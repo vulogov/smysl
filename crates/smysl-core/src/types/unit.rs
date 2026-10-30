@@ -37,6 +37,22 @@ pub struct UnitCore {
     pub source: Option<SourceRef>,
     /// Opaque deterministic CBOR belonging to an extension schema (rule X).
     pub payload: Option<Vec<u8>>,
+    /// The language the text fields are written in (SMYSL-2.3 A-1, core key 9, FC-1, 1.10).
+    ///
+    /// **Absent means "the language of the view that presents the unit"** (view key 6), which is
+    /// what every unit meant before 1.10 — so an old store re-encodes to the bytes it always
+    /// did, which is the whole of the compatibility claim this addition is permitted under.
+    ///
+    /// Absent and present are **different cores and different uids**: the language a gist is
+    /// written in is part of what it says. That is why the migration needed a release of warning
+    /// first (`SMY-W432`): a document spelling `lang` as an unquoted payload key has it move into
+    /// the core here, and a move between two hashed places changes a uid with nothing to report
+    /// it.
+    ///
+    /// A producer SHOULD write it on every unit whose text is natural language and omit it where
+    /// the fields are identifiers or data. `und` and `mul` are permitted values — "nobody knows"
+    /// and "several" are real answers, and both are different from saying nothing.
+    pub lang: Option<crate::ids::LangTag>,
     /// Unknown keys from a future minor version, preserved verbatim.
     pub extra: Extra,
 }
@@ -58,6 +74,7 @@ pub struct UnitCoreBuilder {
     pub status: Status,
     pub source: Option<SourceRef>,
     pub payload: Option<Vec<u8>>,
+    pub lang: Option<crate::ids::LangTag>,
     pub extra: Extra,
 }
 
@@ -73,8 +90,19 @@ impl UnitCoreBuilder {
             status,
             source: None,
             payload: None,
+            lang: None,
             extra: Extra::new(),
         }
+    }
+
+    /// The language the text fields are written in (core key 9, 1.10).
+    ///
+    /// Takes a parsed [`LangTag`](crate::ids::LangTag), so a tag that is not well-formed BCP-47
+    /// cannot reach a unit core through this crate — the field is inside the uid, and a producer
+    /// handed a `&str` would be one typo away from two identities for one claim.
+    pub fn lang(mut self, tag: crate::ids::LangTag) -> Self {
+        self.lang = Some(tag);
+        self
     }
 
     pub fn body(mut self, s: impl Into<String>) -> Self {
@@ -146,6 +174,7 @@ impl UnitCore {
             status: b.status,
             source: b.source,
             payload: b.payload,
+            lang: b.lang,
             extra: b.extra,
         })
     }

@@ -17,6 +17,22 @@ smysl-graph = { path = "../crates/smysl-graph" }
 smysl-pack = { path = "../crates/smysl-pack", features = ["branch-and-bound"] }
 smysl-thread = { path = "../crates/smysl-thread" }
 smysl-check = { path = "../crates/smysl-check" }
+smysl-query = { path = "../crates/smysl-query" }
+# Import and export (TX-P11 step 11): `lib_roundtrip` and `lib_import`.
+smysl-lib = { path = "../crates/smysl-lib" }
+# Every reader, so one target covers all nine and the purity gate's feature split is exercised
+# by the fuzzer rather than only by the test suite.
+smysl-text = { path = "../crates/smysl-text", features = [
+    "reader-txt",
+    "reader-md",
+    "reader-usfm",
+    "reader-osis",
+    "reader-zefania",
+    "reader-json",
+    "reader-telegram",
+    "reader-slack",
+    "reader-whatsapp",
+] }
 
 # A library in the fuzz crate, so the store generator is shared by every algebra target
 # rather than copied into each one. Copies drift, and a generator that differs between
@@ -58,5 +74,60 @@ doc = false
 [[bin]]
 name = "pack_exact"
 path = "fuzz_targets/pack_exact.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "readers"
+path = "fuzz_targets/readers.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "redaction_merge"
+path = "fuzz_targets/redaction_merge.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "edtf"
+path = "fuzz_targets/edtf.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "time_engine"
+path = "fuzz_targets/time_engine.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "sq_parse"
+path = "fuzz_targets/sq_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "lib_roundtrip"
+path = "fuzz_targets/lib_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "lib_import"
+path = "fuzz_targets/lib_import.rs"
+test = false
+doc = false
+
+# Schema evolution (TX-P12 step 2): FC-9 decoding and the lens laws over arbitrary bytes.
+[[bin]]
+name = "lens_laws"
+path = "fuzz_targets/lens_laws.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "store_union"
+path = "fuzz_targets/store_union.rs"
 test = false
 doc = false

@@ -1,0 +1,96 @@
+Query {
+    header: [],
+    expr: Set {
+        op: Union,
+        left: Pipeline(
+            Pipeline {
+                scope: Some(
+                    Scope {
+                        items: [
+                            Store(
+                                Ident(
+                                    "a",
+                                ),
+                            ),
+                        ],
+                    },
+                ),
+                source: Some(
+                    SourceStage {
+                        source: Find {
+                            text: Str(
+                                "pool",
+                            ),
+                            engine: None,
+                            lang: None,
+                        },
+                    },
+                ),
+                filters: [],
+                times: [],
+                traversals: [],
+                closures: [],
+            },
+        ),
+        right: Set {
+            op: Intersect,
+            left: Pipeline(
+                Pipeline {
+                    scope: Some(
+                        Scope {
+                            items: [
+                                Store(
+                                    Ident(
+                                        "b",
+                                    ),
+                                ),
+                            ],
+                        },
+                    ),
+                    source: Some(
+                        SourceStage {
+                            source: Find {
+                                text: Str(
+                                    "contention",
+                                ),
+                                engine: None,
+                                lang: None,
+                            },
+                        },
+                    ),
+                    filters: [],
+                    times: [],
+                    traversals: [],
+                    closures: [],
+                },
+            ),
+            right: Pipeline(
+                Pipeline {
+                    scope: Some(
+                        Scope {
+                            items: [
+                                Store(
+                                    Ident(
+                                        "c",
+                                    ),
+                                ),
+                            ],
+                        },
+                    ),
+                    source: None,
+                    filters: [],
+                    times: [],
+                    traversals: [],
+                    closures: [],
+                },
+            ),
+        },
+    },
+    ordering: [],
+    shaping: [],
+    output: Some(
+        OutputStage {
+            output: Count,
+        },
+    ),
+}

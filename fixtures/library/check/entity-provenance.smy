@@ -1,0 +1,7 @@
+@doc smysl/0.1 { id: v/library-entity-provenance }
+
+@x.text/entity ent/dated { status: cited, lang: en, source: { kind: doc, ref: "alias:kjv/1769", published: 1769 } }
+~ Jerusalem
+
+@x.text/entity ent/placed { status: cited, lang: en, source: { kind: doc, ref: "t3:rzmgkk46zz6hvqsysq2fuayq4lbqkwqc2c7t4c2ee5yoa5heh67q" } }
+~ Jericho

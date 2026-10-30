@@ -20,6 +20,29 @@ re-encodes byte-identically, preserves what it does not understand, derives uids
 to give one to a unit whose shape §7 forbids. No dependencies; `node --test` is built in. A
 dependency doing part of the work would weaken the evidence.
 
+**The library records, as of 1.10.0.** Records 14 (manifest), 15 (part text) and 18 (part
+reading) are decoded, and the four identities over them — tid, mid, did, rdid — are derived
+here. Before this they were named and nothing more: preserved verbatim, re-encoded byte for
+byte, reported as *named but not understood*, which is honest C-Read and left §2.6's domain
+separation checked by one implementation only.
+
+§2.6 says each identity is BLAKE3-256 over a one-byte domain prefix and a preimage, and that
+the prefix is the record code the identity names — so no two kinds of identity can be equal and
+none can be a uid, whatever their preimages. That is a claim about four lines of construction,
+and `fixtures/library/wire/ids.json` carries the preimage, the body bytes and the digest apart
+so that a disagreement says which of the two was wrong. What is *not* here is a reader: no
+implementation but the reference one reads USFM or OSIS, deliberately, because the question is
+whether three implementations agree on the identity of a record — not whether three parsers
+agree with each other.
+
+Since 1.10.0 the same derivations also run over `fixtures/library/bibles/wire/`, which **is** a
+reader's output: the book of Ruth in the Russian Synodal edition as `usfm/1` read it, four parts
+and 89 segment rows, carried for GE-T1's corpus clause. Still not a reader here — the bundle is
+records, not scripture — but it moves one claim out of reach of a hand-written fixture. A segment
+row's `start` and `end` are **byte** offsets, and over Cyrillic an implementation that indexed by
+character derives every identity correctly and resolves every span half as wide. So every row's
+span is decoded as UTF-8, and a span that began or ended inside a letter fails.
+
 ```sh
 cd nodejs
 npm test          # 126 tests, no install step, Node 18+

@@ -1,4 +1,7 @@
-# Every argument each subcommand accepts, one `command  argument` pair per line.
+# Every argument each subcommand accepts, one `command  argument` pair per line — and, since
+# TX-P2 step 3, every argument's `[possible values: …]` beside it. A choice is a capability:
+# `text append` arrived as a new value of `<ACTION>` and this file did not move by one line,
+# which means a *removed* action would have been just as invisible.
 #
 # The third CLI gate, and it exists because the other two are blind to this one thing.
 # `cli()` registers all twenty-two subcommands from the COMMANDS table unconditionally; its
@@ -27,6 +30,7 @@ fmt        --store
 fmt        --write
 fmt        --output
 fmt        --format
+fmt        [possible values: surface, cbor, pack]
 fmt        --strict
 fmt        --offline
 fmt        --no-color
@@ -34,24 +38,33 @@ fmt        --noprogress
 fmt        --json
 fmt        --quiet
 fmt        --verbose
+fmt        --backend
+fmt        [possible values: memory, redb]
+fmt        --shard
 fmt        --seed-check
 fmt        --help
 check      [FILE]
 check      --config
+check      --library
 check      --conformance
-check      --as
 check      --store
-check      --granularity
+check      --as
 check      --output
 check      --format
-check      --pass
+check      [possible values: surface, cbor, pack]
+check      --granularity
+check      --estimator
 check      --strict
 check      --offline
+check      --pass
 check      --no-color
 check      --noprogress
 check      --json
 check      --quiet
 check      --verbose
+check      --backend
+check      [possible values: memory, redb]
+check      --shard
 check      --seed-check
 check      --help
 pack       [PATH]
@@ -62,6 +75,7 @@ pack       --output
 pack       --support
 pack       --focus
 pack       --format
+pack       [possible values: surface, cbor, pack]
 pack       --query
 pack       --strict
 pack       --offline
@@ -69,27 +83,36 @@ pack       --payload
 pack       --no-color
 pack       --source
 pack       --engine
+pack       [possible values: lexical, semantic, hybrid]
 pack       --noprogress
 pack       --json
 pack       --model
 pack       --quiet
 pack       --query-limit
 pack       --lod
+pack       [possible values: auto, L0, L1, L2]
 pack       --verbose
+pack       --backend
+pack       [possible values: memory, redb]
 pack       --explain
-pack       --seed-check
+pack       --shard
 pack       --tokenizer
 pack       --mode
+pack       [possible values: greedy, exact]
+pack       --seed-check
 pack       --help
 merge      <STORE>
 merge      --config
 merge      --policy
+merge      [possible values: latest, all, contend]
 merge      --retraction
+merge      [possible values: strict, advisory, ignore]
 merge      --store
 merge      --output
 merge      --staged
 merge      --fail-on-contention
 merge      --format
+merge      [possible values: surface, cbor, pack]
 merge      --max-contentions-per-agent
 merge      --strict
 merge      --offline
@@ -98,6 +121,9 @@ merge      --noprogress
 merge      --json
 merge      --quiet
 merge      --verbose
+merge      --backend
+merge      [possible values: memory, redb]
+merge      --shard
 merge      --seed-check
 merge      --help
 diff       <STORE>
@@ -108,6 +134,7 @@ diff       --store
 diff       --output
 diff       --recipe
 diff       --format
+diff       [possible values: surface, cbor, pack]
 diff       --strict
 diff       --offline
 diff       --no-color
@@ -115,6 +142,9 @@ diff       --noprogress
 diff       --json
 diff       --quiet
 diff       --verbose
+diff       --backend
+diff       [possible values: memory, redb]
+diff       --shard
 diff       --seed-check
 diff       --help
 trace      <UID>
@@ -125,6 +155,7 @@ trace      --depth
 trace      --output
 trace      --parents
 trace      --format
+trace      [possible values: surface, cbor, pack]
 trace      --grounds
 trace      --both
 trace      --strict
@@ -135,6 +166,9 @@ trace      --noprogress
 trace      --json
 trace      --quiet
 trace      --verbose
+trace      --backend
+trace      [possible values: memory, redb]
+trace      --shard
 trace      --seed-check
 trace      --help
 view       [PATH]
@@ -144,6 +178,7 @@ view       --id
 view       --output
 view       --threads
 view       --format
+view       [possible values: surface, cbor, pack]
 view       --requires
 view       --strict
 view       --offline
@@ -152,6 +187,9 @@ view       --noprogress
 view       --json
 view       --quiet
 view       --verbose
+view       --backend
+view       [possible values: memory, redb]
+view       --shard
 view       --seed-check
 view       --help
 bundle     [PATH]
@@ -159,7 +197,10 @@ bundle     --config
 bundle     --view
 bundle     --include-retracted
 bundle     --output
+bundle     --unknown
+bundle     [possible values: keep, drop]
 bundle     --format
+bundle     [possible values: surface, cbor, pack]
 bundle     --strict
 bundle     --offline
 bundle     --no-color
@@ -167,15 +208,21 @@ bundle     --noprogress
 bundle     --json
 bundle     --quiet
 bundle     --verbose
+bundle     --backend
+bundle     [possible values: memory, redb]
+bundle     --shard
 bundle     --seed-check
 bundle     --help
 thread     [PATH]
 thread     --config
 thread     --derive
+thread     [possible values: analysis, narrative, brief, qa, plan, exposition, dialogue, dossier]
 thread     --schema
+thread     [possible values: analysis, narrative, brief, qa, plan, exposition, dialogue, dossier]
 thread     --output
 thread     --only
 thread     --format
+thread     [possible values: surface, cbor, pack]
 thread     --list
 thread     --show
 thread     --strict
@@ -190,6 +237,9 @@ thread     --json
 thread     --explain
 thread     --quiet
 thread     --verbose
+thread     --backend
+thread     [possible values: memory, redb]
+thread     --shard
 thread     --seed-check
 thread     --help
 salience   [PATH]
@@ -199,6 +249,7 @@ salience   --top
 salience   --explain
 salience   --output
 salience   --format
+salience   [possible values: surface, cbor, pack]
 salience   --weights
 salience   --seed
 salience   --strict
@@ -208,6 +259,9 @@ salience   --noprogress
 salience   --json
 salience   --quiet
 salience   --verbose
+salience   --backend
+salience   [possible values: memory, redb]
+salience   --shard
 salience   --seed-check
 salience   --help
 find       <QUERY>
@@ -218,7 +272,9 @@ find       --kind
 find       --min-status
 find       --output
 find       --engine
+find       [possible values: lexical, semantic, hybrid]
 find       --format
+find       [possible values: surface, cbor, pack]
 find       --model
 find       --strict
 find       --offline
@@ -228,9 +284,15 @@ find       --source
 find       --noprogress
 find       --payload
 find       --json
-find       --why
+find       --lang
+find       --analyzer
 find       --quiet
+find       --library
 find       --verbose
+find       --backend
+find       [possible values: memory, redb]
+find       --why
+find       --shard
 find       --seed-check
 find       --help
 retract    <UID>
@@ -242,6 +304,7 @@ retract    --output
 retract    --reason
 retract    --authority
 retract    --format
+retract    [possible values: surface, cbor, pack]
 retract    --strict
 retract    --offline
 retract    --no-color
@@ -249,6 +312,9 @@ retract    --noprogress
 retract    --json
 retract    --quiet
 retract    --verbose
+retract    --backend
+retract    [possible values: memory, redb]
+retract    --shard
 retract    --seed-check
 retract    --help
 withdraw   <EDGE>
@@ -260,6 +326,7 @@ withdraw   --output
 withdraw   --reason
 withdraw   --at
 withdraw   --format
+withdraw   [possible values: surface, cbor, pack]
 withdraw   --dry-run
 withdraw   --strict
 withdraw   --offline
@@ -268,6 +335,9 @@ withdraw   --noprogress
 withdraw   --json
 withdraw   --quiet
 withdraw   --verbose
+withdraw   --backend
+withdraw   [possible values: memory, redb]
+withdraw   --shard
 withdraw   --seed-check
 withdraw   --help
 resolve    <ITEM>
@@ -279,6 +349,7 @@ resolve    --at
 resolve    --output
 resolve    --dry-run
 resolve    --format
+resolve    [possible values: surface, cbor, pack]
 resolve    --strict
 resolve    --offline
 resolve    --no-color
@@ -286,15 +357,20 @@ resolve    --noprogress
 resolve    --json
 resolve    --quiet
 resolve    --verbose
+resolve    --backend
+resolve    [possible values: memory, redb]
+resolve    --shard
 resolve    --seed-check
 resolve    --help
 review     [PATH]
 review     --config
 review     --confirm
 review     --confirmed-by
+review     [possible values: human, model, tool]
 review     --all
 review     --output
 review     --format
+review     [possible values: surface, cbor, pack]
 review     --strict
 review     --offline
 review     --no-color
@@ -302,17 +378,22 @@ review     --noprogress
 review     --json
 review     --quiet
 review     --verbose
+review     --backend
+review     [possible values: memory, redb]
+review     --shard
 review     --seed-check
 review     --help
 commit     <UID>
 commit     [PATH]
 commit     --config
 commit     --level
+commit     [possible values: floated, drafted, committed, canonical, retconned]
 commit     --as
 commit     --note
 commit     --output
 commit     --at
 commit     --format
+commit     [possible values: surface, cbor, pack]
 commit     --dry-run
 commit     --strict
 commit     --offline
@@ -321,6 +402,9 @@ commit     --noprogress
 commit     --json
 commit     --quiet
 commit     --verbose
+commit     --backend
+commit     [possible values: memory, redb]
+commit     --shard
 commit     --seed-check
 commit     --help
 render     [PATH]
@@ -329,9 +413,13 @@ render     --thread
 render     --profile
 render     --output
 render     --target
+render     [possible values: markdown, md, typst, html, slides, json, text]
 render     --format
+render     [possible values: surface, cbor, pack]
 render     --lod
+render     [possible values: L0, L1, L2]
 render     --contentions
+render     [possible values: show, suppress]
 render     --strict
 render     --as
 render     --offline
@@ -341,15 +429,20 @@ render     --noprogress
 render     --json
 render     --quiet
 render     --verbose
+render     --backend
+render     [possible values: memory, redb]
+render     --shard
 render     --seed-check
 render     --help
 import     <PATH>
 import     --config
 import     --key
 import     --kind
+import     [possible values: file, metric, tool, url, doc]
 import     --store
 import     --output
 import     --format
+import     [possible values: surface, cbor, pack]
 import     --strict
 import     --offline
 import     --no-color
@@ -357,6 +450,9 @@ import     --noprogress
 import     --json
 import     --quiet
 import     --verbose
+import     --backend
+import     [possible values: memory, redb]
+import     --shard
 import     --seed-check
 import     --help
 relink     [PATH]
@@ -365,6 +461,7 @@ relink     --dry-run
 relink     --store
 relink     --output
 relink     --format
+relink     [possible values: surface, cbor, pack]
 relink     --strict
 relink     --offline
 relink     --no-color
@@ -372,6 +469,9 @@ relink     --noprogress
 relink     --json
 relink     --quiet
 relink     --verbose
+relink     --backend
+relink     [possible values: memory, redb]
+relink     --shard
 relink     --seed-check
 relink     --help
 compact    [PATH]
@@ -380,6 +480,7 @@ compact    --dry-run
 compact    --store
 compact    --output
 compact    --format
+compact    [possible values: surface, cbor, pack]
 compact    --strict
 compact    --offline
 compact    --no-color
@@ -387,37 +488,60 @@ compact    --noprogress
 compact    --json
 compact    --quiet
 compact    --verbose
+compact    --backend
+compact    [possible values: memory, redb]
+compact    --shard
 compact    --seed-check
 compact    --help
 ingest     [FILE]
 ingest     --config
 ingest     --hop
 ingest     --rung
+ingest     [possible values: computed, document, web, model]
 ingest     --store
 ingest     --granularity
+ingest     [possible values: coarse, default, standard, fine]
 ingest     --output
+ingest     --estimator
 ingest     --format
+ingest     [possible values: surface, cbor, pack]
 ingest     --max-output
-ingest     --path
 ingest     --strict
+ingest     --lang-policy
 ingest     --offline
-ingest     --repair
 ingest     --no-color
-ingest     --prompt
+ingest     --normaliser
+ingest     [possible values: v1, v2]
 ingest     --noprogress
+ingest     --temperature
+ingest     --json
+ingest     --path
+ingest     [possible values: auto, surface, json-ast]
+ingest     --quiet
+ingest     --repair
+ingest     --prompt
+ingest     --verbose
+ingest     --backend
+ingest     [possible values: memory, redb]
 ingest     --yes
 ingest     --dry-run
-ingest     --json
-ingest     --quiet
-ingest     --verbose
+ingest     --shard
 ingest     --seed-check
+ingest     --text
+ingest     --window-level
+ingest     --digest-budget
+ingest     --reextract
+ingest     --single-pass
+ingest     --cost
 ingest     --help
 attest     [PATH]
 attest     --config
 attest     --what
+attest     [possible values: gist-coverage, warrant-plausibility, granularity]
 attest     --sample
 attest     --output
 attest     --format
+attest     [possible values: surface, cbor, pack]
 attest     --strict
 attest     --offline
 attest     --no-color
@@ -425,6 +549,9 @@ attest     --noprogress
 attest     --json
 attest     --quiet
 attest     --verbose
+attest     --backend
+attest     [possible values: memory, redb]
+attest     --shard
 attest     --seed-check
 attest     --help
 providers  --config
@@ -434,6 +561,7 @@ providers  --store
 providers  --output
 providers  --tasks
 providers  --format
+providers  [possible values: surface, cbor, pack]
 providers  --strict
 providers  --offline
 providers  --no-color
@@ -441,15 +569,20 @@ providers  --noprogress
 providers  --json
 providers  --quiet
 providers  --verbose
+providers  --backend
+providers  [possible values: memory, redb]
+providers  --shard
 providers  --seed-check
 providers  --help
 usage      --by
+usage      [possible values: provider, task, run, model]
 usage      --config
 usage      --store
 usage      --since
 usage      --output
 usage      --reset
 usage      --format
+usage      [possible values: surface, cbor, pack]
 usage      --strict
 usage      --offline
 usage      --no-color
@@ -457,6 +590,9 @@ usage      --noprogress
 usage      --json
 usage      --quiet
 usage      --verbose
+usage      --backend
+usage      [possible values: memory, redb]
+usage      --shard
 usage      --seed-check
 usage      --help
 reindex    [PATH]
@@ -464,6 +600,7 @@ reindex    --config
 reindex    --verify
 reindex    --output
 reindex    --format
+reindex    [possible values: surface, cbor, pack]
 reindex    --strict
 reindex    --offline
 reindex    --no-color
@@ -471,6 +608,9 @@ reindex    --noprogress
 reindex    --json
 reindex    --quiet
 reindex    --verbose
+reindex    --backend
+reindex    [possible values: memory, redb]
+reindex    --shard
 reindex    --seed-check
 reindex    --help
 ui         [PATH]
@@ -478,6 +618,7 @@ ui         --config
 ui         --store
 ui         --output
 ui         --format
+ui         [possible values: surface, cbor, pack]
 ui         --strict
 ui         --offline
 ui         --no-color
@@ -485,5 +626,380 @@ ui         --noprogress
 ui         --json
 ui         --quiet
 ui         --verbose
+ui         --backend
+ui         [possible values: memory, redb]
+ui         --shard
 ui         --seed-check
 ui         --help
+text       <ACTION>
+text       [possible values: add, append, ls, show, align, redact, index]
+text       [TARGET]
+text       [OTHER]
+text       --config
+text       --reader
+text       --store
+text       --versification
+text       --output
+text       --scheme
+text       --alias
+text       --format
+text       [possible values: surface, cbor, pack]
+text       --lang
+text       --strict
+text       --licence
+text       --offline
+text       --carry
+text       [possible values: none, ref, text]
+text       --no-color
+text       --noprogress
+text       --part-policy
+text       --json
+text       --param
+text       --pseudonymise
+text       --quiet
+text       --as
+text       --verbose
+text       --at
+text       --backend
+text       [possible values: memory, redb]
+text       --reason
+text       --shard
+text       --forks
+text       --seed-check
+text       --rebuild
+text       --raw
+text       --segments
+text       --help
+date       <ACTION>
+date       [possible values: set, order, show]
+date       <TARGET>
+date       [RELATION]
+date       [possible values: before, after, meets, overlaps, during, contains, equals]
+date       [OTHER]
+date       --axis
+date       [possible values: said, composed, about]
+date       --config
+date       --store
+date       --value
+date       --output
+date       --window
+date       --basis
+date       --format
+date       [possible values: surface, cbor, pack]
+date       --as
+date       --strict
+date       --at
+date       --offline
+date       --no-color
+date       --why
+date       --dry-run
+date       --noprogress
+date       --json
+date       --quiet
+date       --verbose
+date       --backend
+date       [possible values: memory, redb]
+date       --shard
+date       --seed-check
+date       --help
+same-as    <ACTION>
+same-as    [possible values: propose, classes]
+same-as    --config
+same-as    --engine
+same-as    [possible values: identical-span, lexical, anchored]
+same-as    --policy
+same-as    --store
+same-as    --output
+same-as    --scope
+same-as    --format
+same-as    [possible values: surface, cbor, pack]
+same-as    --neighbours
+same-as    --no-adjacent
+same-as    --strict
+same-as    --at
+same-as    --offline
+same-as    --no-color
+same-as    --yes
+same-as    --dry-run
+same-as    --noprogress
+same-as    --json
+same-as    --quiet
+same-as    --verbose
+same-as    --backend
+same-as    [possible values: memory, redb]
+same-as    --shard
+same-as    --seed-check
+same-as    --help
+link       --config
+link       --scope
+link       --candidates
+link       --store
+link       --output
+link       --per-unit
+link       --format
+link       [possible values: surface, cbor, pack]
+link       --neighbours
+link       --hub
+link       --strict
+link       --offline
+link       --pairs
+link       --at
+link       --no-color
+link       --noprogress
+link       --yes
+link       --json
+link       --quiet
+link       --verbose
+link       --backend
+link       [possible values: memory, redb]
+link       --shard
+link       --seed-check
+link       --help
+summarise  --config
+summarise  --scope
+summarise  --levels
+summarise  --store
+summarise  --at
+summarise  --output
+summarise  --format
+summarise  [possible values: surface, cbor, pack]
+summarise  --yes
+summarise  --strict
+summarise  --offline
+summarise  --no-color
+summarise  --noprogress
+summarise  --json
+summarise  --quiet
+summarise  --verbose
+summarise  --backend
+summarise  [possible values: memory, redb]
+summarise  --shard
+summarise  --seed-check
+summarise  --help
+q          [SQ]
+q          [PATH]
+q          --config
+q          --from-question
+q          --yes
+q          --approved-by
+q          --output
+q          --file
+q          --format
+q          [possible values: surface, cbor, pack]
+q          --library
+q          --strict
+q          --explain
+q          --offline
+q          --no-color
+q          --why
+q          --noprogress
+q          --param
+q          --all-versions
+q          --json
+q          --idf
+q          [possible values: partition, collection, library]
+q          --quiet
+q          --per-partition
+q          --verbose
+q          --backend
+q          [possible values: memory, redb]
+q          --engine-model
+q          --candle-model
+q          --shard
+q          --seed-check
+q          --view
+q          --save
+q          --rerun
+q          --current
+q          --help
+ask        <QUESTION>
+ask        [PATH]
+ask        --config
+ask        --scope
+ask        --intent
+ask        [possible values: define, explain, verify, attribute, trace, locate, depend, compare]
+ask        --lang
+ask        [possible values: en, de, es, fr, ru]
+ask        --output
+ask        --format
+ask        [possible values: surface, cbor, pack]
+ask        --subject
+ask        --strict
+ask        --templates
+ask        --budget
+ask        --offline
+ask        --no-color
+ask        --target
+ask        --noprogress
+ask        --save
+ask        --answer
+ask        --json
+ask        --at
+ask        --quiet
+ask        --verbose
+ask        --yes
+ask        --backend
+ask        [possible values: memory, redb]
+ask        --shard
+ask        --seed-check
+ask        --help
+measure    <IDS>
+measure    [PATH]
+measure    --config
+measure    --scope
+measure    --channel
+measure    --output
+measure    --policy
+measure    --format
+measure    [possible values: surface, cbor, pack]
+measure    --profile
+measure    --axis
+measure    --strict
+measure    --level
+measure    --offline
+measure    --analyzer
+measure    --no-color
+measure    --noprogress
+measure    --param
+measure    --json
+measure    --min-n
+measure    --quiet
+measure    --seed
+measure    --allow-lossy
+measure    --verbose
+measure    --backend
+measure    [possible values: memory, redb]
+measure    --dry-run
+measure    --at
+measure    --shard
+measure    --seed-check
+measure    --help
+assess     <ACTION>
+assess     [possible values: key, score, state, diff]
+assess     <TARGET>
+assess     [OTHER]
+assess     --config
+assess     --reader
+assess     --policy
+assess     --store
+assess     --output
+assess     --scope
+assess     --format
+assess     [possible values: surface, cbor, pack]
+assess     --mode
+assess     [possible values: any, all]
+assess     --judge
+assess     [possible values: accepted, lexical, anchored]
+assess     --strict
+assess     --neighbours
+assess     --offline
+assess     --dry-run
+assess     --no-color
+assess     --at
+assess     --noprogress
+assess     --json
+assess     --quiet
+assess     --verbose
+assess     --backend
+assess     [possible values: memory, redb]
+assess     --shard
+assess     --seed-check
+assess     --help
+lib        <ACTION>
+lib        [possible values: import, status, accept, discard, export, verify, migrate]
+lib        [TARGET]
+lib        --config
+lib        --name
+lib        --accept
+lib        --store
+lib        --licence
+lib        --output
+lib        --format
+lib        [possible values: surface, cbor, pack]
+lib        --origin
+lib        --import
+lib        --strict
+lib        --fail-on-contention
+lib        --offline
+lib        --no-color
+lib        --scope
+lib        --layout
+lib        [possible values: single, by-view, by-expression, by-collection, by-time, by-query]
+lib        --noprogress
+lib        --budget
+lib        --json
+lib        --group-by
+lib        --quiet
+lib        --verbose
+lib        --window
+lib        --as-of
+lib        --backend
+lib        [possible values: memory, redb]
+lib        --shard
+lib        --target-revision
+lib        --agent
+lib        --seed-check
+lib        --clock
+lib        --closure
+lib        [possible values: full, ref]
+lib        --with-views
+lib        --with-packs
+lib        --with-text
+lib        --with-provenance
+lib        --with-staged
+lib        --with-quarantine
+lib        --primary
+lib        --index
+lib        --primary-shards
+lib        --p2
+lib        --keep-scratch
+lib        --no-join
+lib        --keep-original
+lib        --edges
+lib        --unknown
+lib        [possible values: include, drop]
+lib        --no-verify
+lib        --force
+lib        --help
+schema     <ACTION>
+schema     [possible values: show, check]
+schema     [TARGET]
+schema     --config
+schema     --store
+schema     --output
+schema     --format
+schema     [possible values: surface, cbor, pack]
+schema     --strict
+schema     --offline
+schema     --no-color
+schema     --noprogress
+schema     --json
+schema     --quiet
+schema     --verbose
+schema     --backend
+schema     [possible values: memory, redb]
+schema     --shard
+schema     --seed-check
+schema     --help
+migrate    [PATH]
+migrate    --config
+migrate    --schema
+migrate    --to
+migrate    --agent
+migrate    --output
+migrate    --clock
+migrate    --format
+migrate    [possible values: surface, cbor, pack]
+migrate    --dry-run
+migrate    --strict
+migrate    --offline
+migrate    --no-color
+migrate    --noprogress
+migrate    --json
+migrate    --quiet
+migrate    --verbose
+migrate    --backend
+migrate    [possible values: memory, redb]
+migrate    --shard
+migrate    --seed-check
+migrate    --help

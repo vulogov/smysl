@@ -1,0 +1,24 @@
+{
+  "files": [
+    {"file": "text-v1.cbor", "decls": [
+      {"id": "x.text/v1", "version": 1, "fields": 8, "lenses_opaque": false, "steps": [], "codes": []}
+    ]},
+    {"file": "series.cbor", "decls": [
+      {"id": "x.demo/v1", "version": 1, "fields": 3, "lenses_opaque": false, "steps": [], "codes": []},
+      {"id": "x.demo/v1", "version": 2, "fields": 5, "lenses_opaque": false, "steps": [{"from": 1, "to": 2, "ops": ["rename-type", "rename-key", "map-value", "require", "default"], "bytes": "a3000101020285a3006b72656e616d652d74797065016b782e64656d6f2f6974656d026c782e64656d6f2f7468696e67a3006a72656e616d652d6b6579016964656d6f3a6e616d65026a64656d6f3a7469746c65a300696d61702d76616c7565016a64656d6f3a737461746502a1647368757466636c6f736564a2006772657175697265016964656d6f3a72616e6ba3006764656661756c74016964656d6f3a72616e6b0200"}], "codes": []},
+      {"id": "x.demo/v1", "version": 3, "fields": 6, "lenses_opaque": false, "steps": [{"from": 2, "to": 3, "ops": ["split-value", "require", "default", "retire"], "bytes": "a3000201030284a5006b73706c69742d76616c7565016a64656d6f3a73746174650264616a617203646f70656e04a16864656d6f3a67617064736f6d65a3006772657175697265016864656d6f3a67617002a16a64656d6f3a7374617465646f70656ea4006764656661756c74016864656d6f3a67617002646e6f6e6503a16a64656d6f3a7374617465646f70656ea20066726574697265016864656d6f3a6f6c64"}], "codes": []}
+    ]},
+    {"file": "unknown-op.cbor", "decls": [
+      {"id": "x.unknown/v1", "version": 2, "fields": null, "lenses_opaque": false, "steps": [{"from": 1, "to": 2, "ops": ["rename-key", "transpose"], "bytes": "a3000101020282a3006a72656e616d652d6b65790163753a610263753a62a200697472616e73706f73650163753a62"}], "codes": ["SMY-W469"]}
+    ]},
+    {"file": "opaque.cbor", "decls": [
+      {"id": "x.opaque/v1", "version": 1, "fields": "opaque", "lenses_opaque": true, "steps": [], "codes": ["SMY-W430", "SMY-W430"]}
+    ]}
+  ],
+  "chains": [
+    {"id": "x.demo/v1", "from": 1, "to": 2, "hash": "b56b99eb03ea6c91ab733863a242d88c6ad08b38d7d5e2632e5b60e126a63221"},
+    {"id": "x.demo/v1", "from": 2, "to": 3, "hash": "9631cf42acb0fc2ff7d90f558d2b4d82ddb221910028195632228e4ba0cccb11"},
+    {"id": "x.demo/v1", "from": 1, "to": 3, "hash": "1a6cbe7078df05dced8cf1575e6521f137524cfe244916c18fff459eb171cb23"},
+    {"id": "x.demo/v1", "from": 2, "to": 2, "hash": "4a35d55cd103bdac08e2c7417e03c1772ffa676bdc54eb878127974d79640fbb"}
+  ]
+}

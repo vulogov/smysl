@@ -35,6 +35,8 @@
 //! is the other way. Treat `Present` as "the evidence exists", never as "the claim is
 //! supported".
 
+use core::fmt;
+
 use crate::{canonical_uid, Code, Diagnostic, UnitCore};
 
 /// The payload key a quote travels under.
@@ -52,6 +54,183 @@ pub enum Support {
     Present,
     Loose,
     Absent,
+}
+
+/// Which comparison form a quote check uses.
+///
+/// V1 is what every release up to 1.8 compared with, and it does not change by one byte: `support`
+/// and its three siblings have been public contract since 1.3, so a stored verdict stays a stored
+/// verdict. V2 is the form that answers the five probes in SMYSL-2.1 §2.1, every one of which is a
+/// quote a reader would call verbatim and the checker called `Loose` or `Absent`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[non_exhaustive]
+pub enum Normaliser {
+    /// The 1.3 form: typographic quotes folded to one mark, dashes unified, NBSP to space.
+    #[default]
+    V1,
+    /// V1, plus the folds in `fold_v2` — quotation marks deleted rather than unified, apostrophes
+    /// kept inside words, Spanish openers deleted, `ё` and `е`+U+0308 to `е`, `ß` to `ss`.
+    V2,
+}
+
+impl Normaliser {
+    /// The identifier a recipe records.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Normaliser::V1 => "v1",
+            Normaliser::V2 => "v2",
+        }
+    }
+}
+
+impl fmt::Display for Normaliser {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.pad(self.id())
+    }
+}
+
+/// What V2 does to one already-lowercased character.
+///
+/// One function, shared by the two V2 walkers, because the walkers are the one place where a
+/// comparison and a span could disagree: `support_with` finds a substring in a string the
+/// character fold produced, and `support_span_with` maps that index back through a second walk of
+/// the same text. Two copies of the table would be two chances to answer differently, which is
+/// the bug this crate exists to make impossible rather than unlikely.
+enum Fold {
+    /// Deleted. Typography, not content.
+    Drop,
+    /// Whitespace, which the walker collapses with the rest.
+    Space,
+    One(char),
+    Two(char, char),
+}
+
+/// V2's character table (SMYSL-2.1 §4.3.3).
+///
+/// Applied after `to_lowercase`, so only lowercase forms appear here: `ⴊ` arrives as `ё`, `ẞ` as `ß`.
+/// `prev_out` is the last character already written, which only the U+0308 rule reads.
+///
+/// Deliberately a hand table rather than a crate. V2 is a comparison form that goes into a recipe
+/// hash, so it has to be frozen; a dependency's Unicode tables move between releases, and a quote
+/// that was `Present` in one build would be `Loose` in the next with nothing in the recipe to say
+/// why.
+fn fold_v2(c: char, prev_out: Option<char>) -> Fold {
+    match c {
+        // Quotation marks are typography. Folding them to a single mark, as V1 does, leaves
+        // French `« Liberté »` — which carries spaces inside the marks — non-contiguous with
+        // `«Liberté»`, so both stay `Loose`. Deleting them lets the whitespace collapse and the
+        // two forms meet.
+        '"' | '\u{201C}' | '\u{201D}' | '\u{201F}' | '\u{201E}' | '\u{201A}' | '\u{00AB}'
+        | '\u{00BB}' | '\u{2039}' | '\u{203A}' | '\u{300C}' | '\u{300D}' | '\u{300E}'
+        | '\u{300F}' => Fold::Drop,
+        // An apostrophe lives *inside* a word, so it is kept and unified rather than deleted:
+        // `l’homme`, `aujourd’hui` and `qu’il` have to stay one token each, and deleting the mark
+        // would join the parts into a word that appears in neither text.
+        '\'' | '\u{2018}' | '\u{2019}' | '\u{201B}' | '\u{02BC}' | '\u{2032}' => Fold::One('\''),
+        // Spanish openers carry no content and are absent from most transcriptions.
+        '\u{00BF}' | '\u{00A1}' => Fold::Drop,
+        // Russian typography writes `е` where the orthography has `ё`, routinely and in print. A
+        // comparison that distinguishes them calls a correctly transcribed verse `Loose`. The
+        // stored text is never altered; this is the comparison form only.
+        '\u{0451}' => Fold::One('\u{0435}'),
+        // The same letter decomposed: `е` followed by a combining diaeresis.
+        '\u{0308}' if prev_out == Some('\u{0435}') => Fold::Drop,
+        // The German case-fold pair, which `to_lowercase` does not perform: `ẞ` lowercases to
+        // `ß`, and `ß` compares equal to `ss` in every German text that spells it either way.
+        '\u{00DF}' => Fold::Two('s', 's'),
+        // Already whitespace by `char::is_whitespace`; named so the table is the whole contract
+        // and a future change to that predicate cannot move V2.
+        '\u{202F}' | '\u{2009}' | '\u{00A0}' => Fold::Space,
+        // As V1.
+        '`' | '*' => Fold::Drop,
+        '\u{2010}'..='\u{2015}' | '\u{2212}' => Fold::One('-'),
+        other if other.is_whitespace() => Fold::Space,
+        other => Fold::One(other),
+    }
+}
+
+/// V2's comparison form, and the byte offset in `s` each output byte came from.
+///
+/// The same walk as `normalise_mapped`, over `fold_v2` instead of V1's inline table. The two are
+/// separate functions rather than one parameterised walk because V1's offsets are contract and
+/// the safest way to keep them is not to touch the code that produces them.
+fn normalise_v2_mapped(s: &str) -> Mapped {
+    let mut out = String::with_capacity(s.len());
+    let mut map: Vec<usize> = Vec::with_capacity(s.len() + 1);
+    let mut ends: Vec<usize> = vec![0];
+    let mut space: Option<usize> = None;
+    let mut content_ends = 0usize;
+    for (at, c) in s.char_indices() {
+        for lower in c.to_lowercase() {
+            let last = out.chars().next_back();
+            match fold_v2(lower, last) {
+                Fold::Drop => continue,
+                Fold::Space => {
+                    space.get_or_insert(at);
+                    continue;
+                }
+                Fold::One(k) => {
+                    if let Some(from) = space.take() {
+                        if !out.is_empty() {
+                            out.push(' ');
+                            map.push(from);
+                            ends.push(at);
+                        }
+                    }
+                    let before = out.len();
+                    out.push(k);
+                    map.resize(out.len().max(before), at);
+                }
+                Fold::Two(a, b) => {
+                    if let Some(from) = space.take() {
+                        if !out.is_empty() {
+                            out.push(' ');
+                            map.push(from);
+                            ends.push(at);
+                        }
+                    }
+                    let before = out.len();
+                    out.push(a);
+                    out.push(b);
+                    map.resize(out.len().max(before), at);
+                }
+            }
+            content_ends = at + c.len_utf8();
+            // After the output for this character, not inside the match arms: `to_lowercase`
+            // can yield several characters for one source character, and every output byte they
+            // produce ends where that one source character ends.
+            ends.resize(out.len() + 1, content_ends);
+        }
+    }
+    map.truncate(out.len());
+    map.push(content_ends);
+    ends.truncate(out.len() + 1);
+    Mapped {
+        out,
+        starts: map,
+        ends,
+    }
+}
+
+/// V2's comparison form.
+fn normalise_v2(s: &str) -> String {
+    normalise_v2_mapped(s).out
+}
+
+/// The comparison form for `n`.
+fn form(n: Normaliser, s: &str) -> String {
+    match n {
+        Normaliser::V1 => normalise(s),
+        Normaliser::V2 => normalise_v2(s),
+    }
+}
+
+/// The comparison form for `n`, with offsets back into `s`.
+fn form_mapped(n: Normaliser, s: &str) -> Mapped {
+    match n {
+        Normaliser::V1 => normalise_mapped(s),
+        Normaliser::V2 => normalise_v2_mapped(s),
+    }
 }
 
 /// Collapse the differences a model will introduce without meaning anything by them.
@@ -73,22 +252,48 @@ pub enum Support {
 ///
 /// Deliberately **not** stemming or synonyms — those would make a reworded claim look
 /// attributed, which is exactly the thing this exists to catch.
-/// [`normalise`], keeping where each normalised byte came from (1.5).
+/// `normalise`, keeping where each normalised byte came from (1.5).
 ///
 /// One entry per byte of the result, plus a sentinel, so a match found in the normalised text can
 /// be pointed back at the source a person reads. Normalisation deletes characters, collapses
 /// whitespace runs and can change a character's length when it lowercases, so the mapping cannot
 /// be recomputed from the two strings afterwards — it has to be recorded while it happens.
-fn normalise_mapped(s: &str) -> (String, Vec<usize>) {
+/// A text's comparison form, and the source offsets an output range maps back to.
+///
+/// Two tracks, not one, and that is the whole of the MS-4 fix. `starts[i]` is where the character
+/// producing output byte `i` *begins*, which is what a range's lower bound wants. A range's upper
+/// bound wants something else: where the last character of the match *ends*. Reading `starts` at
+/// the exclusive output index answers a different question — "where does the next character
+/// begin?" — and the two answers differ by exactly the characters the normaliser drops between
+/// them. A quote ending before a closing curly mark or a backtick swallowed it.
+struct Mapped {
+    out: String,
+    /// Where the character producing output byte `i` begins, in the source.
+    starts: Vec<usize>,
+    /// For a match ending just before output byte `i`, where the last character that produced it
+    /// ends, in the source. `ends[0]` is zero and is never read: no match ends before it begins.
+    /// Length is `out.len() + 1`, so an exclusive index into the output is always in range.
+    ends: Vec<usize>,
+}
+
+fn normalise_mapped(s: &str) -> Mapped {
     let mut out = String::with_capacity(s.len());
     let mut map: Vec<usize> = Vec::with_capacity(s.len() + 1);
+    // Index 0 is the empty prefix, which no match can end before.
+    let mut ends: Vec<usize> = vec![0];
     // Where the run of whitespace began, so the single space that replaces it maps to the end of
     // the previous word rather than the start of the next. Otherwise a range ending at a word
     // boundary swallowed the space after it.
     let mut space: Option<usize> = None;
     let mut content_ends = 0usize;
-    for (at, c) in s.char_indices() {
-        let c = match c {
+    for (at, raw) in s.char_indices() {
+        // `raw` is kept because `content_ends` is an offset into the *source*, and the mapped
+        // character's width is not the source character's. Shadowing `raw` with the replacement
+        // here — as this loop did until 1.9 — made the sentinel `at + 1` for a three-byte dash,
+        // so a span ending on the last content character ended *inside* it: `&source[span]`
+        // panicked, and a `Loose` range pointed at a truncated region. Found by the F-3 property
+        // test, which generates the characters the normaliser rewrites.
+        let c = match raw {
             '`' | '*' => continue,
             '\u{2018}' | '\u{2019}' | '\u{201B}' | '\u{201C}' | '\u{201D}' | '\u{201F}' | '\'' => {
                 '"'
@@ -105,19 +310,28 @@ fn normalise_mapped(s: &str) -> (String, Vec<usize>) {
             if !out.is_empty() {
                 out.push(' ');
                 map.push(from);
+                // A match that takes in the collapsed space takes in the whole run it stands
+                // for, which ended where this character begins.
+                ends.push(at);
             }
         }
         let before = out.len();
         out.extend(c.to_lowercase());
         map.resize(out.len().max(before), at);
-        content_ends = at + c.len_utf8();
+        content_ends = at + raw.len_utf8();
+        ends.resize(out.len() + 1, content_ends);
     }
     map.truncate(out.len());
     // The sentinel ends at the last content character rather than at the end of the string:
     // trailing whitespace normalises away, and a range ending on the last word must not reach past
     // it into a newline no reader would call part of the quote.
     map.push(content_ends);
-    (out, map)
+    ends.truncate(out.len() + 1);
+    Mapped {
+        out,
+        starts: map,
+        ends,
+    }
 }
 
 fn normalise(s: &str) -> String {
@@ -239,11 +453,20 @@ fn word_positions(s: &str) -> Vec<(usize, &str)> {
 ///
 /// No stemming and no synonyms: a reworded claim is not an attributed one.
 pub fn support(quote: &str, source: &str) -> Support {
-    let q = normalise(quote);
+    support_with(Normaliser::V1, quote, source)
+}
+
+/// [`support`] under a chosen comparison form (1.9).
+///
+/// `support(q, s)` is `support_with(Normaliser::V1, q, s)`, which is what keeps the four 1.3
+/// entry points byte-for-byte: a caller who has stored a verdict gets that verdict, and a caller
+/// who wants the probes of SMYSL-2.1 §2.1 to read `Present` asks for V2.
+pub fn support_with(n: Normaliser, quote: &str, source: &str) -> Support {
+    let q = form(n, quote);
     if q.is_empty() {
         return Support::Absent;
     }
-    let s = normalise(source);
+    let s = form(n, source);
     if s.contains(&q) {
         return Support::Present;
     }
@@ -261,18 +484,44 @@ pub fn support(quote: &str, source: &str) -> Support {
 /// matched to the last, elisions included, because that is the region the quote was drawn from —
 /// and the match is the earliest subsequence, so a quote opening on a common word starts the range
 /// at that word's first occurrence. `Absent` has no range.
+///
+/// **Both ends land on a character the comparison form keeps.** A range never reaches past the
+/// match to take in a mark the fold discarded — a closing `”` under V2, a backtick or an asterisk
+/// under V1 — nor into the whitespace after it. This was wrong until 1.10 in both forms: the upper
+/// bound was read off the table of where characters *begin*, which answers "where does the next
+/// character start?" and so included everything dropped in between. The spike measured it at 10 of
+/// 5,560 spans under V2 (MS-4); V1 had it too, on the marks V1 drops rather than folds, which the
+/// finding did not know. V1's verdicts are unchanged — this moves only where a range ends.
 pub fn support_span(quote: &str, source: &str) -> (Support, Option<core::ops::Range<usize>>) {
-    let q = normalise(quote);
+    support_span_with(Normaliser::V1, quote, source)
+}
+
+/// [`support_span`] under a chosen comparison form (1.9).
+///
+/// The verdict agrees with [`support_with`] for the same `n` by construction: both read the same
+/// character table, and `tests/quote_v2.rs` asserts the agreement over generated input rather
+/// than resting on that.
+pub fn support_span_with(
+    n: Normaliser,
+    quote: &str,
+    source: &str,
+) -> (Support, Option<core::ops::Range<usize>>) {
+    let q = form(n, quote);
     if q.is_empty() {
         return (Support::Absent, None);
     }
-    let (s, map) = normalise_mapped(source);
-    let at = |i: usize| map.get(i).copied().unwrap_or(source.len());
-    if let Some(i) = s.find(&q) {
-        return (Support::Present, Some(at(i)..at(i + q.len())));
+    let m = form_mapped(n, source);
+    // Lower bounds read `starts`, upper bounds read `ends`. Reading one track for both was the
+    // MS-4 overshoot: an upper bound taken from `starts` is where the *next* character begins,
+    // so every character dropped in between — a closing quote mark, a backtick — fell inside the
+    // range. Measured at 0.18% of 5,560 spans under V2, and present in V1 for the marks it drops.
+    let start = |i: usize| m.starts.get(i).copied().unwrap_or(source.len());
+    let end = |i: usize| m.ends.get(i).copied().unwrap_or(source.len());
+    if let Some(i) = m.out.find(&q) {
+        return (Support::Present, Some(start(i)..end(i + q.len())));
     }
-    if let Some((first, last)) = loose_span(&q, &s) {
-        return (Support::Loose, Some(at(first)..at(last)));
+    if let Some((first, last)) = loose_span(&q, &m.out) {
+        return (Support::Loose, Some(start(first)..end(last)));
     }
     (Support::Absent, None)
 }
@@ -336,11 +585,20 @@ pub fn quote_of(core: &UnitCore) -> Option<String> {
 /// request, and a missing one is a thinner record rather than a false one. What is faulted
 /// is a quote the source does not support.
 pub fn verify(units: &[UnitCore], source: &str) -> Vec<Diagnostic> {
+    verify_with(Normaliser::V1, units, source)
+}
+
+/// [`verify`] under a chosen comparison form (1.9).
+///
+/// `ingest` passes the normaliser its options name, so a run can be checked under V2 without
+/// changing what a caller of [`verify`] gets. The diagnostics are the same two codes either way:
+/// the comparison form decides which quotes reach them, not what they say.
+pub fn verify_with(n: Normaliser, units: &[UnitCore], source: &str) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for u in units {
         let Some(q) = quote_of(u) else { continue };
         let uid = canonical_uid(u);
-        match support(&q, source) {
+        match support_with(n, &q, source) {
             Support::Present => {}
             Support::Loose => out.push(
                 Diagnostic::on(Code::W308, uid)

@@ -1,0 +1,127 @@
+# GE-T1's corpus clause (SMYSL-2.4 §5.5): the five Bibles, each built into a library with the
+# `usfm/1` reader, with every identity rolled into one digest so two platforms compare exactly.
+#
+# Columns: edition, key, value.
+#   input_hex   BLAKE3 over the input file names and their digests. A mismatch here says the
+#               corpus differs, not that the build does.
+#   roll_hex    BLAKE3 over the canonical identity listing: every alias and mid, and every
+#               part's tid, length, structure hash and rdid, in alias then part order.
+#   first/last  the first and last book in full, so a moved roll has somewhere to start.
+#
+# Written by crates/smysl-text/tests/ge_t1_bibles.rs under SMYSL_BLESS=1 with SMYSL_GE_T1
+# pointing at the corpus. Blessing changes what two platforms are compared against.
+deu1912	lang	de
+deu1912	reader	usfm/1
+deu1912	versification	-
+deu1912	input_hex	c65ca5d04525c297877150b03fde5a223d8dbcff28d51723329c855093fddb78
+deu1912	books	66
+deu1912	parts	1141
+deu1912	bytes	4094708
+deu1912	lossy	false
+deu1912	roll_hex	0bf3743818c3a4f8740c58e97f43434dc3ff6e0429009b94c1e8fb367cea5f08
+deu1912	first.alias	deu1912/01-gen
+deu1912	first.mid_hex	a5fc10ca540b6394e17914efac55a4fbd3110ff22bf56db0a61e4954e7e9be1c
+deu1912	first.part_count	50
+deu1912	first.first_part.tid_hex	ad683cecbf5265a22dac07a6e58d1e30b339e9671b49959874bcd5fbc7b63117
+deu1912	first.first_part.length	3983
+deu1912	first.first_part.structure_hex	6ea21dc496a379c37ef9dfa05cb22edbf33de9b45130d0e755a4551c23b56249
+deu1912	first.first_part.rdid_hex	0b94a1bbd942c6e02ede3f843555549b6751129249e67964c1577d21f2b2651e
+deu1912	last.alias	deu1912/66-rev
+deu1912	last.mid_hex	954fb64c58d248eaf9689ce66b1a38bc753d174f68d2c75c0e01ea31edd8a626
+deu1912	last.part_count	22
+deu1912	last.first_part.tid_hex	a844c09aba7c677993ee6f22527bd7e2c74ea55fd08bd4c9950204bdb20101ee
+deu1912	last.first_part.length	3092
+deu1912	last.first_part.structure_hex	c3873f605f4d50e9699a3684c021c5456d6e62070b9ff97b5e6ed73ebf10a986
+deu1912	last.first_part.rdid_hex	450e47dd63fdf9d899bd6052a10e146c5561ff884aa3f9e657100f5a68533aad
+eng-kjv	lang	en
+eng-kjv	reader	usfm/1
+eng-kjv	versification	kjv
+eng-kjv	input_hex	322ed1d3a774f59bf1b7ed26050f1f1785c1de54f467f0c005ca51d0c25e66b7
+eng-kjv	books	66
+eng-kjv	parts	1143
+eng-kjv	bytes	4199873
+eng-kjv	lossy	false
+eng-kjv	roll_hex	2556c2ca8cd0ae4451f05b611cb9e7e9d5d990f1d1f708618725849541a3a19f
+eng-kjv	first.alias	eng-kjv/01-gen
+eng-kjv	first.mid_hex	8dc39ae0f126a2cbed5a348ca8551e613dbee0f87ca979c9812b84ed8c9cada3
+eng-kjv	first.part_count	50
+eng-kjv	first.first_part.tid_hex	ea3fb0cd52a2c7095cf5f4ebd50a5336666a0a3f82144cd642cc72683b6c12ae
+eng-kjv	first.first_part.length	4152
+eng-kjv	first.first_part.structure_hex	f159d25d22e3a09f9e9c673cfbf50acda4cc7feba7d520d94ad59387a8eb0337
+eng-kjv	first.first_part.rdid_hex	94c3eaae89b14274d43b44afa2a99fc8d9610857e41b0682924d903af0ce3bee
+eng-kjv	last.alias	eng-kjv/66-rev
+eng-kjv	last.mid_hex	dff27cdc755ba3261a8dc9057d8f5836dc3357790ca48ec4dc4eafa09b6af844
+eng-kjv	last.part_count	22
+eng-kjv	last.first_part.tid_hex	726de774f602c7b65c4f39e49e2f33a2cd286b6da1a8766d3c05e8920e68f12b
+eng-kjv	last.first_part.length	3062
+eng-kjv	last.first_part.structure_hex	4a329368a497b090e161d86c04774305d67225c6cf321742affdfc84dc52b4dd
+eng-kjv	last.first_part.rdid_hex	e5ff3225804a26871011287982dbe654a61885dedc76ee36b41304b45343d0a9
+fraLSG	lang	fr
+fraLSG	reader	usfm/1
+fraLSG	versification	-
+fraLSG	input_hex	247de2d805607b54bf16e558552f595fff45b9de00d542b74eadea4e6eec81c6
+fraLSG	books	66
+fraLSG	parts	1146
+fraLSG	bytes	4314125
+fraLSG	lossy	false
+fraLSG	roll_hex	d7cb5e1c74c5dc53342f1702c6c6655a9b6a7246bd3bea38613ad423e258cea9
+fraLSG	first.alias	fralsg/01-gen
+fraLSG	first.mid_hex	89f1bba23944a8b75c36d236f654e093e495e916e24383a2c4ad035103ead13d
+fraLSG	first.part_count	50
+fraLSG	first.first_part.tid_hex	9d4ac7d730875948e9ebba1e3cb8582b9c5b0d270d18edebe693bb916308b5f9
+fraLSG	first.first_part.length	4229
+fraLSG	first.first_part.structure_hex	89bf775c3d68d555bae63e1585c78095638d99c0436cd839f227a2978521b546
+fraLSG	first.first_part.rdid_hex	44ea0c816714e038d7bafe02474badce1bf8419c2c3a8228cdd59e5c7d167442
+fraLSG	last.alias	fralsg/66-rev
+fraLSG	last.mid_hex	5cb676f2a3bbc509726a65d5084ab3229a4469a7c5784589fa6e449679880950
+fraLSG	last.part_count	22
+fraLSG	last.first_part.tid_hex	c28b7a27af47a19018c803a50c21a52186951889543dac810e81d4d674ce3eb9
+fraLSG	last.first_part.length	3117
+fraLSG	last.first_part.structure_hex	0f8c66062d292cd30a3007d048d4e174bdae0817d2dc5244e5a003911deafa03
+fraLSG	last.first_part.rdid_hex	9d142804182577667ae4c68f27248fb84c79bf278f47b98c59f4d4842fc047c1
+russyn	lang	ru
+russyn	reader	usfm/1
+russyn	versification	synodal
+russyn	input_hex	1b785eeef42853840c2c6fe691563073ccae609f09b2994d472aacf9aa05184b
+russyn	books	66
+russyn	parts	1164
+russyn	bytes	6072062
+russyn	lossy	false
+russyn	roll_hex	96c0580828115e7d2f901c863d57ffb61eb868725c6f5b10c21c7061e97170c7
+russyn	first.alias	russyn/01-gen
+russyn	first.mid_hex	7f99e11f5e2bee72a9b6d03d7df3e409834cb9cd9fc498d7f3ce5f0c8e9ce428
+russyn	first.part_count	50
+russyn	first.first_part.tid_hex	0065f1a6b648fa398cde477b4ee156d921fcd5cff20bacfa8055126ef74a7590
+russyn	first.first_part.length	6119
+russyn	first.first_part.structure_hex	45f9be3a3b2dd104881862250396c71c23fcd331a3d3c90fd0abed391f5044f0
+russyn	first.first_part.rdid_hex	5f9717a347c61961553e9084b71b6ddec6516b1cd6ca85c33e2624f68f501e47
+russyn	last.alias	russyn/66-rev
+russyn	last.mid_hex	ff38f7c668a8aed1b3653bf35ef13d420dbedd053444a156df60b0ffe79b0bc9
+russyn	last.part_count	22
+russyn	last.first_part.tid_hex	4695cd7f0c7a0893c76cfe8c10c0087137f9a80d2547ebf40fc9a06335939d35
+russyn	last.first_part.length	4364
+russyn	last.first_part.structure_hex	6eeb2f7130aeb9854b75f934b601c85c8a23c7878cd19e0c9367d51f0fda952d
+russyn	last.first_part.rdid_hex	0ee3df29e6cb9ac82aac1a143bdfe9358d83bd811f9673b44a1ab54d2160c15f
+spaRV1909	lang	es
+spaRV1909	reader	usfm/1
+spaRV1909	versification	-
+spaRV1909	input_hex	e266a2bc08480c7fc1b38a6b87521e4cec3eacd2cd5d6ec9bed3759423d42165
+spaRV1909	books	66
+spaRV1909	parts	1139
+spaRV1909	bytes	3945908
+spaRV1909	lossy	false
+spaRV1909	roll_hex	f3ac17110bb4e6a10f04da914f2861c728822caf3789dee14b31df26476b3e74
+spaRV1909	first.alias	sparv1909/01-gen
+spaRV1909	first.mid_hex	87500b28bf617dc26372fe4cd2bed4da6ba73d0c6e9a12fa5317869f54144667
+spaRV1909	first.part_count	50
+spaRV1909	first.first_part.tid_hex	81903dc04dde59469b04087e24d9c12c96b7b5ec3c386c212d516eabd9d6a505
+spaRV1909	first.first_part.length	3865
+spaRV1909	first.first_part.structure_hex	4c1be445ab8961557ff6640b371fc7211b5a7d0928840a052ce49eaed41bbfa1
+spaRV1909	first.first_part.rdid_hex	e4b82759eba67568ccdf6d699f2f4e07f50dce3992a9a6f5fae794eef6d0e51c
+spaRV1909	last.alias	sparv1909/66-rev
+spaRV1909	last.mid_hex	94d7f0937c08e2ed19f72b7ad4d20f93a310b7a14cd434f00920e3ab64f75a63
+spaRV1909	last.part_count	22
+spaRV1909	last.first_part.tid_hex	35d4145f4f72d11c180b748b1363e250c5bdcd6217291c0b99e43a89485816e2
+spaRV1909	last.first_part.length	2909
+spaRV1909	last.first_part.structure_hex	d5d6c0edcec4708a6331ad61edc137d2934487fb5e9763628248e1224c829c32
+spaRV1909	last.first_part.rdid_hex	71c715b5d2d81a60c36830734238ba37a9334e5dc1bd42fa5675b89f3f806200

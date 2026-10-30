@@ -17,9 +17,11 @@
 pub mod passes;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use smysl_core::{Error, GranularityProfile, Label, Severity, Uid};
-use smysl_graph::Store;
+use smysl_core::types::PartResolver;
+use smysl_core::{Error, GranularityProfile, Label, ProfileEstimator, Severity, Uid};
+use smysl_graph::StoreRead;
 
 pub use passes::extension::{fidelity, ConsumerProfile, FidelityReport};
 pub use smysl_core::diag::{Code, Diagnostic, Report, Span, Subject};
@@ -53,6 +55,16 @@ pub enum Pass {
     /// every caller that lists it, and a variant inserted mid-enum would renumber nothing here
     /// but would reorder every report that iterates `ALL`.
     CommitmentSupport,
+    /// 12 - the library (1.10, RFC SMYSL-2.4 §4.3.3). Appended for the reason above.
+    Library,
+    /// 13 - time, rule E (1.10, RFC SMYSL-2.4 §4.3, TX-P3 step 3).
+    ///
+    /// In `ALL` unconditionally and in [`Pass::IMPLEMENTED`] only under the `text` feature,
+    /// because rule E's engine lives in `smysl-text`. A build without it reports the pass as
+    /// not run, which is a sentence a caller can read — the alternative, a `Pass` enumeration
+    /// that changes shape with a feature, would make `--pass time` an unknown name in one
+    /// build and a known one in another.
+    Time,
 }
 
 impl Pass {
@@ -68,9 +80,12 @@ impl Pass {
         Pass::Extension,
         Pass::Hashes,
         Pass::CommitmentSupport,
+        Pass::Library,
+        Pass::Time,
     ];
 
     /// The passes this build actually runs.
+    #[cfg(feature = "text")]
     pub const IMPLEMENTED: &'static [Pass] = &[
         Pass::Integrity,
         Pass::Shape,
@@ -80,6 +95,23 @@ impl Pass {
         Pass::Trust,
         Pass::Extension,
         Pass::CommitmentSupport,
+        Pass::Library,
+        Pass::Time,
+    ];
+
+    /// The passes this build actually runs. Without the `text` feature, `Time` is not one:
+    /// rule E's engine is in `smysl-text`.
+    #[cfg(not(feature = "text"))]
+    pub const IMPLEMENTED: &'static [Pass] = &[
+        Pass::Integrity,
+        Pass::Shape,
+        Pass::Closure,
+        Pass::Granularity,
+        Pass::Epistemics,
+        Pass::Trust,
+        Pass::Extension,
+        Pass::CommitmentSupport,
+        Pass::Library,
     ];
 
     pub const fn number(self) -> u8 {
@@ -95,6 +127,8 @@ impl Pass {
             Pass::Extension => 9,
             Pass::Hashes => 10,
             Pass::CommitmentSupport => 11,
+            Pass::Library => 12,
+            Pass::Time => 13,
         }
     }
 
@@ -111,6 +145,8 @@ impl Pass {
             Pass::Extension => "extension",
             Pass::Hashes => "hashes",
             Pass::CommitmentSupport => "commitment",
+            Pass::Library => "library",
+            Pass::Time => "time",
         }
     }
 
@@ -145,6 +181,23 @@ pub struct CheckOptions {
     /// What the consumer implements, for the `--as` degradation report. Absent means no
     /// `SMY-W010` is emitted: nobody asked what a particular consumer would lose.
     pub consumer: Option<ConsumerProfile>,
+    /// Count the granularity bounds with this estimator instead of the profile's own (F-2,
+    /// `check --estimator`). It overrides whichever profile is in force, because the question
+    /// a caller is asking is "would these units fit under *that* count".
+    pub estimator: Option<ProfileEstimator>,
+    /// Where a part's bytes can be fetched from, so the `Library` pass can verify them
+    /// (1.10). Absent means the object half of that pass is skipped and the report says so:
+    /// a log holds no text (OQ-39), so without this there is nothing to check against, and
+    /// reporting every manifest as unverified would be a complaint about the caller's
+    /// arguments rather than about the store.
+    ///
+    /// `RefUnwindSafe` is in the bound because leaving it out **took `CheckOptions`'s own
+    /// `UnwindSafe` away**, and that is a major semver break by auto-trait leakage —
+    /// `make semver` says so, and it had been saying so since the field landed, because the
+    /// sweep that runs the other eleven gates did not run that one. A resolver reads bytes
+    /// and hands them back; none of the three implementations has interior mutability, so
+    /// the bound costs nothing and buys back a trait a consumer may have been relying on.
+    pub parts: Option<Arc<dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe>>,
 }
 
 impl CheckOptions {
@@ -173,6 +226,15 @@ impl CheckOptions {
         self
     }
 
+    /// Hand the `Library` pass an object store, so `SMY-E446` and `SMY-E401` are checked.
+    pub fn with_parts(
+        mut self,
+        parts: Arc<dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe>,
+    ) -> CheckOptions {
+        self.parts = Some(parts);
+        self
+    }
+
     fn runs(&self, p: Pass) -> bool {
         p.is_implemented() && (self.only.is_empty() || self.only.contains(&p))
     }
@@ -194,7 +256,7 @@ impl CheckOptions {
 /// `l1_min`, the largest `l1_max`, and `topical` admission if any view uses it. A unit outside
 /// that is outside every profile present, which is a warning worth having; a unit inside it is
 /// not flagged on the strength of a sort order.
-fn store_granularity(store: &Store) -> GranularityProfile {
+fn store_granularity(store: &(impl StoreRead + ?Sized)) -> GranularityProfile {
     let mut distinct: Vec<&GranularityProfile> = Vec::new();
     for v in store.views() {
         if !distinct.contains(&&v.granularity) {
@@ -214,8 +276,15 @@ fn store_granularity(store: &Store) -> GranularityProfile {
                 g.l0_max = g.l0_max.max(p.l0_max);
                 g.l1_min = g.l1_min.min(p.l1_min);
                 g.l1_max = g.l1_max.max(p.l1_max);
-                if p.admission == smysl_core::Admission::Topical {
-                    g.admission = smysl_core::Admission::Topical;
+                // Widest also means: any admission that is not `single-assertion` disables
+                // the single-assertion check, and from 1.10 that includes one this build
+                // cannot name (A-8.1). Keeping `single-assertion` in the merged profile
+                // because the only other view used an unknown code would check units against
+                // a rule no view in the store stated.
+                if g.admission == smysl_core::Admission::SingleAssertion
+                    && p.admission != smysl_core::Admission::SingleAssertion
+                {
+                    g.admission = p.admission;
                 }
             }
             g
@@ -226,11 +295,14 @@ fn store_granularity(store: &Store) -> GranularityProfile {
 /// Run the pipeline.
 ///
 /// Never short-circuits: every requested pass runs, whatever the earlier ones found.
-pub fn check(store: &Store, opts: CheckOptions) -> Report {
-    let granularity = opts
+pub fn check(store: &(impl StoreRead + ?Sized), opts: CheckOptions) -> Report {
+    let mut granularity = opts
         .granularity
         .clone()
         .unwrap_or_else(|| store_granularity(store));
+    if let Some(e) = opts.estimator.clone() {
+        granularity.estimator = e;
+    }
 
     let mut report = Report::new();
     if opts.runs(Pass::Integrity) {
@@ -256,6 +328,13 @@ pub fn check(store: &Store, opts: CheckOptions) -> Report {
     }
     if opts.runs(Pass::CommitmentSupport) {
         passes::commitment::run(store, &mut report);
+    }
+    if opts.runs(Pass::Library) {
+        passes::library::run(store, opts.parts.as_deref(), &mut report);
+    }
+    #[cfg(feature = "text")]
+    if opts.runs(Pass::Time) {
+        passes::time::run(store, &mut report);
     }
     report.sort();
     report
@@ -305,7 +384,7 @@ pub fn conformance(report: &Report, class: ConformanceClass) -> ConformanceVerdi
 
 /// `check` plus the failure decision, for callers that want one call.
 pub fn check_and_fail_on(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     opts: CheckOptions,
     severity: Severity,
 ) -> Result<Report, Error> {
@@ -319,7 +398,7 @@ pub fn check_and_fail_on(
 /// Mixed granularity in a merged store is legal, not an error (D-5). `check --granularity`
 /// reports the distribution so a reader can see what they are looking at rather than being
 /// told off for it.
-pub fn granularity_distribution(store: &Store) -> BTreeMap<String, usize> {
+pub fn granularity_distribution(store: &(impl StoreRead + ?Sized)) -> BTreeMap<String, usize> {
     let mut out = BTreeMap::new();
     for v in store.views() {
         *out.entry(v.granularity.profile.clone()).or_insert(0) += 1;
@@ -337,6 +416,9 @@ pub enum ConformanceClass {
     Produce,
     Merge,
     Full,
+    /// C-Library (1.10, D-8). Appended at the end, like `Pass::Library`, and for the same
+    /// reason: `ALL` is iterated in declaration order.
+    Library,
 }
 
 impl ConformanceClass {
@@ -346,6 +428,7 @@ impl ConformanceClass {
         ConformanceClass::Produce,
         ConformanceClass::Merge,
         ConformanceClass::Full,
+        ConformanceClass::Library,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -355,6 +438,7 @@ impl ConformanceClass {
             ConformanceClass::Produce => "C-Produce",
             ConformanceClass::Merge => "C-Merge",
             ConformanceClass::Full => "C-Full",
+            ConformanceClass::Library => "C-Library",
         }
     }
 
@@ -401,16 +485,33 @@ impl ConformanceClass {
                 | Code::E031
                 | Code::E032
                 | Code::E040
+                // `E410` since TX-P3 step 3, and in *shape* rather than in the library family
+                // below. A-13 gives C-Produce the obligation "write only well-formed EDTF", so
+                // a store carrying a malformed value was not produced conformantly — while
+                // C-Library's obligation is to derive effective time and report contested
+                // subjects, which it can do perfectly well with one unreadable date in the
+                // store. The code is reported either way; what this decides is which promise
+                // the store makes impossible to keep.
+                | Code::E410
         );
         let lifecycle = matches!(code, Code::E050 | Code::E051);
         let render = matches!(code, Code::E210);
+        // The library family (1.10, D-8). `E452` is in it and §4.3.3's list does not name it:
+        // a log that holds a part text is the one thing OQ-39 decided a log never does, and a
+        // consumer promising C-Library would be reading text from the one place the format
+        // says text never lives. `E402` is *not* in it — a licence that refuses to let text
+        // travel is a correct store, not a defective one.
+        let library = matches!(code, Code::E401 | Code::E403 | Code::E446 | Code::E452);
 
         match self {
             ConformanceClass::Read => structural,
             ConformanceClass::Consume => structural || epistemic,
             ConformanceClass::Produce => structural || epistemic || shape,
             ConformanceClass::Merge => structural || epistemic || lifecycle,
-            ConformanceClass::Full => structural || epistemic || shape || lifecycle || render,
+            ConformanceClass::Full => {
+                structural || epistemic || shape || lifecycle || render || library
+            }
+            ConformanceClass::Library => structural || epistemic || library,
         }
     }
 }
@@ -442,6 +543,7 @@ mod conformance_table {
     const SHAPE: Code = Code::E020;
     const LIFECYCLE: Code = Code::E050;
     const RENDER: Code = Code::E210;
+    const LIBRARY: Code = Code::E403;
 
     /// The whole table, written out. Each row is `(class, what it forbids)`; anything absent
     /// from a row must be permitted at that class.
@@ -452,11 +554,12 @@ mod conformance_table {
         (ConformanceClass::Merge, &[STRUCTURAL, EPISTEMIC, LIFECYCLE]),
         (
             ConformanceClass::Full,
-            &[STRUCTURAL, EPISTEMIC, SHAPE, LIFECYCLE, RENDER],
+            &[STRUCTURAL, EPISTEMIC, SHAPE, LIFECYCLE, RENDER, LIBRARY],
         ),
+        (ConformanceClass::Library, &[STRUCTURAL, EPISTEMIC, LIBRARY]),
     ];
 
-    const ALL_FAMILIES: &[Code] = &[STRUCTURAL, EPISTEMIC, SHAPE, LIFECYCLE, RENDER];
+    const ALL_FAMILIES: &[Code] = &[STRUCTURAL, EPISTEMIC, SHAPE, LIFECYCLE, RENDER, LIBRARY];
 
     #[test]
     fn each_class_forbids_exactly_its_row() {
@@ -474,6 +577,68 @@ mod conformance_table {
 
     /// The property the table exists to express, stated separately so it cannot be lost in a
     /// refactor of the rows above.
+    /// C-Library branches the same way C-Merge does, and the branch is the claim: a store
+    /// with a shape error is perfectly readable as a library, and a store with a malformed tid
+    /// is perfectly producible from. Collapsing either into the other would turn the table
+    /// into a ladder, which it has never been.
+    #[test]
+    fn library_is_a_branch_and_not_a_rung() {
+        assert!(!ConformanceClass::Library.forbids(SHAPE));
+        assert!(!ConformanceClass::Library.forbids(LIFECYCLE));
+        assert!(!ConformanceClass::Library.forbids(RENDER));
+        assert!(!ConformanceClass::Produce.forbids(LIBRARY));
+        assert!(!ConformanceClass::Merge.forbids(LIBRARY));
+        assert!(ConformanceClass::Full.forbids(LIBRARY));
+    }
+
+    /// `SMY-E410` is a **shape** code, not a library one, and the placement is the claim.
+    ///
+    /// A-13 gives C-Produce "write only well-formed EDTF", so a store carrying a malformed
+    /// date was not produced conformantly. C-Library's obligation is to derive effective time
+    /// and report contested subjects, and it can do that with one unreadable date in the
+    /// store — the date is reported and skipped. So the code blocks producing and does not
+    /// block reading as a library, which is the same shape as every other row in this table.
+    #[test]
+    fn a_malformed_date_blocks_producing_and_not_reading_as_a_library() {
+        assert!(ConformanceClass::Produce.forbids(Code::E410));
+        assert!(ConformanceClass::Full.forbids(Code::E410));
+        assert!(!ConformanceClass::Library.forbids(Code::E410));
+        assert!(!ConformanceClass::Read.forbids(Code::E410));
+        assert!(!ConformanceClass::Merge.forbids(Code::E410));
+        // And the warnings rule E reports block nothing at all: a contested subject is a fact
+        // about a corpus, not a defect in it.
+        for code in [Code::W411, Code::W412, Code::W413, Code::W449] {
+            for class in ConformanceClass::ALL {
+                assert!(
+                    !class.forbids(code),
+                    "{class} must not be blocked by {code}"
+                );
+            }
+        }
+    }
+
+    /// The family, written out. Four codes and one of them is `SMY-E452`, which §4.3.3's list
+    /// omits; the omission is the thing worth pinning, because a store whose log holds text is
+    /// exactly what C-Library must not accept. `SMY-E402` is outside the family on purpose: a
+    /// licence refusing to let text travel describes a correct store.
+    #[test]
+    fn the_library_family_is_four_codes() {
+        for code in [Code::E401, Code::E403, Code::E446, Code::E452] {
+            assert!(
+                ConformanceClass::Library.forbids(code),
+                "{code} must block C-Library"
+            );
+        }
+        assert!(
+            !ConformanceClass::Library.forbids(Code::E402),
+            "a licence that refuses carry is a correct store"
+        );
+        assert!(
+            !ConformanceClass::Library.forbids(Code::W418),
+            "a fork is a warning about a corpus, not a store that cannot be read"
+        );
+    }
+
     #[test]
     fn merge_is_not_produce_and_neither_subsumes_the_other() {
         assert!(
@@ -506,6 +671,7 @@ mod conformance_table {
 mod tests {
     use super::*;
     use smysl_core::{KernelType, Record, Status, UnitCoreBuilder, View, ViewId};
+    use smysl_graph::Store;
 
     fn claim(gist: &str) -> Record {
         Record::Unit(
@@ -516,8 +682,8 @@ mod tests {
     }
 
     #[test]
-    fn five_conformance_classes_with_stable_names() {
-        assert_eq!(ConformanceClass::ALL.len(), 5);
+    fn six_conformance_classes_with_stable_names() {
+        assert_eq!(ConformanceClass::ALL.len(), 6);
         assert_eq!(ConformanceClass::Read.to_string(), "C-Read");
         assert_eq!(ConformanceClass::Full.to_string(), "C-Full");
         for c in ConformanceClass::ALL {
@@ -533,8 +699,11 @@ mod tests {
     }
 
     #[test]
-    fn ten_passes_numbered_as_in_section_17() {
-        assert_eq!(Pass::ALL.len(), 11);
+    fn thirteen_passes_numbered_as_in_section_17() {
+        // Thirteen as of TX-P3 step 3, with `time`. The number is the position, so a variant
+        // inserted mid-enum would renumber every pass after it and change what `--pass 7`
+        // means in a report somebody has already read; appending is why `Time` is last.
+        assert_eq!(Pass::ALL.len(), 13);
         for (i, p) in Pass::ALL.iter().enumerate() {
             assert_eq!(p.number() as usize, i + 1);
             assert_eq!(Pass::parse(p.as_str()), Some(*p));
@@ -550,19 +719,25 @@ mod tests {
             .filter(|p| p.is_implemented())
             .map(|p| p.as_str())
             .collect();
-        assert_eq!(
-            implemented,
-            [
-                "integrity",
-                "shape",
-                "closure",
-                "granularity",
-                "epistemics",
-                "trust",
-                "extension",
-                "commitment"
-            ]
-        );
+        // `time` is here only under the `text` feature, because rule E's engine lives in
+        // `smysl-text`. Asserted both ways rather than only the one this build has: a feature
+        // that silently dropped a pass from `IMPLEMENTED` would make `check` report "clean"
+        // for a store it had not looked at.
+        let mut want = vec![
+            "integrity",
+            "shape",
+            "closure",
+            "granularity",
+            "epistemics",
+            "trust",
+            "extension",
+            "commitment",
+            "library",
+        ];
+        if cfg!(feature = "text") {
+            want.push("time");
+        }
+        assert_eq!(implemented, want);
         assert!(
             !Pass::Retraction.is_implemented(),
             "lands with merge in SM-P6"

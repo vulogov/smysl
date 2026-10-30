@@ -51,18 +51,25 @@ def test_unit_core_keys_match_the_table_in_2_2():
         6: "status",
         7: "source",
         8: "payload",
+        9: "lang",
     }
     assert smysl.UNIT_KEYS == expected, "the unit core's key assignment is the format"
 
 
-def test_keys_at_nine_and_above_are_unknown_and_kept():
-    """§2.2 and §5: `>= 9` is an unknown key preserved verbatim under rule X."""
-    body = {0: "claim", 1: "a gist", 6: 1, 9: "something a later version added"}
+def test_keys_at_ten_and_above_are_unknown_and_kept():
+    """§2.2 and §5: `>= 10` is an unknown key preserved verbatim under rule X.
+
+    Nine until 1.10, when `lang` took key 9 (A-1). The row moved rather than the rule: an
+    implementation that went on treating 9 as unknown would preserve the language as opaque bytes
+    and compute the same uid, which is why this test's integer and the key table's highest row
+    have to move together.
+    """
+    body = {0: "claim", 1: "a gist", 6: 1, 10: "something a later version added"}
     raw = smysl.encode_one([1, body])
     records = smysl.decode_store(raw)
     assert records[0].reencode() == raw
     named = records[0].unit_fields()
-    assert named[9] == "something a later version added", "an unknown key lost its integer"
+    assert named[10] == "something a later version added", "an unknown key lost its integer"
     assert "schema" in named and "gist" in named
 
 
@@ -176,7 +183,29 @@ def test_record_type_codes_match_the_table_in_3_1():
         11: "withdrawal",
         12: "resolution",
         13: "commitment",
+        14: "manifest",
+        15: "part_text",
+        16: "reserved",
+        17: "dating",
+        18: "part_reading",
+        19: "redaction",
     }
+
+
+def test_a_named_record_is_not_the_same_as_an_understood_one():
+    """§3.1: a code the spec names is not a code this implementation decodes.
+
+    1.10 added five library codes to the name table and this implementation decodes all five —
+    a manifest, a part text, a dating, a part reading and a redaction, with an identity for each
+    but the redaction (`test_library.py`). Two are still named and not understood, and that is
+    what the two tables exist to be able to say: 9 is a checkpoint nothing has ever emitted and
+    16 is reserved. A reader that called those known while decoding neither would be exactly the
+    silence ``SMY-W014`` exists to break.
+    """
+    named_not_understood = set(smysl.RECORD_NAMES) - smysl.UNDERSTOOD_RECORDS
+    assert named_not_understood == {9, 16}
+    assert {14, 15, 17, 18, 19} <= smysl.UNDERSTOOD_RECORDS
+    assert smysl.UNDERSTOOD_RECORDS <= set(smysl.RECORD_NAMES)
 
 
 def test_a_record_is_a_two_element_array():

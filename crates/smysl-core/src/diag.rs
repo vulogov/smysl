@@ -180,7 +180,7 @@ macro_rules! registry {
 }
 
 registry! {
-    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider }
+    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure, Export, Schema, Store }
 
     // --- Parse and encoding ------------------------------------------------
     Parse => {
@@ -282,6 +282,200 @@ registry! {
     Merge => {
         W058 = "SMY-W058", Warn,  "Two agents' latest commitments to one unit disagree";
     }
+    Extension => {
+        W409 = "SMY-W409", Warn,  "Unknown enumeration code - preserved verbatim, treated as unknown";
+        W434 = "SMY-W434", Warn,  "Bundle carries records this build cannot interpret";
+        W432 = "SMY-W432", Warn,  "A payload key named `lang` is the unit core key spelled unquoted";
+    }
+    Provider => {
+        W435 = "SMY-W435", Warn,  "A chunk succeeded on a later attempt; the earlier error is kept";
+        W433 = "SMY-W433", Warn,  "Ingest input contains a smysl prompt marker; sent inside a derived fence";
+    }
+    Lod => {
+        W025 = "SMY-W025", Warn,  "Granularity bounds unevaluable - the profile names an estimator this build does not have";
+    }
+    Provider => {
+        W436 = "SMY-W436", Warn,  "A unit is not in the script of the passage it came from (language policy)";
+    }
+    // --- The library (RFC SMYSL-2.4), in the order `smysl-text` raises them -------------------
+    //
+    // Registered with the code that raises them, not with the RFC that allocated them. A code
+    // nothing can trigger is worse than a missing one, because a reader who greps for it finds
+    // a promise with nothing behind it. The rest arrive with their readers, their ingest path
+    // and their check pass.
+    Library => {
+        E401 = "SMY-E401", Error, "Structure hash or rdid does not match the part entry on re-read";
+        E402 = "SMY-E402", Error, "Carrying text is refused by the licence recorded in the manifest";
+        E403 = "SMY-E403", Error, "A malformed library identity, or provenance the unit's type forbids";
+        E410 = "SMY-E410", Error, "Malformed EDTF value in published or a dating";
+        W411 = "SMY-W411", Warn,  "The observed instant lies outside the published interval";
+        W412 = "SMY-W412", Warn,  "A live dating rule E could not apply: held, outranked, or applying to nothing";
+        W413 = "SMY-W413", Warn,  "Temporal inconsistency: a negative cycle or an empty interval under rule E";
+        W414 = "SMY-W414", Warn,  "Source redacted: a part text or reading was dropped on receipt under rule Z; counted";
+        W415 = "SMY-W415", Warn,  "Units excluded from a time-scoped result for lack of a time on the axis asked; counted";
+        W418 = "SMY-W418", Warn,  "Expression fork: one alias has two manifest heads";
+        E440 = "SMY-E440", Error, "Reader resource cap exceeded; nothing was written";
+        E445 = "SMY-E445", Error, "The library or a shard is locked by another writer";
+        E446 = "SMY-E446", Error, "An object does not hash to the identity it is stored under";
+        W449 = "SMY-W449", Warn,  "An EDTF value outside the instant range; indexed as an open bound";
+        E450 = "SMY-E450", Error, "Appending to a pseudonymised expression without its pseudonym key";
+        E452 = "SMY-E452", Error, "A record 15 or 18 was offered to a log; text lives in the object store";
+        W451 = "SMY-W451", Warn,  "An alignment scheme does not cover a locator; the pair is left unaligned and counted";
+        E404 = "SMY-E404", Error, "A unit's span reaches past the length of the part it names";
+        W405 = "SMY-W405", Warn,  "A unit's locator and its span name different places; the span wins";
+        W419 = "SMY-W419", Warn,  "Ambiguous attribution: the quote occurs more than once in the node named";
+        W441 = "SMY-W441", Warn,  "An attributed quote was absent after repair; staged with no span and a capped status";
+        W447 = "SMY-W447", Warn,  "A structure node larger than the window was split at sentence boundaries";
+        E442 = "SMY-E442", Error, "A model answer references a unit outside its batch and ledger digest";
+        W443 = "SMY-W443", Warn,  "Untrusted text contained a prompt fence marker; neutralised in the prompt only";
+        W444 = "SMY-W444", Warn,  "A tool-owned field in a model answer was dropped";
+        W453 = "SMY-W453", Warn,  "The pivot pass returned no translation for a unit; it is staged in the source language only";
+    }
+
+    // --- The query language (RFC SMYSL-2.9, planner SMYSL-2.5 §3.2) ---------------------------
+    //
+    // Three of these are the lexer's, the parser's and the printer's, raised in the order a
+    // parse meets them. The other three arrived with the planner in TX-P6 step 2, on the rule
+    // the library block above states — a code nothing can trigger is worse than a missing one,
+    // and until a planner existed `E461` and `E462` could not be raised by anything.
+    //
+    // `E511` is allocated here rather than in SMYSL-2.5's range because that range is full
+    // (E460-W479, every code used) and because the refusal is about a *name the grammar
+    // accepted*: `from store:ledger` parses, and the span the diagnostic carries is a grammar
+    // span. SMYSL-2.0 §6.1 records the allocation against 2.9.
+    Query => {
+        E427 = "SMY-E427", Error, "Unsupported sq version in a `using` clause";
+        E460 = "SMY-E460", Error, "sq syntax error, or a parameter left unbound";
+        E461 = "SMY-E461", Error, "A stage is not available in this build or phase";
+        E462 = "SMY-E462", Error, "A traversal names a relation kind nothing in scope declares";
+        W463 = "SMY-W463", Warn,  "A traversal stopped at its depth with an unexplored frontier";
+        W464 = "SMY-W464", Warn,  "A supersession fork in scope: no single head, every successor kept";
+        E466 = "SMY-E466", Error, "A query cannot be pinned: the store has no such declaration";
+        W417 = "SMY-W417", Warn,  "A dossier subject names more than one entity; the candidates are listed and nothing ran";
+        E468 = "SMY-E468", Error, "A question matches no intent rule; name the intent";
+        E477 = "SMY-E477", Error, "Unknown dossier template set";
+        W478 = "SMY-W478", Warn,  "An answer unit grounds outside its dossier and was dropped";
+        // TX-P10 step 3: S1's vector cache (SMYSL-2.5 §3.14), raised by `smysl-embed-candle`
+        // when a sidecar was written under another model hash. In this block because `~sem`
+        // is the query that reads the cache, and the code is in SMYSL-2.5's range.
+        W476 = "SMY-W476", Warn,  "A cached vector under another model hash was ignored and recomputed";
+        // TX-P10 step 4, where a plan can reach a model: `--seed-check` refuses one before it
+        // runs, and a saved query that recorded one is rerun under another.
+        E416 = "SMY-E416", Error, "--seed-check on a model-dependent plan; refused before anything executes";
+        W467 = "SMY-W467", Warn,  "A model-dependent saved query was rerun under a different model hash; its diffs are not comparable";
+        // TX-P10 step 5: the natural-language front end's refusal of what a model wrote.
+        E474 = "SMY-E474", Error, "The natural-language front end produced text that is not an acceptable sq/1 query; nothing was executed";
+        W510 = "SMY-W510", Warn,  "A string literal is not in NFC; it is matched byte-exactly as written";
+        E511 = "SMY-E511", Error, "A scope names something this environment does not hold";
+        E512 = "SMY-E512", Error, "An operator does not apply to the type of the field it names";
+    }
+
+    // --- Measures (RFC SMYSL-2.6 §8), in an eleventh group --------------------------------------
+    //
+    // Two of the ten SMYSL-2.6 allocates, on the library block's rule: registered with the code
+    // that raises them. TX-P8 M1 builds the recipe, the payload and the unit writer, and those
+    // can refuse a measure nobody registered (`E489`) and decline to persist a value whose
+    // scope has nothing to ground it on (`W483`). The refusals that need a measure — lossy
+    // texts, a missing class policy, an undated scope, a compressor window, a small sample —
+    // arrive with the measures, in M2 to M6. `E486` is withdrawn in the RFC and stays unused.
+    // M2 brings three with T1 and T4, the first measures that read a text: `E480` and `W408`
+    // for a lossy one, refused or admitted, and `W485` for a sample below the recipe's `min:n`.
+    // `W408` is SMYSL-2.0's, filed in the library range and raised only by a measure, so it
+    // sits here with the refusal it is the other half of. M3 brings `E484` with T6, the pair of
+    // texts too long for the compressor to see both. TX-P9 N1 brings two with the unit
+    // measures: `E481` for a class measure (A2, A3) whose recipe names no class policy, and
+    // `E482` for a time-ordered one (A3) over a scope whose undated share is above the
+    // recipe's `undated:max`. N2 brings `E407` with A8: draft 3's, in the library range like
+    // `W408`, and raised only by a measure that budgets a scope in two languages by bytes.
+    // N6 brings the two the assessment raises: `W487` for a reader's unit that answers no item
+    // of the key, and `W488` for an item whose question or answer no longer stands.
+    Measure => {
+        E407 = "SMY-E407", Error, "A byte-counting estimator was refused over a scope in more than one language";
+        W408 = "SMY-W408", Warn,  "A measure ran over a lossy text because its recipe admits one";
+        E480 = "SMY-E480", Error, "A measure refused a lossy text its recipe does not admit";
+        E481 = "SMY-E481", Error, "A class-level measure or assessment has no class policy in its recipe";
+        E482 = "SMY-E482", Error, "A time-ordered measure was refused: the scope's undated share exceeds the recipe's undated:max";
+        W483 = "SMY-W483", Warn,  "A measure was computed but not persisted: its scope has no basis to ground a derived unit";
+        E484 = "SMY-E484", Error, "A compression distance was refused: the two texts together exceed the compressor's window";
+        W485 = "SMY-W485", Warn,  "A measure was not run: its sample is below the recipe's min:n";
+        W487 = "SMY-W487", Warn,  "A response unit was not scored: it answers no item of the key";
+        W488 = "SMY-W488", Warn,  "A key item drifted: its question or an answer was withdrawn, retracted, superseded or became unfounded";
+        E489 = "SMY-E489", Error, "Recipe incompatible: an unknown measure id or version, or inputs that cannot be compared";
+    }
+
+    // --- Export (RFC SMYSL-2.7 §8), in a twelfth group ------------------------------------------
+    //
+    // On the library block's rule: registered with the code that raises them. TX-P11 step 2
+    // builds `smysl-lib`'s exporter, which can leave a record out because what it names is not
+    // all in the file (`W490`), export records naming uids the source store does not hold
+    // (`W495`), and give a generated view id a hash suffix (`W497`). `W425` is SMYSL-2.0's,
+    // raised only by export, so it sits here. Step 3's index and `verify` bring `E494`, a file
+    // that does not match its index. Step 4's import brings `E493`, an input that does not
+    // decode, `W496`, records held waiting, and `W423`, SMYSL-2.0's quarantine code, raised
+    // only by import. Step 7's `--as-of` brings `W498`, a unit left out because what it rests
+    // on was not yet known. Step 10's surface format brings `W428`, records the surface cannot
+    // spell, and `E424`, a file that does not read back as what was selected, both
+    // SMYSL-2.0's and raised only here. TX-P12 step 13's `--target-revision` brings the last
+    // two: records dropped because they named an original (`W491`), and units that cannot be
+    // rewritten in dependency order (`E492`).
+    Export => {
+        W425 = "SMY-W425", Warn,  "Unknown records were exported to unattributed.cbor, or dropped with --unknown drop; counted";
+        W490 = "SMY-W490", Warn,  "A record was left out of an export file: the records it names are not all in it; counted";
+        W495 = "SMY-W495", Warn,  "Exported records reference uids the source store does not hold; counted";
+        W497 = "SMY-W497", Warn,  "A layout key is not a view-id segment, or two keys collide; the generated id has a hash suffix";
+        E494 = "SMY-E494", Error, "An export collection's file does not match its index (BLAKE3, record count or record-set digest)";
+        E493 = "SMY-E493", Error, "A lib import input is truncated or undecodable; nothing from that file is imported";
+        W496 = "SMY-W496", Warn,  "Imported records are waiting for a unit, edge, part or manifest the library does not hold; counted";
+        W423 = "SMY-W423", Warn,  "An imported record failed a check and was quarantined";
+        W498 = "SMY-W498", Warn,  "--as-of excluded units whose deps or grounds were not yet known on that date; counted";
+        W428 = "SMY-W428", Warn,  "Records with no surface form were left out of a surface export; counted per type";
+        E424 = "SMY-E424", Error, "A surface export file does not read back as the records selected for it; the index is incomplete";
+        W491 = "SMY-W491", Warn,  "--target-revision dropped commitments, datings, withdrawals, resolutions or contentions naming original uids; counted";
+        E492 = "SMY-E492", Error, "--target-revision cannot order the units to rewrite (a cycle in deps or grounds within the selection); export refused";
+    }
+
+    // --- Schema evolution (RFC SMYSL-2.5 §3.8–§3.10, SMYSL-2.3 A-7), in a thirteenth group ------
+    //
+    // Registered with the code that raises them, as every block above. TX-P12 step 1 decodes
+    // FC-9: a shape or lens array that does not match is read as opaque (`W430`), two
+    // declarations of one version are a fork (`W429`), and an op tag this build does not know
+    // makes its step unusable (`W469`). Step 2's lens engine brings the rest: no path between
+    // two revisions (`E470`), a step ill-formed against the revision it leaves (`E471`), a
+    // backward path through `retire` or an op with no inverse (`E422`), and a name or value a
+    // chain cannot carry (`W420`). Step 3's field resolution brings `E421`, a field no schema
+    // in scope declares or one two schemas both declare; step 5's `schema check` brings
+    // `E426` (rule N); step 6's `migrate` brings `W472` and `E473`; step 8's pointer lenses
+    // bring `W475`.
+    Schema => {
+        W430 = "SMY-W430", Warn,  "A schema declaration's payload_shape or lenses do not match FC-9's structure; read as opaque";
+        W429 = "SMY-W429", Warn,  "Schema fork: two declarations of one id and version with different content; the id has no current revision";
+        W469 = "SMY-W469", Warn,  "A lens step carries an op this build does not know; the step is unusable (units counted under W420)";
+        E470 = "SMY-E470", Error, "No lens path between the requested revisions";
+        E471 = "SMY-E471", Error, "A lens step is ill-formed: a default without its require, an op on an undeclared key, or a widening without its paired key";
+        E422 = "SMY-E422", Error, "A lens path runs backward through a retire or an op with no inverse";
+        W420 = "SMY-W420", Warn,  "A lens could not carry a name or value; the unit is excluded from predicates on that field and counted";
+        E421 = "SMY-E421", Error, "A field no schema in scope declares, or one two schemas both declare and the query did not qualify";
+        E426 = "SMY-E426", Error, "Rule N: a schema revision gives a name a new meaning without a declared widening, or reintroduces a retired name";
+        W472 = "SMY-W472", Warn,  "Migration proposed commitments or datings for review instead of transferring them; counts reported";
+        E473 = "SMY-E473", Error, "Migration needs information the old units lack; a model recipe is required";
+        W475 = "SMY-W475", Warn,  "A json/1 snapshot has no version marker; read without a pointer lens; count reported";
+    }
+
+    // --- The unit store (RFC SMYSL-2.8 §8), in a fourteenth group -------------------------------
+    //
+    // Registered with the code that raises them. TX-P13b step 1's redb store brings three: a
+    // store that did not describe its log and was rebuilt from it (`W501`), one written in a
+    // layout this build cannot read (`E503`), and a store another process holds, read from
+    // the log instead (`W504`). TX-P13c step 1's union of shards brings `W500`, a reference that
+    // waits on a shard not loaded; TX-P13d's primary mode brings `E505`, a primary shard and its
+    // export disagreeing; `E502` is withdrawn in favour of `E445`.
+    Store => {
+        W500 = "SMY-W500", Warn,  "A reference names a uid in a shard not loaded in this union; it waits on that shard";
+        W501 = "SMY-W501", Warn,  "The unit store does not describe this log (length, hash or layout); rebuilt from the log";
+        E503 = "SMY-E503", Error, "The unit store's layout is newer than this build reads; it is derived, so delete it to rebuild";
+        W504 = "SMY-W504", Warn,  "The unit store is held by another process; read from the CBOR log instead";
+        E505 = "SMY-E505", Error, "A primary shard and its export disagree on the record-set digest";
+    }
 }
 
 impl fmt::Display for Code {
@@ -302,6 +496,12 @@ pub enum Subject {
     Span(Span),
     /// A unit, identified by uid.
     Unit(Uid),
+    /// A record that is not a unit — a relation, an attestation, a commitment, a binding —
+    /// identified by the BLAKE3 of its canonical encoding, the hash the store dedupes by.
+    ///
+    /// SMYSL-2.7 §4.3: import quarantines records one by one, and a finding the check attributed
+    /// to a relation's target unit or to the whole store could not say which record it was.
+    Record([u8; 32]),
     /// Neither - a whole-store or whole-run diagnostic.
     Store,
 }
@@ -339,6 +539,11 @@ impl Diagnostic {
         Diagnostic::new(code).with_subject(Subject::Unit(uid))
     }
 
+    /// A diagnostic about one record, by the hash of its canonical encoding.
+    pub fn on_record(code: Code, hash: [u8; 32]) -> Diagnostic {
+        Diagnostic::new(code).with_subject(Subject::Record(hash))
+    }
+
     pub fn with_subject(mut self, subject: Subject) -> Diagnostic {
         self.subject = subject;
         self
@@ -368,6 +573,14 @@ impl Diagnostic {
         }
     }
 
+    /// The record hash this diagnostic is about, when it names a record that is not a unit.
+    pub fn record(&self) -> Option<&[u8; 32]> {
+        match &self.subject {
+            Subject::Record(h) => Some(h),
+            _ => None,
+        }
+    }
+
     pub fn is_error(&self) -> bool {
         self.severity == Severity::Error
     }
@@ -379,6 +592,8 @@ impl fmt::Display for Diagnostic {
         match &self.subject {
             Subject::Span(s) => write!(f, " (at {s})")?,
             Subject::Unit(u) => write!(f, " (at {u})")?,
+            // A uid's short width, under its own prefix: a record hash is not a uid.
+            Subject::Record(h) => write!(f, " (at rec:{})", crate::ids::base32(h, 26))?,
             Subject::Store => {}
         }
         if let Some(s) = &self.suggestion {
@@ -567,9 +782,193 @@ mod tests {
     /// threshold that does not exist. 52 as of 1.3.0: `SMY-W309`, a caller's source replacing
     /// the one a unit gave — numbered past `W306`, which stays retired rather than reused. 53 as
     /// of 1.4.0: `SMY-W056`, a withdrawal naming an edge 1.4 does not let anyone withdraw.
+    /// 61 as of 1.9.0, the last of them `SMY-W435`: a repair that worked used to erase what it
+    /// repaired. 62 with `SMY-W433`: an input carrying a prompt marker is told about rather than
+    /// trusted to be innocent. 63 with `SMY-W025`: a granularity bound nobody in this build can
+    /// evaluate. 64 as of 1.10.0: `SMY-W436`, a unit written in a different script from its
+    /// passage — numbered at the end of the ingest run rather than in the `W30x` block it
+    /// belongs to semantically, because the free number there is `W306` and that one is
+    /// retired. 69, also 1.10.0, with the first five of RFC SMYSL-2.4's library codes —
+    /// `E401`, `E402`, `E440`, `E445`, `E446` — in a ninth group. Five and not the twelve that
+    /// RFC allocates: these are the ones `smysl-text` can raise as it stands, and the rest
+    /// arrive with the code that raises them. 70, still 1.10.0, with `SMY-E452` — the sixth,
+    /// registered in TX-P1 step 4 because that is the step where `Store::append` can raise it:
+    /// a log is offered a record 15 or 18 and refuses it (OQ-39). 72 with `SMY-E403` and
+    /// `SMY-W418`, which TX-P1 step 5's `Library` check pass raises. 73 with `SMY-E450` in
+    /// TX-P2 step 3, where `text append` exists to refuse: an append to a pseudonymised
+    /// expression with no pseudonym key. Step 2 built `--pseudonymise` and left the code
+    /// unregistered, which is this rule applied rather than an omission. 74 with `SMY-E410` in
+    /// TX-P3 step 1, where `@date` and `source { published: … }` give the surface parser two
+    /// places to meet a malformed EDTF value and refuse it.
+    ///
+    /// 76 with `SMY-W412` and `SMY-W413` in TX-P3 step 2, where the time engine computes an
+    /// interval and can therefore say that a live dating did not move a bound, or that a set of
+    /// records cannot all be true. They are also the two `DetectionKind` values A-8.2 adds, and
+    /// `DetectionKind::code()` is total — every kind names the diagnostic it is reported as — so
+    /// the kinds and the codes had to arrive together, which is why step 1 shipped neither.
+    ///
+    /// 78 with `SMY-W411` and `SMY-W449` in TX-P3 step 3, where the `Time` check pass exists
+    /// to raise them: an `observed` outside the `published` interval it stands beside, and an
+    /// EDTF value outside the millisecond instant range, which is indexed as an open bound
+    /// rather than clamped. Both are findings about a *store*, which is why they waited for a
+    /// pass — the engine computes intervals and pushes no diagnostics at all.
+    ///
+    /// 79 with `SMY-W451` in TX-P4 step 4, where `text align` exists: an alignment scheme that
+    /// does not cover a locator leaves the pair unaligned, and the count of those is what says
+    /// whether a map covers a corpus. Registered now rather than in step 1 for the usual reason
+    /// — until there was a command that aligned two expressions, nothing in this build could
+    /// find an uncovered locator.
+    ///
+    /// 81 with `SMY-E404` and `SMY-W405` in TX-P5 step 1, where FC-3 gives a unit a `span` and a
+    /// `manifest` and the library pass can therefore compare them against the part: a span past
+    /// the part's length, and a locator naming a different place than the span beside it. They
+    /// were allocated in TX-P1 step 5 and deliberately left out of the registry, because the
+    /// field they read did not exist — this is that promise being kept rather than a late
+    /// addition.
+    ///
+    /// 84 with `SMY-W419`, `SMY-W441` and `SMY-W447` in TX-P5 step 3, where windowing a reading
+    /// and attaching a span to a quote exist: a quote that occurs more than once in the node the
+    /// model named, a quote the window does not support after repair, and a structure node too
+    /// large for one window. All three are about a *place* in a text, which is why none of them
+    /// could be raised before there was code that chose one — `W419` has been allocated since
+    /// draft 3 and had nothing behind it until now.
+    ///
+    /// 87 with `SMY-E442`, `SMY-W443` and `SMY-W444` in TX-P5 step 4, where a text ingest has a
+    /// ledger digest to scope a reference against, a second fence to neutralise a marker inside,
+    /// and an answer whose tool-owned fields are dropped rather than trusted. All three need a
+    /// prompt that sends a digest and a converter that reads one, which is what step 4 builds.
+    ///
+    /// 88 with `SMY-W453` in TX-P5's pivot policy, the first of the range's seven free numbers
+    /// to be spent: `pivot:<lang>` asks a model for one line per unit, and a line that does not
+    /// come back is a unit with no translation. Reported rather than inferred from a count,
+    /// because the alternative — a staged unit that silently stayed in the source language — is
+    /// the policy failure F-6 exists to report. A translation that comes back in the *wrong*
+    /// language reuses `SMY-W436` instead of taking a number of its own: it is the same defect
+    /// that code already names, measured against the language asked for rather than the
+    /// passage's.
+    ///
+    /// 91 with `SMY-E427`, `SMY-E460` and `SMY-W510` in TX-P6 step 1, where a lexer, a parser
+    /// and a canonical printer for `sq/1` exist (RFC SMYSL-2.9). They are the three a parse can
+    /// produce: a `using` clause naming a version this build does not support, a syntax error or
+    /// an unbound `$parameter`, and a string literal that is not in NFC. The last is a *warning*
+    /// and not an error on purpose — SMYSL-2.9's QG-5 keeps a literal's bytes exactly as written,
+    /// because a quote must match a corpus byte for byte, and the hazard that creates is a
+    /// non-NFC quote matching nothing at all while looking correct on screen. Silence there is
+    /// the worst available outcome, so the parse succeeds and says so.
+    ///
+    /// 95 with `SMY-E461`, `SMY-E462`, `SMY-E466` and `SMY-E511` in TX-P6 step 2, where the
+    /// planner exists. The first three were allocated by RFC SMYSL-2.5 and withheld until
+    /// something could raise them: a stage this build does not lower, a traversal naming a
+    /// relation kind nothing in scope declares, and a `using` pin for a declaration the store
+    /// does not hold. `E511` is new, and it is in SMYSL-2.9's range rather than SMYSL-2.5's
+    /// because that range is full and because the refusal is about a name the *grammar*
+    /// accepted — `from store:ledger` parses, and the span is a grammar span.
+    ///
+    /// 98 with `SMY-W464` in TX-P6 step 5, where the supersession pass exists. Allocated by
+    /// SMYSL-2.5 and withheld on the same rule as the rest: a fork is two units superseding
+    /// one target with nothing ordering them, and until a pass chose heads there was nothing
+    /// to decline to choose.
+    ///
+    /// 99 with `SMY-W415` in TX-P6 step 6, where time stages exist. It is the oldest withheld
+    /// code in the registry — draft 3 allocated it in the `E401`–`W431` block and SMYSL-2.6
+    /// §4's A3 has cited it since — and it was withheld for the usual reason and one more. The
+    /// usual one: until a query could say `said during 1769`, nothing excluded a unit for
+    /// having no time. The extra one is that the exclusion is **not** a filter failing. A unit
+    /// with no date on the axis asked did not fail the test; it could not take it, and A-2.4
+    /// rule 5 says an undated interval is *not early and not late* rather than outside every
+    /// range. So the count is reported beside the answer, like `W463`, and the two are the only
+    /// warnings this crate's query path raises about a run that succeeded.
+    ///
+    /// 97 with `SMY-W463` and `SMY-E512` in TX-P6 step 4, where traversals and filters exist.
+    /// `W463` was allocated by SMYSL-2.5 and withheld on the same rule as `E461`: a traversal
+    /// that stopped at its depth with the graph still going is worth saying, and nothing could
+    /// say it until something walked a graph with a depth.
+    ///
+    /// `SMY-E512` is new: an operator that does not apply
+    /// to the type of the field it names, such as `>` on `kind`. Also SMYSL-2.9's range, for
+    /// SMYSL-2.5's reason and one of its own — the grammar admits `<` after any field, because
+    /// a grammar cannot know a field's type, so this refusal belongs to the document that
+    /// defines what the grammar accepted. It is **not** `E421`/`E422`: those are about a field
+    /// nothing declares and a key retired without a mapping, and this field is declared and
+    /// readable; what is wrong is the question asked of it. That leaves `W513`–`W519`
+    /// unallocated.
+    ///
+    /// `SMY-E421` and `SMY-E422` stay out for the same reason the four above came in. Field
+    /// resolution needs declared field types, and a declaration's `payload_shape` is opaque
+    /// CBOR until FC-9 decoding lands in TX-P12 step 1; the planner records that the check did
+    /// not run rather than pretending it passed. (`E422` came with the lens engine, TX-P12 step
+    /// 2, which raises it for a backward path; `E421` came with field resolution, step 3.)
+    ///
+    /// That leaves `454`–`459` of RFC SMYSL-2.4's `E401`–`W459` range unallocated.
+    ///
+    /// Step 5's plan named six codes and two of them are **not** here. `SMY-E404` is a span
+    /// past a part's length and `SMY-W405` is a locator disagreeing with a span; both read
+    /// `SourceRef.span`, which SMYSL-2.4 §4.3.1 gives to TX-P5. Registering them with the pass
+    /// that will one day raise them would put two codes in the registry that nothing in this
+    /// build can produce, which is the thing this comment exists to prevent.
+    /// 103 with `SMY-W417`, `SMY-E468`, `SMY-E477` and `SMY-W478` in TX-P8 step 3, where `ask`
+    /// exists. Three are SMYSL-2.5's and one is draft 3's, and each was withheld until something
+    /// could raise it: a subject that names two entities, a question no intent rule matches, a
+    /// template set this build does not carry, and a model answer grounding outside the
+    /// dossier it was given. `W417` sits in the query block although its number is in the
+    /// library range, because the ambiguity is the dossier's: the library resolves a name, and
+    /// only a question needs that name to be one thing.
+    ///
+    /// 105 with `SMY-W483` and `SMY-E489` in TX-P8 M1 (SMYSL-2.6), in an eleventh group,
+    /// `Measure`: the two of the RFC's ten that a recipe, a payload writer and a unit writer can
+    /// raise before any measure exists. The other seven are refusals a measure makes, and wait
+    /// for the measures.
+    ///
+    /// 108 with `SMY-W408`, `SMY-E480` and `SMY-W485` in TX-P8 M2, where T1 and T4 read a text
+    /// and can refuse a lossy one, admit it under a recipe that says so, or find it too short.
+    ///
+    /// 109 with `SMY-E484` in TX-P8 M3, where T6 refuses a pair of texts longer than the
+    /// compressor's window.
+    ///
+    /// 111 with `SMY-E481` and `SMY-E482` in TX-P9 N1, where A2 and A3 count proposition
+    /// classes and A3 orders a scope by effective time.
+    ///
+    /// 112 with `SMY-E407` in TX-P9 N2, where A8 budgets a scope with `smysl/utf8-div4` and
+    /// refuses one whose units are drawn from text in more than one language.
+    ///
+    /// 114 with `SMY-W487` and `SMY-W488` in TX-P9 N6, where a score skips a reader's unit
+    /// that answers no item and leaves out an item that drifted after its key was made.
+    ///
+    /// 118 with `SMY-W425`, `SMY-W490`, `SMY-W495` and `SMY-W497` in TX-P11 step 2, raised by
+    /// `smysl-lib`'s exporter, in a twelfth group.
+    ///
+    /// 119 with `SMY-E494` in TX-P11 step 3, raised by `verify` on a file its index disowns.
+    ///
+    /// 122 with `SMY-E493`, `SMY-W496` and `SMY-W423` in TX-P11 step 4, raised by import.
+    /// 123 with `SMY-W414` in TX-P11 step 6, where import drops a redacted part's text and
+    /// readings at the door (rule Z, SMYSL-2.3 A-12.3).
+    /// 124 with `SMY-W498` in TX-P11 step 7, raised by `--as-of`.
+    /// 126 with `SMY-W428` and `SMY-E424` in TX-P11 step 10, raised by the surface format.
+    ///
+    /// 133 with `SMY-W430`, `SMY-W429` and `SMY-W469` (TX-P12 step 1, FC-9 decoding) and
+    /// `SMY-E470`, `SMY-E471`, `SMY-E422` and `SMY-W420` (step 2, the lens engine), in a
+    /// thirteenth group, `Schema`.
+    ///
+    /// 135 with `SMY-W491` and `SMY-E492` in TX-P12 step 13 (SMYSL-2.7 §3.11), raised by
+    /// `lib export --target-revision`, in the export group with the rest of SMYSL-2.7's.
+    ///
+    /// 136 with `SMY-E421` in TX-P12 step 3, raised by field resolution in `sq`; 137 with
+    /// `SMY-E426` in step 5, raised by `schema check` (rule N); 139 with `SMY-W472` and
+    /// `SMY-E473` in step 6, raised by `migrate`; 140 with `SMY-W475` in step 8, raised by
+    /// `pointer(…)` over a snapshot with no version marker.
+    ///
+    /// 143 with `SMY-W501`, `SMY-E503` and `SMY-W504` in TX-P13b step 1, raised by the redb
+    /// unit store, in a fourteenth group, `Store`; 144 with `SMY-W500` in TX-P13c step 1,
+    /// raised by a union of shards for a reference that waits on one not loaded; 145 with
+    /// `SMY-E505` in TX-P13d, a primary shard and its export disagreeing.
+    ///
+    /// 146 with `SMY-W476` in TX-P10 step 3, raised by S1's vector cache for a sidecar written
+    /// under another model hash; 148 with `SMY-E416` and `SMY-W467` in step 4, raised by
+    /// `--seed-check` on a model-dependent plan and by a rerun under another model; 149 with
+    /// `SMY-E474` in step 5, raised by the natural-language front end.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 57);
+        assert_eq!(Code::ALL.len(), 149);
     }
 
     #[test]
@@ -580,7 +979,7 @@ mod tests {
                 "group {g} has no codes"
             );
         }
-        assert_eq!(Group::ALL.len(), 8);
+        assert_eq!(Group::ALL.len(), 14);
     }
 
     #[test]
@@ -594,6 +993,21 @@ mod tests {
     fn display_is_the_wire_form() {
         assert_eq!(Code::E030.to_string(), "SMY-E030");
         assert_eq!(Code::W304.to_string(), "SMY-W304");
+    }
+
+    /// A record subject is a record's hash, read back by `record()` and printed at a uid's
+    /// short width under `rec:`, so it is never mistaken for a uid.
+    #[test]
+    fn a_diagnostic_can_name_a_record() {
+        let h = [0xa5; 32];
+        let d = Diagnostic::on_record(Code::E060, h);
+        assert_eq!(d.subject, Subject::Record(h));
+        assert_eq!(d.record(), Some(&h));
+        assert_eq!((d.uid(), d.span()), (None, None));
+        let shown = d.to_string();
+        let at = shown.rsplit_once(" (at ").unwrap().1;
+        assert_eq!(at, format!("rec:{})", crate::ids::base32(&h, 26)));
+        assert_eq!(at.len(), "rec:".len() + 26 + 1);
     }
 
     #[test]

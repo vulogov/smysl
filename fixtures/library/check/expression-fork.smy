@@ -1,0 +1,7 @@
+@doc smysl/0.1 { id: v/library-fork }
+
+# Two people catalogued the same book without having met, and neither manifest
+# names the other in `supersedes`. Both are heads.
+@manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain, carry: text, part-policy: "smysl/parts/1 level=chapter min=65536 max=4194304", title: "The Holy Bible, Authorised Version" }
+
+@manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain, carry: text, part-policy: "smysl/parts/1 level=chapter min=65536 max=4194304", title: "King James Version (1769 Blayney)" }

@@ -3,7 +3,8 @@ name        = "smysl-tui"
 description = "smysl terminal UI: graph browser, pack simulator, staging"
 version.workspace      = true
 edition.workspace      = true
-rust-version.workspace = true
+# Above the workspace base, via `ratatui` -> `instability` 0.3.12 and `darling` 0.23.
+rust-version           = "1.88"
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true

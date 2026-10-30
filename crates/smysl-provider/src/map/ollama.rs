@@ -74,6 +74,13 @@ impl Ollama {
             "options": {
                 "temperature": req.temperature,
                 "num_predict": req.max_output as i64,
+                // The window the caller planned against. Ollama's default `num_ctx` is its
+                // own, not the configured one, so a chunker that sized to 32768 could have its
+                // prompt silently truncated at 2048 and the model would answer about the part
+                // it saw. Configured rather than probed: `probe` reports the architecture's
+                // window, which can be far larger than the machine will hold, and sending that
+                // unasked would be the same mistake in the other direction.
+                "num_ctx": self.cfg.context_window as i64,
             },
         });
 
@@ -206,6 +213,7 @@ impl Ollama {
             .unwrap_or_default();
 
         Ok(Capabilities {
+            model: self.cfg.model.clone(),
             context_window,
             max_output: self.cfg.max_output,
             // Ollama takes a schema in `format` regardless of what the model advertises,
@@ -244,6 +252,7 @@ impl Provider for Ollama {
 
     fn caps(&self) -> Capabilities {
         Capabilities {
+            model: self.cfg.model.clone(),
             context_window: self.cfg.context_window,
             max_output: self.cfg.max_output,
             structured: self.cfg.structured,
@@ -441,6 +450,51 @@ mod tests {
         assert_eq!(b["messages"][1]["content"], "hello");
         assert_eq!(b["options"]["num_predict"], 1024);
         assert_eq!(b["options"]["temperature"], 0.0);
+        // H-10. 8192 is `cfg()`'s configured window, which is also the one the chunker sized
+        // against; Ollama's own default is 2048, so the absence of this key meant a long
+        // prompt could be truncated to a quarter of the plan and answered as if whole.
+        assert_eq!(b["options"]["num_ctx"], 8192);
+    }
+
+    /// The window sent is the configured one, never a probe's.
+    ///
+    /// `parse_show` reports the architecture's context length, which on a 128k model is two
+    /// orders of magnitude past what a laptop will allocate. Asking the server for it unasked
+    /// would fail the request — or swap the machine — in the name of honesty about a number
+    /// nobody set. `caps()` is where a probe's measurement lands; `body` reads `cfg`.
+    #[test]
+    fn the_window_sent_is_the_configured_one() {
+        let probed = provider()
+            .parse_show(r#"{"model_info":{"llama.context_length":131072}}"#)
+            .unwrap();
+        assert_eq!(
+            probed.context_window, 131072,
+            "the probe reports what it found"
+        );
+
+        let b = provider()
+            .body(&Request::new("llama3.2", "hi"), false)
+            .unwrap();
+        assert_eq!(
+            b["options"]["num_ctx"], 8192,
+            "the request carries the configured window, not the probed one"
+        );
+    }
+
+    /// H-9: `caps()` names the model a request will get when it names none.
+    ///
+    /// The fallback at the top of `body` has always existed, so the name was knowable only
+    /// inside the mapper and `Ingestor` recorded an empty string in the recipe for it.
+    #[test]
+    fn caps_names_the_model_the_fallback_will_use() {
+        assert_eq!(provider().caps().model, "llama3.2");
+        let mut req = Request::new("", "hi");
+        req.model = String::new();
+        assert_eq!(
+            provider().body(&req, false).unwrap()["model"],
+            provider().caps().model,
+            "what `caps` advertises must be what the fallback sends"
+        );
     }
 
     #[test]

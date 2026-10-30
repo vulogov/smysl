@@ -1,0 +1,50 @@
+[package]
+name         = "smysl-embed-candle"
+description  = "Transformer embeddings for a smysl store (S1): multilingual encoders on candle, from a local model directory."
+version.workspace      = true
+edition.workspace      = true
+# Not the workspace base: `candle-core` 0.9.2 pulls `zip` 7, which declares 1.88 — the facade's
+# floor already, so the feature that reaches this crate raises nothing.
+rust-version           = "1.88"
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+# What TX-P10 step 1 verified (SMYSL-2.5 §3.14), before any code was written against it.
+#
+# **candle 0.9, not 0.10 or 0.11.** From 0.10.0, `candle-core` depends on `tokenizers` 0.22 with
+# `features = ["onig"]` on every target but wasm, unconditionally: no feature of candle turns it
+# off, and `onig` is Oniguruma, a C library compiled through `onig_sys` and `cc`. 0.9.2 has no
+# `tokenizers` dependency at all, and the tree below — 161 crates — has no `-sys` crate and no
+# `cc`. `xtask check-native` is what keeps that true: a caret on 0.9 cannot reach 0.10, and if
+# a 0.9 patch release ever brought C in, the check fails rather than this comment going stale.
+#
+# **XLM-R is in it.** `candle_transformers::models::xlm_roberta` has `XLMRobertaModel`, which is
+# the family of `multilingual-e5-small`/`-base` and of `bge-m3`'s dense encoder. Loading it from
+# `config.json`, `tokenizer.json` and `model.safetensors` was built at 1.88 in a scratch crate;
+# that a real model's weights load is step 3's test, not this one's.
+#
+# **`tokenizers` 0.21, shared with S0.** `model2vec-rs` takes `^0.21` in 0.2 and 0.3 alike, so
+# the two embedders use one tokenizer stack. `fancy-regex` rather than the default `onig`, for
+# the reason `smysl-embed`'s manifest gives; without `esaxx_fast`, so `esaxx-rs` is in the tree
+# without its C++.
+#
+# No accelerator features (`metal`, `cuda`, `mkl`, `accelerate`): each is native code by
+# definition, and a CPU encoder is what the purity labels and the cache are written for.
+[dependencies]
+smysl-core     = { workspace = true }
+smysl-graph    = { workspace = true }
+smysl-retrieve = { workspace = true }
+# Hashing a model's files for the vector cache's key. The workspace's `pure` build of it.
+blake3         = { workspace = true }
+# A model's `config.json`. In the tree already: `tokenizers` and `candle-transformers` both
+# take it, so naming it adds no crate.
+serde_json     = { workspace = true }
+
+candle-core         = { version = "0.9", default-features = false }
+candle-nn           = { version = "0.9", default-features = false }
+candle-transformers = { version = "0.9", default-features = false }
+tokenizers          = { version = "0.21", default-features = false, features = ["fancy-regex"] }

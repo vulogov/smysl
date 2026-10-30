@@ -1,0 +1,3 @@
+This passage uses bidirectional overrides, so what a reviewer sees is not what is stored.
+The rollback ‮was not‬ applied to the shard.
+A span names bytes, and the bytes are these ones whichever way a terminal draws them.

@@ -1,0 +1,42 @@
+# GE-T10's third set, the front before any declared fix (intent table and entity port as of
+# commit 45a3161), written by `cargo test -p smysl-query --test ge_t10 ge_t10_third -- --nocapture`.
+GE-T10, third set
+the front, per language
+  lang                intent   subject
+  de                  9/16      8/16
+  en                 14/16     14/16
+  es                 10/16     10/16
+  fr                 11/16     11/16
+  ru                 13/16      7/16
+  all                57/80     50/80
+  every question the front lost:
+    li-define2     es  SMY-E468: ¿Quién fue James Lind?
+    li-define2     ru  SMY-E468: Кем был Джеймс Линд?
+    ph-define2     en  SMY-E468: What exactly was phlogiston?
+    ph-define2     de  SMY-E468: Was genau war Phlogiston?
+    ph-define2     es  SMY-E468: ¿Qué era exactamente el flogisto?
+    ph-define2     fr  SMY-E468: Qu'était exactement le phlogistique ?
+    sn-verify3     fr  SMY-E468: Est-il vrai qu'on a retiré la poignée de la pompe sur l'avis de John Snow ?
+    mi-verify3     de  SMY-E468: Gibt es Belege dafür, dass Miasma Krankheiten verbreitet?
+    mi-verify3     es  SMY-E468: ¿Hay pruebas de que el miasma propaga enfermedades?
+    mi-verify3     fr  SMY-E468: Est-il vrai qu'un miasme propage les maladies ?
+    mi-verify3     ru  SMY-E468: Есть ли доказательства, что миазмы распространяют болезни?
+    je-attribute2  de  SMY-E468: Wer sagte, Jenners Impfstoff sei gefährlich?
+    je-attribute2  ru  no subject: Кто сказал, что вакцина Дженнера опасна?
+    li-attribute2  de  SMY-E468: Wer behauptet, James Lind habe das Heilmittel entdeckt?
+    li-attribute2  ru  SMY-E468: Кто утверждает, что Джеймс Линд открыл лекарство?
+    ph-trace2      de  no subject: Woher stammt die Idee des Phlogistons?
+    ph-trace2      ru  no subject: Откуда взялась идея флогистона?
+    sc-trace2      de  SMY-E468: Geschichte des Skorbuts
+    sc-trace2      es  SMY-E468: Historia del escorbuto
+    sc-trace2      fr  SMY-E468: Histoire du scorbut
+    sc-trace2      ru  no subject: История цинги
+    je-locate2     en  SMY-E468: Where do the texts mention Jenner?
+    je-locate2     de  SMY-E468: Wo werden Jenners Versuche erwähnt?
+    je-locate2     es  SMY-E468: ¿Dónde se menciona a Jenner?
+    ls-depend2     de  SMY-E468: Was hängt vom Werk Joseph Listers ab?
+    ls-depend2     es  SMY-E468: ¿Qué depende del trabajo de Joseph Lister?
+    ls-depend2     fr  SMY-E468: Qu'est-ce qui dépend du travail de Joseph Lister ?
+    ls-depend2     ru  no subject: Что зависит от работ Джозефа Листера?
+    sp-depend2     ru  no subject: Что следует из прививки от оспы?
+    ch-compare2    ru  no subject: Сравни холеру и цингу

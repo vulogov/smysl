@@ -4,25 +4,37 @@ exclude  = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
-version      = "1.9.0"
+version      = "1.11.0"
 edition      = "2021"
-rust-version = "1.79"
+# The floor the nine pure-path crates actually build at, measured rather than declared:
+# `blake3` pulls `constant_time_eq` 0.4.2, whose manifest is edition 2024, so a Cargo older
+# than this cannot parse it. `scripts/verify-msrv.py` holds the whole story — this number was
+# `1.79` for eleven releases, was false in every selection, and nothing tested it.
+# The crates needing more declare it themselves: `smysl-provider` and `smysl-ingest` 1.86,
+# `smysl-tui`, `smysl-embed`, `smysl-embed-candle` and this facade 1.88. Cargo has no
+# per-feature MSRV, so each is its maximum.
+rust-version = "1.85"
 license      = "MPL-2.0"
 authors      = ["Vladimir Ulogov"]
 repository   = "https://github.com/vulogov/smysl"
 
 [workspace.dependencies]
-smysl-core     = { path = "crates/smysl-core",     version = "1.9.0" }
-smysl-graph    = { path = "crates/smysl-graph",    version = "1.9.0" }
-smysl-check    = { path = "crates/smysl-check",    version = "1.9.0" }
-smysl-pack     = { path = "crates/smysl-pack",     version = "1.9.0" }
-smysl-thread   = { path = "crates/smysl-thread",   version = "1.9.0" }
-smysl-render   = { path = "crates/smysl-render",   version = "1.9.0" }
-smysl-retrieve = { path = "crates/smysl-retrieve", version = "1.9.0" }
-smysl-embed    = { path = "crates/smysl-embed",    version = "1.9.0" }
-smysl-provider = { path = "crates/smysl-provider", version = "1.9.0" }
-smysl-ingest   = { path = "crates/smysl-ingest",   version = "1.9.0", default-features = false }
-smysl-tui      = { path = "crates/smysl-tui",      version = "1.9.0" }
+smysl-core     = { path = "crates/smysl-core",     version = "1.11.0" }
+smysl-graph    = { path = "crates/smysl-graph",    version = "1.11.0" }
+smysl-check    = { path = "crates/smysl-check",    version = "1.11.0" }
+smysl-pack     = { path = "crates/smysl-pack",     version = "1.11.0" }
+smysl-thread   = { path = "crates/smysl-thread",   version = "1.11.0" }
+smysl-render   = { path = "crates/smysl-render",   version = "1.11.0" }
+smysl-retrieve = { path = "crates/smysl-retrieve", version = "1.11.0" }
+smysl-embed    = { path = "crates/smysl-embed",    version = "1.11.0" }
+smysl-embed-candle = { path = "crates/smysl-embed-candle", version = "1.11.0" }
+smysl-provider = { path = "crates/smysl-provider", version = "1.11.0" }
+smysl-ingest   = { path = "crates/smysl-ingest",   version = "1.11.0", default-features = false }
+smysl-tui      = { path = "crates/smysl-tui",      version = "1.11.0" }
+smysl-text     = { path = "crates/smysl-text",     version = "1.11.0" }
+smysl-query    = { path = "crates/smysl-query",    version = "1.11.0" }
+smysl-measure  = { path = "crates/smysl-measure",  version = "1.11.0" }
+smysl-lib      = { path = "crates/smysl-lib",      version = "1.11.0" }
 
 # `pure` keeps the C SIMD backend out of the build: zero C in the core path (§13).
 blake3                = { version = "1", default-features = false, features = ["std", "pure"] }
@@ -35,6 +47,80 @@ tokio                 = { version = "1", features = ["rt", "sync", "macros"] }
 ureq                  = { version = "2", default-features = false }
 serde                 = { version = "1", features = ["derive"] }
 serde_json            = "1"
+# The pseudonym key's thirty-two bytes. Not pinned with `=`: nothing derived from it is an
+# identity anybody re-derives — the key is a secret, and a corpus is reproducible from the key
+# and not from the generator that made it. Declares 1.63, below this workspace's base.
+getrandom             = "0.3"
+
+# Reader dependencies, pinned exactly. SMYSL-2.4 §7 requires it: a reader's output *is* a
+# corpus's identity, so a parser that changed its mind between patch releases would change
+# every tid taken with it, and GE-T1 would fail on a dependency bump nobody made on purpose.
+#
+# `=0.41.0` and not 0.42: 0.42 declares rustc 1.86, and `smysl-text` is in the pure tier at
+# 1.85. Cargo picks 0.41 silently to keep the floor, which is the kind of choice that should be
+# written down rather than inferred from a lock file — raising the pure tier for an XML parser
+# is a decision about every pure crate, and it has not been made.
+quick-xml             = { version = "=0.41.0", default-features = false }
+# The segmenter's boundaries reach a reading's segment table, and that table's hash is a
+# manifest's `structure` — so a UAX #29 table that changed between patch releases would
+# change identities nobody re-derived. Pinned for the same reason the parsers are. 1.13.3
+# declares 1.85, which is this workspace's base: the pure tier does not move for it.
+unicode-segmentation  = { version = "=1.13.3" }
+# The analyzer chains (SMYSL-2.4 §3.7). Pinned for a different reason than the parsers: terms
+# are not an identity, but an index built with one stemmer and queried with another silently
+# answers the wrong question, and `Chain::id` is what a store records to make that detectable.
+# A pin is what makes the id mean one algorithm. Both are MIT-or-better and declare no floor.
+caseless              = { version = "=0.2.2" }
+rust-stemmers         = { version = "=1.2.0" }
+# Language identification, behind `smysl-text/detect` and nothing's default. Pinned exactly
+# because SMYSL-2.4 §7 names the risk: a `mul` manifest's segment languages go into a reading,
+# and a reading's rdid is an identity — so a detector that changed its mind between releases
+# would change identities nobody re-derived. Five language features, not the 75 defaults.
+lingua = { version = "=1.8.0", default-features = false, features = ["english", "russian", "spanish", "french", "german"] }
+pulldown-cmark        = { version = "=0.13.4", default-features = false }
+# A Slack export is a zip, so `reader-slack` reads one (SMYSL-2.4 §3.2 called the choice
+# unverified; TX-P2 step 2 verified it). `=4.6.1` and not 9.0.0, which is the current release:
+# 9 declares rustc 1.88, and `smysl-text` is in the pure tier at 1.85. 4.6.1 declares 1.82, and
+# the highest floor anywhere in its tree is `hashbrown` 0.17's **1.85** — exactly the base,
+# which is why the pin is exact in both crates rather than a caret. Eleven crates, no C, and
+# none of `NEVER`.
+#
+# It was `=4.3.0` until 2026-10-16, when `make semver` failed: every 4.x release up to and
+# including 4.6.0 has since been yanked, and an exact pin on a yanked version resolves for a
+# build that already has a lockfile but not for `cargo update`, which `cargo-semver-checks`
+# runs for the facade. 4.6.1 is the one survivor of the line and declares the same 1.82, so
+# the floor argument above is unchanged.
+#
+# `default-features = false` drops eight codecs. A Slack archive is deflate or stored, and
+# `aes-crypto` would have put `getrandom` into the pure tier's default-feature neighbourhood
+# for an encryption nobody's export uses.
+zip                   = { version = "=4.6.1", default-features = false, features = ["deflate-flate2"] }
+# The backend `zip`'s own `deflate-flate2` does not name. Measured, not assumed: that feature
+# is `dep:flate2` alone, and `flate2` with no backend feature **does not compile** — fifteen
+# errors about a missing `MZ_DEFAULT_WINDOW_BITS`. So the choice of inflater is ours to make,
+# and `rust_backend` is `miniz_oxide`: pure Rust, no `cc` in the tree, which is what §13's "zero
+# C in the core path" asks for and what `make crate-features` checks.
+flate2                = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
+
+# The substrate index's backing store (SMYSL-2.4 §3.8, `substrate-redb`; SMYSL-2.8 §3.5 shares
+# this pin with `store-redb`). `=2.6.4` and **not** 4.3.0, which is the current release, for the
+# reason `quick-xml` is pinned below its latest and `zip` far below its: 4.3 declares rustc 1.90
+# and 3.0 and 4.0 declare 1.89, while `smysl-text` is in the pure tier at 1.85. 2.6.4 declares
+# **1.85** — exactly this workspace's base — so the feature moves no floor for any build of the
+# substrate. SMYSL-2.4 §3.8 recorded the redb backing as owed on the strength of 4.3's 1.90
+# alone; the version table is in that section now, because "redb needs 1.90" is true of one
+# release and of nothing else.
+#
+# Pinned exactly rather than with a caret, and for a different reason than the readers: a
+# reader's output is a corpus's identity, while an index is derived and disposable. What the pin
+# buys here is that the *file format* behind `index.redb` changes only when somebody decides it
+# should — redb's format moved across both of its majors, and a silent minor bump that could not
+# open an existing file would turn a cache into a refusal.
+#
+# `default-features = false` drops nothing this needs: the default set is empty, and `logging`,
+# `cache_metrics` and `python` are all opt-in. Its only normal dependency on Linux and macOS is
+# `libc` — no `cc`, no C toolchain, which is what §13 asks for and `make crate-features` checks.
+redb                  = { version = "=2.6.4", default-features = false }
 
 # ---------------------------------------------------------------------------
 # Facade crate: [lib] + [[bin]] (RFC SMYSL-1 §12.1)
@@ -44,7 +130,10 @@ name         = "smysl"
 description  = "An AI<->AI<->Human data interchange format, library, and CLI"
 version.workspace      = true
 edition.workspace      = true
-rust-version.workspace = true
+# Not the workspace base: with `tui` the facade pulls `ratatui` and therefore `instability`.
+# A package's `rust-version` is one number for every feature combination, so it has to be the
+# maximum — 1.88 here, where the default features alone would be 1.86.
+rust-version           = "1.88"
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
@@ -86,11 +175,62 @@ required-features = ["cli"]
 # every default build is a cost an embedder who only calls the library never opted into.
 # `--features tui` for anyone who wants the browser; free for everyone else.
 default   = ["cli", "local", "render-typst"]
-cli       = ["dep:clap"]
+# `text` is the library layer of RFC SMYSL-2.4: a catalog, an object store, and the readers.
+# It is **not** in the library's default tree and arrives only through `cli`, which is what
+# keeps the claim that `--no-default-features` carries no serde stack true (§4.5). `cli` turns
+# on all six TX-P1 readers, because a `text add` with no reader built is a command that can
+# only refuse.
+cli       = [
+    "dep:clap",
+    "text",
+    "smysl-text/reader-txt",
+    "smysl-text/reader-md",
+    "smysl-text/reader-usfm",
+    "smysl-text/reader-osis",
+    "smysl-text/reader-zefania",
+    "smysl-text/reader-json",
+    # The three chat readers. In `cli` for the reason the others are: a `text add --reader
+    # telegram/1` that can only refuse is not a command.
+    "smysl-text/reader-telegram",
+    "smysl-text/reader-slack",
+    "smysl-text/reader-whatsapp",
+    # Stemming. Free here and nowhere else: `reader-json` has already put `serde` in this
+    # tree, so the one thing `smysl-text/stem` costs a CLI build is the stemmer itself.
+    "smysl-text/stem",
+]
+# `dep:getrandom` is here and not in `smysl-text`, and the reason is the whole shape of
+# pseudonymisation (SMYSL-2.4 §3.2): the key under `<library>/secrets/pseudonym.key` is
+# thirty-two random bytes, and the pure tier has no randomness source in its default tree — that
+# is the claim TX-P2 step 1 put in the purity gate when `lingua` brought `getrandom` with it. So
+# the library layer knows where the key lives and what shape it has, and the facade mints one.
+# Free in this tree: `ureq`'s TLS stack already links it, so the feature adds no crate at all.
+# `smysl-ingest?/text` is weak on purpose: text ingest's windowing and span attachment are
+# `smysl-ingest`'s and need this feature's library layer, but a build with `text` and without
+# `ingest` should not acquire an ingest crate to get a reader.
+text      = ["dep:smysl-text", "dep:getrandom", "dep:smysl-measure", "dep:smysl-lib", "smysl-check/text", "smysl-ingest?/text"]
+# Language identification. Not in `cli` and not in `text`: it is 57 crates and 14.4 MB of
+# `lingua` models (SMYSL-2.4 §3.7, measured in TX-P2 step 1), and nothing in the CLI asks for
+# a guess yet — a manifest's language comes from the reader or from `--lang`, and a fallback
+# that only some builds had would have made a mid depend on a feature flag. Here so that a
+# library consumer who wants `smysl::text::lang` can have it by name.
+lang-detect = ["text", "smysl-text/detect"]
+# The substrate index's backing store (SMYSL-2.4 §3.8). Off by default, and the default is the
+# decision rather than an oversight: it puts `redb` in the tree of a binary that runs perfectly
+# well without it, and what it buys shows up on a corpus large enough for 1.1 KB a unit to
+# matter. A build with it writes the `postings` table to `index/substrate.redb` instead of into
+# the sidecar, and `find --library` scores it there; a build without it says so, by name, rather
+# than reporting a library whose postings are written down as having none.
+substrate-redb = ["text", "smysl-text/substrate-redb"]
+# The unit store on disk (SMYSL-2.8 §3.5): `smysl::redb::RedbStore`, a `StoreRead` whose cores
+# stay in the log until asked for. Off by default for the reason `substrate-redb` is.
+store-redb = ["smysl-graph/store-redb", "smysl-text?/store-redb"]
 tui       = ["dep:smysl-tui", "cli"]
 # Semantic retrieval. Off by default: it needs a model file the operator supplies, and a
 # build that cannot use one should not pay for `tokenizers` in its dependency tree.
 semantic  = ["dep:smysl-embed"]
+# Transformer embeddings (S1, SMYSL-2.5 §3.14): `semantic` and a multilingual encoder on candle.
+# Off by default for `semantic`'s reason, and more so: it is 161 crates and a forward pass.
+semantic-candle = ["semantic", "dep:smysl-embed-candle"]
 providers = ["dep:smysl-provider"]
 # Staging, rule T and M, recipes, CSV import and the quote check's callers — everything a
 # program that builds its own units needs, with no provider layer compiled in. `ingest` adds
@@ -119,17 +259,40 @@ smysl-core     = { workspace = true }
 smysl-graph    = { workspace = true }
 smysl-retrieve = { workspace = true }
 smysl-check    = { workspace = true }
+smysl-text     = { workspace = true, optional = true }
 smysl-pack     = { workspace = true }
+# TX-P6 step 7: `q` runs the query language. Unconditional, like `smysl-pack`, because the
+# crate is pure and a query over a plain store needs no feature; `q --library` additionally
+# needs `text`, and says so when the build lacks it.
+smysl-query    = { workspace = true }
+# TX-P8 M7: `measure` computes the text-level measures. Behind `text`, because every measure
+# this build has reads a library's text, and a measure crate in a build that cannot open a
+# library would be one whose every result is a refusal.
+smysl-measure  = { workspace = true, optional = true }
+# TX-P11 step 5: `lib` imports into a library and exports from one (SMYSL-2.7). Behind
+# `text`, because an import writes manifests into a library and the library is `smysl-text`'s.
+smysl-lib      = { workspace = true, optional = true }
 smysl-thread   = { workspace = true }
 smysl-render   = { workspace = true }
 smysl-provider = { workspace = true, optional = true }
 smysl-ingest   = { workspace = true, optional = true }
 smysl-tui      = { workspace = true, optional = true }
 smysl-embed    = { workspace = true, optional = true }
+smysl-embed-candle = { workspace = true, optional = true }
 clap           = { workspace = true, optional = true }
+getrandom      = { workspace = true, optional = true }
 
 [dev-dependencies]
 # The global-flag matrix test parses `--json` output with a real parser rather than
 # pattern-matching it: machine-readable output that a machine cannot read is the bug
 # being guarded against, so the guard has to be a parser.
 serde_json = { workspace = true }
+
+# T2 and T6 compress at brotli's quality 11, which is about 1 MB/s optimised and some tens of
+# times slower without: §5.1's rows compress millions of characters, and unoptimised they would
+# make `make test` a matter of minutes. Optimising one dependency in the dev and test profiles
+# changes no output — the encoder's arithmetic is integer and IEEE `f32`, which rounds the same
+# at every opt-level — and `fixtures/measure/compress.tsv` pins lengths that would show it if
+# it did.
+[profile.dev.package.brotli]
+opt-level = 3

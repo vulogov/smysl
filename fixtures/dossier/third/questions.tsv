@@ -1,0 +1,105 @@
+# GE-T10's third question set (SMYSL-2.5 OQ-22's owed spelling fixes, and subject morphology):
+# sixteen questions, two per intent, each asked in the five tier-1 languages, eighty rows, over
+# the committed corpus (`../gold/corpus.smy`). Only the front is scored on it — the intent the
+# table reads and the subject the entity port finds — so it has no slot gold.
+#
+# WHY A THIRD SET. Sets 1 and 2 found two kinds of loss: spellings the intent table does not
+# write, and inflected subjects no exact match can meet. A fix measured on the questions that
+# found it is measured in-sample, so both fixes are scored here, on questions written before
+# either fix was made, and the figures before the fixes were taken on it first (`baseline.txt`,
+# written by the harness before the code changed). The fixes were declared before any run of this set:
+#   1. a comma after the rule's verb is not part of the rule (`wer sagte, …`, `stimmt es, dass`)
+#   2. contractions of a rule's preposition (`vom`, `des`, `del`, `du`, `des`)
+#   3. plural verbs where the table has the singular (`wo werden … erwähnt`, `woher kommen`)
+#   4. French elision of `que` (`est-il vrai qu'un …`)
+#   5. a stemmed match for a subject no exact spelling finds (Snowball, the question's language)
+#
+# WHO WROTE THIS. The same hand that wrote the fixes, which is the limit this set cannot remove:
+# it knew which four spellings were to be fixed. The questions are written as a person would
+# ask them — inflections, possessives, other verbs and other tenses kept — and several are
+# expected to fail in ways no declared fix touches (`¿Quién fue …`, `Кем был …`, `Gibt es
+# Belege …`, a surname without its forename, a German compound). Nothing was rephrased after a
+# run. Single hand, so no agreement figure.
+#
+# Columns as `../gold/questions.tsv`: qid, intent, lang, question. The qid's prefix names the
+# subject, as in GE-T10's SUBJECTS table.
+li-define2	define	en	Who was James Lind?
+li-define2	define	de	Wer war James Lind?
+li-define2	define	es	¿Quién fue James Lind?
+li-define2	define	fr	Qui était James Lind ?
+li-define2	define	ru	Кем был Джеймс Линд?
+ph-define2	define	en	What exactly was phlogiston?
+ph-define2	define	de	Was genau war Phlogiston?
+ph-define2	define	es	¿Qué era exactamente el flogisto?
+ph-define2	define	fr	Qu'était exactement le phlogistique ?
+ph-define2	define	ru	Что такое флогистон?
+sp-explain3	explain	en	Why was smallpox so deadly?
+sp-explain3	explain	de	Warum waren die Pocken so tödlich?
+sp-explain3	explain	es	¿Por qué era tan mortal la viruela?
+sp-explain3	explain	fr	Pourquoi la variole était-elle si mortelle ?
+sp-explain3	explain	ru	Почему оспа была такой смертельной?
+se-explain3	explain	en	Why did Semmelweis insist on handwashing?
+se-explain3	explain	de	Warum bestand Semmelweis auf dem Händewaschen?
+se-explain3	explain	es	¿Por qué insistía Semmelweis en lavarse las manos?
+se-explain3	explain	fr	Pourquoi Semmelweis insistait-il sur le lavage des mains ?
+se-explain3	explain	ru	Почему Земмельвейс настаивал на мытье рук?
+sn-verify3	verify	en	Is it true that John Snow removed the Broad Street pump handle?
+sn-verify3	verify	de	Stimmt es, dass John Snow den Pumpenschwengel entfernen ließ?
+sn-verify3	verify	es	¿Es verdad que John Snow mandó quitar la manivela de la bomba?
+sn-verify3	verify	fr	Est-il vrai qu'on a retiré la poignée de la pompe sur l'avis de John Snow ?
+sn-verify3	verify	ru	Правда ли, что Джон Сноу снял ручку насоса?
+mi-verify3	verify	en	Is there evidence that miasma spreads disease?
+mi-verify3	verify	de	Gibt es Belege dafür, dass Miasma Krankheiten verbreitet?
+mi-verify3	verify	es	¿Hay pruebas de que el miasma propaga enfermedades?
+mi-verify3	verify	fr	Est-il vrai qu'un miasme propage les maladies ?
+mi-verify3	verify	ru	Есть ли доказательства, что миазмы распространяют болезни?
+je-attribute2	attribute	en	Who said that Jenner's vaccine was dangerous?
+je-attribute2	attribute	de	Wer sagte, Jenners Impfstoff sei gefährlich?
+je-attribute2	attribute	es	¿Quién dijo que la vacuna de Jenner era peligrosa?
+je-attribute2	attribute	fr	Qui a dit que le vaccin de Jenner était dangereux ?
+je-attribute2	attribute	ru	Кто сказал, что вакцина Дженнера опасна?
+li-attribute2	attribute	en	Who claims James Lind discovered the cure?
+li-attribute2	attribute	de	Wer behauptet, James Lind habe das Heilmittel entdeckt?
+li-attribute2	attribute	es	¿Quién afirma que James Lind descubrió la cura?
+li-attribute2	attribute	fr	Qui affirme que James Lind a découvert le remède ?
+li-attribute2	attribute	ru	Кто утверждает, что Джеймс Линд открыл лекарство?
+ph-trace2	trace	en	Where did the idea of phlogiston come from?
+ph-trace2	trace	de	Woher stammt die Idee des Phlogistons?
+ph-trace2	trace	es	¿De dónde viene la idea del flogisto?
+ph-trace2	trace	fr	D'où vient l'idée du phlogistique ?
+ph-trace2	trace	ru	Откуда взялась идея флогистона?
+sc-trace2	trace	en	History of scurvy
+sc-trace2	trace	de	Geschichte des Skorbuts
+sc-trace2	trace	es	Historia del escorbuto
+sc-trace2	trace	fr	Histoire du scorbut
+sc-trace2	trace	ru	История цинги
+ch-locate2	locate	en	Where is cholera mentioned?
+ch-locate2	locate	de	Wo wird die Cholera erwähnt?
+ch-locate2	locate	es	¿Dónde aparece el cólera?
+ch-locate2	locate	fr	Où est mentionné le choléra ?
+ch-locate2	locate	ru	Где упоминается холера?
+je-locate2	locate	en	Where do the texts mention Jenner?
+je-locate2	locate	de	Wo werden Jenners Versuche erwähnt?
+je-locate2	locate	es	¿Dónde se menciona a Jenner?
+je-locate2	locate	fr	Où apparaît Jenner ?
+je-locate2	locate	ru	Где упоминается Дженнер?
+ls-depend2	depend	en	What depends on Joseph Lister's work?
+ls-depend2	depend	de	Was hängt vom Werk Joseph Listers ab?
+ls-depend2	depend	es	¿Qué depende del trabajo de Joseph Lister?
+ls-depend2	depend	fr	Qu'est-ce qui dépend du travail de Joseph Lister ?
+ls-depend2	depend	ru	Что зависит от работ Джозефа Листера?
+sp-depend2	depend	en	What follows from smallpox vaccination?
+sp-depend2	depend	de	Was folgt aus der Impfung gegen die Pocken?
+sp-depend2	depend	es	¿Qué se sigue de la vacunación contra la viruela?
+sp-depend2	depend	fr	Qu'est-ce qui dépend de la vaccination contre la variole ?
+sp-depend2	depend	ru	Что следует из прививки от оспы?
+ch-compare2	compare	en	Compare cholera and scurvy
+ch-compare2	compare	de	Vergleiche Cholera und Skorbut
+ch-compare2	compare	es	Compara el cólera y el escorbuto
+ch-compare2	compare	fr	Compare le choléra et le scorbut
+ch-compare2	compare	ru	Сравни холеру и цингу
+sn-compare2	compare	en	What is the difference between John Snow and Semmelweis?
+sn-compare2	compare	de	Was ist der Unterschied zwischen John Snow und Semmelweis?
+sn-compare2	compare	es	¿Cuál es la diferencia entre John Snow y Semmelweis?
+sn-compare2	compare	fr	Quelle est la différence entre John Snow et Semmelweis ?
+sn-compare2	compare	ru	Чем отличается Джон Сноу от Земмельвейса?

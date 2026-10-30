@@ -1,0 +1,6 @@
+from library
+expand ->grounds
+expand <-x.text/quotes
+expand -[x.text/mentions]- depth 3
+expand rests on
+expand lineage depth 1

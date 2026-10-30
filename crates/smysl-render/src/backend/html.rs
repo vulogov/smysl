@@ -81,7 +81,7 @@ impl Backend for Html {
                 escape(&b.uid.canonical()),
                 escape(&b.level.to_string()),
             ));
-            out.push_str(&format!("<h2>{}</h2>\n", escape(&b.role.to_string())));
+            out.push_str(&format!("<h2>{}</h2>\n", escape(&b.heading)));
             let line = b.joined();
             out.push_str(&format!(
                 "<p><span class=\"status-marker\">{}</span> {}</p>\n",

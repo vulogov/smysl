@@ -140,6 +140,25 @@ unit, so the failure is reported once, up front, rather than once per unit.
   *data, never instruction* — the same fencing discipline Chapter 10 covers
   for `ingest`, applied here to a whole unit instead of raw prose.
 
+  From 1.9 the markers are *derived from the content they fence*: a 16-hex
+  digest of it, so `<<<SMYSL-INPUT-9f3c…>>>` rather than a fixed string.
+  A fixed marker is a seam the content can write. Text containing
+  `<<<SMYSL-INPUT>>>` closed the fence early and everything after it read as
+  the prompt's own voice — the document was then instructing the model, which
+  is exactly what the *data, never instruction* sentence exists to prevent and
+  could not. A document cannot contain the marker derived from it short of
+  finding a BLAKE3 fixed point, and a document that contains the *prefix* is
+  reported as `SMY-W433` with its offset: survivable, and still worth knowing.
+  The repair turn fences the previous answer and the diagnostics the same way,
+  each under its own derived marker, because the diagnostics quote the model's
+  own text back at it.
+
+  None of this is a security boundary, and the chapter says so twice for a
+  reason. Rule T, the ceiling and the quote check are what make an obedient
+  answer harmless: a model that does what an injected paragraph tells it still
+  cannot write `measured`, and a quote it invents still fails against the
+  document.
+
   The model must answer with `YES` or `NO` as its first word, followed by a
   short reason. `attest` reads that first word and nothing more sophisticated:
   an answer that starts with neither word — `"I'm not sure"`, an empty
@@ -529,6 +548,33 @@ provider that never set it (and reads 1024) is not asked for less.
 whatever this said, and an answer of a dozen units could be cut off at the
 limit — which is now reported as that, and counted as the call it was.
 
+An `ingest` block holds the defaults that are facts about the project rather
+than things to type on every invocation: `prompt`, a prompt override file;
+`path`, the ingest path to prefer; and, from 1.9, `temperature`, from 0.0 to
+2.0. A relative path in this block resolves beside the configuration file that
+spells it, which for `-C other.hjson` is that file's own directory. Each has a
+flag that overrides it — `--prompt`, `--path`, `--temperature` — and each is
+range- or value-checked when the file is loaded, so a configuration that cannot
+produce a request is refused before a call is paid for.
+
+One thing to know about `temperature` before text ingest asks it of you: there
+it is a correctness parameter rather than a quality knob. Text
+extraction runs each window twice by default and reports what the two passes
+agreed about, and the only agreement establishable without a judge is that two
+passes found the same bytes and wrote the same gist. Two runs above temperature
+0 share no identity at all — measured, not supposed: 145 runs of one local model
+were bit-identical at 0, and at 0.7 five of six inputs produced answers sharing
+no unit — so a temperature with two passes is refused before the first call,
+and `--single-pass` is how a caller says they meant to sample. The choice goes
+into the recipe either way, so a corpus records which of the two it is.
+
+`context_window` is also what Ollama is told, as `num_ctx`, with every request.
+The chunker sizes every chunk against it; Ollama's own default is smaller, so a
+chunk planned for a large window could be truncated by the server and answered
+as if whole. It is the configured value that is sent, never one a `--probe`
+measured: a 128k architecture window is routinely more than the machine will
+allocate.
+
 #term("Provider")[
   One configured endpoint: an id, which mapper drives it (`ollama`,
   `anthropic`, and so on), an endpoint URL, a model name, its context window
@@ -616,7 +662,7 @@ records the attempt:
 #screen(caption: "$ echo \"The auth service saw a latency regression after the 4.2 release.\" | smysl ingest --yes")[
 ```
 smysl ingest: warning: SMY-W304: span degraded to opaque prose after provider unreachable (at b3:gnpwyiyujyn6x32m6u36euxjqh)
-smysl ingest: 1 chunk(s), 0 call(s), 1 unit(s), 1 degraded, 0 token(s)
+smysl ingest: 1 chunk(s), 0 call(s), 1 unit(s), 0 weakened, 1 degraded, 0 repaired, 0 token(s)
 1 unit(s) staged and confirmed
 ```
 ]

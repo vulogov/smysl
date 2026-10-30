@@ -13,10 +13,14 @@
 
 pub mod cbor;
 pub mod diag;
+pub mod edtf;
 pub mod error;
 pub mod hash;
 pub mod ids;
+pub mod lang;
 pub mod quote;
+pub mod schema;
+pub mod schemas;
 pub mod surface;
 pub mod types;
 
@@ -24,21 +28,22 @@ pub use cbor::envelope::unit_core_bytes;
 pub use cbor::{from_cbor, from_cbor_seq, to_cbor, to_cbor_seq};
 pub use diag::{Code, Diagnostic, Group, Report, Severity, Span, Subject};
 pub use error::{
-    CodecError, Error, ExitCode, IdError, IntegrityError, MergeError, NonDetReason, PackError,
-    ParseError, ProviderError, RenderError, ShapeError,
+    CodecError, Error, ExitCode, IdError, IntegrityError, LibError, MergeError, NonDetReason,
+    PackError, ParseError, ProviderError, RenderError, ShapeError,
 };
 pub use hash::{canonical_uid, hash_bytes, verify, Rolling};
 pub use ids::{
-    AgentId, AgentKind, ContentionId, KernelType, Label, LangTag, SchemaId, ThreadId, Uid,
-    UidPrefix, ViewId,
+    is_alias, AgentId, AgentKind, ContentionId, Did, KernelType, Label, LangTag, Mid, Rdid,
+    SchemaId, ThreadId, Tid, Uid, UidPrefix, ViewId,
 };
 pub use types::{
-    json_escape, quantise, tokens, Admission, Attestation, Commit, Commitment, Contention,
-    ContentionStatus, Date, Detected, DetectionKind, DropReason, Extra, Fidelity,
-    GranularityProfile, Hlc, LabelBinding, Lod, Op, Optimality, PackInfo, PackMode, Record,
-    RelKind, Relation, Resolution, ResolutionTarget, Role, Rung, SchemaDecl, SourceKind,
-    SourcePolicy, SourceRef, Status, Step, Thread, ThreadSchema, Unit, UnitCore, UnitCoreBuilder,
-    View, Withdrawal,
+    json_escape, quantise, tokens, Admission, Allen, Attestation, Axis, Calendar, Carry, Commit,
+    Commitment, Contention, ContentionStatus, Date, Dating, DatingTarget, DatingValue, Detected,
+    DetectionKind, DropReason, Extra, Fidelity, GranularityProfile, Hlc, LabelBinding, Lod,
+    Manifest, Op, Optimality, PackInfo, PackMode, ParentKind, PartEntry, PartReading, PartText,
+    ProfileEstimator, Record, Redaction, RelKind, Relation, Resolution, ResolutionTarget, Role,
+    Rung, SchemaDecl, SourceKind, SourcePolicy, SourceRef, Status, Step, Thread, ThreadSchema,
+    TokenEstimator, Unit, UnitCore, UnitCoreBuilder, View, Withdrawal,
 };
 
 /// Format versions this implementation accepts in a `@doc` header (§11).

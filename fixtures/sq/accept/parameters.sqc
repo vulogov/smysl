@@ -1,0 +1,4 @@
+from library
+find $topic
+where lang = $language
+limit $n

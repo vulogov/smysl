@@ -109,6 +109,7 @@ impl Provider for DeepSeek {
 
     fn caps(&self) -> Capabilities {
         Capabilities {
+            model: self.cfg.model.clone(),
             context_window: self.cfg.context_window,
             max_output: self.cfg.max_output,
             // Whatever the configuration says, this endpoint enforces no schema. Reporting

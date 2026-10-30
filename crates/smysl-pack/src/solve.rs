@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{DropReason, Lod, Optimality, PackError, PackInfo, PackMode, ThreadId, Uid};
-use smysl_graph::{EdgeSet, SalienceReport, Store};
+use smysl_graph::{EdgeSet, SalienceReport, StoreRead};
 
 use crate::bound;
 use crate::closure;
@@ -240,7 +240,7 @@ impl Choice {
 }
 
 pub fn pack(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     salience: &SalienceReport,
     req: &PackRequest,
 ) -> Result<Pack, PackError> {
@@ -638,7 +638,7 @@ pub fn pack(
 }
 
 /// Verify a finished pack against C1-C7. Exposed so a caller can audit rather than trust.
-pub fn verify(store: &Store, pack: &Pack, req: &PackRequest) -> Vec<Violation> {
+pub fn verify(store: &(impl StoreRead + ?Sized), pack: &Pack, req: &PackRequest) -> Vec<Violation> {
     violations(
         store,
         &pack.selection,
@@ -653,7 +653,7 @@ pub fn verify(store: &Store, pack: &Pack, req: &PackRequest) -> Vec<Violation> {
     )
 }
 
-fn highest_available(store: &Store, uid: &Uid) -> Lod {
+fn highest_available(store: &(impl StoreRead + ?Sized), uid: &Uid) -> Lod {
     store
         .get(uid)
         .map(|u| u.core.max_lod())
@@ -670,7 +670,7 @@ fn raise(selection: &mut Selection, uid: Uid, level: Lod) {
     }
 }
 
-fn cost_of(store: &Store, selection: &Selection, e: &CostModel) -> u64 {
+fn cost_of(store: &(impl StoreRead + ?Sized), selection: &Selection, e: &CostModel) -> u64 {
     selection
         .iter()
         .filter_map(|(u, l)| store.get(u).map(|unit| e.unit(&unit.core, *l)))
@@ -679,7 +679,7 @@ fn cost_of(store: &Store, selection: &Selection, e: &CostModel) -> u64 {
 
 /// The cost and value a delta adds, charging only the shortfall over what is already held.
 fn weigh(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     selected: &Selection,
     d: &Selection,
     salience: &BTreeMap<Uid, f32>,
@@ -702,7 +702,7 @@ fn weigh(
 
 /// Why a unit did not make it (§8).
 fn drop_reason(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     selection: &Selection,
     uid: &Uid,
     salience: &BTreeMap<Uid, f32>,

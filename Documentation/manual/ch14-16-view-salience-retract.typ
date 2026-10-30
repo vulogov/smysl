@@ -212,7 +212,7 @@ ever there.
 
 #exercises((
   [Run `smysl view --id v/narrow --roots b3:wo4t2c46lq45fnakd6tajlgcac
-   --format surface fixtures/corpus/F1-incident.smy`. One root reaches three
+   fixtures/corpus/F1-incident.smy`. One root reaches three
    units. Trace by hand, in the source file, why those three and not the other
    five.],
   [A view stores *roots*, not a list of members. Suppose you add a new claim
@@ -616,6 +616,11 @@ anything scores. And `Bm25::index_with(Tokenizer::folding())` turns the English 
 `required` and `require` meet. It is off by default for the reason above, and it is a choice
 rather than an improvement: turning it on moves every score in the index, and a corpus of
 identifiers is worse off for it.
+
+The fold is English and applies to whatever it is given, which until 1.9 it did without saying
+so: Spanish `lunes` — Monday, not a plural — folded to `lun`. `Tokenizer::folding_for(&lang)`
+folds for `en` and leaves every other language as written, so a store with a view language can
+let the document decide instead of the caller guessing.
 
 #subsection("Why a hit is a hit: `--why`")
 

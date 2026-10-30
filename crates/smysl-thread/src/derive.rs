@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::{
     tokens, AgentId, Hlc, RelKind, Role, Status, Step, Thread, ThreadId, ThreadSchema, Uid,
 };
-use smysl_graph::{salience, topo, EdgeSet, SalienceReport, SalienceRequest, Store};
+use smysl_graph::{salience, topo, EdgeSet, SalienceReport, SalienceRequest, StoreRead};
 
 use crate::schema::{definition, Matcher, Position, SchemaDef};
 
@@ -93,7 +93,7 @@ pub struct DeriveReport {
 
 /// Derive a thread over a store (§19).
 pub fn derive_thread(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     schema: ThreadSchema,
     opts: &DeriveOptions,
 ) -> (Thread, DeriveReport) {
@@ -140,7 +140,7 @@ pub fn derive_thread(
 
 /// The personalisation vector for derivation: what the schema's most important role is
 /// about, or the view's roots when nothing matches.
-fn seed(store: &Store, scope: &[Uid]) -> BTreeSet<Uid> {
+fn seed(store: &(impl StoreRead + ?Sized), scope: &[Uid]) -> BTreeSet<Uid> {
     let focal: BTreeSet<Uid> = scope
         .iter()
         .copied()
@@ -189,9 +189,24 @@ impl Ordering {
     }
 }
 
-fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
+/// The reply edge a chat reader's `reply` id becomes (SMYSL-2.4 §3.2). It orders a dialogue the
+/// way `precedes` orders a narrative: a reply is later than what it replies to.
+const REPLIES: &str = "x.text/replies";
+
+fn ordering(store: &(impl StoreRead + ?Sized), scope: &[Uid]) -> Ordering {
     let g = store.adjacency();
-    let kinds = EdgeSet::ordering();
+    // TX-P8 step 2: a reply edge is an ordering edge in every schema, since "later than what it
+    // answers" is true of a reply whatever the thread is for. Added only when the store has the
+    // kind, because an `EdgeSet` holds kinds the adjacency has numbered.
+    let mut ordering: Vec<smysl_graph::EdgeKind> = RelKind::KERNEL
+        .iter()
+        .filter(|k| k.is_ordering())
+        .filter_map(|k| smysl_graph::EdgeKind::kernel(k.clone()))
+        .collect();
+    if let Some(k) = g.edge_kind(&RelKind::Extension(REPLIES.to_string())) {
+        ordering.push(k);
+    }
+    let kinds = EdgeSet::of(ordering);
     let t = topo(g, &kinds);
 
     let mut index = BTreeMap::new();
@@ -221,6 +236,7 @@ fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
         first.remove(&u);
         last.remove(&u);
     }
+    let chained = !first.is_empty() || !last.is_empty();
 
     // Rank within the scope, by chain index then uid - a total order, so a band is a
     // function of the graph rather than of iteration.
@@ -233,7 +249,19 @@ fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
     // instant keep the chain index they always had, so a corpus that carries none derives
     // exactly what it derived before.
     let mut ordered: Vec<Uid> = in_scope.iter().copied().collect();
+    // Span order sits between observation time and the chain index (TX-P8 step 2): two units
+    // drawn from one part are in the order the text has them, which is what an exposition is —
+    // and a text's units carry no `observed` and almost no ordering edges, so without this key
+    // the chain index left them in uid order, which is no order. Keyed on the manifest first
+    // so two texts do not interleave by byte offset.
+    let placed = |u: &Uid| -> Option<(String, u64)> {
+        let unit = store.get(u)?;
+        let source = unit.core.source.as_ref()?;
+        let (start, _) = source.span()?;
+        Some((source.manifest()?.canonical(), start))
+    };
     ordered.sort_by_key(|u| {
+        let span = placed(u);
         // `None` sorts *before* `Some` in Rust, which would put every untimed unit at the front
         // — the opposite of the intent. An untimed unit is not early; it is not on the timeline,
         // so it follows the timed ones and keeps the chain order it always had.
@@ -241,11 +269,26 @@ fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
         (
             observed.is_none(),
             observed.unwrap_or(0),
+            span.is_none(),
+            span.unwrap_or_default(),
             index.get(u).copied().unwrap_or(usize::MAX),
             *u,
         )
     });
     let rank: BTreeMap<Uid, usize> = ordered.iter().enumerate().map(|(i, u)| (*u, i)).collect();
+
+    // A scope with no ordering edges at all still has a first and a last unit when its units
+    // carry an order of their own (TX-P8 step 2): a text's verses have spans and a chat's
+    // messages have instants, and "nothing precedes anything" would otherwise leave an
+    // exposition with no introduction. Only when the chain is wholly absent and every unit has
+    // such an order, so a scope whose edges say where it starts keeps the answer they give.
+    if !chained && ordered.len() > 1 {
+        let has_own_order = |u: &Uid| store.observed_at(u).is_some() || placed(u).is_some();
+        if ordered.iter().all(has_own_order) {
+            first.insert(ordered[0]);
+            last.insert(ordered[ordered.len() - 1]);
+        }
+    }
 
     Ordering {
         index,
@@ -255,19 +298,84 @@ fn ordering(store: &Store, scope: &[Uid]) -> Ordering {
     }
 }
 
+/// The ends of every relation whose kind one of the schema's rules names.
+///
+/// `Matcher::SourceOf` and `TargetOf` used to answer by calling `relations_of_kind`, which
+/// filters every relation in the store and allocates a `Vec` — once per unit, per rule. On a
+/// store with R relations and U units in scope that is O(U · R) work to answer a question with
+/// one answer per kind. Built once here instead, from one `relations_of_kind` call per kind the
+/// rules actually mention, so a schema with no relation rule builds nothing.
+///
+/// It is the same call, so the withdrawn-edge filter is the same filter: `relations_of_kind`
+/// excludes a withdrawn relation, and nothing here can disagree with it about which those are.
+struct RelEnds {
+    sources: BTreeMap<RelKind, BTreeSet<Uid>>,
+    targets: BTreeMap<RelKind, BTreeSet<Uid>>,
+}
+
+impl RelEnds {
+    fn for_rules(store: &(impl StoreRead + ?Sized), def: &SchemaDef) -> RelEnds {
+        let mut sources: BTreeMap<RelKind, BTreeSet<Uid>> = BTreeMap::new();
+        let mut targets: BTreeMap<RelKind, BTreeSet<Uid>> = BTreeMap::new();
+        for (matcher, _) in def.rules {
+            match matcher {
+                Matcher::SourceOf(k) => {
+                    sources.entry(k.clone()).or_insert_with(|| {
+                        store
+                            .relations_of_kind(k)
+                            .into_iter()
+                            .map(|r| r.from)
+                            .collect()
+                    });
+                }
+                Matcher::TargetOf(k) => {
+                    targets.entry(k.clone()).or_insert_with(|| {
+                        store
+                            .relations_of_kind(k)
+                            .into_iter()
+                            .map(|r| r.to)
+                            .collect()
+                    });
+                }
+                Matcher::SourceOfExt(name) => {
+                    let k = RelKind::Extension((*name).to_string());
+                    let ends: BTreeSet<Uid> = store
+                        .relations_of_kind(&k)
+                        .into_iter()
+                        .map(|r| r.from)
+                        .collect();
+                    sources.entry(k).or_insert(ends);
+                }
+                Matcher::TargetOfExt(name) => {
+                    let k = RelKind::Extension((*name).to_string());
+                    let ends: BTreeSet<Uid> = store
+                        .relations_of_kind(&k)
+                        .into_iter()
+                        .map(|r| r.to)
+                        .collect();
+                    targets.entry(k).or_insert(ends);
+                }
+                _ => {}
+            }
+        }
+        RelEnds { sources, targets }
+    }
+}
+
 fn assign(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     def: &SchemaDef,
     scope: &[Uid],
     sal: &SalienceReport,
     order: &Ordering,
 ) -> BTreeMap<Uid, Role> {
     let ranked: Vec<Uid> = sal.top(scope.len()).into_iter().map(|(u, _)| u).collect();
+    let ends = RelEnds::for_rules(store, def);
 
     let mut out = BTreeMap::new();
     for uid in scope {
         for (matcher, role) in def.rules {
-            if matches(store, matcher, uid, order, &ranked) {
+            if matches(store, matcher, uid, order, &ranked, &ends) {
                 out.insert(*uid, *role);
                 break;
             }
@@ -276,7 +384,18 @@ fn assign(
     out
 }
 
-fn matches(store: &Store, m: &Matcher, uid: &Uid, order: &Ordering, ranked: &[Uid]) -> bool {
+fn matches(
+    store: &(impl StoreRead + ?Sized),
+    m: &Matcher,
+    uid: &Uid,
+    order: &Ordering,
+    ranked: &[Uid],
+    ends: &RelEnds,
+) -> bool {
+    // Kept ahead of every arm, including the two that are now set lookups: a uid the store does
+    // not hold matches nothing. An index built from the store's own relations could only contain
+    // uids the store holds, so dropping this would be invisible on any real input and wrong on a
+    // scope naming a unit that is not there.
     let Some(unit) = store.get(uid) else {
         return false;
     };
@@ -284,11 +403,18 @@ fn matches(store: &Store, m: &Matcher, uid: &Uid, order: &Ordering, ranked: &[Ui
         Matcher::Any => true,
         Matcher::Type(k) => unit.core.schema.kernel() == Some(*k),
         Matcher::StatusAtLeast(s) => unit.core.status >= *s,
-        Matcher::SourceOf(k) => store
-            .relations_of_kind(k)
-            .into_iter()
-            .any(|r| r.from == *uid),
-        Matcher::TargetOf(k) => store.relations_of_kind(k).into_iter().any(|r| r.to == *uid),
+        Matcher::SourceOf(k) => ends.sources.get(k).is_some_and(|s| s.contains(uid)),
+        Matcher::TargetOf(k) => ends.targets.get(k).is_some_and(|s| s.contains(uid)),
+        Matcher::SourceOfExt(name) => ends
+            .sources
+            .get(&RelKind::Extension((*name).to_string()))
+            .is_some_and(|s| s.contains(uid)),
+        Matcher::TargetOfExt(name) => ends
+            .targets
+            .get(&RelKind::Extension((*name).to_string()))
+            .is_some_and(|s| s.contains(uid)),
+        // A scan of `n`, deliberately: rule arities are small, and an index over a prefix of a
+        // ranking would cost more to build than the scan it replaced.
         Matcher::SalienceTop(n) => ranked.iter().take(*n).any(|u| u == uid),
         Matcher::At(Position::First) => order.first.contains(uid),
         Matcher::At(Position::Last) => order.last.contains(uid),
@@ -350,9 +476,19 @@ fn order_steps(
 ) -> Vec<Step> {
     let mut steps: Vec<(usize, usize, Uid, Role)> = Vec::new();
     for (role, units) in picked {
-        let role_pos = def.position_of(*role).unwrap_or(usize::MAX);
+        // `in_order`: the units' own order leads and the role annotates (see
+        // `SchemaDef::in_order`). Otherwise the role leads, as it always has.
+        let role_pos = if def.in_order {
+            0
+        } else {
+            def.position_of(*role).unwrap_or(usize::MAX)
+        };
         for uid in units {
-            let chain = order.index.get(uid).copied().unwrap_or(usize::MAX);
+            let chain = if def.in_order {
+                order.rank.get(uid).copied().unwrap_or(usize::MAX)
+            } else {
+                order.index.get(uid).copied().unwrap_or(usize::MAX)
+            };
             steps.push((role_pos, chain, *uid, *role));
         }
     }
@@ -382,7 +518,7 @@ fn order_steps(
 /// than chosen.
 ///
 /// Repair iterates to a fixpoint, because an inserted dep may itself have deps.
-fn repair(store: &Store, steps: &mut Vec<Step>, report: &mut DeriveReport) {
+fn repair(store: &(impl StoreRead + ?Sized), steps: &mut Vec<Step>, report: &mut DeriveReport) {
     loop {
         let present: BTreeSet<Uid> = steps.iter().map(|s| s.unit).collect();
         let mut insertion: Option<(usize, Step, Uid)> = None;
@@ -417,7 +553,12 @@ fn repair(store: &Store, steps: &mut Vec<Step>, report: &mut DeriveReport) {
 ///
 /// Deliberately unambitious: it concatenates and truncates. Anything better needs a model,
 /// which is what `--refine` is for.
-fn synth_gist(store: &Store, def: &SchemaDef, steps: &[Step], budget: u32) -> String {
+fn synth_gist(
+    store: &(impl StoreRead + ?Sized),
+    def: &SchemaDef,
+    steps: &[Step],
+    budget: u32,
+) -> String {
     // The heaviest roles, not the first ones. Weight is the table's own statement of what
     // a role contributes, so a gist built from the opening roles would summarise an
     // analysis by its definitions rather than by its finding.
@@ -429,17 +570,18 @@ fn synth_gist(store: &Store, def: &SchemaDef, steps: &[Step], budget: u32) -> St
             .then(def.position_of(*a).cmp(&def.position_of(*b)))
     });
 
-    let mut parts: Vec<&str> = Vec::new();
+    // Owned, because a unit may come back as an owned handle from a paged store (SMYSL-2.8).
+    let mut parts: Vec<String> = Vec::new();
     for role in order.iter().take(2) {
         if let Some(step) = steps.iter().find(|s| s.role == *role) {
             if let Some(unit) = store.get(&step.unit) {
-                parts.push(unit.core.gist.trim());
+                parts.push(unit.core.gist.trim().to_string());
             }
         }
     }
     if parts.is_empty() {
         if let Some(first) = steps.first().and_then(|s| store.get(&s.unit)) {
-            parts.push(first.core.gist.trim());
+            parts.push(first.core.gist.trim().to_string());
         }
     }
 
@@ -472,7 +614,7 @@ fn synth_gist(store: &Store, def: &SchemaDef, steps: &[Step], budget: u32) -> St
 ///
 /// The SM-P11 gate asserts this over generated graphs - the repair either works always or
 /// it is not a repair.
-pub fn satisfies_rule_l(store: &Store, thread: &Thread) -> Vec<(Uid, Uid)> {
+pub fn satisfies_rule_l(store: &(impl StoreRead + ?Sized), thread: &Thread) -> Vec<(Uid, Uid)> {
     let present: BTreeSet<Uid> = thread.units().copied().collect();
     let mut out = Vec::new();
     for uid in &present {
@@ -513,6 +655,7 @@ mod tests {
         canonical_uid, KernelType, Record, Relation, SourceKind, SourceRef, UnitCore,
         UnitCoreBuilder,
     };
+    use smysl_graph::Store;
 
     fn unit(t: KernelType, gist: &str, status: Status) -> UnitCore {
         let mut b = UnitCoreBuilder::new(t, gist, status);
@@ -533,7 +676,7 @@ mod tests {
         )
     }
 
-    fn derive(store: &Store, schema: ThreadSchema) -> (Thread, DeriveReport) {
+    fn derive(store: &(impl StoreRead + ?Sized), schema: ThreadSchema) -> (Thread, DeriveReport) {
         derive_thread(store, schema, &opts())
     }
 
@@ -887,6 +1030,12 @@ mod tests {
 
         for &s in ThreadSchema::ALL {
             let (t, _) = derive(&store, s);
+            if !crate::schema::derivable(s) {
+                // The dossier: no rules, so nothing is assigned — which is why the CLI
+                // refuses to derive one rather than returning this empty thread.
+                assert!(t.steps.is_empty(), "{s} has no rules and derived something");
+                continue;
+            }
             assert!(!t.steps.is_empty(), "{s} derived nothing");
             assert!(satisfies_rule_l(&store, &t).is_empty(), "{s} broke rule L");
         }

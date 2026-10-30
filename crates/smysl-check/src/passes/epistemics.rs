@@ -19,9 +19,9 @@
 
 use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{Status, Uid};
-use smysl_graph::{topo, EdgeKind, EdgeSet, Store};
+use smysl_graph::{topo, EdgeKind, EdgeSet, StoreRead};
 
-pub fn run(store: &Store, report: &mut Report) {
+pub fn run(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     let g = store.adjacency();
     let order = topo(g, &EdgeSet::one(EdgeKind::Grounds));
 
@@ -60,7 +60,7 @@ pub fn run(store: &Store, report: &mut Report) {
 ///
 /// Ties break by ascending uid, so the named ground is a function of the graph rather than
 /// of iteration order (rule D).
-fn weakest_ground(store: &Store, uid: &Uid) -> Option<(Status, Uid)> {
+fn weakest_ground(store: &(impl StoreRead + ?Sized), uid: &Uid) -> Option<(Status, Uid)> {
     let unit = store.get(uid)?;
     unit.core
         .grounds
@@ -75,6 +75,7 @@ mod tests {
     use smysl_core::{
         canonical_uid, KernelType, Record, SourceKind, SourceRef, Status, UnitCore, UnitCoreBuilder,
     };
+    use smysl_graph::Store;
 
     fn check(records: Vec<Record>) -> Report {
         let store = Store::from_records(records);

@@ -3,7 +3,8 @@ name        = "smysl-ingest"
 description = "smysl ingest boundary: staging, repair, trust ceiling, recipes"
 version.workspace      = true
 edition.workspace      = true
-rust-version.workspace = true
+# Above the workspace base, via `smysl-provider`, and through it the `icu_*` 2.2 chain under `ureq`.
+rust-version           = "1.86"
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
@@ -29,14 +30,28 @@ anthropic = ["model", "smysl-provider/anthropic"]
 openai    = ["model", "smysl-provider/openai"]
 gemini    = ["model", "smysl-provider/gemini"]
 deepseek  = ["model", "smysl-provider/deepseek"]
+# Text ingest (SMYSL-2.4 §4.3.4, TX-P5 step 3): windowing a reading and attaching a span to a
+# quote. Off by default, because the window and the span need a *library* — a structure, a part's
+# bytes and a manifest — and a caller ingesting a document has none of those and should not link
+# a reader layer to say so. `smysl-pack` joins this feature in step 4, where the ledger digest
+# arrives; it is left out until then rather than declared ahead of the code that needs it.
+text      = ["dep:smysl-text", "dep:smysl-pack"]
 
 [dependencies]
 smysl-core     = { workspace = true }
 smysl-check    = { workspace = true }
 smysl-graph    = { workspace = true }
 smysl-provider = { workspace = true, optional = true }
+# Behind `text`. The edge runs this way because windowing reads a `Structure` and attachment
+# writes the copy set through `provenance::stamp`, both of which live where text lives; and
+# `smysl-text` does not depend on this crate, so there is no cycle. Both are pure-tier, so no
+# MSRV floor moves.
+smysl-text     = { workspace = true, optional = true }
+# Behind `text` as well: the ledger digest is a pack over what has already been extracted
+# (§3.5), and packing is `smysl-pack`'s job rather than a second budget solver here.
+smysl-pack     = { workspace = true, optional = true }
 
-# Both drive `Ingestor` against providers, so neither exists without `model`.
+# All four drive `Ingestor` against providers, so none of them exists without `model`.
 [[test]]
 name              = "gate"
 required-features = ["model"]
@@ -44,3 +59,61 @@ required-features = ["model"]
 [[test]]
 name              = "providers_live"
 required-features = ["model"]
+
+[[test]]
+name              = "lang_policy"
+required-features = ["model"]
+
+[[test]]
+name              = "consensus"
+required-features = ["model"]
+
+# Windowing and span attachment need no provider, so this one names `text` and not `model`:
+# a build that cannot call a model can still measure step 3b's probe set.
+[[test]]
+name              = "probe_set"
+required-features = ["text"]
+
+# The reader half of step 3b: `\wj` and `<q who>` into a `text:mode`, with no provider in the
+# path at all — a reader marked it or it did not, and that is arithmetic over a reading.
+[[test]]
+name              = "reported_speech"
+required-features = ["text"]
+
+# Text ingest end to end, offline. Needs both features and a reader, which the dev-dependency
+# below supplies: a library has to hold a text before anything can window one.
+[[test]]
+name              = "text_gate"
+required-features = ["text", "model"]
+
+[[test]]
+name              = "redteam"
+required-features = ["text", "model"]
+
+# The phase exit's own figures (§6 TX-P5 step 5): resume, span coverage, entity duplication and
+# the cost report. The entity clause needs a reading with *speakers* in it, which is a chat
+# reader — hence the second dev-dependency feature below.
+[[test]]
+name              = "phase_exit"
+required-features = ["text", "model"]
+
+# GE-T2's rerun under the consensus policy (§5.5).
+[[test]]
+name              = "ge_t2"
+required-features = ["text", "model"]
+
+[dev-dependencies]
+# `tests/text_gate.rs` and `tests/redteam.rs` build a real library on disk, which means reading
+# a file into one: `txt/1` is the smallest reader that produces nodes, and a dev-dependency is
+# the only place a reader belongs — nothing in the published tree of this crate reads a file.
+# `tests/phase_exit.rs` adds `reader-telegram`: the entity-duplication clause measures one
+# holder across many windows, and a holder comes from a node with a *speaker* — which no
+# scripture reader produces and every chat reader does.
+# `tests/link.rs` adds `reader-usfm`: a summary tree takes its levels from a reading, and
+# `txt/1` emits one level — a flat list of lines has no tree for `summarise` to walk. USFM is
+# the reader this repository already has corpus material for, at ../../fixtures/library/bibles.
+smysl-text     = { workspace = true, features = [
+    "reader-txt",
+    "reader-telegram",
+    "reader-usfm",
+] }

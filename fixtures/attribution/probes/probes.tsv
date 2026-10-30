@@ -1,0 +1,60 @@
+# TX-P5 step 3b's probe set: attribution-bearing passages with known reported speech.
+#
+# Columns, tab separated: file, locator, quote, expected mode, how the source marks the
+# clause, note.
+#   locator    the verse the clause is in. The probe is measured *there*: a short quote can be
+#              matched loosely somewhere else in the book, and the first run of this set proved
+#              it - `Thou sayest it.` at 15:2 attached to Peter's `what thou sayest` at 14:68,
+#              one chapter and one part away, and was scored against the wrong verse.
+#   expected   `reported` where the verse frames the clause with a verb of saying attributing
+#              it to somebody, `none` where it does not. That criterion is the whole labelling
+#              rule, and it is a fact about the English rather than about any markup.
+#   marking    `wj` inside a `\wj ... \wj*` span, `quoted` inside paired quotation marks,
+#              `both`, `bare` for neither. A fact about the source file, checkable by looking.
+#              Only `wj`, `quoted` and `both` probes are in the gated denominator: a clause its
+#              edition leaves to a comma and a capital letter is counted and reported rather
+#              than passed, which is GE-T13's rule for a pair open on the side compared.
+#   note       the speaker, and the frame the label was read off.
+#
+# The two editions carry the same 47 verses, so the arms differ only in typography. See
+# README.md for where the files came from and what was chosen.
+
+# eng-kjv: the 1769 text, which marks the words of Jesus and punctuates nothing
+eng-kjv/MRK14-15.usfm	Mark.15.2	Art thou the King of the Jews?	reported	bare	Pilate: `And Pilate asked him,`
+eng-kjv/MRK14-15.usfm	Mark.15.2	Thou sayest it.	reported	wj	Jesus: `And he answering said unto him,`
+eng-kjv/MRK14-15.usfm	Mark.15.4	Answerest thou nothing? behold how many things they witness against thee.	reported	bare	Pilate: `And Pilate asked him again, saying,`
+eng-kjv/MRK14-15.usfm	Mark.15.9	Will ye that I release unto you the King of the Jews?	reported	bare	Pilate: `But Pilate answered them, saying,`
+eng-kjv/MRK14-15.usfm	Mark.15.12	What will ye then that I shall do unto him whom ye call the King of the Jews?	reported	bare	Pilate: `And Pilate answered and said again unto them,`
+eng-kjv/MRK14-15.usfm	Mark.15.13	Crucify him.	reported	bare	the multitude: `And they cried out again,`; the same words recur at 15:14, which the locator settles
+eng-kjv/MRK14-15.usfm	Mark.15.14	Why, what evil hath he done?	reported	bare	Pilate: `Then Pilate said unto them,`
+eng-kjv/MRK14-15.usfm	Mark.15.18	Hail, King of the Jews!	reported	bare	the soldiers: `And began to salute him,`
+eng-kjv/MRK14-15.usfm	Mark.15.22	The place of a skull.	none	bare	nobody: `which is, being interpreted` is a gloss on a name and not a verb of saying
+eng-kjv/MRK14-15.usfm	Mark.15.26	THE KING OF THE JEWS.	none	bare	nobody: `the superscription of his accusation was written over` is writing, not speech
+eng-kjv/MRK14-15.usfm	Mark.15.28	And he was numbered with the transgressors.	reported	bare	the scripture: `And the scripture was fulfilled, which saith,`
+eng-kjv/MRK14-15.usfm	Mark.15.29	thou that destroyest the temple, and buildest it in three days	reported	bare	those that passed by: `wagging their heads, and saying,`; the clause runs on into 15:30, and the part probed is the part inside its own verse
+eng-kjv/MRK14-15.usfm	Mark.15.31	He saved others; himself he cannot save.	reported	bare	the chief priests: `Likewise also the chief priests mocking said among themselves with the scribes,`
+eng-kjv/MRK14-15.usfm	Mark.15.34	Eloi, Eloi, lama sabachthani?	reported	wj	Jesus: `And at the ninth hour Jesus cried with a loud voice, saying,`
+eng-kjv/MRK14-15.usfm	Mark.15.34	My God, my God, why hast thou forsaken me?	none	bare	nobody: the rest of the verse is `which is, being interpreted` again - a translation of the clause before it, not a second saying
+eng-kjv/MRK14-15.usfm	Mark.15.35	Behold, he calleth Elias.	reported	bare	some that stood by: `when they heard it, said,`
+eng-kjv/MRK14-15.usfm	Mark.15.36	Let alone; let us see whether Elias will come to take him down.	reported	bare	one that ran: `and gave him to drink, saying,`
+eng-kjv/MRK14-15.usfm	Mark.15.39	Truly this man was the Son of God.	reported	bare	the centurion: `he said,`
+
+# engwebp: the World English Bible, which marks the words of Jesus and punctuates every quotation
+engwebp/MRK14-15.usfm	Mark.15.2	Are you the King of the Jews?	reported	quoted	Pilate: `Pilate asked him,`
+engwebp/MRK14-15.usfm	Mark.15.2	So you say.	reported	both	Jesus: `He answered,`
+engwebp/MRK14-15.usfm	Mark.15.4	Have you no answer? See how many things they testify against you!	reported	quoted	Pilate: `Pilate again asked him,`
+engwebp/MRK14-15.usfm	Mark.15.9	Do you want me to release to you the King of the Jews?	reported	quoted	Pilate: `Pilate answered them, saying,`
+engwebp/MRK14-15.usfm	Mark.15.12	What then should I do to him whom you call the King of the Jews?	reported	quoted	Pilate: `Pilate again asked them,`
+engwebp/MRK14-15.usfm	Mark.15.13	Crucify him!	reported	quoted	the multitude: `They cried out again,`; the same words recur at 15:14, which the locator settles
+engwebp/MRK14-15.usfm	Mark.15.14	Why, what evil has he done?	reported	quoted	Pilate: `Pilate said to them,`
+engwebp/MRK14-15.usfm	Mark.15.18	Hail, King of the Jews!	reported	quoted	the soldiers: `They began to salute him,`
+engwebp/MRK14-15.usfm	Mark.15.22	The place of a skull.	none	quoted	nobody: `which is, being interpreted` is a gloss on a name and not a verb of saying - and this edition puts quotation marks round it
+engwebp/MRK14-15.usfm	Mark.15.26	THE KING OF THE JEWS.	none	quoted	nobody: `The superscription of his accusation was written over him:` is writing, not speech - and this edition puts quotation marks round it
+engwebp/MRK14-15.usfm	Mark.15.28	He was counted with transgressors.	reported	quoted	the Scripture: `The Scripture was fulfilled which says,`
+engwebp/MRK14-15.usfm	Mark.15.29	You who destroy the temple and build it in three days	reported	quoted	those who passed by: `wagging their heads and saying,`; the quotation runs on into 15:30, and the part probed is the part inside its own verse
+engwebp/MRK14-15.usfm	Mark.15.31	He saved others. He can’t save himself.	reported	quoted	the chief priests: `the chief priests mocking among themselves with the scribes said,`
+engwebp/MRK14-15.usfm	Mark.15.34	Eloi, Eloi, lama sabachthani?	reported	both	Jesus: `Jesus cried with a loud voice, saying,`
+engwebp/MRK14-15.usfm	Mark.15.34	My God, my God, why have you forsaken me?	none	both	nobody: `which is, being interpreted` again - and this edition marks the gloss as words of Jesus as well as quoting it
+engwebp/MRK14-15.usfm	Mark.15.35	Behold, he is calling Elijah.	reported	quoted	some who stood by: `when they heard it, said,`
+engwebp/MRK14-15.usfm	Mark.15.36	Let him be. Let’s see whether Elijah comes to take him down.	reported	quoted	one who ran: `gave it to him to drink, saying,`
+engwebp/MRK14-15.usfm	Mark.15.39	Truly this man was the Son of God!	reported	quoted	the centurion: `he said,`

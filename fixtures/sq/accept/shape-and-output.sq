@@ -1,0 +1,3 @@
+from library
+pack 4000 tokens as view
+measure t1, t2.detail

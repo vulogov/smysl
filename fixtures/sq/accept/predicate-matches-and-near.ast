@@ -1,0 +1,42 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: None,
+            filters: [
+                Filter {
+                    pred: Matches(
+                        Str(
+                            "pool exhaustion",
+                        ),
+                    ),
+                    lens_none: false,
+                },
+                Filter {
+                    pred: Near {
+                        text: Str(
+                            "database contention",
+                        ),
+                        threshold: Decimal {
+                            scaled: 8000,
+                        },
+                    },
+                    lens_none: false,
+                },
+            ],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: None,
+}

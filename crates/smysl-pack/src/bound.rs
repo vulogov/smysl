@@ -10,7 +10,7 @@
 //! the tightest sound bound that stays cheap to compute.
 
 use smysl_core::{Lod, Uid};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 use std::collections::BTreeMap;
 
 use crate::constraints::Selection;
@@ -39,7 +39,7 @@ impl Relaxed {
 /// Sound because it relaxes away closure and integrality: a real acquisition costs at
 /// least the item's own cost and cannot be taken in part.
 pub fn fractional(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     selection: &Selection,
     scope: &[Uid],
     salience: &BTreeMap<Uid, f32>,
@@ -160,6 +160,7 @@ mod tests {
     use smysl_core::{
         canonical_uid, KernelType, Record, SourceKind, SourceRef, Status, UnitCore, UnitCoreBuilder,
     };
+    use smysl_graph::Store;
 
     fn evidence(gist: &str, body: Option<&str>) -> UnitCore {
         let mut b = UnitCoreBuilder::new(KernelType::Evidence, gist, Status::Measured)

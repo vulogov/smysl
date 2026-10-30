@@ -13,7 +13,7 @@ use bm25::{
 };
 
 use smysl_core::{SchemaId, Status, Uid};
-use smysl_graph::Store;
+use smysl_graph::{Store, StoreRead};
 
 use crate::{candidates, indexable, Hit, Query, Retriever};
 
@@ -51,7 +51,7 @@ pub struct Bm25 {
 /// gist counts four times, in the body twice, in the detail once. Repetition rather than a
 /// post-hoc score multiplier because it also feeds the length normalisation, which is the
 /// part of BM25 that decides a short precise gist beats a long rambling body.
-fn repeats(weight: f32) -> usize {
+pub(crate) fn repeats(weight: f32) -> usize {
     match weight {
         w if w >= 1.0 => 4,
         w if w >= 0.5 => 2,
@@ -59,7 +59,7 @@ fn repeats(weight: f32) -> usize {
     }
 }
 
-fn document_text(store: &Store, uid: &Uid) -> Option<String> {
+fn document_text(store: &(impl StoreRead + ?Sized), uid: &Uid) -> Option<String> {
     let parts = indexable(store, uid)?;
     let mut out = String::new();
     for (text, weight) in parts {
@@ -77,7 +77,7 @@ impl Bm25 {
     /// Fitting is over the same corpus that is then scored, which is what makes the inverse
     /// document frequencies meaningful: a term common in *this* store is uninformative in
     /// this store, whatever it is worth elsewhere.
-    pub fn index(store: &Store) -> Bm25 {
+    pub fn index(store: &(impl StoreRead + ?Sized)) -> Bm25 {
         Bm25::index_with(store, crate::tokenize::Tokenizer::plain())
     }
 
@@ -87,7 +87,14 @@ impl Bm25 {
     /// a unit saying `require`. Off by default: the fold helps prose and hurts identifiers, and
     /// turning it on moves every score in the index, so it is the caller's decision and not a
     /// silent improvement.
-    pub fn index_with(store: &Store, tokenizer: crate::tokenize::Tokenizer) -> Bm25 {
+    ///
+    /// The suffixes are English and are applied to any text given, so a caller indexing a store
+    /// that is not English wants `Tokenizer::folding_for(&view.lang)`, which folds for `en` and
+    /// leaves everything else as written.
+    pub fn index_with(
+        store: &(impl StoreRead + ?Sized),
+        tokenizer: crate::tokenize::Tokenizer,
+    ) -> Bm25 {
         let facts = candidates(store);
 
         // Deterministic order: `facts` is a BTreeMap, so the corpus is built in uid order on
@@ -113,8 +120,12 @@ impl Bm25 {
             .map(|u| {
                 let strings = store
                     .get(u)
-                    .and_then(|unit| unit.core.payload.as_deref())
-                    .map(smysl_core::surface::payload::payload_strings)
+                    .and_then(|unit| {
+                        unit.core
+                            .payload
+                            .as_deref()
+                            .map(smysl_core::surface::payload::payload_strings)
+                    })
                     .unwrap_or_default();
                 (*u, strings)
             })
@@ -131,6 +142,23 @@ impl Bm25 {
 }
 
 impl Bm25 {
+    /// Score an existing postings table instead of building one (1.10).
+    ///
+    /// The hook TX-P4 step 2 exists for: `find` spends its time building this index and nothing
+    /// about that work is query-dependent, so a corpus that has already been analysed should be
+    /// searchable without analysing it again. The `store` argument is not in SMYSL-2.4 §4.3.5's
+    /// signature and is not optional — [`Bm25View`](crate::Bm25View) has the argument.
+    ///
+    /// Scores are bit-identical to [`Bm25::index_with`] over the same corpus and analyzer. That
+    /// is a tested claim rather than an intention: see `tests/postings.rs`.
+    pub fn over<'p>(
+        postings: &'p dyn crate::Postings,
+        analyzer: &'p dyn crate::Analyze,
+        store: &'p Store,
+    ) -> crate::Bm25View<'p> {
+        crate::Bm25View::new(postings, analyzer, store)
+    }
+
     /// What each query term contributed to this unit's score (R22, 1.6).
     ///
     /// Exact rather than attributed: BM25 sums `idf(t) · value(t, d)` over the *distinct* terms of

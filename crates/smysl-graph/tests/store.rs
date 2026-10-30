@@ -14,7 +14,7 @@ use smysl_core::{
     KernelType, Op, Record, RelKind, Relation, Rung, SourceKind, SourceRef, Status, Thread,
     ThreadId, ThreadSchema, Uid, UnitCore, UnitCoreBuilder, View, ViewId,
 };
-use smysl_graph::{EdgeSet, Store, StoreOptions};
+use smysl_graph::{record_set_digest, EdgeSet, Store, StoreOptions};
 
 fn agent() -> AgentId {
     AgentId::new("human:vladimir").unwrap()
@@ -189,6 +189,26 @@ fn a_rebuilt_index_is_byte_identical_to_the_maintained_one() {
         "the two index paths disagree about size"
     );
     assert_eq!(maintained, rebuilt, "the two index paths disagree");
+}
+
+/// `smysl reindex` indexes the store it has just opened instead of absorbing the log a second
+/// time (TX-P13a step 2). That is only sound if a store fresh from its log already *is* the
+/// rebuild, so this pins it: the same bytes, and the same as a `from_records` load, whose
+/// hashing is now one encoding a record rather than three.
+#[test]
+fn a_store_fresh_from_its_log_indexes_as_its_rebuild() {
+    let path = tmp("fresh");
+    let mut written = Store::open(&path).unwrap();
+    written.append(&corpus()).unwrap();
+    let (mut opened, _) = Store::open_with(&path, StoreOptions::default()).unwrap();
+    let fresh = opened.index().to_bytes();
+    assert_eq!(fresh, opened.reindex().to_bytes());
+
+    let loaded = Store::from_records(corpus());
+    assert_eq!(loaded.log_len(), opened.log_len());
+    assert_eq!(loaded.log_hash(), opened.log_hash());
+    assert_eq!(loaded.record_set_digest(), opened.record_set_digest());
+    assert_eq!(fresh, loaded.index().to_bytes());
 }
 
 #[test]
@@ -394,6 +414,47 @@ fn an_attestation_delivered_before_its_unit_still_attaches() {
     assert_eq!(s.get(&uid).unwrap().attestations.len(), 1);
 }
 
+/// The attestation waits, visibly, until its unit arrives; then nothing waits (SMYSL-2.7 §4.3).
+#[test]
+fn an_early_attestation_is_pending_until_its_unit_arrives() {
+    let c = claim("a claim", vec![]);
+    let uid = canonical_uid(&c);
+    let a = Attestation::new(
+        uid,
+        agent(),
+        Op::Authored,
+        Rung::Document,
+        Hlc::new(1, 0, agent()),
+    );
+    let mut s = Store::new();
+    s.append(&[Record::Attestation(a.clone())]).unwrap();
+    assert_eq!(s.pending_attestations(), [a]);
+    s.append(&[Record::Unit(c)]).unwrap();
+    assert!(s.pending_attestations().is_empty());
+}
+
+/// `contains_record` answers by the hash `append` dedupes by, for every record the store holds
+/// and for none it does not; the free digest over the records equals the store's, whatever
+/// their order and however often one repeats.
+#[test]
+fn records_are_known_by_their_hash_and_digested_without_a_store() {
+    let records = corpus();
+    let s = Store::from_records(records.clone());
+    for r in &records {
+        assert!(s.contains_record(&Store::record_hash(r)), "{r:?}");
+    }
+    let absent = Record::Unit(claim("not in the store", vec![]));
+    assert!(!s.contains_record(&Store::record_hash(&absent)));
+
+    assert_eq!(record_set_digest(&records), s.record_set_digest());
+    let mut shuffled: Vec<Record> = records.iter().rev().cloned().collect();
+    shuffled.push(records[0].clone());
+    assert_eq!(record_set_digest(&shuffled), s.record_set_digest());
+    let mut more = records.clone();
+    more.push(absent);
+    assert_ne!(record_set_digest(&more), s.record_set_digest());
+}
+
 #[test]
 fn threads_are_keyed_by_id_and_owner_with_last_write_winning() {
     let c = claim("a claim", vec![]);
@@ -553,4 +614,50 @@ fn arrival_order_does_not_change_the_derived_graph() {
 fn the_index_is_byte_stable_across_repeated_derivation() {
     let s = Store::from_records(corpus());
     assert_eq!(s.index().to_bytes(), s.index().to_bytes());
+}
+
+/// `Store` is `Send + Sync`, and stays so with its derived state built lazily (TX-P13a step 3,
+/// SMYSL-2.8 §2.5). Nothing asserted it before; a pipeline holding one behind an `Arc` would
+/// have been the first to notice it stopping.
+#[test]
+fn a_store_is_send_and_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Store>();
+}
+
+/// An append invalidates the adjacency and the next read rebuilds it: the lazy path answers
+/// what the eager one did, including a retraction's `unfounded` set.
+#[test]
+fn a_lazy_rebuild_answers_as_an_eager_one() {
+    // The corpus plus a retraction, so `unfounded` is not empty.
+    let mut records = corpus();
+    let uids: Vec<_> = Store::from_records(corpus())
+        .units()
+        .map(|(u, _)| *u)
+        .collect();
+    records.push(Record::Relation(Relation::new(
+        RelKind::Retracts,
+        uids[0],
+        uids[1],
+    )));
+    let corpus = || records.clone();
+    let mut grown = Store::new();
+    for r in corpus() {
+        grown.append(&[r]).unwrap();
+        grown.prepare();
+    }
+    let mut lazy = Store::new();
+    for r in corpus() {
+        lazy.append(&[r]).unwrap();
+    }
+    let whole = Store::from_records(corpus());
+    for s in [&grown, &lazy] {
+        assert_eq!(s.state_hash(), whole.state_hash());
+        assert_eq!(s.index().to_bytes(), whole.index().to_bytes());
+        for (uid, _) in whole.units() {
+            assert_eq!(s.is_unfounded(uid), whole.is_unfounded(uid));
+            assert_eq!(s.rebuttals_of(uid), whole.rebuttals_of(uid));
+        }
+    }
+    assert!(whole.is_unfounded(&uids[1]), "the retraction is seen");
 }

@@ -1,0 +1,526 @@
+//! A library's shards (TX-P13c step 1, SMYSL-2.8 §3.6–§3.7 with SMYSL-2.4 §14.2).
+//!
+//! Each expression's units go to a log of their own and everything else stays in the catalog;
+//! the library still reads as the one store it always was. And a union of some of its shards
+//! says, for a reference into a shard it does not hold, which shard it waits on (`SMY-W500`).
+
+#![cfg(feature = "reader-txt")]
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use smysl_core::diag::{Code, Report};
+use smysl_core::ids::{AgentId, KernelType, LangTag, Tid};
+use smysl_core::types::epistemics::{SourceKind, SourceRef, Status};
+use smysl_core::types::provenance::Hlc;
+use smysl_core::types::unit::UnitCoreBuilder;
+use smysl_core::types::{Carry, Record};
+use smysl_core::{canonical_uid, to_cbor_seq, Attestation, RelKind, Relation};
+use smysl_graph::{Store, StoreRead, Union};
+use smysl_text::library::{AddSpec, Library, LAYOUT, LAYOUT_1, MARKER};
+use smysl_text::limits::Caps;
+use smysl_text::readers::Input;
+use smysl_text::shards;
+
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new(tag: &str) -> Scratch {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let p = std::env::temp_dir().join(format!(
+            "smysl-shards-{tag}-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).expect("a scratch directory");
+        Scratch(p)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn spec(alias: &str) -> AddSpec {
+    AddSpec::new("txt/1", alias, "CC0-1.0")
+        .with_lang(LangTag::new("en").expect("a tag"))
+        .with_carry(Carry::Text)
+}
+
+fn unit_from(tid: &Tid, locator: &str, gist: &str) -> smysl_core::UnitCore {
+    let source = SourceRef::new(SourceKind::Doc, format!("{}#{locator}", tid.canonical()));
+    UnitCoreBuilder::new(KernelType::Claim, gist, Status::Speculative)
+        .source(source)
+        .build()
+        .expect("a unit")
+}
+
+fn agent() -> AgentId {
+    AgentId::new("tool:shards").unwrap()
+}
+
+/// Two expressions, a unit from each, a `quotes` edge from one to the other, an attestation
+/// on each unit and one unit with no source at all.
+struct Fixture {
+    reply: smysl_core::UnitCore,
+    message: smysl_core::UnitCore,
+    loose: smysl_core::UnitCore,
+    quotes: Relation,
+}
+
+fn grow(lib: &mut Library) -> Fixture {
+    let a = lib
+        .add(
+            &Input::new(b"the reply quotes the message\n"),
+            &spec("chat/replies"),
+            &Caps::DEFAULT,
+        )
+        .expect("added");
+    let b = lib
+        .add(
+            &Input::new(b"the message being quoted\n"),
+            &spec("chat/messages"),
+            &Caps::DEFAULT,
+        )
+        .expect("added");
+    let reply = unit_from(&a.parts[0], "L1", "the reply");
+    let message = unit_from(&b.parts[0], "L1", "the message");
+    let loose = UnitCoreBuilder::new(KernelType::Claim, "from nowhere", Status::Speculative)
+        .build()
+        .unwrap();
+    let quotes = Relation::new(
+        RelKind::Extension("x.text/quotes".into()),
+        canonical_uid(&reply),
+        canonical_uid(&message),
+    );
+    let attest = |u: &smysl_core::UnitCore| {
+        Record::Attestation(Attestation::new(
+            canonical_uid(u),
+            agent(),
+            smysl_core::Op::Imported,
+            smysl_core::Rung::Computed,
+            Hlc::new(7, 0, agent()),
+        ))
+    };
+    lib.append_records(&[
+        Record::Unit(reply.clone()),
+        Record::Unit(message.clone()),
+        Record::Unit(loose.clone()),
+        Record::Relation(quotes.clone()),
+        attest(&reply),
+        attest(&message),
+    ])
+    .expect("appended");
+    Fixture {
+        reply,
+        message,
+        loose,
+        quotes,
+    }
+}
+
+fn read_log(root: &Path, shard: &str) -> Vec<Record> {
+    let bytes = std::fs::read(root.join(shards::log_path(shard))).unwrap_or_default();
+    smysl_core::from_cbor_seq(&bytes).expect("a log").0
+}
+
+#[test]
+fn each_expression_gets_its_units_and_the_catalog_keeps_the_rest() {
+    let dir = Scratch::new("route");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let f = grow(&mut lib);
+    assert_eq!(lib.shards(), ["catalog", "chat/messages", "chat/replies"]);
+    assert!(
+        dir.path().join("log/shards/chat~replies.cbor").is_file(),
+        "an alias's `/` is not a directory"
+    );
+
+    let replies = read_log(dir.path(), "chat/replies");
+    let messages = read_log(dir.path(), "chat/messages");
+    let catalog = read_log(dir.path(), "catalog");
+    let has_unit = |log: &[Record], u: &smysl_core::UnitCore| {
+        log.iter().any(|r| matches!(r, Record::Unit(x) if x == u))
+    };
+    assert!(has_unit(&replies, &f.reply));
+    assert!(has_unit(&messages, &f.message));
+    assert!(
+        has_unit(&catalog, &f.loose),
+        "a unit from no text stays in the catalog"
+    );
+    assert!(
+        replies
+            .iter()
+            .any(|r| matches!(r, Record::Relation(x) if x == &f.quotes)),
+        "a relation goes where its `from` is"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|r| matches!(r, Record::Attestation(a) if a.uid == canonical_uid(&f.message))),
+        "an attestation goes where its subject is"
+    );
+    assert!(
+        catalog.iter().all(|r| !matches!(r, Record::Attestation(_))),
+        "{catalog:?}"
+    );
+    assert_eq!(
+        catalog
+            .iter()
+            .filter(|r| matches!(r, Record::Manifest(_)))
+            .count(),
+        2,
+        "manifests stay in the catalog"
+    );
+
+    // The library is the one store it always was: the same as every log read together.
+    let together: Vec<Record> = lib
+        .shards()
+        .iter()
+        .flat_map(|s| read_log(dir.path(), s))
+        .collect();
+    let union = Store::from_records(together);
+    assert_eq!(lib.store().record_set_digest(), union.record_set_digest());
+    assert_eq!(lib.store().state_hash(), union.state_hash());
+
+    // And reopening reads it back exactly, routing nothing twice.
+    let digest = lib.store().record_set_digest();
+    let stamp = lib.stamp();
+    drop(lib);
+    let mut lib = Library::open(dir.path()).expect("reopened");
+    assert_eq!(lib.store().record_set_digest(), digest);
+    assert_eq!(lib.stamp(), stamp, "the stamp is a function of the logs");
+    let before = std::fs::read(dir.path().join(shards::log_path("chat/replies"))).unwrap();
+    lib.append_records(&[Record::Unit(f.reply.clone())])
+        .expect("a repeat appends nothing");
+    assert_eq!(
+        std::fs::read(dir.path().join(shards::log_path("chat/replies"))).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn a_union_of_some_shards_waits_on_the_others() {
+    let dir = Scratch::new("waits");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let f = grow(&mut lib);
+    drop(lib);
+
+    let open = |s: &str| Store::from_records(read_log(dir.path(), s));
+    let (catalog, replies, messages) =
+        (open("catalog"), open("chat/replies"), open("chat/messages"));
+    let index = Arc::new(shards::uid_index(dir.path()).expect("an index"));
+    assert_eq!(
+        index
+            .shards_of(&canonical_uid(&f.message))
+            .collect::<Vec<_>>(),
+        ["chat/messages"]
+    );
+
+    let dangling = |u: &dyn Fn(&mut Report)| {
+        let mut r = Report::new();
+        u(&mut r);
+        r.diagnostics
+            .iter()
+            .map(|d| (d.code, d.message.clone()))
+            .collect::<Vec<_>>()
+    };
+    let some = Union::new([
+        ("catalog".to_string(), &catalog),
+        ("chat/replies".to_string(), &replies),
+    ])
+    .with_index(index.clone());
+    let got = dangling(&|r| some.report_dangling(r));
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].0, Code::W500);
+    assert!(got[0].1.contains("chat/messages"), "{got:?}");
+
+    let all = Union::new([
+        ("catalog".to_string(), &catalog),
+        ("chat/replies".to_string(), &replies),
+        ("chat/messages".to_string(), &messages),
+    ])
+    .with_index(index);
+    assert!(dangling(&|r| all.report_dangling(r)).is_empty());
+    let lib = Library::open(dir.path()).expect("reopened");
+    assert_eq!(all.record_set_digest(), lib.store().record_set_digest());
+    assert_eq!(all.state_hash(), lib.store().state_hash());
+}
+
+#[test]
+fn a_layout_one_library_opens_and_becomes_layout_two_when_it_shards() {
+    let dir = Scratch::new("upgrade");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let added = lib
+        .add(&Input::new(b"one line\n"), &spec("notes"), &Caps::DEFAULT)
+        .expect("added");
+    drop(lib);
+    // What 1.10.0-dev wrote: one log, layout 1, every record in the catalog.
+    std::fs::write(dir.path().join(MARKER), format!("{LAYOUT_1}\n")).unwrap();
+    let unit = unit_from(&added.parts[0], "L1", "a claim");
+    let mut catalog = read_log(dir.path(), "catalog");
+    catalog.push(Record::Unit(unit.clone()));
+    std::fs::write(
+        dir.path().join(shards::log_path("catalog")),
+        to_cbor_seq(&catalog),
+    )
+    .unwrap();
+
+    let mut lib = Library::open(dir.path()).expect("a layout-1 library opens");
+    assert_eq!(lib.layout(), LAYOUT_1);
+    assert_eq!(lib.shards(), ["catalog"]);
+    assert!(lib.store().contains_uid(&canonical_uid(&unit)));
+    let stamp = lib.stamp();
+    let bytes = std::fs::read(dir.path().join(shards::log_path("catalog"))).unwrap();
+    assert_eq!(
+        stamp,
+        (bytes.len() as u64, smysl_core::hash_bytes(&bytes)),
+        "one shard stamps as its log, as the catalog stamped before shards"
+    );
+
+    // The first write that makes a shard raises the marker first.
+    lib.append_records(&[Record::Unit(unit_from(
+        &added.parts[0],
+        "L1",
+        "another claim",
+    ))])
+    .expect("appended");
+    assert_eq!(lib.layout(), LAYOUT);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(MARKER))
+            .unwrap()
+            .trim(),
+        LAYOUT
+    );
+    assert_eq!(lib.shards(), ["catalog", "notes"]);
+    assert_ne!(lib.stamp(), stamp);
+}
+
+#[test]
+fn a_torn_tail_in_a_shard_is_cut_before_the_next_write() {
+    let dir = Scratch::new("torn");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let f = grow(&mut lib);
+    drop(lib);
+    let path = dir.path().join(shards::log_path("chat/replies"));
+    let whole = std::fs::read(&path).unwrap();
+    // Half a record: what a writer killed mid-append leaves.
+    let mut torn = whole.clone();
+    let half = to_cbor_seq(&[Record::Unit(f.loose.clone())]);
+    torn.extend_from_slice(&half[..half.len() / 2]);
+    std::fs::write(&path, &torn).unwrap();
+
+    let mut lib = Library::open(dir.path()).expect("a torn tail does not fail an open");
+    assert!(lib.store().contains_uid(&canonical_uid(&f.reply)));
+    let next = unit_from(&tid_of(&lib, "chat/replies"), "L1", "a later reply");
+    lib.append_records(&[Record::Unit(next.clone())])
+        .expect("appended");
+    let after = std::fs::read(&path).unwrap();
+    assert!(after.starts_with(&whole));
+    let (records, consumed) = smysl_core::from_cbor_seq(&after).unwrap();
+    assert_eq!(consumed, after.len(), "the tail was cut, not written after");
+    assert!(records
+        .iter()
+        .any(|r| matches!(r, Record::Unit(x) if x == &next)));
+}
+
+/// A shard's uid list as it lies on disk: the log length it is stamped with, and its uids.
+fn uid_file(root: &Path, shard: &str) -> (u64, Vec<[u8; 32]>) {
+    let path = root
+        .join(shards::UIDS_DIR)
+        .join(format!("{}.uids", shards::stem(shard)));
+    let bytes = std::fs::read(path).expect("a uid list");
+    let rest = bytes
+        .strip_prefix(b"smysl/uids/1\n".as_slice())
+        .expect("the magic");
+    let (len, body) = rest.split_at(8);
+    (
+        u64::from_be_bytes(len.try_into().unwrap()),
+        body.chunks_exact(32)
+            .map(|c| c.try_into().unwrap())
+            .collect(),
+    )
+}
+
+/// TX-P13c step 2: an append grows a shard's uid list in place — the new uids after the old and
+/// the stamp moved on — and a batch with no unit for the shard still moves the stamp, so the
+/// list stays current; a list made stale behind the library's back is rewritten whole. The
+/// index a reopen reads from the lists is the one the appends built.
+#[test]
+fn an_append_grows_the_uid_list_in_place_and_keeps_it_current() {
+    let dir = Scratch::new("uids");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let fx = grow(&mut lib);
+    let shard = "chat/replies";
+    let log_len = |_: &Library| {
+        std::fs::metadata(dir.path().join(shards::log_path(shard)))
+            .unwrap()
+            .len()
+    };
+    let (stamp, before) = uid_file(dir.path(), shard);
+    assert_eq!(stamp, log_len(&lib));
+
+    let tid = tid_of(&lib, shard);
+    let more = unit_from(&tid, "L1", "one more from the reply");
+    lib.append_records(&[Record::Unit(more.clone())]).unwrap();
+    let (stamp, after) = uid_file(dir.path(), shard);
+    assert_eq!(stamp, log_len(&lib));
+    assert_eq!(after.len(), before.len() + 1);
+    assert_eq!(
+        &after[..before.len()],
+        &before[..],
+        "the old uids are not rewritten"
+    );
+    assert_eq!(after.last().unwrap(), canonical_uid(&more).as_bytes());
+
+    // A relation from the reply: the shard's log grows, its uids do not, and its list follows.
+    let backs = Relation::new(
+        RelKind::Backs,
+        canonical_uid(&more),
+        canonical_uid(&fx.reply),
+    );
+    lib.append_records(&[Record::Relation(backs)]).unwrap();
+    let (stamp, same) = uid_file(dir.path(), shard);
+    assert_eq!(
+        stamp,
+        log_len(&lib),
+        "a stale list after a relation-only batch"
+    );
+    assert_eq!(same, after);
+
+    // Stale behind its back: the next append rewrites it whole, and it is current again.
+    let path = dir
+        .path()
+        .join(shards::UIDS_DIR)
+        .join(format!("{}.uids", shards::stem(shard)));
+    std::fs::write(&path, b"smysl/uids/1\n\0\0\0\0\0\0\0\x01").unwrap();
+    let last = unit_from(&tid, "L1", "and the last");
+    lib.append_records(&[Record::Unit(last)]).unwrap();
+    let (stamp, whole) = uid_file(dir.path(), shard);
+    assert_eq!(stamp, log_len(&lib));
+    assert_eq!(whole.len(), after.len() + 1);
+
+    let reopened = Library::open(dir.path()).expect("reopened");
+    assert_eq!(reopened.uid_shards(), lib.uid_shards());
+    assert_eq!(&shards::uid_index(dir.path()).unwrap(), lib.uid_shards());
+}
+
+fn tid_of(lib: &Library, alias: &str) -> Tid {
+    let mid = lib.store().heads(alias)[0];
+    lib.store().manifest(&mid).unwrap().parts[0].tid
+}
+
+/// TX-P13d: a shard made primary — its records into the library's unit store, its log set aside
+/// — is the same shard: the library reopens to the same store, an append to it goes into the
+/// unit store and no log comes back, the store and its export agree, and made an index-mode shard
+/// again it has a log holding everything it was given, appends included.
+#[cfg(feature = "store-redb")]
+#[test]
+fn a_primary_shard_is_the_shard_it_was_and_goes_back_to_a_log() {
+    let dir = Scratch::new("primary");
+    let mut lib = Library::create(dir.path()).expect("created");
+    let fx = grow(&mut lib);
+    let shard = "chat/replies";
+    let before = lib.store().record_set_digest();
+    let log = dir.path().join(shards::log_path(shard));
+    let was = std::fs::read(&log).unwrap();
+
+    let digest = lib.migrate_primary(shard).expect("made primary");
+    assert!(shards::is_primary(dir.path(), shard));
+    assert!(!log.exists(), "the log is set aside");
+    assert_eq!(
+        std::fs::read(dir.path().join(shards::set_aside(shard))).unwrap(),
+        was,
+        "set aside as it was"
+    );
+    assert_eq!(lib.primary_shards(), [shard]);
+    assert_eq!(lib.primary_digest(shard).unwrap(), digest);
+    // Again is nothing new.
+    assert_eq!(lib.migrate_primary(shard).unwrap(), digest);
+
+    let reopened = Library::open(dir.path()).expect("reopened");
+    assert_eq!(reopened.store().record_set_digest(), before);
+    assert_eq!(reopened.shards(), lib.shards());
+    drop(reopened);
+
+    // An append routed to the primary shard goes into the store.
+    let tid = tid_of(&lib, shard);
+    let more = unit_from(&tid, "L1", "another from the reply");
+    let backs = Relation::new(
+        RelKind::Backs,
+        canonical_uid(&more),
+        canonical_uid(&fx.reply),
+    );
+    lib.append_records(&[Record::Unit(more.clone()), Record::Relation(backs)])
+        .expect("appended");
+    assert!(!log.exists(), "an append to a primary shard wrote no log");
+    let grown = lib.store().record_set_digest();
+    let reopened = Library::open(dir.path()).expect("reopened");
+    assert_eq!(reopened.store().record_set_digest(), grown);
+    assert!(reopened.store().contains_uid(&canonical_uid(&more)));
+    assert_eq!(reopened.uid_shards(), lib.uid_shards());
+    drop(reopened);
+    assert!(lib.primary_digest(shard).is_ok());
+
+    // And back: a log again, holding what the shard was given, appends included.
+    lib.migrate_index(shard).expect("an index shard again");
+    assert!(!shards::is_primary(dir.path(), shard));
+    let records = read_log(dir.path(), shard);
+    assert!(records.contains(&Record::Unit(more.clone())));
+    assert!(records.contains(&Record::Unit(fx.reply.clone())));
+    let reopened = Library::open(dir.path()).expect("reopened");
+    assert_eq!(reopened.store().record_set_digest(), grown);
+}
+
+/// A migration a crash interrupted is finished or undone by the next open, whichever loses
+/// nothing: a shard the store holds with no marker goes back to its log; a marked shard whose log
+/// is still there has it set aside; a marked shard the store no longer holds loses its marker.
+#[cfg(feature = "store-redb")]
+#[test]
+fn an_interrupted_migration_is_settled_at_the_next_open() {
+    let dir = Scratch::new("settle");
+    let mut lib = Library::create(dir.path()).expect("created");
+    grow(&mut lib);
+    let shard = "chat/messages";
+    let digest = lib.store().record_set_digest();
+    let log = dir.path().join(shards::log_path(shard));
+    let marker = dir.path().join(shards::primary_marker(shard));
+    let aside = dir.path().join(shards::set_aside(shard));
+
+    // The store holds it, and the crash came before the marker: back to index mode.
+    lib.migrate_primary(shard).expect("made primary");
+    drop(lib);
+    std::fs::remove_file(&marker).unwrap();
+    std::fs::rename(&aside, &log).unwrap();
+    let lib = Library::open(dir.path()).expect("opened");
+    assert!(lib.primary_shards().is_empty(), "not finished, so undone");
+    assert_eq!(lib.store().record_set_digest(), digest);
+    drop(lib);
+    let mut lib = Library::open(dir.path()).expect("opened again");
+    // And it can be made primary again from there.
+    lib.migrate_primary(shard).expect("made primary again");
+    drop(lib);
+
+    // Marked, and the crash came before the log was set aside: set aside now.
+    std::fs::rename(&aside, &log).unwrap();
+    let mut lib = Library::open(dir.path()).expect("opened");
+    assert_eq!(lib.primary_shards(), [shard]);
+    assert!(!log.exists() && aside.is_file(), "the log is set aside");
+    assert_eq!(lib.store().record_set_digest(), digest);
+
+    // Going back, and the crash came before the marker went: the marker goes.
+    lib.migrate_index(shard).expect("index again");
+    drop(lib);
+    std::fs::write(&marker, b"smysl/primary/1\n").unwrap();
+    let lib = Library::open(dir.path()).expect("opened");
+    assert!(lib.primary_shards().is_empty());
+    assert!(!marker.exists());
+    assert_eq!(lib.store().record_set_digest(), digest);
+}

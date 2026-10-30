@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::{quantise, Uid};
 
 use crate::adjacency::{EdgeSet, NodeId};
-use crate::store::Store;
+use crate::store::StoreRead;
 
 /// Damping factor. Fixed rather than configurable: it is hash input for every pack.
 pub const DAMPING: f64 = 0.85;
@@ -226,7 +226,7 @@ impl SalienceReport {
 }
 
 /// Compute salience (§16.4).
-pub fn salience(store: &Store, req: &SalienceRequest) -> SalienceReport {
+pub fn salience(store: &(impl StoreRead + ?Sized), req: &SalienceRequest) -> SalienceReport {
     let g = store.adjacency();
     let n = g.len();
     let mut out = SalienceReport::default();
@@ -287,7 +287,7 @@ pub fn salience(store: &Store, req: &SalienceRequest) -> SalienceReport {
 /// Personalised PageRank over the support graph (§16.4).
 ///
 /// Returns a value per dense id, normalised so the highest is 1.0.
-fn personalised_pagerank(store: &Store, seed: &[NodeId]) -> Vec<f64> {
+fn personalised_pagerank(store: &(impl StoreRead + ?Sized), seed: &[NodeId]) -> Vec<f64> {
     let g = store.adjacency();
     let n = g.len();
     let kinds = EdgeSet::support_rank();
@@ -345,7 +345,7 @@ fn personalised_pagerank(store: &Store, seed: &[NodeId]) -> Vec<f64> {
 /// would let one agent corroborate itself. Groups that share ancestry are collapsed for
 /// the same reason: two agents that both worked from the same parent agree because they
 /// read the same thing, not because they checked.
-fn corroboration(store: &Store, uid: &Uid) -> (f32, Vec<String>, Vec<String>) {
+fn corroboration(store: &(impl StoreRead + ?Sized), uid: &Uid) -> (f32, Vec<String>, Vec<String>) {
     let Some(unit) = store.get(uid) else {
         return (0.0, Vec::new(), Vec::new());
     };
@@ -383,7 +383,7 @@ fn corroboration(store: &Store, uid: &Uid) -> (f32, Vec<String>, Vec<String>) {
 }
 
 /// The seed set for a store with no active thread: every root of every view (§16.4).
-pub fn view_roots(store: &Store) -> BTreeSet<Uid> {
+pub fn view_roots(store: &(impl StoreRead + ?Sized)) -> BTreeSet<Uid> {
     store
         .views()
         .flat_map(|v| v.roots.iter().copied())
@@ -393,6 +393,7 @@ pub fn view_roots(store: &Store) -> BTreeSet<Uid> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::Store;
     use smysl_core::{
         canonical_uid, AgentId, Attestation, Hlc, KernelType, Op, Record, RelKind, Relation, Rung,
         SourceKind, SourceRef, Status, Unit, UnitCore, UnitCoreBuilder,
@@ -440,7 +441,7 @@ mod tests {
         )
     }
 
-    fn plain(store: &Store) -> SalienceReport {
+    fn plain(store: &(impl StoreRead + ?Sized)) -> SalienceReport {
         salience(store, &SalienceRequest::default())
     }
 
@@ -477,7 +478,7 @@ mod tests {
 
     /// A second, deliberately naive implementation of §16.4's pseudocode. Written to be
     /// obviously correct rather than efficient, so a disagreement points at the fast path.
-    fn reference_pagerank(store: &Store, seed: &[Uid]) -> BTreeMap<Uid, f64> {
+    fn reference_pagerank(store: &(impl StoreRead + ?Sized), seed: &[Uid]) -> BTreeMap<Uid, f64> {
         let g = store.adjacency();
         let n = g.len();
         let ids: Vec<NodeId> = (0..n as NodeId).collect();

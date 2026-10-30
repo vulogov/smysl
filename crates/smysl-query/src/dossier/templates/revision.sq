@@ -1,0 +1,4 @@
+about entity($subject)
+expand <-supersedes only
+order by salience descending
+limit 12

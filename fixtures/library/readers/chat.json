@@ -1,0 +1,24 @@
+{
+  "name": "A short exchange",
+  "messages": [
+    {
+      "id": 1,
+      "from": "Ada",
+      "date": "2026-01-02T09:14:00Z",
+      "text": "The reader is the thing the identities are derived from."
+    },
+    {
+      "id": 2,
+      "from": "Bea",
+      "date": "2026-01-02T09:15:12Z",
+      "text": "So a silent change in one is a silent change in every tid taken with it."
+    },
+    {
+      "id": 3,
+      "from": "Ada",
+      "date": "2026-01-02T09:16:40Z",
+      "text": "Which is why the parsers are pinned.",
+      "edited": false
+    }
+  ]
+}

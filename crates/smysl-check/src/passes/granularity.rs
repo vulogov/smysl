@@ -11,10 +11,14 @@
 //! guess is worse than no error at all.
 
 use smysl_core::diag::{Code, Diagnostic, Report};
-use smysl_core::{tokens, Admission, GranularityProfile, Uid, UnitCore};
-use smysl_graph::Store;
+use smysl_core::{Admission, GranularityProfile, Uid, UnitCore};
+use smysl_graph::StoreRead;
 
-pub fn run(store: &Store, granularity: &GranularityProfile, report: &mut Report) {
+pub fn run(
+    store: &(impl StoreRead + ?Sized),
+    granularity: &GranularityProfile,
+    report: &mut Report,
+) {
     for (uid, unit) in store.units() {
         check_unit(uid, &unit.core, granularity, report);
     }
@@ -46,8 +50,12 @@ pub fn check_unit(
         }
     }
 
-    // `SMY-W041` - outside the profile's body range.
-    let n = tokens(body);
+    // `SMY-W041` - outside the profile's body range, counted with the profile's estimator
+    // (F-2). An unknown estimator is reported once per unit by the shape pass, so this pass
+    // stays silent rather than repeating it.
+    let Some(n) = granularity.tokens(body) else {
+        return;
+    };
     if !granularity.body_in_range(n) {
         let direction = if n < granularity.l1_min {
             "under"
@@ -93,6 +101,7 @@ fn list_items(body: &str) -> usize {
 mod tests {
     use super::*;
     use smysl_core::{canonical_uid, KernelType, Record, Status, UnitCoreBuilder};
+    use smysl_graph::Store;
 
     fn check(body: &str, g: &GranularityProfile) -> Report {
         let core = UnitCoreBuilder::new(KernelType::Claim, "a claim", Status::Speculative)

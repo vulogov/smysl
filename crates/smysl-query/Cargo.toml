@@ -1,0 +1,76 @@
+[package]
+name        = "smysl-query"
+description = "smysl query language sq/1: lexer, parser, AST, canonical printer and planner"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+# docs.rs builds with default features unless told otherwise, which for this crate meant
+# publishing a partial API: the feature-gated modules simply were not there. Set on every
+# published crate rather than only the five with features today, so a crate that gains one
+# later does not silently reintroduce the gap.
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+
+[dependencies]
+# For `Span`, `Code`, `Diagnostic` and `Report`. The grammar's errors are the tree's errors:
+# SMYSL-2.9 §2 gives four reasons for matching `smysl-core`'s `surface/` idiom, and a shared
+# diagnostic type is the one a caller sees.
+smysl-core = { workspace = true }
+# QG-5 keeps a string literal's bytes exactly as written, which creates the one hazard worth a
+# diagnostic: a quote that is not in NFC looks right on screen and matches nothing. `SMY-W510`
+# needs a quick-check scan to say so. `smysl-core` already carries this crate, so the pure
+# dependency tree does not grow by adding it here.
+unicode-normalization = { workspace = true }
+# TX-P6 step 2. The planner's phase 3 resolves `from` against a store and phase 4 partitions
+# by its catalog, so the `Scope` port needs a backend to have one implementation that is not a
+# test double. `smysl-graph` is itself a pure crate, so the pure tree does not grow a runtime
+# — what grows is this crate's job, from a grammar to a grammar and a planner, which is what
+# SMYSL-2.5 §4.1 always had it doing.
+smysl-graph = { workspace = true }
+# TX-P6 step 3. The lexical source scores through `Bm25::over` on a `Subset` view of one
+# postings table — SMYSL-2.5 §3.4's per-partition IDF without the per-partition index it
+# originally asked for. `smysl-retrieve` is a pure crate, so the pure tree does not grow a
+# runtime, and §4.5 has listed it among this crate's dependencies since draft 1.
+smysl-retrieve = { workspace = true }
+# TX-P6 step 4. `pack N tokens` is SMYSL-2.5 §3.3's row, and the function it names is
+# `smysl_pack::pack` — the same packer the CLI `pack` command uses, so a query and a command
+# cannot disagree about a budget. `smysl-pack` is a pure crate, like the other three.
+smysl-pack = { workspace = true }
+
+# The grammar goldens (SMYSL-2.9 §5). The fixture tree is language-free, like
+# `fixtures/conformance/`, because three more implementations of this grammar are coming and
+# they validate against the same artifacts.
+[[test]]
+name = "grammar"
+
+# The planner goldens (TX-P6 step 2; SMYSL-2.5 §3.2). Kept apart from `grammar` because they
+# are a different kind of expectation: a grammar golden is language-free and three more
+# implementations will validate against it, while a plan snapshot is this planner's record of
+# what four phases decided over a store.
+[[test]]
+name = "planner"
+
+# The stage goldens (TX-P6 step 4; SMYSL-2.5 §3.3). A third test target rather than more cases
+# in `planner`, because this one asserts a different kind of thing: not what a plan recorded
+# but what running it answered, and over a shuffled log as well as a sorted one.
+[[test]]
+name = "stages"
+
+# The supersession pass (TX-P6 step 5; SMYSL-2.5 §3.2). Its own target because its fixture is
+# its own: `fixtures/corpus` holds no supersession at all, so the pass had nothing to act on
+# there and `fixtures/sq/plans/supersession.smy` is the store that gives it something.
+[[test]]
+name = "supersession"
+
+# Saved queries and reruns (TX-P8 step 1; SMYSL-2.5 §3.6, §5.4). Its own target because its
+# assertion is about a store that *changes* between two runs of one query — append data, rerun
+# pinned — and about what the save left untouched, which is every result's salience.
+[[test]]
+name = "saved"

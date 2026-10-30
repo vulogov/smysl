@@ -1,0 +1,38 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: None,
+            filters: [],
+            times: [
+                TimeStage {
+                    axis: Said,
+                    op: During,
+                    value: Range(
+                        "2026-09-01",
+                        "2026-09-15",
+                    ),
+                },
+                TimeStage {
+                    axis: Observed,
+                    op: Before,
+                    value: At(
+                        "2026-10-01",
+                    ),
+                },
+            ],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: None,
+}

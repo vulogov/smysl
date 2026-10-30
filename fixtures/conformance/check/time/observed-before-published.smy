@@ -1,0 +1,4 @@
+@doc smysl/0.1 { id: v/observed-before-published }
+
+@claim c/early { status: cited, source: { kind: doc, ref: "a book", observed: 0, published: "1984" } }
+~ A reading taken before the book it came from was published.

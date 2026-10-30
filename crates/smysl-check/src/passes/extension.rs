@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 
 use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{Fidelity, RelKind, SchemaId};
-use smysl_graph::Store;
+use smysl_graph::{HotKind, StoreRead};
 
 /// What a consumer implements, for `check --as` (§23.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,9 +66,13 @@ pub struct FidelityReport {
     pub missing: BTreeSet<SchemaId>,
 }
 
-pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report) {
+pub fn run(
+    store: &(impl StoreRead + ?Sized),
+    profile: Option<&ConsumerProfile>,
+    report: &mut Report,
+) {
     // `SMY-E012` - an extension that redefines a kernel type or relation kind.
-    for r in store.iter() {
+    for r in store.hot_records(HotKind::SchemaDecls) {
         if let smysl_core::Record::SchemaDecl(d) = r {
             if d.redefines_kernel() {
                 report.push(Diagnostic::new(Code::E012).with_message(format!(
@@ -98,13 +102,99 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
     // record was preserved in perfect silence: a reader was never told the store held
     // something it could not interpret. Preservation is rule X working; saying nothing
     // about it is how a reader comes to believe they have seen the whole document.
-    for r in store.iter() {
+    for r in store.hot_records(HotKind::Unknown) {
         if let smysl_core::Record::Unknown { code, payload } = r {
             report.push(Diagnostic::new(Code::W014).with_message(format!(
                 "record type {code} is not known to this build; \
                  {} byte(s) preserved verbatim, skipped semantically",
                 payload.len()
             )));
+        }
+    }
+
+    // `SMY-W432` - a payload key named `lang`, which is now unit core key 9 spelled unquoted.
+    //
+    // The lint was the migration, and the migration has happened: FC-1 activated in TX-P5 step 1,
+    // so a bare `lang:` on a unit *is* the core key and a payload key of that name can only
+    // arrive quoted or from CBOR. What the warning says has therefore changed from "this will
+    // move" to "you have the core key's name in your payload" — the field exists now, and a unit
+    // carrying the language in two hashed places is a unit whose language nothing can agree on.
+    // The code stays rather than being retired: a store written before this release still holds
+    // such units, and the advice is still the advice.
+    for r in store.records() {
+        if let smysl_core::Record::Unit(u) = &*r {
+            if let Some(bytes) = &u.payload {
+                if let Ok(o) = smysl_core::surface::payload_to_object(bytes) {
+                    if o.iter().any(|(k, _)| k.value == "lang") {
+                        report.push(Diagnostic::new(Code::W432).with_message(
+                            "a payload key named `lang` is unit core key 9 spelled unquoted \
+                             (1.10): the language belongs in the core key, and `\"lang\":` is \
+                             how a payload key of that name is written",
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // `SMY-W409` - an enumeration *code* this build does not know, which is W014's argument
+    // one level down. 1.9 opened four enumerations so that an unrecognised code no longer
+    // fails the decode, and 1.10 opened the fifth, `admission`; preserving it silently would
+    // repeat the mistake W014 was added to fix, where a reader is given a document it cannot
+    // fully interpret and told nothing.
+    //
+    // The code is reported, not the value: `Unknown` is what the build calls it, and the raw
+    // byte is the only thing that identifies which future kind was meant.
+    for r in store.records() {
+        match &*r {
+            smysl_core::Record::Unit(u) => {
+                if let Some(s) = u.source.as_ref() {
+                    if s.kind == smysl_core::SourceKind::Unknown {
+                        report.push(Diagnostic::new(Code::W409).with_message(format!(
+                            "source kind {} is not known to this build; \
+                             preserved verbatim, treated as unknown",
+                            s.kind_code()
+                        )));
+                    }
+                }
+            }
+            smysl_core::Record::Thread(th) => {
+                if th.schema == smysl_core::ThreadSchema::Unknown {
+                    report.push(Diagnostic::new(Code::W409).with_message(format!(
+                        "thread schema {} is not known to this build; \
+                         preserved verbatim, and the thread defines no roles",
+                        th.schema_code()
+                    )));
+                }
+                for st in &th.steps {
+                    if st.role == smysl_core::Role::Unknown {
+                        report.push(Diagnostic::new(Code::W409).with_message(format!(
+                            "step role {} is not known to this build; \
+                             preserved verbatim, treated as unknown",
+                            st.role_code()
+                        )));
+                    }
+                }
+            }
+            smysl_core::Record::View(v)
+                if v.granularity.admission == smysl_core::Admission::Unknown =>
+            {
+                report.push(Diagnostic::new(Code::W409).with_message(format!(
+                    "admission {} is not known to this build; preserved verbatim, and the \
+                     single-assertion check does not run for this profile",
+                    v.granularity.admission_code()
+                )));
+            }
+            smysl_core::Record::Contention(c)
+                if c.detected.kind == smysl_core::DetectionKind::Unknown =>
+            {
+                report.push(Diagnostic::new(Code::W409).with_message(format!(
+                    "detection kind {} is not known to this build; \
+                     preserved verbatim, reported as a plain disagreement",
+                    c.detected.kind_code()
+                )));
+            }
+            _ => {}
         }
     }
 
@@ -135,15 +225,15 @@ pub fn run(store: &Store, profile: Option<&ConsumerProfile>, report: &mut Report
 }
 
 /// Whether a `SchemaDecl` in this store declares the kind.
-fn declared(store: &Store, kind: &RelKind) -> bool {
-    store.iter().any(|r| match r {
+fn declared(store: &(impl StoreRead + ?Sized), kind: &RelKind) -> bool {
+    store.hot_records(HotKind::SchemaDecls).any(|r| match r {
         smysl_core::Record::SchemaDecl(d) => d.relations.contains(kind),
         _ => false,
     })
 }
 
 /// What `check --as` reports (§23.1).
-pub fn fidelity(store: &Store, profile: &ConsumerProfile) -> FidelityReport {
+pub fn fidelity(store: &(impl StoreRead + ?Sized), profile: &ConsumerProfile) -> FidelityReport {
     let mut degraded = Vec::new();
     for (uid, unit) in store.units() {
         if !profile.understands(&unit.core.schema) {
@@ -191,6 +281,7 @@ mod tests {
         canonical_uid, KernelType, Record, Relation, SchemaDecl, Status, Uid, UnitCoreBuilder,
         View, ViewId,
     };
+    use smysl_graph::Store;
 
     fn ext(id: &str) -> SchemaId {
         SchemaId::parse(id).unwrap()
@@ -366,6 +457,63 @@ mod tests {
         );
         assert_eq!(r.count(Code::W013), 1);
         assert!(r.is_clean());
+    }
+
+    /// The declaration `x.text/v1` ships as a record (A-11, TX-P5 step 2), against the pass that
+    /// makes shipping it necessary.
+    ///
+    /// Ten relation kinds were in use across three crates before the declaration existed, and
+    /// every store that held one of them warned `SMY-W013` on every check — the warning was
+    /// correct and unactionable, because there was nothing to declare them with. This is the
+    /// half of "registered" that a registry alone does not buy.
+    #[test]
+    fn the_standard_text_schema_declares_every_kind_it_names() {
+        use smysl_core::schemas::text;
+
+        let a = UnitCoreBuilder::new(KernelType::Claim, "a", Status::Speculative)
+            .build()
+            .unwrap();
+        let b = UnitCoreBuilder::new(KernelType::Claim, "b", Status::Speculative)
+            .build()
+            .unwrap();
+        let (ua, ub) = (canonical_uid(&a), canonical_uid(&b));
+
+        let edges: Vec<Record> = text::RELATIONS
+            .iter()
+            .map(|k| {
+                Record::Relation(Relation::new(
+                    RelKind::parse(k).expect("a well-formed kind"),
+                    ua,
+                    ub,
+                ))
+            })
+            .collect();
+
+        let mut without = vec![Record::Unit(a.clone()), Record::Unit(b.clone())];
+        without.extend(edges.clone());
+        assert_eq!(
+            check(without, None).count(Code::W013),
+            text::RELATIONS.len(),
+            "every kind should warn while nothing declares it"
+        );
+
+        let mut with = vec![
+            Record::SchemaDecl(text::decl()),
+            Record::Unit(a),
+            Record::Unit(b),
+        ];
+        with.extend(edges);
+        let r = check(with, None);
+        assert_eq!(
+            r.count(Code::W013),
+            0,
+            "the declaration did not cover a kind"
+        );
+        assert_eq!(
+            r.count(Code::E012),
+            0,
+            "registered is not kernel, and must not claim to be"
+        );
     }
 
     #[test]

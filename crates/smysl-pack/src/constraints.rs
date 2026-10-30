@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{Contention, Lod, RelKind, Uid};
-use smysl_graph::{EdgeSet, Store};
+use smysl_graph::{EdgeSet, StoreRead};
 
 /// A selection: which units are in, and at what level.
 pub type Selection = BTreeMap<Uid, Lod>;
@@ -103,7 +103,7 @@ pub struct Constraints {
 ///
 /// Returns every violation, not the first: a solver that fixed one at a time would loop.
 pub fn violations(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     selection: &Selection,
     used: u64,
     c: &Constraints,
@@ -111,7 +111,7 @@ pub fn violations(
     let mut out = Vec::new();
     // Open as the store reads it: a resolution, or a rebuttal no longer live, releases the
     // positions even where the contention's own record still says open (1.4).
-    let contentions: Vec<&Contention> = store.open_contentions().collect();
+    let contentions: Vec<&Contention> = store.open_contentions();
 
     for (uid, level) in selection {
         let Some(unit) = store.get(uid) else { continue };
@@ -211,7 +211,7 @@ pub fn violations(
 }
 
 /// The warrants a unit declares: the targets of its `warrant` edges (§3.2).
-pub fn warrants_of(store: &Store, uid: &Uid) -> Vec<Uid> {
+pub fn warrants_of(store: &(impl StoreRead + ?Sized), uid: &Uid) -> Vec<Uid> {
     store
         .relations_of_kind(&RelKind::Warrant)
         .into_iter()
@@ -228,6 +228,7 @@ mod tests {
         canonical_uid, ContentionId, Detected, DetectionKind, Hlc, KernelType, Record, Relation,
         SourceKind, SourceRef, Status, UnitCore, UnitCoreBuilder,
     };
+    use smysl_graph::Store;
 
     fn evidence(gist: &str) -> UnitCore {
         UnitCoreBuilder::new(KernelType::Evidence, gist, Status::Measured)

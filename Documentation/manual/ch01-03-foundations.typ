@@ -140,7 +140,7 @@ classification, and each subcommand's own `--help` repeats it under
     ([Command], [Purity]),
     ([`fmt`], [pure]),
     ([`check`], [pure]),
-    ([`pack`], [pure]),
+    ([`pack`], [mixed — pure unless `--query` is ranked with `--engine semantic` or `hybrid`]),
     ([`merge`], [pure]),
     ([`diff`], [pure]),
     ([`trace`], [pure]),
@@ -148,8 +148,12 @@ classification, and each subcommand's own `--help` repeats it under
     ([`bundle`], [pure]),
     ([`thread`], [mixed — pure today; reserved for `--refine`, not yet wired]),
     ([`salience`], [pure]),
-    ([`find`], [pure]),
+    ([`find`], [mixed — pure unless `--engine semantic` or `hybrid`]),
     ([`retract`], [pure]),
+    ([`withdraw`], [pure]),
+    ([`resolve`], [pure]),
+    ([`review`], [pure]),
+    ([`commit`], [pure]),
     ([`render`], [pure]),
     ([`import`], [pure]),
     ([`relink`], [pure]),
@@ -160,6 +164,8 @@ classification, and each subcommand's own `--help` repeats it under
     ([`usage`], [pure]),
     ([`reindex`], [pure]),
     ([`ui`], [pure — needs a terminal, and `--features tui`, which is not on by default]),
+    ([`text`], [pure]),
+    ([`date`], [pure]),
   ),
 )
 
@@ -168,7 +174,7 @@ This is not a marketing claim; it is a tested one. The project's CI runs
 (reordered records, rebuilt indices, repeated runs) specifically to catch any
 pure command that has quietly stopped being a function of its bytes.
 
-Operationally, the split means: run the fifteen commands that cannot reach a
+Operationally, the split means: run the twenty-three commands that cannot reach a
 model as often as you like, in a pre-commit hook, in a CI matrix, on a laptop
 with no network — the answer is always the same answer, and there is no bill
 for asking twice. The two model commands are different in kind, not degree:
@@ -282,7 +288,7 @@ From the repository root:
 
 #screen(caption: "$ cargo build")[
 ```
-   Compiling smysl v1.9.0 (/path/to/smysl)
+   Compiling smysl v1.11.0 (/path/to/smysl)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.37s
 ```
 ]
@@ -379,8 +385,8 @@ it builds to what the enabled features permit. That's the mechanism Chapter
     ([Flag], [Why it exists], [Matters most in]),
     ([`-s, --store PATH`], [Names the input store; `-` reads stdin. Interchangeable with a trailing positional on most subcommands.], [Every chapter]),
     ([`-o, --output PATH`], [Where to write the result; defaults to stdout so commands compose in a pipeline. Honoured by every command that emits one artifact; the three that print a *report* rather than an artifact — `view`, `salience`, `retract` — say so and point you at shell redirection instead of accepting a flag they will not act on.], [Ch. 11–18, 22]),
-    ([`--format surface|cbor`], [Chooses the *shape* of output — human-readable surface text or the binary CBOR log. Defaults to `cbor` when stdout isn't a terminal, so a script gets bytes and a person at a keyboard gets text. On `merge` it also counts what the surface form leaves behind and says so: contentions and attestations have no surface spelling, and a second name for a unit the grammar has already named has nowhere to go. A record that *is* rendered is not counted, which is the whole value of the number.], [Ch. 4–5]),
-    ([`-C, --config FILE`], [Points at a configuration file — provider credentials, defaults — instead of environment variables or flags on every call.], [Ch. 9–10]),
+    ([`--format surface|cbor|pack`], [Chooses the *shape* of output — human-readable surface text or the binary CBOR log. Defaults to `cbor` when stdout isn't a terminal, so a script gets bytes and a person at a keyboard gets text, except on `fmt` and `thread`, which write text either way. Five commands write both forms: `fmt`, `merge`, `pack`, `bundle` and `thread`. `import`, `relink` and `compact` write a store log, which has no surface spelling, and refuse `--format surface`. Every other command refuses `--format` outright: a report, a store updated in place and a rendered artifact are not documents, and `--json` is the flag for parsing a report. From 1.9 that refusal is a usage error rather than silence — twenty-three commands used to accept the flag and write whatever they were going to. `pack` is `lib export`'s alone, a lossy selection no other command writes, and every other command refuses it (from TX-P11 step 5). On `merge` and `bundle` the surface form also counts what it leaves behind and says so: contentions and attestations have no surface spelling, and a second name for a unit the grammar has already named has nowhere to go. A record that *is* rendered is not counted, which is the whole value of the number.], [Ch. 4–5]),
+    ([`-C, --config FILE`], [Points at a configuration file — provider credentials, defaults — instead of environment variables or flags on every call. It must exist, and relative paths inside it resolve beside it.], [Ch. 9–10]),
     ([`--strict`], [Promotes warning-severity diagnostics to the failure threshold, so a CI gate can refuse anything the tool merely frowns at. Honoured wherever a command has a warning to promote — `check`, `merge`, `pack`, `thread`, `fmt`, `render`. `bundle` produces no diagnostics, so there is nothing there for it to do.], [Ch. 6, 19]),
     ([`--offline`], [Hard-fails rather than letting any byte leave the machine — the enforcement half of the trust model, not just a warning.], [Ch. 7–10]),
     ([`--json`], [Machine-readable output instead of formatted text, for a caller that parses rather than reads. Honoured by every command that reports something: `check`, `diff`, `trace`, `salience`, `view`, `retract`. `retract --json` also carries `authorised` and `refusal`, which the text form prints on stderr where a machine reading stdout would never see them.], [Ch. 6, 19]),
@@ -388,7 +394,9 @@ it builds to what the enabled features permit. That's the mechanism Chapter
     ([`-v, --verbose`], [Increases verbosity; repeatable (`-vv`, `-vvv`) for progressively more diagnostic detail.], [Debugging any command]),
     ([`--no-color`], [Disables ANSI colour, for logs and terminals that don't want it.], [Scripted use]),
     ([`--noprogress`], [Disables progress bars unconditionally, whatever the terminal thinks it can render.], [Large stores, CI logs]),
-    ([`--seed-check`], [Asserts this exact invocation is bit-reproducible — the command-line hook onto rule D, the same determinism `cargo xtask determinism` checks in CI.], [Ch. 21]),
+    ([`--backend`], [Which store a CBOR log goes through: `memory`, the default, reads it whole; `redb` reads it through the unit store beside it, `.smysl/store/<name>.redb`, built on first use (`SMY-W501`), and writes through the store's writer, which holds `.smysl/store/<name>.lock` for the one append and refuses a second writer with `SMY-E445`. A library root is read through one unit store for all its shards, `index/units.redb` (since 1.10; `--shard` opens it for the shards named). Surface text and stdin are read into memory either way. Needs a build with `--features store-redb`; one without it refuses the flag by name. Since 1.10.], [Stores past a few hundred thousand units]),
+    ([`--shard`], [On a library, reads only the named shards — one per expression, plus the catalogue — as one store; repeatable, `all` for every one. Each shard goes through the backend `--backend` chose, so a reader of one expression in a large library holds that expression and nothing else. A reference into a shard not named is `SMY-W500` and names the shard, rather than `SMY-E060`: it waits, as an early attestation does. Read commands only. Since 1.10.], [Large libraries]),
+    ([`--seed-check`], [Asserts this exact invocation is bit-reproducible — the command-line hook onto rule D, the same determinism `cargo xtask determinism` checks in CI. From 1.9 the assertion is checked: an invocation that reaches a model or an embedding exits 2 before running, and the refusal names which invocations are the impure ones. The decision is per invocation rather than per command, so `find` is refused with `--engine semantic` and runs with the default lexical engine.], [Ch. 21]),
   ),
 )
 

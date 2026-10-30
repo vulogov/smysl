@@ -1,0 +1,70 @@
+# ru — tokens after which a sentence boundary is suppressed. Format: see `en.txt`.
+#
+# The Russian list carries more multi-dot forms than the others (`т.е.`, `т.д.`, `н.э.`),
+# and they are what makes the token rule scan back over `.` as well as letters: a token that
+# stopped at the first dot would look up `е.` and find nothing.
+#
+# `ё` is not folded here. The lists are matched against the text as it was normalised, and
+# `analyze.rs` is where ё→е belongs — a segmenter that folded would have to fold the text too,
+# and the text is what the offsets are into.
+
+# Common contractions
+т.е.
+т.к.
+т.д.
+т.п.
+т.н.
+и.о.
+н.э.
+др.
+пр.
+напр.
+см.
+ср.
+стр.
+рис.
+табл.
+гл.
+разд.
+прим.
+
+# Titles and ranks
+#
+# `г-н`, `г-жа` and `д-р` are absent on purpose: they carry no period, so they can never
+# create a boundary for this list to suppress, and a row nothing can trigger is worse than a
+# missing one.
+проф.
+Проф.
+акад.
+Акад.
+доц.
+канд.
+тов.
+кап.
+Кап.
+
+# Places and dates
+г.
+гг.
+обл.
+ул.
+пл.
+пер.
+просп.
+д.
+корп.
+кв.
+в.
+вв.
+м.
+
+# Measure and trade
+руб.
+коп.
+млн.
+млрд.
+тыс.
+экз.
+мин.
+сек.
+ч.

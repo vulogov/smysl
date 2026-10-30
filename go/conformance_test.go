@@ -110,7 +110,7 @@ func TestStoresReencodeByteIdentically(t *testing.T) {
 func TestUnitCoreKeysMatchTheTable(t *testing.T) {
 	want := map[uint64]string{
 		0: "schema", 1: "gist", 2: "body", 3: "detail", 4: "deps",
-		5: "grounds", 6: "status", 7: "source", 8: "payload",
+		5: "grounds", 6: "status", 7: "source", 8: "payload", 9: "lang",
 	}
 	if len(smysl.UnitKeys) != len(want) {
 		t.Fatalf("key count: got %d, want %d", len(smysl.UnitKeys), len(want))
@@ -122,12 +122,15 @@ func TestUnitCoreKeysMatchTheTable(t *testing.T) {
 	}
 }
 
-func TestUnknownKeysAtNineAndAboveSurvive(t *testing.T) {
+// Ten, not nine, since 1.10: `lang` took key 9 (SMYSL-2.3 A-1). The row moved and the rule did
+// not — an implementation still treating 9 as unknown would carry the language as opaque bytes and
+// hash to the same uid, so this integer and the key table's highest row move together.
+func TestUnknownKeysAtTenAndAboveSurvive(t *testing.T) {
 	body := &smysl.Map{Entries: []smysl.Pair{
 		{Key: uint64(0), Value: "claim"},
 		{Key: uint64(1), Value: "a gist"},
 		{Key: uint64(6), Value: uint64(1)},
-		{Key: uint64(9), Value: "a later addition"},
+		{Key: uint64(10), Value: "a later addition"},
 	}}
 	raw, err := smysl.EncodeOne([]any{uint64(1), body})
 	if err != nil {
@@ -142,8 +145,8 @@ func TestUnknownKeysAtNineAndAboveSurvive(t *testing.T) {
 		t.Fatal("an unknown key did not survive a round trip")
 	}
 	m := records[0].Body.(*smysl.Map)
-	if v, ok := m.Get(uint64(9)); !ok || v != "a later addition" {
-		t.Fatalf("unknown key 9 lost: %v", v)
+	if v, ok := m.Get(uint64(10)); !ok || v != "a later addition" {
+		t.Fatalf("unknown key 10 lost: %v", v)
 	}
 }
 
@@ -240,7 +243,8 @@ func TestRecordTypeCodesMatchTheTable(t *testing.T) {
 	want := map[uint64]string{
 		1: "unit", 2: "attestation", 3: "relation", 4: "thread", 5: "view",
 		6: "contention", 7: "pack_info", 8: "schema_decl", 9: "checkpoint", 10: "label_binding",
-		11: "withdrawal", 12: "resolution", 13: "commitment",
+		11: "withdrawal", 12: "resolution", 13: "commitment", 14: "manifest", 15: "part_text",
+		16: "reserved", 17: "dating", 18: "part_reading", 19: "redaction",
 	}
 	if len(smysl.RecordNames) != len(want) {
 		t.Fatalf("code count: got %d, want %d", len(smysl.RecordNames), len(want))
@@ -248,6 +252,32 @@ func TestRecordTypeCodesMatchTheTable(t *testing.T) {
 	for k, v := range want {
 		if smysl.RecordNames[k] != v {
 			t.Errorf("code %d: got %q, want %q", k, smysl.RecordNames[k], v)
+		}
+	}
+}
+
+// §3.1: a code the spec names is not a code this implementation decodes.
+//
+// 1.10 added five library codes to the name table and this implementation decodes all five — a
+// manifest, a part text, a dating, a part reading and a redaction, with an identity for each but
+// the redaction (library_test.go). Two are still named and not understood, and that is what the
+// two tables exist to be able to say: 9 is a checkpoint nothing has ever emitted and 16 is
+// reserved. A reader that called those known while decoding neither would be exactly the silence
+// SMY-W014 exists to break.
+func TestANamedRecordIsNotTheSameAsAnUnderstoodOne(t *testing.T) {
+	for _, code := range []uint64{9, 16} {
+		r := smysl.Record{Code: code}
+		if r.IsKnown() {
+			t.Errorf("code %d is named but must not be reported as understood", code)
+		}
+		if strings.HasPrefix(r.Name(), "unknown(") {
+			t.Errorf("code %d is in the table, so it should have a name: %q", code, r.Name())
+		}
+	}
+	for _, code := range []uint64{1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 17, 18, 19} {
+		r := smysl.Record{Code: code}
+		if !r.IsKnown() {
+			t.Errorf("code %d is decoded here and must be reported as understood", code)
 		}
 	}
 }

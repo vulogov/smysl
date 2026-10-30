@@ -1,0 +1,2333 @@
+# RFC SMYSL-2.5 — Query, dossiers and schema evolution tooling
+
+**Status:** draft 1, for discussion. Implementation RFC (non-normative); normative rules are in SMYSL-2.3.
+**Author:** Vladimir Ulogov
+**Date:** 2026-10-02
+**Part of:** RFC set SMYSL-2 — see SMYSL-2.0 (index and roadmap).
+**For:** crate `1.9.0-dev` (`d25ec9e`), format `smysl/1.0`, kernel `smysl.kernel/0.1`.
+**Derived from:** RFC SMYSL-2 draft 3, §10.4, §11, §12, §15, §19.5, Appendix A (`x.query/v1`), Appendix C.
+**Phases:** TX-P6, TX-P8 (dossiers, saved queries, thread schemas), TX-P10, TX-P12.
+**Depends on:** SMYSL-2.3 (FC-5 `x.query/v1`, FC-8 thread schemas, FC-9 record 8 keys 4–5, rule N, lens ops and the lens-chain hash in Appendix B, thread-schema and role codes in A-8.2); diagnostics E416–E427 and W429–W431 from the set's registry (SMYSL-2.0 §6.1); SMYSL-2.1 (open `ThreadSchema`/`Role` enumerations, prompt-injection guard); SMYSL-2.4 (`smysl-text`: catalog, partitions, analyzers, effective time, entities, classes, alignment); SMYSL-2.6 (the `measure` output stage); SMYSL-2.7 (`lib export --target-revision` calls the backward lens defined here); SMYSL-2.8 (virtual union over shards).
+
+---
+
+## 0. Summary
+
+This RFC turns draft 3's query, dossier and schema-evolution chapters into work items over the
+existing tree. Four deliverables:
+
+1. **`smysl-query`**, a new pure crate: a hand-written parser for `sq/1`, a typed AST, a planner
+   that lowers each stage onto an existing function where one exists, an executor, `--explain`
+   and `--why`, reciprocal rank fusion across partitions, language bridges, purity labelling,
+   saved queries (`x.query/v1`) and reruns that separate the data effect from the schema effect.
+2. **Schema evolution tooling.** FC-9 decoding into typed structures in `smysl-core`, a lens
+   engine (forward and backward application, composition, chain hashing, unmappable counting),
+   field resolution and pinned compile-forward of queries in `smysl-query`, `smysl schema
+   show|check`, `smysl migrate`, and pointer lenses for `json/1`.
+3. **Dossiers.** Intents and slot templates written in `sq`, the `dossier` thread schema (FC-8),
+   `smysl ask`, and an optional model answer step whose units are capped by rule M.
+4. **Embeddings and the natural-language front end.** S0 moves `smysl-embed` to `model2vec-rs 0.3`
+   with the `wasm` feature (verified here: builds, existing tests pass, no `cc` from that
+   path); S1 is a new optional `smysl-embed-candle`; the NL → `sq` front end is a port with no
+   provider linked.
+
+The CLI gains `q`, `ask`, `schema` and `migrate`, and `find` gains language and analyzer flags.
+Lens laws get seeded property tests and a cargo-fuzz target from the phase they land in (D-11).
+
+Two findings from reading the code change the design and are called out where they apply:
+- **`answers` carries salience rank** (`RelKind::carries_support`, `smysl-core/src/types/relation.rs`).
+  Saving a query with kernel `answers` edges to its results, as Appendix A of draft 3 proposes,
+  would raise the salience of those results, so a saved query would change the answer of any
+  later query ordered by salience (§3.6, OQ-49).
+- **`Hybrid` deliberately does not merge engines.** A rank merge measured 0.78 MRR against pure
+  semantic's 0.84 (`smysl-embed/src/lib.rs`, `Hybrid` docs). RRF in this RFC therefore fuses
+  *partitions of one engine*, never lexical with semantic (§3.4, OQ-46).
+
+## 1. Scope
+
+**In:**
+- `sq/1` grammar (**SMYSL-2.9**, with the additions in §3.1), parser, AST, planner,
+  executor, `--explain`, `--why`, `--seed-check`, `--save`, reruns, `diff` of result sets.
+- Operator-to-API mapping for every stage (§3.3).
+- Partitions and RRF fusion (§3.4), language bridges (§3.5), the independent-witness hook (§3.7).
+- Saved queries as `x.query/v1` units (§3.6).
+- FC-9 typed decoding, the lens engine, field resolution, `using` pins, schema/data effect split,
+  `schema show|check`, `migrate`, pointer lenses (§3.8–§3.12).
+- Dossier pipeline, intents, templates, the `dossier` thread, `ask`, the answer step (§3.13).
+- S0 model upgrade, S1 crate, semantic sources and bridges, NL front-end port (§3.14–§3.15).
+
+**Out:**
+- Record layouts, keys, ids, the FC-9 op encoding, rule N's text, FC-8 codes: SMYSL-2.3.
+- The catalog, readers, analyzers, effective time, entities, same-as and classes, the substrate
+  index (persistent postings, `vectors`, `schemas` tables): SMYSL-2.4. This RFC consumes them
+  through traits so `smysl-query` builds and tests against a plain `Store` first.
+- `measure` implementations (SMYSL-2.6); the `measure` stage only dispatches to them.
+- `lib export --target-revision` wiring (SMYSL-2.7); the backward lens it calls is here.
+- `StoreRead`, shards, the virtual union as a disk structure (SMYSL-2.8). Until then,
+  `from store:a, store:b` merges into a scratch in-memory `Store` (§3.3).
+- Lens functions (unit conversion, arithmetic): deferred by D-5 (OQ-23).
+
+## 2. What exists today
+
+Everything below was read at `d25ec9e` in `/tmp/smysl`. "(unverified)" marks what was not.
+
+### 2.1 Retrieval: `smysl-retrieve`
+
+- `crates/smysl-retrieve/src/lib.rs`:
+  - `pub trait Retriever { fn search(&self, &Query) -> Vec<Hit>; fn len(&self) -> usize; }`.
+    Contract: deterministic, ties broken by uid.
+  - `Query` (`#[non_exhaustive]`): `text`, `limit`, `kinds: Vec<KernelType>`,
+    `min_status: Option<Status>`, `within: BTreeSet<Uid>`, `payload: Option<PayloadFilter>`,
+    `schemas: BTreeSet<SchemaId>`. Builders `kinds`, `min_status`, `within`, `with_payload`,
+    `schemas`. Predicates `admits_unit`, `admits_schema` (kernel `kinds` never admit an extension
+    type), `admits_status`, `admits_payload`.
+  - `within` restricts candidates **without** changing IDF: "IDF still comes from the whole index".
+    So a per-partition IDF (draft 3 §11.2) cannot be obtained from one index plus `within`.
+  - `Hit { uid, score, terms: Vec<(String, f32)> }`, `#[non_exhaustive]`, `Hit::new`,
+    `with_terms`. `terms` is advisory: empty means "this retriever does not say".
+  - `candidates(store)` takes **every** unit (since 1.7), superseded ones included. Nothing in
+    retrieval prefers the head of a `supersedes` chain.
+- `crates/smysl-retrieve/src/lexical.rs`: `Bm25::index(store)` (= `index_with(store,
+  Tokenizer::plain())`). Gist, body and detail are repeated 4/2/1 times. Payload strings per uid
+  come from `smysl_core::surface::payload::payload_strings`. `contributions()` gives the exact
+  per-term summands that `--why` prints. Results sorted by score desc, then uid; `terms` filled
+  after truncation.
+- `crates/smysl-retrieve/src/tokenize.rs`: `Tokenizer { plain(), folding(), terms() }`,
+  `fold_suffix`, `tokenize` splits on `!is_alphanumeric() && c != '_' && c != '-'` (line 99).
+- `bm25 = { version = "2", default-features = false }` (`crates/smysl-retrieve/Cargo.toml`), so
+  the crate is pure and listed in `PURE_CRATES` (`xtask/src/purity.rs`).
+- `payload_strings` (`crates/smysl-core/src/surface/payload.rs`) collects **string** values
+  (and string arrays) at any depth, dotted paths for nesting. Booleans and integers are not
+  collected, so a `--payload text:verbatim=true` filter can never match a boolean field.
+
+### 2.2 Semantic retrieval: `smysl-embed`
+
+- `crates/smysl-embed/src/lib.rs`: `Model(StaticModel)` with `from_dir` (local directory only)
+  and `from_bytes`; `Semantic::index(store, model)` embeds **gists only**, in uid order, in one
+  batch; cosine; scores `<= 0` dropped.
+- `Hybrid<L, S>` routes, it does not merge: `routes_to_lexical` is true when
+  `looks_like_identifier(text)` (no whitespace, contains one of `_ . / : -`) or when `kinds` is
+  non-empty and contains no interpretive kind. `INTERPRETIVE` is `Claim, Finding, Hypothesis,
+  Question` — four kinds, where draft 3 §11.2 names three.
+- The test `one_engine_answers_and_the_other_is_not_consulted` pins the absence of a merge.
+- `crates/smysl-embed/Cargo.toml` pins `model2vec-rs = { version = "0.2", default-features =
+  false, features = ["fancy-regex"] }`; `Cargo.lock` resolves `0.2.1`, `tokenizers 0.21.4`,
+  `esaxx-rs 0.1.10`. The manifest comment says no feature combination of 0.2.1 avoids
+  `esaxx_fast` (C++), and that model2vec-rs requires `clap` and `serde_json`.
+- **Verified for this RFC (F-11):** in a scratch worktree, changing the pin to `{ version = "0.3",
+  default-features = false, features = ["wasm"] }` builds offline and `cargo test -p
+  smysl-embed` passes (unit 7, evaluation 1, gate 5, semantic 4; the semantic tests skip
+  without `SMYSL_EMBED_MODEL`). `model2vec-rs 0.3.0`'s `wasm` feature is `["local-only",
+  "tokenizers/unstable_wasm"]`, which enables `fancy-regex` and not `esaxx_fast`; `esaxx-rs`
+  stays in the tree without its `cpp` feature. `clap` is optional in 0.3.0; `serde_json` is
+  not. `StaticModel::from_pretrained` and `from_bytes` have the same signatures in 0.2.1 and
+  0.3.0, so `Model` compiles unchanged.
+- **Correction to F-11's wording.** `cargo tree -p smysl-embed -e normal,build -i cc` on the
+  patched tree still shows `cc v1.4.0` — as a **build-dependency of `blake3`**, through
+  `smysl-core`, not through the embedder. The workspace takes blake3 with `features = ["std",
+  "pure"]` (root `Cargo.toml`), whose comment says this keeps the C SIMD backend out; that no C
+  file is compiled was not checked from a build log (unverified). The accurate claim is
+  "the S0 path adds no `cc`", not "no `cc` in the tree".
+- Not checked: that `potion-multilingual-128M` loads through `from_dir` (no model in the
+  sandbox; unverified). `fixtures/embed-tiny/` holds a small model used by the gate tests.
+
+### 2.3 Graph: lineage, traversal, salience, store queries
+
+- `crates/smysl-graph/src/lineage.rs`:
+  - `TraceKind { Parents, Grounds, Both, Rests }`, `parse`, `as_str` (`rests-on`).
+  - `trace(store, root, kind, depth: Option<u32>) -> Lineage` and `trace_via(store, root,
+    &EdgeSet, depth)`: breadth-first, frontier sorted, result sorted by `(depth, uid)`, each
+    node with `via` (`Root, Parent, Supersedes, Grounds, Deps, Rests`).
+  - `dependents(store, uid)`: reverse closure over `EdgeSet::support()`, no depth.
+  - `dependents_via(store, uid, &EdgeSet)` and `rests_on(store, uid, &EdgeSet)`: depth-first,
+    "in the order first reached", **no depth bound**. Both handle the direction asymmetry:
+    `deps`/`grounds` are stored dependent → premise, relations premise → dependent for
+    `conditions, causes, enables, warrant, backs`.
+  - `membership(store, roots)`: closure over `EdgeSet::all()`, the members of a view.
+  - `diff(a, b) -> StoreDiff { only_in_a, only_in_b, … }` by unit membership.
+- `crates/smysl-graph/src/adjacency.rs`: `EdgeKind { Deps, Grounds, Kernel(u8), Extension(u16) }`,
+  `EdgeSet::{all, of, support, dependency, premises, ordering, support_rank, one, with, union}`,
+  `Adjacency::{out, incoming, out_edges, in_edges, edge_kind(&RelKind)}` (extension kinds are
+  interned per store).
+- `crates/smysl-graph/src/traverse.rs`: `closure`, `reverse_closure`, `topo`, `cycles`,
+  `rebuttals_of(g, node)` (all incoming `rebuts`).
+- `crates/smysl-graph/src/salience.rs`: `salience(store, &SalienceRequest) -> SalienceReport`
+  with `get`, `explain`, `top`, `renormalise(within)`. `corroboration()` (private) groups
+  attestations by `(agent, recipe)` and counts only groups with **disjoint ancestry**
+  (`groups`, `dependent_groups` in `SalienceTerms`), capped at `CORROBORATION_CAP = 4`. This is
+  the existing independence mechanism the witness hook generalises (§3.7).
+- `crates/smysl-graph/src/store/mod.rs` (`Store`):
+  - `units()`, `get`, `relations()`, `threads()`, `views()`, `iter()` (all records),
+    `adjacency()`, `resolve_prefix`, `matching_prefix`.
+  - `units_with_source_prefix(prefix)`: full scan, canonical order.
+  - `units_in_observed_order()`: collects and sorts every unit with `source.observed`; units
+    without one are left out. `observed_at(uid)`.
+  - `relations_of_kind(&RelKind)`: canonical order, withdrawn excluded.
+  - `open_contentions()`: contentions whose `contention_status` reads `Open`.
+  - `commitment_of(uid)`: latest by `(wall_ms, counter, agent)`; `units_at_commitment(level)`.
+  - `rebuttals_of(uid)`: **live** rebuttals only (not withdrawn, rebutter present and not
+    `unfounded`). `is_live_rebuttal`, `supports_of(uid, &EdgeSet)` (one hop).
+  - `attestations_of`, `attested_by`, `agreement(uid, n)`.
+  - There is **no accessor for schema declarations**: they are reachable only through `iter()`
+    as `Record::SchemaDecl`, as `smysl-check/src/passes/extension.rs` does.
+- `crates/smysl-graph/src/relink.rs`: `relink(store) -> Relinked { records, moved, dangling,
+  forked }`. The supersession-head computation is the private `fn successors(store)`; forks
+  resolve to nothing. There is no public "head of chain" helper.
+- `crates/smysl-graph/src/merge/mod.rs`: `merge(&mut Store, &Store, MergeOptions)`.
+
+### 2.4 Packing
+
+- `crates/smysl-pack/src/solve.rs`: `pack(store, &SalienceReport, &PackRequest) -> Result<Pack,
+  PackError>`. `PackRequest::budget(n)`, `.scoped(uids)`, `.focusing(uids)`, `.resting_on(EdgeSet)`,
+  `.reserving(n)`, `.capped(Lod)`, `.exact()`. Rule R is applied by the packer through
+  `traverse::rebuttals_of` (`crates/smysl-pack/src/closure.rs`; module doc of `traverse.rs`).
+- `crates/smysl-pack/src/cost.rs`: `Estimator` (`#[non_exhaustive]`, `ALL`, one variant
+  `Utf8Div4`, id `smysl/utf8-div4`, `ceil(len/4) + 2`); `CostModel`, `ExternalCost`.
+  FC-6's script-aware estimator is SMYSL-2.1/2.4's; the planner records whichever is used.
+
+### 2.5 Threads and rendering
+
+- `crates/smysl-core/src/types/thread.rs`: `ThreadSchema { Analysis=0, Narrative=1, Brief=2, Qa=3,
+  Plan=4 }`; `from_u8` returns `None` for anything else (F-12). `Role` has 24 values `0..=23`
+  (`Context … Decision`); `Role::from_u8` indexes `ALL` and returns `None` past it. `Step { role,
+  unit, note: Option<String> }`. `Thread { id, schema, owner, gist, steps, ts, extra }`.
+  `timeline` is not in the tree (CHANGELOG lists it as carried into 1.9).
+- `crates/smysl-thread/src/schema.rs`: `SchemaDef { schema, roles, arity, rules: &[(Matcher,
+  Role)], weights }`, `definition(schema) -> &'static SchemaDef`, `Matcher { Type, SourceOf,
+  TargetOf, StatusAtLeast, SalienceTop, At(Position), Any }`.
+- `crates/smysl-thread/src/derive.rs`: `derive_thread(store, schema, &DeriveOptions) -> (Thread,
+  DeriveReport)`; four stages (assign, select, order, repair); `DeriveOptions::scoped(uids)`;
+  `ts` is supplied, never read.
+- `crates/smysl-render`: `build(store, &Thread, &Profile, &BuildOptions) -> Ir`, `emit`,
+  `Target::{Markdown, Typst, Html, Slides, Json, Text}`. No file under `smysl-render/src`
+  reads a unit's payload, so "rendering goes through lenses" (draft 3 §15.3) is a constraint on
+  future code, not a change to existing code.
+
+### 2.6 The CLI
+
+- `src/main.rs`: `enum Purity { Pure, Mixed, Model }`, `struct Cmd { name, about, purity, phase }`,
+  `const COMMANDS: &[Cmd]` with **26** entries. Tests pin it: `command_table_matches_section_23`
+  (`COMMANDS.len() == 26` and the name list), `only_ingest_and_attest_are_model_dependent`
+  (model = `[ingest, attest]`, mixed = `[thread]`), `every_command_names_the_phase_that_wires_it`
+  (`SM-Pnn` or a dotted release). `tests/dispatch.rs` runs all 26; `tests/cli-surface.txt` and
+  `tests/public-api*.txt` are snapshots.
+- `cmd_find` (`src/main.rs` ≈ line 3710): builds `smysl::Query` from `--kind`, `--min-status`,
+  `--source` (→ `units_with_source_prefix` → `within`; an empty match returns early rather than
+  searching everything), `--schema`, `--payload KEY=VALUE[,VALUE]` (`payload_filter`),
+  `--engine lexical|semantic|hybrid` with `--model` or `SMYSL_EMBED_MODEL` (`engine_for`),
+  `ranked()` (rebuilds `Bm25::index` per call, F-10; the semantic path is behind
+  `#[cfg(feature = "semantic")]`). `--why` prints per-term contributions on stderr. `find` is
+  tagged `Purity::Pure` even though `--engine semantic|hybrid` is model-dependent.
+- `cmd_thread` (≈ line 3849): `--derive [S] | --schema S` with a hard-coded `value_parser(["analysis",
+  "narrative", "brief", "qa", "plan"])`, `--scope UID` (repeatable), `--arity ROLE=N`,
+  `--explain`; `Hlc::new(0, 0, owner)` keeps derivation pure.
+- **`--seed-check` is declared as a global flag and is read**, and since TX-P6 step 7
+  (2026-10-17) `q` honours it with §3.2's stronger assertion: the plan runs twice and the
+  answers are compared. This entry said "read nowhere"
+  until 2026-10-16, on the strength of a probe
+  (`smysl --seed-check find --why -n 3 pool fixtures/corpus/F1-incident.smy`) that exits 0 and
+  prints the ranking — which is what a *pure* invocation under a working flag also does, so the
+  probe could not tell the two apart. `src/main.rs` declares it and the dispatcher reads it per
+  invocation, refusing an invocation whose purity it cannot assert. **Part of TX-P6 step 7's
+  exit is therefore already met**, which is why the correction matters rather than being
+  housekeeping: the step is smaller than its line suggests. What is genuinely absent is the
+  stronger assertion — running twice and comparing bytes — which belongs to `sq` (`SMY-E416`).
+  Noted in SMYSL-2.9 §2 on 2026-10-15 and corrected here.
+- Rule A (`xtask/src/purity.rs`): nothing under `src/` except `lib.rs` may name a sibling crate;
+  every CLI capability must be reachable through the facade `src/lib.rs`.
+
+### 2.7 Schema declarations
+
+- `crates/smysl-core/src/types/annex.rs`: `SchemaDecl { id: SchemaId, version: u32, types:
+  Vec<SchemaId>, relations: Vec<RelKind>, payload_shape: Option<Vec<u8>>, extra: Extra }`,
+  `redefines_kernel()`.
+- `crates/smysl-core/src/cbor/keys.rs`: `schema_decl::{ID=0, VERSION=1, TYPES=2, RELATIONS=3,
+  PAYLOAD_SHAPE=4, HIGHEST=4}`. `cbor/envelope.rs`: `schema_decl_bytes` writes `payload_shape`
+  as a CBOR **byte string** holding deterministic CBOR; `dec_schema_decl` requires `id` and
+  `version` and keeps unknown keys in `extra`. Key 5 (`lenses`) therefore survives today in
+  `extra`, opaque.
+- `smysl_core::cbor::{Dec, Enc}` are public (`cbor/mod.rs`), so FC-9 decoding needs no new codec.
+- Surface: `schema_decl()` in `crates/smysl-core/src/surface/parse.rs` accepts only `version`,
+  `types`, `relations`; any other key is `SMY-E001`. `schema_decl_has_surface_form` in
+  `surface/write.rs` is false when `payload_shape` or `extra` is present (F-18).
+- Payload decoding: `payload_to_object(bytes) -> Result<HObject, CodecError>`; `HValue { Null,
+  Bool, Int, Float, Str, Array, Object }` (`surface/hjson.rs`). The lens engine works on this.
+
+### 2.8 Staging, attestations, diagnostics, tests
+
+- `Op { Authored=0, Transformed=1, Imported=2, Attested=3 }` (`types/provenance.rs`).
+- `smysl-ingest/src/stage.rs`: `prepare`, `prepare_declared` (with `SchemaDecl`s),
+  `prepare_attested`, `prepare_under`; rule M first via `monotone::apply`, which remaps uids
+  and rewrites edges; `Staged::to_surface()`. `SMY-W036` reports a rule-M lowering at ingest.
+  Re-exported by the facade under feature `stage`.
+- Diagnostics: one macro table in `crates/smysl-core/src/diag.rs`; the facade test pins
+  `Code::ALL.len() == 57`.
+- Property tests use an in-repo seeded xorshift generator (`crates/smysl-graph/tests/merge_algebra.rs`),
+  not `proptest` (absent from `Cargo.lock`). `fuzz/` is a cargo-fuzz crate with targets `surface,
+  cbor, merge_algebra, pack_constraints, pack_exact, pipeline` and a shared generator library.
+- Golden tests regenerate with `SMYSL_BLESS=1` (`smysl-render/tests/golden.rs`) or
+  `SMYSL_REGENERATE_GOLDEN=1` (`smysl-pack/tests/golden.rs`): two spellings for one convention.
+- `nom 7.1.3` is in `Cargo.lock` (transitively); no parser crate is a direct dependency of a
+  pure crate.
+
+## 3. Design
+
+### 3.1 The language: `sq/1` as implemented
+
+Grammar: **SMYSL-2.9**, which carries the productions themselves. Draft 3's Appendix C is
+not in this repository, so 2.9 recovers the grammar from this document's own surface forms —
+chiefly §3.3's table — and marks as an addition anything it had to supply. The deltas below
+are normative over it and are what the implementation fixes that the sketch left open:
+
+- **Version.** A query without `using sq/N` runs under `sq/1`. `SUPPORTED_SQ = ["sq/1"]`;
+  anything else is `SMY-E427`.
+- **Comments.** `#` starts a comment only at the start of a token (after whitespace or at line
+  start). `text(kjv-1769#Ps.14)` keeps its `#`; `… # scope` is a comment.
+- **Multi-word keywords** (`order by`, `group by`, `align by class`, `compare by`, `in reading
+  order`, `in time order`, `as recorded`, `as view`) are keywords only at stage-head position.
+- **Field names** may contain `:` and `.` (`text:mode`, `payload.code.kind`). `lang:any` after a
+  `find` string is the source option, not a field.
+- **Time ranges** are lexed in a time context only, so `2026-09-01T00:00:00Z .. 2026-09-15`
+  does not collide with arithmetic-looking tokens; EDTF validation is SMYSL-2.4's parser
+  (`SMY-E410` on failure).
+- **Additions within `sq/1`** (additive, so no version bump, §15.7 of draft 3):
+  - `$name` parameters, bound by the caller and recorded in the saved query; used by dossier
+    templates. An unbound parameter is `SMY-E460`.
+  - `explain` and `why` are CLI flags, not stages.
+  - `with lens none` on a stage disables lensing for qualified access only; unqualified access
+    is always lensed. **Settled 2026-10-15** (SMYSL-2.9 OQ-77): this sentence stands and §3.9's
+    "reads revision 1 raw, no lens" was the stale one. A qualified reference names the field as
+    the named revision named it and is compiled forward from there, so the modifier turns that
+    compile-forward off. SMYSL-2.9 §4.7 fixes the placement: `where`, `order by`, `group by`,
+    `compare by`.
+- **`match`** (Cypher-like patterns) is parsed into an AST node and refused by the planner with
+  `SMY-E461` until a later phase (OQ-50). Every other stage in SMYSL-2.9 §4 is planned.
+
+**Parser approach: hand-written recursive descent with a small mode-aware lexer.** Reasons:
+1. The tree's own parsers are hand-written (`surface/lex.rs`, `surface/parse.rs`, 2,243 lines)
+   with `Code`-tagged, span-carrying diagnostics. `sq` errors should look the same.
+2. A grammar implemented as plain functions ports to the Python, JavaScript and Go
+   implementations line by line. A combinator or PEG crate does not, and saved queries are
+   meant to be readable by another implementation.
+3. Contextual lexing (`#`, `lang:any`, time ranges, multi-word keywords) is awkward in a
+   generated lexer and trivial in a hand-written one.
+4. The purity gate (`FORBIDDEN_DEPS` in `xtask/src/purity.rs`) would allow `nom` or `winnow`,
+   but each dependency of a pure crate is a cost the project has argued against case by case
+   (`bm25` with `default-features = false`). The grammar is about 40 productions; a parser crate
+   does not pay for itself.
+
+### 3.2 Planner
+
+The planner lowers the AST in a fixed order. Each phase has one job and records what it did, so
+`--explain` prints the plan rather than reconstructing it.
+
+1. **Header.** Resolve `using` pins: `sq/N` (else `E427`), `schema-id@revision` against the
+   `SchemaSet` (§3.8). Unknown revision: `SMY-E466`.
+2. **Field resolution.** Every field and relation name is resolved against the declarations of
+   the schemas in scope (§3.9). Undeclared field: `SMY-E421`. Undeclared relation kind in a
+   traversal: `SMY-E462`. A pinned query is compiled forward here.
+
+   **Built in two halves, and TX-P6 step 2 built the first.** Relation kinds resolve today,
+   against the fourteen kernel kinds and the `relations` every declaration carries, so `E462`
+   is raised. Field names do **not**: a declaration's `payload_shape` is opaque CBOR until
+   FC-9 decoding lands, so nothing can refuse a field and `E421` would be a code with nothing
+   behind it. The plan records that the check did not run and `--explain` prints it, because a
+   resolution phase that quietly resolves nothing is worse than one that is openly absent. The
+   typed half, with `E421`, `E422` and compile-forward, is **TX-P12 step 3**, which names them
+   as its own — **built 2026-10-22** (§6, TX-P12 step 3).
+3. **Scope.** `from` resolves to a set of stores and a candidate uid set, through the `Scope`
+   trait (§4.2). Plain `Store`: `store:` and the whole store. `smysl-text` (SMYSL-2.4) adds
+   `texts`, `library`, `collection:`, `channel`, `import:` and catalog predicates. Until it
+   does, those five are refused by name with `SMY-E461`, whose §8 meaning lists exactly this
+   case; a scope item naming a store that is not open is `SMY-E511`. Neither is an empty
+   result: a question asked of a corpus that is not here must say so, because "nothing found"
+   cannot be told from a true negative.
+4. **Partitions.** The candidate set is split by `(manifest, lang)` when the catalog provides
+   them, else one partition. IDF scope (partition, collection, library; **default collection**)
+   is recorded.
+
+   **OQ-14 answered in TX-P4 step 2**, and the rule is sharper than a default: *IDF is computed
+   over the query's declared scope*. A **filter** — `within`, `kinds`, `min_status`, `schemas`,
+   `payload` — says which units may be returned and never moves a term's weight, which is the
+   rule 1.5 wrote into `Query::within`. A **scope** — `from collection:`, `find --library` —
+   says what corpus the question is about, and that is what `df` and `N` are counted over. The
+   two were never in conflict; the open question had them tangled.
+
+   What settled the default: the cost argument behind it is gone, and the two alternatives have
+   concrete defects. SMYSL-2.4's `postings` table is per partition and `df`, `docs` and total
+   length are counts over **disjoint** document sets, so each of the three scopes is exactly
+   computable from one table with no rebuild — partition is one row, collection a sum over the
+   named rows, library a sum over all (`postings::View::of`). *Partition* as a default fails on a
+   one-document partition: with `N = 1` every term it holds has the same `idf`, so the ranking
+   inside it is by length normalisation alone, it takes rank 1 of its own partition and a full
+   `1/(k + 1)` under §3.4's RRF — per-partition IDF systematically favours small texts. *Library*
+   inflates `N` with corpora the query did not ask about, and for fixed `df` the ratio between two
+   terms' `idf` compresses toward 1 as `N` grows, which flattens discrimination inside the corpus
+   that was asked for. Both are asserted in `smysl-text/tests/index.rs`.
+
+   What is **not** answered: which scope ranks better. That needs relevance judgements, which are
+   GE-T5 and GE-T10 material this repository does not hold.
+5. **Sources.** Each source stage yields a ranked or unranked set per partition.
+6. **Filters and time.** Predicates evaluate over **lensed** unit views (§3.9). Time predicates
+   use SMYSL-2.4's effective-time engine; undated units are counted (`SMY-W415`).
+7. **Traversals** (`expand`) and **closures** (`with`).
+8. **Set operations** on sub-plans.
+9. **Ordering and grouping**, then **shape** (`limit`, `pack`), then **output**.
+
+A **supersession pass** runs after sources and traversals: units with a single newest successor
+are replaced by it, as relink resolves chains; a fork keeps every successor and raises
+`SMY-W464`. `--all-versions` turns the pass off.
+
+**Purity labelling.** Every plan step carries `Purity::Pure` or `ModelDependent(reason)`. The
+plan is model-dependent if any step is: `~sem`, `~hybrid` that routes semantic, `near`, a
+semantic bridge, a model intent classifier, a dossier template that uses one, or the NL front
+end (the translation, not the run). `--seed-check` on a model-dependent plan is `SMY-E416`
+before anything executes. On a pure plan it executes twice — the second time with freshly built
+indexes and scratch buffers — and compares result hashes; a mismatch is an internal error.
+
+### 3.3 Operator-to-API mapping
+
+| `sq` stage | existing function (file) | new code |
+|---|---|---|
+| `from store:P [, store:Q]` | `Store::open`; `merge(&mut scratch, &other, MergeOptions)` (`smysl-graph/src/merge/mod.rs`) | union into a scratch store until SMYSL-2.8's virtual union; contentions between stores computed by merge's detection |
+| `from texts / library / collection: / channel / import:` | — | `Scope` impl in `smysl-text` (SMYSL-2.4). **Built in TX-P6 step 6** as `smysl_text::scope::LibraryScope`, and the six items had to be *defined* first, because this document names them and SMYSL-2.4 never says what any of them is. Each is defined by something the catalogue already records: `texts` and `library` are the whole library; **a collection is an alias namespace** — `collection:kjv` is every expression aliased `kjv` or `kjv/…`, which is what the alias grammar's `/` is for and how every library in this repository already names its editions; **`import:<name>` is the collection rule on the reserved `import:` prefix** of SMYSL-2.3 A-5 and SMYSL-2.7 §3.9; **a channel is a conversation** — `channels` is every expression a chat reader produced, and `channel:<name>` is found in the two places the readers put a name: the expression's alias for Telegram and WhatsApp, which export one conversation per file, and the `channel`-level locator head for Slack, whose archive holds many. A name is looked up both ways and unioned. An item that names nothing is `SMY-E511`, never an empty set |
+| `find "…" ~lex` | `Bm25::index_with`, `Retriever::search`, `Query::{kinds,min_status,within,schemas}`; `Bm25::over(postings, analyzer, store)` | per-partition scoring over a postings view, **not** a second index per partition (§3.4); RRF (§3.4) |
+| `find "…" ~sem` | `Semantic::index`, `search` (`smysl-embed`) | `SemanticSource` port; S1 via `smysl-embed-candle` |
+| `find "…" ~hybrid` | `Hybrid::routes_to_lexical`, `looks_like_identifier` | routing decision recorded in the plan |
+| `about entity("…")` | `Adjacency::edge_kind(&RelKind)` for `x.text/mentions` | entity resolution through aliases and same-as (SMYSL-2.4). **Built in TX-P6 step 6** across the `Entities` port (§4.2): the library resolves a name to every `x.text/entity` whose gist is that name — which is what *aliases* means under A-2.4 rule 7, an entity being its name in one expression — and then to every entity in the same `x.text/same-as` class; the query crate walks `x.text/mentions` to them and keeps the result within the pipeline's candidates. A source that **selects rather than ranks**: nothing measured a score, so none is invented |
+| `about class(<uid>)` | — | class membership (SMYSL-2.4, TX-P7) |
+| `text(alias#loc)`, `text(alias @ range)` | — | locator and part lookup (SMYSL-2.4) |
+| `uid b3:…` | `Store::resolve_prefix`, `resolve_label` | — |
+| `view v/…` | `Store::views()`, `membership(store, roots)` | — |
+| `pointer("…")`, `metric("…")` | `units_with_source_prefix` | pointer lenses (§3.12) |
+| `question "…"` | — | dossier (§3.13) |
+| `where kind / schema / status` | `Query::admits_schema`, `Status: Ord` | typed predicate evaluator |
+| `where lang` | — | core key 9 (FC-1, SMYSL-2.4) |
+| `where holder / speaker / mode / <payload key>` | `payload_to_object` | lensed views (§3.9) |
+| `where commitment` | `Store::commitment_of` | — |
+| `where matches "…"` | `Tokenizer::terms`, `Bm25` contributions | term presence test |
+| `where near("…", t)` | `Semantic` cosine | model-dependent |
+| `said/observed … during/overlaps/before/after` | `Store::observed_at` (observed axis only) | effective time and range index (SMYSL-2.4). **Built in TX-P6 step 6** across the `Times` port (§4.2): `said` is rule E's effective time from `time::engine::effective`, computed once per scope and cached; `observed` is `Store::observed_at`, as the second column says. The EDTF literal is parsed through the same port, so `SMY-E410` is raised at planning by SMYSL-2.4's one parser rather than a second one here. A unit with no time on the axis asked is excluded and counted — `SMY-W415`, beside the answer — because A-2.4 rule 5 makes an undated interval neither early nor late, so it never took the comparison it would otherwise be reported as failing |
+| `expand ->grounds`, `->deps`, `->k` | `trace_via(store, root, &EdgeSet::one(k), depth)` | — |
+| `expand <-k` | `dependents_via` (no depth) | `dependents_trace(store, root, &EdgeSet, depth) -> Lineage` in `smysl-graph`, BFS mirror of `trace_via`, sorted `(depth, uid)` |
+| `expand -[k]-` | `Adjacency::out` + `incoming` | both-direction BFS, same output order |
+| `expand rests_on / dependents / lineage` | `rests_on(…, EdgeSet::premises())`, `dependents_via(…, EdgeSet::dependency())`, `trace(…, TraceKind::Both, depth)` | depth for the first two via the new BFS |
+| `expand mentions` | extension edge via `Adjacency::edge_kind` | — |
+| `with rebuttals` | `Store::rebuttals_of` (live only) | — |
+| `with grounds` | `UnitCore.grounds`; `trace_via` depth 1 | — |
+| `with holders / speakers` | payload uid keys through lenses | — |
+| `with spans / datings` | — | SMYSL-2.4 |
+| `union / intersect / except` | `BTreeSet` operations | — |
+| `order by salience` | `salience(store, SalienceRequest::default().seeded(result))`, `renormalise(result)` | — |
+| `order by <field>` | — | typed comparator, ties by uid |
+| `in reading order / in time order` | `units_in_observed_order` (observed axis) | span order and effective time (SMYSL-2.4) |
+| `group by`, `compare by` | — | new |
+| `align by class [policy]` | — | class matrix (SMYSL-2.4 classes) |
+| `limit n` | `Vec::truncate` | — |
+| `pack N tokens [as view]` | `pack(store, &sal, &PackRequest::budget(N).scoped(result).focusing(result))` | emit a `View` record for `as view` |
+| `count / units / json / show` | `smysl::json_escape` pattern in `cmd_find` | output writers |
+| `spans` | — | SMYSL-2.4 |
+| `measure <ids>` | — | dispatch to SMYSL-2.6 |
+| `match` | — | refused (`E461`) in this RFC |
+
+Two small `smysl-graph` additions follow from the table: `dependents_trace` (depth-bounded
+reverse BFS) and `pub fn supersession_heads(store) -> (BTreeMap<Uid, Uid>, Vec<Uid>)`, which is
+the existing private `relink::successors` made public so query and relink cannot disagree.
+
+### 3.4 Partitions and fusion
+
+*Amended (OQ-91, 2026-10-26): over a catalogued scope, **each unit's terms are cut by its own
+partition's analyzer**, and a partition's query by that partition's.* One table holds them all —
+the library's kept postings, or one built for the query's units by the rule the kept one is
+built by, which gives the same answer bit for bit — and a partition is scored against the IDF
+universe's statistics summed over it. Until then the lexical source built one table over the
+whole store per analyzer a query needed, so with the default collection IDF a German unit was
+counted, cut by the English chain, in an English partition's statistics. Units the catalogue
+does not place are cut, and their partition's query split, by the plain chain. A plain store
+keeps the old shape: one table per analyzer over the store. On the fixtures of `fixtures/sq` the
+change moved no answer.
+
+- One BM25 index per partition, built with `Bm25::index_subset` so IDF is the partition's
+  (or the collection's, by IDF scope). Until SMYSL-2.4's persistent postings, the planner caches
+  per-partition indexes for the duration of one invocation only.
+  - **Since TX-P4 step 2 there is no per-partition index to build.** `postings::View::of` takes
+    the partitions a scope names and sums their counts, which is exact because the sets are
+    disjoint; `Bm25::over` scores it. `Bm25::index_subset` is therefore not needed and was not
+    added — a second index per partition is the cost F-10 measured, and the whole point of the
+    table is that it is paid once.
+  - **What TX-P6 step 3 built, for a plain store.** `postings::View::of` sums *disjoint
+    partition tables* and lives in `smysl-text`, which the pure tier cannot reach until step 6.
+    A plain `Store` gives the planner the other shape — one corpus, partitioned after the fact
+    — so step 3 added `smysl_retrieve::Subset`, a `Postings` restricted to a uid set. Every
+    statistic BM25 reads comes through that trait, so restricting the answers restricts `N`,
+    `df`, `avgdl` and the candidate lists exactly; `crates/smysl-retrieve/tests/postings.rs`
+    asserts bit-for-bit that scoring through a `Subset` equals scoring a table built from
+    those units alone. It is still not a second index: one table is built per store, and a
+    view of it costs one pass over the partition.
+  - **The partition and the IDF scope are different restrictions.** A partition decides which
+    units may be *returned*; the IDF scope decides what the term statistics are counted
+    *over*. They coincide only at `idf_scope = partition`. `smysl-retrieve` already separates
+    them — `Query::within` restricts candidates and leaves IDF to the index — so the `Subset`
+    sets the universe and `within` sets the partition.
+- Each partition is searched with its own analyzer (SMYSL-2.4 chain id, recorded). **Built in TX-P6 step 6:** `Partition` carries the chain id, `Scope::analyzer` supplies the chain behind it, and the executor builds one postings table *per analyzer* rather than per partition — a table is a function of the analyzer that cut its terms, so a scope over three languages builds three and a plain store builds one. The plan prints the id beside each partition.
+- **RRF.** `score(u) = Σ_p 1 / (k + rank_p(u))`, `k = 60`, ranks 1-based, partitions summed in
+  sorted partition-key order, f64, ties by uid. The fused list is a function of integer ranks
+  and a fixed summation order, so it is bit-reproducible. `k` is recorded in the recipe and is
+  **not a parameter** (OQ-45, decided 2026-10-28). Over this fusion it cannot change an order: a
+  unit belongs to one partition, so its score is `1 / (k + rank)` for its one rank, monotone in
+  the rank at every `k`, and two units at one rank tie at every `k` and fall to the uid
+  (`fuse.rs`, `k_cannot_reorder_units_ranked_by_one_partition`). `k` moves an order only for a
+  unit two partitions rank — cited from parts in two languages or two manifests — and there a
+  parameter would be one more number a rerun depends on, chosen on whatever corpus chose it.
+  Where a unit *is* ranked twice — the lexical-with-semantic fusion OQ-46 measured, below — the
+  sweep in `fusion.rs` moves MRR by up to 0.035 across `k` from 1 to 1000, and the best `k`
+  differs by corpus and by model.
+- **What RRF never does:** fuse lexical with semantic. `~hybrid` keeps the measured routing of
+  `Hybrid::routes_to_lexical`; the routing outcome is recorded per partition. **OQ-46, decided
+  2026-10-28: route, and the measurement that decided it is RRF's, not the old merge's.** The
+  0.78 against 0.84 that removed the merge measured an average of ranks over one English set;
+  `crates/smysl-embed/tests/fusion.rs` scores lexical, semantic, routed and RRF-fused (`k = 60`,
+  both engines' full rankings) over three corpora with both S0 models. MRR / P@1:
+
+  | corpus (searches) | model | lexical | semantic | routed | fused |
+  |---|---|---|---|---|---|
+  | queries.tsv, English (20) | potion-base-8M | 0.746 / 0.600 | 0.850 / 0.750 | 0.875 / 0.800 | 0.877 / 0.800 |
+  | | potion-multilingual-128M | 0.746 / 0.600 | 0.838 / 0.700 | **0.900 / 0.800** | 0.867 / 0.750 |
+  | Ruth restated, within English (40) | potion-base-8M | **0.912 / 0.825** | 0.826 / 0.775 | 0.826 / 0.775 | 0.835 / 0.750 |
+  | | potion-multilingual-128M | **0.912 / 0.825** | 0.824 / 0.725 | 0.824 / 0.725 | 0.870 / 0.775 |
+  | five-language verses, across (295) | potion-base-8M | 0.292 / 0.217 | 0.305 / 0.203 | 0.305 / 0.203 | 0.353 / 0.251 |
+  | | potion-multilingual-128M | 0.292 / 0.217 | **0.866 / 0.810** | **0.866 / 0.810** | 0.725 / 0.641 |
+
+  Fusion ties routing on the English set with the English model and loses to it with the
+  multilingual one; it loses 0.14 MRR across languages with the only model that can cross them,
+  because BM25 there has names and numbers to rank by and pulls the translations down; and where
+  it wins, over the English-only model's verses, every engine is near chance. The one place it
+  helps is Ruth, where the restatements share the verses' names and nouns — and there lexical
+  alone beats both, so the finding is about **which engine a paraphrase within one language
+  goes to**, not about merging: `~hybrid` sends prose to semantic, and over this corpus `~lex`
+  is the better choice, which a query can make. Every set is small and every gold single-hand
+  or of record by construction; reopen with a within-language set in a language other than
+  English, where neither engine has been measured.
+- `--why` on a fused result prints, per hit, the partition ranks and the per-term contributions
+  inside each partition (from `Hit::terms`).
+
+### 3.5 Language bridges
+
+`lang:any` asks the planner for the strongest bridge per pair of partitions:
+
+| bridge | source | purity | phase |
+|---|---|---|---|
+| structural alignment | SMYSL-2.4 `align` table | pure | TX-P6 when the table exists |
+| proposition classes | SMYSL-2.4 classes (`strict` normative, D-7) | pure | after TX-P7 |
+| entity aliases | `x.text/entity` + `x.text/same-as` | pure | TX-P6 |
+| multilingual embeddings | S0 / S1 (`SemanticSource`) | model-dependent | TX-P10 — *built at step 4: `~sem lang:any`, one cosine ranking over every partition* |
+| query-term translation | `Translator` port (§3.15) | model-dependent | TX-P10 |
+
+The bridge used is a column of the result and a line of `--explain`. A partition reachable by no
+bridge answers in its own language only and is counted (`SMY-W465`).
+
+### 3.6 Saved queries (`x.query/v1`)
+
+A saved query is one unit of type `x.query/saved` (FC-5, SMYSL-2.3) with payload keys from draft
+3 Appendix A:
+
+| key | content |
+|---|---|
+| `query:text` | the query as written, after parameter binding |
+| `query:recipe` | recipe hash: `sq` version, analyzer ids, IDF scope, estimator id, RRF `k`, class policy, template-set id, parameters, per-partition limit |
+| `query:models` | model hashes used (empty for pure plans) |
+| `query:result-hash` | BLAKE3 over `"smysl/sq-result/1\0"` ‖ sorted result uids (tool-level, not format) |
+| `query:sq` | `sq/1` |
+| `query:schemas` | `id@revision` list in force |
+| `query:lens-chain` | hash of every lens chain the plan applied (§3.10) |
+| `query:per-partition` | integer: how many hits a source kept per partition before fusion (OQ-84) |
+
+**A query is saved only after it has planned and run to completion.** *Settled 2026-10-15
+(SMYSL-2.9 OQ-82).* The table above already requires it and this makes it normative rather
+than incidental: `query:result-hash` is taken over the result uids, `query:lens-chain` over the
+chains the plan applied, `query:schemas` over the revisions in force, and the result set is
+written as `RESULT_EDGE` edges — none of which exists before a run. So a query that fails to
+plan is never saved: `SMY-E461` for `match`, `SMY-E462` for an undeclared edge kind,
+`SMY-E422` for a predicate on a retired key. A run that succeeds and finds nothing is still a
+run; §3.13's empty slot keeps its role `gap` and hashes an empty result list.
+
+One consequence is load-bearing elsewhere. `match` is captured as raw text and the canonical
+printer does not normalise it (SMYSL-2.9 §4.9), so two queries differing only in the
+whitespace inside a `match` would hash differently — and that cannot happen, because planning
+refuses `match` and an unplanned query is never saved. If a later phase makes `match`
+plannable, that phase owes a normalisation of the captured text before this guarantee holds
+again.
+
+Status `cited`, `source { kind: doc, ref: "sq:<recipe-hash-short>" }`: the unit cites the query
+text it carries. That matches how `@question` units are authored in `fixtures/corpus/F4-qa.smy`
+(`status: cited` with a `doc` source).
+
+**Results.** Draft 3 links results with kernel `answers` edges from the saved query. That edge
+kind carries salience rank (`RelKind::carries_support` returns true for `Causes | Answers`), so
+saving a query would raise its results' salience and change every later `order by salience`
+— including the rerun of the query that was saved. This RFC therefore:
+- writes the result set as edges of one relation-kind constant, `RESULT_EDGE`;
+- uses `x.query/answers` (an extension kind, which `EdgeKind::carries_support` treats as
+  non-supporting) as its value, as SMYSL-2.3 A-11 decides (OQ-49, resolved);
+- refuses `--save` with kernel `answers` unless salience excludes edges whose source is an
+  `x.query/*` unit, which is a change to `smysl-graph/src/salience.rs` this RFC does not make.
+
+**Reruns.** Let `P` be the previous result (from the result edges), `E_pin` the rerun pinned to
+the recorded revisions over today's data, `E_cur` the same query under current revisions:
+- `q --rerun <uid>` (default, pinned): returns `E_pin`; **data effect** = `diff(P, E_pin)`.
+- `q --rerun <uid> --current`: returns `E_cur`; data effect = `diff(P, E_pin)`, **schema effect**
+  = `diff(E_pin, E_cur)`. Both use only revisions recorded in the unit, never dates.
+- `--current --save` writes a new `x.query/saved` that `supersedes` the old one.
+- A model-dependent saved query rerun under a different model hash raises `SMY-W467`; its diffs
+  are printed and labelled not comparable.
+- A recorded lens-chain hash that the store's declarations no longer reproduce (a declaration was
+  never merged here) is `SMY-E466`: the query cannot be pinned, and it does not answer from part
+  of its meaning.
+- A rerun runs under the recorded `query:per-partition` unless the caller names a limit
+  (OQ-84). A limit given is another question, and its diffs are labelled not comparable. A save
+  written before the key was declared has its limit only in the recipe hash, and reruns under
+  the caller's.
+
+**A `find` does not find saved queries** (OQ-85, decided 2026-10-28). A saved query's gist is
+its text, so over the store it was saved in it would rank first for its own terms. A pipeline
+whose source is `find` (any engine) leaves `x.query/saved` units out of its scope at phase 3,
+before anything scores, so they neither rank nor count toward a collection or partition IDF.
+A predicate that compares `schema` with `x.query/saved`, anywhere in the pipeline's `where`,
+is the way to ask the other question, and turns the default off; a `$parameter` is not looked
+through, since a plan is a function of the query. A pipeline with no `find` scores nothing and
+leaves nothing out. `explain` counts what was left out on the scope line.
+
+### 3.7 Independent witnesses
+
+`support` and dossier ranking count independent witnesses through a trait:
+
+```rust
+pub trait Witnesses {
+    /// Groups of sources that independently support `uid`, and groups dropped as dependent.
+    fn groups(&self, store: &Store, uid: &Uid) -> WitnessGroups;
+}
+```
+
+- **Default implementation:** attestation groups with disjoint ancestry, i.e. today's
+  `salience::corroboration` logic, made public as `smysl_graph::salience::corroboration_groups`
+  so there is one definition.
+- **Library implementation** (SMYSL-2.4): sources are manifests; two are dependent when their
+  derivation graphs (draft 3 §4.7) meet. Partial dependence is OQ-15.
+- When a unit's sources are not all known to the derivation graph, the count falls back to
+  attestation groups for that unit and says so (`SMY-W479`).
+
+This is the 1.9 "corroboration" carry-over (CHANGELOG, Unreleased) served by one mechanism.
+
+### 3.8 FC-9 decoding (in `smysl-core`)
+
+FC-9's byte layout is normative in SMYSL-2.3. Decoding it into types lives in `smysl-core` so
+that `check`, retrieval, rendering and `smysl-query` share one reading:
+
+- `payload_shape` bytes decode as `{0: fields}`; each field `{0: type, 1: values, 2: retired-in,
+  3: note, 4: required-from, 5: required-when}`. A shape that does not match is kept opaque and
+  reported `SMY-W430` — exactly today's behaviour plus the warning.
+- Key 5 moves from `extra` into a typed `lenses: Vec<LensStep>`. The step's **original bytes are
+  kept**, so re-encoding is byte-identical and the chain hash is over exactly what was received.
+- An op tag this build does not know decodes to `LensOp::Unknown { tag, bytes }`. Per D-5, the
+  step is unusable (`SMY-W469`) and units needing it are unmappable (`SMY-W420`).
+- `SchemaSet::from_records(store.iter())` collects every revision of every id. A new
+  `Store::schema_decls()` accessor avoids each caller re-filtering `iter()`.
+- **Current revision** is the highest version. Two declarations of one `(id, version)` with
+  different bytes are a fork: `SMY-W429`, and that id has **no** current revision until resolved.
+- The `@schema` surface form for `fields:` and `lenses:` (spelling normative in SMYSL-2.3) is
+  implemented in `surface/parse.rs` and `surface/write.rs` in TX-P12;
+  `schema_decl_has_surface_form` becomes "no `extra` keys this build cannot spell".
+
+### 3.9 The lens engine and field resolution
+
+**Unit views.** A lensed view of a unit is `UnitView { ty: SchemaId, payload: BTreeMap<String,
+HValue>, edges renamed lazily }` built from `payload_to_object`. Lenses never write: the unit's
+bytes, uid and attestations are untouched.
+
+**Revision inference** (draft 3 §15.2): a unit's revision interval is narrowed by (a) retired
+names it uses, (b) keys required from revision n (with their condition) that it lacks, (c) for
+extracted units, the revisions named in its attestation recipe. The engine lenses from the
+**highest** revision consistent with the clues. By rule N, any consistent revision yields the
+same view; that is a tested law (§5.3), not an assumption.
+
+**Application, forward** (one step, ops in declared order):
+
+| op | forward effect on a view | backward |
+|---|---|---|
+| `rename-type a → b` | `ty = b` if `ty = a` | `b → a` |
+| `rename-relation r → s` | edge kind `r` followed as `s` | `s → r` |
+| `rename-key k → k'` | move `k` to `k'` | move back |
+| `map-value k: {old → new}` | rename value | inverse map; non-injective map is not invertible |
+| `split-value k = v → {k: v', k2: x}` | `k = v` becomes `k = v'` plus `k2 = x` | `k = v'` and `k2 = x` → `k = v`, drop `k2` |
+| `require k [when c]` | none (validation only) | none |
+| `default k = v [when c]` | absent `k` under `c` reads as `v` | drop `k` when it equals `v`; other values left for an earlier op |
+| `retire k` | `k` reads as absent | not invertible: `SMY-E422` on any backward path |
+
+Backward application runs steps in reverse and ops in reverse. After it, any key or value no op
+took back makes the unit unmappable (`SMY-W420`), counted.
+
+**Unmappable values.** A value the chain cannot carry (an enum value outside every `map-value`
+and the target revision's `values`) leaves that field unmappable on that unit: the unit is
+excluded from predicates on that field and counted; other fields still evaluate. `--explain`
+prints counts per lens step: "312 units read through `x.text/v1` 1→2; 0 unmappable". Every
+run states the same counts in one line on stderr when a lens read any unit, and nothing when
+none did (OQ-24): `smysl q: lenses: 312 unit(s) read through x.text/v1 1->2 (chain …, 0
+unmappable)`, chains joined by `;`. `smysl_query::lens_note` makes the line.
+
+**Widening detection.** A `split-value` whose `v'` already exists in the source revision's
+`values` is a widening. The engine requires a `require k2 when k = v'` and a `default k2 = d when
+k = v'` in the same step; their absence is a lens defect (`SMY-E471`), which `schema check` also
+reports as a rule N violation (`SMY-E426`).
+
+**Field resolution** (draft 3 §15.4), implemented in `smysl-query`:
+- Unqualified names resolve against the current revision of each schema in scope. If two schemas
+  in scope both declare the name, the field is ambiguous and must be qualified (`SMY-E421` with
+  the candidates listed).
+- Qualified `x.text/v1@1:text:mode` names the field **as revision 1 named it**, and the
+  predicate is compiled forward 1 → current by the pinned compile-forward rule below. It is
+  that rule scoped to one reference instead of to the whole query, and it is the only reading
+  available: "raw at revision 1" would require lensing newer units backwards, which the last
+  line of this section forbids and which `retire` makes impossible (`SMY-E422`). *Settled
+  2026-10-15 (SMYSL-2.9 OQ-77); the earlier text here said "reads revision 1 raw, no lens",
+  which left `with lens none` nothing to do.*
+- **`with lens none`** on a stage (SMYSL-2.9 §4.7) turns that compile-forward off for the
+  qualified references in that stage: they are read literally at the revision they name, so a
+  unit whose inferred revision is not that one is unmappable on that field and counted
+  (`SMY-W420`), exactly as an unmappable value is. Unqualified access is always lensed (§3.1)
+  and the modifier does not reach it.
+- **Pinned compile-forward.** For `using x.text/v1@1`, every predicate is rewritten through the
+  chain 1 → current:
+  - renames rename the field or value;
+  - `k = v` under a `split-value k = v → {k: v', k2: x}` becomes `k = v' and k2 = x`;
+  - `k = v'` where that split is a **widening** becomes `k = v' and k2 = d`, `d` from the paired
+    `default` — the old, narrow meaning;
+  - a predicate on a retired key, or a retired value with no mapping, is `SMY-E422`.
+  Lenses never run backwards for a query.
+
+### 3.10 Chains, composition and hashing
+
+- `SchemaSet::chain(id, from, to)` finds the step path (steps are `from → to` with `to > from`;
+  gaps or cycles: `SMY-E470`).
+- `LensChain::compose(a, b)` concatenates steps when `a.to == b.from`.
+- **Chain hash:** BLAKE3 over `"smysl/lens-chain/1\0"` ‖ deterministic CBOR array
+  `[id, from, to, [step bytes…]]`, where step bytes are the received record-8 key-5 elements.
+  Hashing received bytes rather than a re-encoding makes the hash identical across
+  implementations that agree on the record. This is the definition SMYSL-2.3 Appendix B adopts.
+- Composition is associative on application and on the hash (both are concatenation); tested.
+
+### 3.11 `schema show`, `schema check`, `migrate`
+
+`smysl schema show <id>`: revisions, field table per revision (type, values, required-from/when,
+retired-in), lens steps with op lists, chain hashes from each revision to current, forks.
+
+`smysl schema check <id>` (pure; draft 3 §15.2–15.3), every revision against **every** earlier one:
+1. No name (type, relation, key, enum value) changes meaning except by a declared widening with
+   its paired key (`SMY-E426`).
+2. A retired name never reappears in a later revision's names or in any lens target (`SMY-E426`).
+3. Forks (`SMY-W429`).
+4. Each step well-formed: `default` paired with `require` under the same condition, ops naming
+   declared keys (`SMY-E471`); unknown ops (`SMY-W469`).
+5. Totality over the store: every unit of the schema is lensed to current; unmappable units are
+   listed (`SMY-W420`).
+6. Extracted units missing a key their recipe's revision requires (`SMY-W431`).
+
+`smysl migrate --schema <id> --to <rev> [--recipe R]`:
+- **Deterministic** (no recipe): for each unit at an older revision, apply the chain forward,
+  rebuild a `UnitCore` with the lensed payload and type, attest `op: Transformed` naming the
+  chain hash in the recipe, and emit `supersedes` new → old. Units go through
+  `stage::prepare_declared` with the target `SchemaDecl`, so rule M (`monotone::apply`) caps
+  each new unit at its source's status and the batch is staged (rule S).
+- If the target revision requires a key the chain cannot supply (no `default` covers it), the
+  migration needs information the units lack: `SMY-E473`, unless `--recipe` names an extraction,
+  which runs through `ingest` and its rules (T, M, S) and makes the run model-dependent.
+- References are re-pointed by the existing `relink` after the staged batch is accepted.
+- Commitments and datings are **proposed** for the new uids, attributed to the migrating agent,
+  staged for review, not transferred (`SMY-W472` with counts).
+- Never automatic, never in place. Old units remain; the supersession pass (§3.2) prefers heads.
+
+### 3.12 Pointer lenses (`json/1`)
+
+The `json/1` reader profile (SMYSL-2.4) declares pointer lenses with the same op set, where a
+"key" is a JSON Pointer and a version marker selects the step (a manifest field or a shape
+fingerprint). `pointer("/database/pool/max_size")` compiles to the set of pointers that map to it
+across versions, and matches units by their locator through `units_with_source_prefix` (today)
+or SMYSL-2.4's `locators` table (later). Locators in units are never rewritten. A snapshot with
+no version marker is read without a lens and counted (`SMY-W475`). Unit conversions stay out
+(OQ-23).
+
+### 3.13 Dossiers
+
+**Pipeline** (draft 3 §12.1):
+1. **Subject.** Resolve X to `x.text/entity` units and classes through aliases and same-as
+   (SMYSL-2.4). More than one candidate: list them, `SMY-W417`, stop. `--subject <uid>` picks.
+   *Since 2026-10-29:* when no run of the topic's words matches an entity as spelled, the
+   runs are tried again through the question language's Snowball stemmer — the analyzer chain
+   that indexes the library — so `холеры`, `цингу`, `Jenners` and `Джозефа Листера` find
+   `холера`, `цинга`, `Jenner` and `Джозеф Листер` (`Entities::candidates_stemmed`;
+   `smysl_text::scope::Stemmed` gives a plain store's port the same). Spelling first, so a stem
+   never displaces an exact name. On the third question set the subject is found for 58 of 80
+   as spelled and **69 of 80** through stems, every miss left being an unread intent; no stem
+   found a wrong subject in any set. Set 1 143 → 150 and the fresh set 77 → 83 (in-sample);
+   the two the stems cannot reach are a German compound (`Cholerabazillus`) and a Russian
+   adjective (`холерный`). *Since 2026-10-29, a comparison:* it names two subjects and the
+   dossier has one, so the run that starts earliest wins and the longest only at that start —
+   `How does Semmelweis compare with Joseph Lister?` asks about Semmelweis, where the longest
+   name anywhere made it Lister; every other intent keeps the longest. On the fourth set the subject is found for every question whose intent
+   is read, 55 of 80; on the fifth 44 of 80, every miss an unread intent; on the sixth 46.
+   `crates/smysl-text/tests/ge_t10_third.rs` pins the six.
+2. **Intent.** A closed rule table per tier-1 language (`define, explain, verify, attribute,
+   trace, locate, depend, compare`): ordered regular patterns over the folded question ("what
+   is", "что такое", "qu'est-ce que", "was ist", "qué es", …). No rule matches: `SMY-E468`,
+   `--intent` overrides. A model classifier is a `Classifier` port, labelled model-dependent
+   (OQ-22). Pure by default.
+3. **Slots.** Each intent is a list of slot templates, each an `sq` file with `$subject`,
+   `$scope`, `$lang`, compiled into the binary (`include_str!`) under a template-set id
+   `smysl/dossier/1` whose hash goes into the recipe — `smysl/dossier/2` since OQ-87 and OQ-88
+   were decided, and `smysl/dossier/3` since OQ-86 was (both 2026-10-28). Unknown set id on
+   rerun: `SMY-E477`.
+   Example, `define/counter.sq`:
+   ```
+   about entity($subject) | where kind in (claim, finding)
+   | expand <-rebuts depth 1 | union (about entity($subject) | with rebuttals)
+   | where status >= inferred | order by salience desc | limit 12
+   ```
+   *As built (TX-P8 step 3)* the slot is `templates/counter.sq`, one file shared by every intent
+   with a counter slot, and it reads
+   ```
+   about entity($subject)
+   expand ->rebuts depth 1
+   except
+   about entity($subject)
+   order by salience descending
+   limit 12
+   ```
+   The sketch above does not parse under SMYSL-2.9 (a `where` after an `expand`, `desc`) and its
+   arrow is the reverse of the one every traversal in this build walks: `->k` is `trace_via`,
+   which for `rebuts` and `causes` reaches the source from the target, so a rebuttal is behind
+   `->rebuts` and `<-rebuts` walks to what the rebutted unit itself rebuts. That holds for every
+   edge kind — for `A --k--> B`, `->k` walks from `B` to `A` — so the example slot is
+   `->exemplifies` too; step 3 wrote `<-exemplifies`, and GE-T10's first run found that slot
+   empty for every question (§6 step 4). The `except` is OQ-86. The template set `smysl/dossier/1` has eighteen slots and assigns them (set 2's changes after the table):
+
+   | intent | slots, in order |
+   |---|---|
+   | define | definition, characteristic, exemplifies, counter, open-question |
+   | explain | cause, evidence, hypothesis, counter, open-question |
+   | verify | support, evidence, counter, reported |
+   | attribute | reported, holder, stance |
+   | trace | introduction, revision, cause |
+   | locate | location, related |
+   | depend | dependent, related |
+   | compare | characteristic, contrast, counter |
+
+   *Set 2* (`smysl/dossier/2`, 2026-10-28) changes three things and keeps the eighteen
+   templates. `trace` is `introduction, cause`: `revision` is withdrawn until sq/1 can select a
+   superseded unit (OQ-87). `counter` and `reported` in `verify`, and `counter` in `explain`,
+   are **narrowed to the question's topic** (OQ-88): the topic's words, less the subject's and
+   the question language's function words, are written into the slot's first pipeline as
+   `where matches "w1" or matches "w2" …`, so the slot starts from units that say something the
+   question said — for `counter`, the claim asked about, whose rebuttals it then walks to. When
+   no unit about the subject says any of them the slot runs on the subject alone, and the
+   dossier records that (`SlotResult::narrowed`, `Dossier::topic_found`). And every slot is
+   planned with `PlanOptions::supersede_before_walk`, which runs the supersession pass on a
+   pipeline's seeds before its walks as well as after, so an edge slot walks from the current
+   account (OQ-87); the recipe records it.
+
+   *Set 3* (`smysl/dossier/3`, 2026-10-28) takes SMYSL-2.9's `only` (OQ-86): every edge slot is
+   `expand … only` instead of `expand … except about entity($subject)`, so a rebuttal, cause or
+   example that names the subject stays in its slot, and `revision` returns to `trace` as
+   `expand <-supersedes only` (OQ-87).
+4. **Rank within a slot** by the product of retrieval score (RRF-normalised), derived salience
+   (`renormalise` over the slot), status rank and independent-witness count, each quantised
+   with `smysl_core::quantise`; ties by uid. Multiplying incomparable scales is a choice to
+   test against GE-T10 (OQ-52). *Tested 2026-10-28, and kept:* `AskOptions::ranking` offers
+   the product, a lexicographic order (retrieval, then salience, then status) and RRF over the
+   three terms' own ranks, and GE-T10's fourth table scores each one's order (OQ-52's row has
+   the figures). A choice other than the product is recorded in the dossier's recipe.
+5. **Pack** with `PackRequest::budget(N).scoped(members).focusing(slot units)`; rule R pins live
+   rebuttals.
+
+**Representation** (draft 3 §12.3):
+- Root: a `question` unit with the question text (`status: cited`, `source { kind: doc, ref:
+  "ask:<recipe-hash-short>" }`).
+- One `x.query/saved` unit per slot, with its template text and parameters, linked to its
+  results by `RESULT_EDGE` (§3.6).
+- A `Thread` of schema `dossier` (FC-8 code and role codes from SMYSL-2.3), one `Step` per filled
+  unit with the slot's role, in template slot order. **An empty slot is a step with role `gap`
+  whose unit is the slot's saved query** and whose `note` names the slot: the absence is a
+  visible, rerunnable finding. `evidence` and `support` reuse today's `Role::Evidence` (17) and
+  `Role::Support` (13), and `question` reuses 16; the other slot roles are codes 24–48
+  (SMYSL-2.3 A-8.2).
+- A `View` with `roots = {question, slot queries}`, `threads = {dossier thread}`, `requires =
+  {x.query/v1, x.text/v1}`, `intent = "dossier"`. `membership` reaches results through the
+  result edges.
+- `smysl_thread::definition(ThreadSchema::Dossier)` returns a `SchemaDef` with the full role
+  list, weights, and **no matcher rules**: `thread --derive dossier` is refused, because dossier
+  threads are produced only by `ask`. `exposition` and `dialogue` derivation (pure, from spans,
+  reply edges and effective time) need SMYSL-2.4 data and are added to `smysl-thread` in TX-P8.
+- Rendering uses `smysl-render::build` on the dossier thread; render profiles gain headings for
+  the new roles. A profile without them falls back to the role name (an unknown role after
+  SMYSL-2.1 opens `Role` is `SMY-W409`).
+
+**Answer step** (`ask --answer`, model-dependent):
+- Input: the packed dossier rendered with `Target::Text`, delimited as data with the
+  prompt-injection guard of SMYSL-2.1 (D-10): instructions inside the text are not followed.
+- Output requested as surface units; every unit must ground only on dossier members. A unit
+  grounding elsewhere is dropped and counted (`SMY-W478`).
+- Accepted units go through `stage::prepare`, so rule M caps each at its weakest ground
+  (`SMY-W036` when lowered). The answer is "AI reads AI and passes it to humans" with the hedges
+  intact.
+
+### 3.14 Embeddings: S0 and S1
+
+**S0** (`smysl-embed`): pin `model2vec-rs 0.3` with `default-features = false, features =
+["wasm"]` (verified, §2.2). Update the manifest comment: no `esaxx_fast`, no C++ from this path,
+`clap` optional, `serde_json` still required (so the crate stays outside `PURE_CRATES`). Default
+multilingual model `potion-multilingual-128M` (256-d), loaded through the existing `from_dir`
+(unverified until a model directory is tried).
+
+**S1** (`smysl-embed-candle`, new, optional, feature `semantic-candle`):
+- Encoders: `multilingual-e5-small`/`-base` (XLM-R family), `bge-m3` (dense head). Loaded from a
+  local directory: `config.json`, `tokenizer.json`, `model.safetensors`; no network, as S0.
+- Pooling: mean pooling over the attention mask for e5 (with the `query: `/`passage: ` prefixes
+  the model card prescribes), CLS for bge-m3 dense; L2-normalised. The pooling id is part of the
+  model hash.
+- **Model hash:** BLAKE3 over the three files' bytes and the pooling id. **Vector cache:** keyed by
+  `(model hash, uid)`; until SMYSL-2.4's `vectors` table, a sidecar `<store>.vec-<hash12>`
+  (CBOR seq of `(uid, f32[])`). An entry under another model hash is ignored and re-embedded
+  (`SMY-W476`). Embeddings are a cache, never identity.
+- Purity: model-dependent; no cross-machine bit-agreement claimed (as for S0).
+- Dependencies: `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers` (shared with S0).
+  Versions, the XLM-R implementation in `candle-transformers`, and the absence of `cc`/`-sys`
+  crates with default features are **unverified** here (not in the offline registry); TX-P10
+  step 1 verifies them before any code is written. *Verified at step 1 (2026-10-26, §6):* **candle 0.9**, because
+  0.10 and later bring Oniguruma through `tokenizers`; XLM-R present; 1.88. *Built at step 3
+  (2026-10-27, §6):* `e5-small` is a BERT, so both architectures run; the hash takes the
+  prefixes too; the sidecar holds raw `f32` bytes.
+
+**Semantic sources and bridges** use a port so `smysl-query` stays pure:
+
+```rust
+pub trait SemanticSource {
+    fn model_hash(&self) -> [u8; 32];
+    fn search(&self, query: &str, within: &BTreeSet<Uid>, limit: usize) -> Vec<Hit>;
+    fn similarity(&self, a: &str, b: &str) -> f32; // for near(…)
+}
+```
+
+S0's `Semantic` and S1's encoder implement it in their own crates; the facade wires them under
+features `semantic` and `semantic-candle`.
+
+*As built (TX-P10 step 4):* one method, `search(query, within, limit)`, beside `model_hash` —
+`near(…)` reads the cosines `search` gives over the candidates, so the query is embedded once
+rather than every unit's text again through `similarity`. Neither embedder implements it:
+`smysl_query::RetrieverSource` adapts any `Retriever` with its model's hash, and lives in
+`smysl-query` itself, which is pure, since `Retriever` is.
+
+### 3.15 Natural-language front end
+
+```rust
+pub trait Translator {
+    fn model_hash(&self) -> [u8; 32];
+    fn translate(&self, question: &str, ctx: &TranslateContext) -> Result<String, TranslateError>;
+}
+```
+
+- `smysl-query` defines the port and `TranslateContext` (declared fields and enum values from
+  the `SchemaSet`, stage list, few-shot examples). No provider is linked.
+- The facade implements it over `smysl-provider` under feature `providers` (rule A: the CLI
+  reaches it only through the facade).
+- The model's output is untrusted. It must parse as `sq/1`, pass field resolution, and use only
+  allowed stages; otherwise `SMY-E474` and nothing runs. The translated query is printed before
+  it runs; `q --from-question "…"` runs it only with `--yes` or interactive confirmation.
+- The run itself is labelled by the query's own purity: the model wrote the query; the query,
+  not the model, produces the answer. The saved query records the translator's model hash in
+  `query:models` and the original question in the unit's body.
+
+*As built (TX-P10 step 5):* `smysl_query::nl` holds the port, the context, the prompt (a pure
+function of question and context, `sq.translate` version 1) and `accept`, the check; the facade's
+`smysl::translate::ProviderTranslator` is the adapter. The context is the store's **vocabulary as
+used** — kinds, statuses, relation kinds, payload keys with sample values — since a kernel store
+declares no fields and a context of declarations alone would offer nothing to filter on. A
+hosted model has no file to hash, so the translator's hash is BLAKE3 over provider, model and
+prompt id and version. `accept` unwraps a reply that is one code fence, and refuses a parameter;
+the refused stages are `pack … as view`, `measure`, a `question` source and `match`.
+
+## 4. Implementation plan
+
+### 4.1 Crates and modules
+
+**New `crates/smysl-query`** (pure; joins `PURE_CRATES`):
+
+| module | contents |
+|---|---|
+| `src/lib.rs` | re-exports, `SUPPORTED_SQ`, `Purity` |
+| `src/lex.rs` | mode-aware lexer, spans |
+| `src/parse.rs` | recursive descent per SMYSL-2.9 §4 + §3.1 additions |
+| `src/ast.rs` | `Query`, `Stage`, `Pred`, `Source`, `Expand`, … |
+| `src/resolve.rs` | field and relation resolution, `using` pins, compile-forward |
+| `src/plan.rs` | planner phases, `Plan`, `PlanStep`, purity |
+| `src/exec.rs` | executor over `Env` |
+| `src/fuse.rs` | RRF |
+| `src/bridge.rs` | bridge selection |
+| `src/witness.rs` | `Witnesses` trait, attestation default |
+| `src/explain.rs` | `--explain` and `--why` text and JSON |
+| `src/saved.rs` | `x.query/v1` encode/decode, rerun, effect split (added in TX-P8 step 1: `Recipe`, `bind`, `to_records`, `load`, `rerun`, `SetDiff`; the schema effect half of the split waits for TX-P12) |
+| `src/dossier/{mod,intent,templates}.rs` + `templates/*.sq` | dossier pipeline (TX-P8 step 3: `ask`, `AskOptions`, `Dossier`, `SlotResult`, `AskError`; `intent::classify` over a 169-rule table for en, de, es, fr and ru; `templates::{SET, SLOTS, slots, hash, set}`; one `.sq` file per slot, eighteen, shared across intents; `fold.rs`, the pinned case fold for subjects and rules) |
+| `src/nl.rs` | `Translator`, `TranslateContext`, output validation |
+| `src/ports.rs` | `Scope`, `SemanticSource`, `Classifier`, `TimeIndex`. As built: `Scope` (step 2, with `analyzer` and `restrict_lang` added in step 6), `Times` (step 6 — `TimeIndex` by the name the trait took, since it answers *a unit's time* and *a literal's meaning* and indexes nothing) and `Entities` (step 6). Each crosses the same line: this crate owns the question and the graph walk, `smysl-text` owns the fact |
+| `src/pred.rs` | predicate resolution and evaluation (added in TX-P6 step 4). `src/resolve.rs` above is this file's eventual other half: it is named for "field and relation resolution, `using` pins, compile-forward", and compile-forward is TX-P12's, while relation kinds and `using` pins resolve in `plan.rs` beside the phases that own them. What is left is one concern — resolving the fields a predicate names and then evaluating it — and splitting a resolver from an evaluator that is its only caller would be two files agreeing about a type |
+| `src/store_scope.rs` | the `Scope` implementation over a plain `Store` (added in TX-P6 step 2: it is the only file here that depends on `smysl-graph`, and a reader asking what the port requires of a backend should find the trait by itself) |
+
+**New `crates/smysl-embed-candle`** (impure tier, optional): `src/{lib,encoder,pool,cache}.rs`.
+
+**Changed:** `smysl-core` (new `src/schema/` module, `cbor/keys.rs`, `cbor/envelope.rs`,
+`surface/parse.rs`, `surface/write.rs`, `diag.rs`), `smysl-graph`, `smysl-retrieve`,
+`smysl-embed`, `smysl-thread`, `smysl-render` (profile headings), facade `src/lib.rs`,
+`src/main.rs`, `xtask/src/purity.rs`, `fuzz/`.
+
+### 4.2 Public API (sketch)
+
+`smysl-core`, `src/schema/mod.rs`:
+
+```rust
+#[non_exhaustive]
+pub enum FieldType { Text, Int, Bool, Uid, Edtf, Enum, List(Box<FieldType>), Other(String) }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Cond { pub key: String, pub value: HValue }
+
+#[non_exhaustive]
+pub struct Field {
+    pub ty: FieldType,
+    pub values: Vec<String>,
+    pub retired_in: Option<u32>,
+    pub note: Option<String>,
+    pub required_from: Option<u32>,
+    pub required_when: Option<Cond>,
+}
+
+#[non_exhaustive]
+pub enum Fields { Typed(BTreeMap<String, Field>), Opaque /* SMY-W430 */, Absent }
+
+#[non_exhaustive]
+pub enum LensOp {
+    RenameType { from: SchemaId, to: SchemaId },
+    RenameRelation { from: RelKind, to: RelKind },
+    RenameKey { from: String, to: String },
+    MapValue { key: String, map: BTreeMap<String, String> },
+    SplitValue { key: String, from: String, to: String, add: BTreeMap<String, HValue> },
+    Require { key: String, when: Option<Cond> },
+    Default { key: String, value: HValue, when: Option<Cond> },
+    Retire { key: String },
+    Unknown { tag: String, bytes: Vec<u8> },
+}
+
+pub struct LensStep { pub from: u32, pub to: u32, pub ops: Vec<LensOp>, bytes: Vec<u8> }
+
+pub struct Revision {
+    pub id: SchemaId, pub version: u32, pub decl_hash: [u8; 32],
+    pub types: Vec<SchemaId>, pub relations: Vec<RelKind>,
+    pub fields: Fields, pub lenses: Vec<LensStep>,
+}
+
+pub fn decode(decl: &SchemaDecl, report: &mut Report) -> Revision;
+pub fn encode_lenses(steps: &[LensStep]) -> Vec<u8>; // byte-identical for decoded steps
+
+pub struct SchemaSet { /* id -> revisions, forks */ }
+impl SchemaSet {
+    pub fn from_records<'a>(records: impl IntoIterator<Item = &'a Record>, report: &mut Report) -> SchemaSet;
+    pub fn current(&self, id: &SchemaId) -> Option<&Revision>;   // None while forked
+    pub fn revisions(&self, id: &SchemaId) -> &[Revision];
+    pub fn forks(&self) -> Vec<(SchemaId, u32)>;
+    pub fn chain(&self, id: &SchemaId, from: u32, to: u32) -> Result<LensChain, LensError>;
+    pub fn infer_revision(&self, unit: &UnitCore) -> RevisionGuess;
+}
+
+pub struct LensChain { pub id: SchemaId, pub from: u32, pub to: u32, steps: Vec<LensStep>, pub hash: [u8; 32] }
+impl LensChain {
+    pub fn identity(id: SchemaId, rev: u32) -> LensChain;
+    pub fn compose(self, next: LensChain) -> Result<LensChain, LensError>;
+    pub fn is_invertible(&self) -> bool;
+    pub fn forward(&self, view: &mut UnitView) -> Mapped;
+    pub fn backward(&self, view: &mut UnitView) -> Result<Mapped, LensError>; // Retire -> E422
+    pub fn widenings(&self) -> Vec<Widening>;
+}
+
+pub struct UnitView { pub ty: SchemaId, pub payload: BTreeMap<String, HValue> }
+impl UnitView { pub fn of(core: &UnitCore) -> UnitView; }
+
+#[non_exhaustive]
+pub enum Mapped { Whole, Partial { unmappable: BTreeSet<String> } }
+```
+
+`smysl-graph` additions:
+
+```rust
+impl Store { pub fn schema_decls(&self) -> impl Iterator<Item = &SchemaDecl>; }
+pub fn dependents_trace(store: &Store, root: Uid, edges: &EdgeSet, depth: Option<u32>) -> Lineage;
+pub fn trace_both(store: &Store, root: Uid, edges: &EdgeSet, depth: Option<u32>) -> Lineage;
+pub fn supersession_heads(store: &Store) -> (BTreeMap<Uid, Uid>, Vec<Uid>); // relink::successors, public
+pub mod salience { pub fn corroboration_groups(store: &Store, uid: &Uid) -> (Vec<String>, Vec<String>); }
+```
+
+`smysl-retrieve` additions: **one, and not this one.** This RFC asked for
+
+```rust
+impl Bm25 {
+    /// An index over `uids` only, so IDF is theirs (per-partition IDF, §3.4).
+    pub fn index_subset(store: &Store, uids: &BTreeSet<Uid>, tokenizer: Tokenizer) -> Bm25;
+}
+```
+
+and TX-P4 step 2 made it unnecessary before TX-P6 could write it. §3.4 records why — a view
+over an existing postings table sums the partitions' counts exactly, because the sets are
+disjoint, so the second index per partition is a cost nobody has to pay. The function was never
+added and should not be: `Bm25::over(postings, analyzer, store)` is the seam, and
+`postings::View::of(table, partitions)` (`smysl-text`) is the summing view. Three other places
+in this RFC named `index_subset` as though it existed and were corrected with this one.
+
+What TX-P6 step 3 added instead is a *view*, in the pure tier, where the summing one cannot
+reach:
+
+```rust
+pub struct Subset<'p> { /* a `Postings` restricted to a uid set */ }
+impl<'p> Subset<'p> {
+    /// O(|uids|), and it builds nothing.
+    pub fn of(inner: &'p dyn Postings, uids: &'p BTreeSet<Uid>) -> Subset<'p>;
+}
+```
+
+`smysl-query`. **The `Scope` trait had no signature in this RFC** — §3.2 phase 3, §3.3's table
+and `Env` below name it and none of them says what it is — so TX-P6 step 2 wrote one from what
+those mentions constrain, and it is recorded here rather than left to be inferred. It is expressed in
+uids and not in a store, because `smysl-text`'s implementation answers from the catalog; it is
+object-safe, because `Env` holds `&dyn Scope`; and phases 3 and 4 are separate methods because
+§3.2 makes them separate phases, with `partition` defaulting to the one partition that section
+calls for when there is no catalog:
+
+```rust
+pub trait Scope {
+    fn name(&self) -> &str;
+    /// Phase 3. An item this scope does not know is an error, never an empty set.
+    fn resolve(&self, item: &ast::ScopeItem, span: Span) -> Result<Candidates, Diagnostic>;
+    /// Every unit, for a query that wrote no `from` (SMYSL-2.9 OQ-79).
+    fn everything(&self) -> Candidates;
+    /// Phase 4. The default is one partition.
+    fn partition(&self, uids: &BTreeSet<Uid>) -> Vec<Partition> { /* one */ }
+}
+
+pub struct Candidates { pub stores: Vec<String>, pub uids: BTreeSet<Uid> }
+pub enum PartitionKey { Uncatalogued, Catalog { manifest: String, lang: String } }
+pub struct Partition { pub key: PartitionKey, pub uids: BTreeSet<Uid> }
+```
+
+```rust
+pub fn parse(text: &str) -> Result<ast::Query, Vec<Diagnostic>>;                  // E460
+pub fn plan(q: &ast::Query, env: &Env<'_>, opts: &PlanOptions) -> Result<Plan, Vec<Diagnostic>>;
+pub fn run(plan: &Plan, env: &Env<'_>) -> Result<Outcome, QueryError>;
+
+pub struct Env<'a> {
+    pub store: &'a Store,
+    pub schemas: &'a SchemaSet,
+    pub scope: &'a dyn Scope,
+    pub times: Option<&'a dyn Times>,       // was `time: Option<&dyn TimeIndex>`; TX-P6 step 6
+    pub entities: Option<&'a dyn Entities>, // TX-P6 step 6
+    pub semantic: Option<&'a dyn SemanticSource>,
+    pub witnesses: &'a dyn Witnesses,
+}
+
+#[non_exhaustive]
+pub struct PlanOptions { pub params: BTreeMap<String, String>, pub all_versions: bool,
+                         pub idf_scope: IdfScope, pub rrf_k: u32, pub current: bool }
+
+#[non_exhaustive]
+pub enum Purity { Pure, ModelDependent(Vec<&'static str>) }
+
+#[non_exhaustive]
+pub struct Plan { pub sq: SqVersion, pub purity: Purity, pub steps: Vec<PlanStep>,
+                  pub pins: Vec<(SchemaId, u32)>, pub lenses: Vec<LensUse>,
+                  pub bridges: Vec<BridgeUse>, pub recipe_hash: [u8; 32] }
+
+#[non_exhaustive]
+pub struct Outcome { pub rows: Vec<Row>, pub uids: Vec<Uid>, pub result_hash: [u8; 32],
+                     pub counts: Counts /* undated, unmappable, truncated, forks */,
+                     pub report: Report }
+
+pub fn explain(plan: &Plan, outcome: Option<&Outcome>) -> String;
+pub fn why(outcome: &Outcome, uid: &Uid) -> Vec<Contribution>;
+
+pub mod saved {
+    pub fn to_records(plan: &Plan, out: &Outcome, agent: &AgentId, ts: Hlc) -> (UnitCore, Vec<Relation>);
+    pub fn load(store: &Store, uid: &Uid) -> Result<SavedQuery, QueryError>;
+    pub fn rerun(saved: &SavedQuery, env: &Env<'_>, current: bool) -> Result<Rerun, QueryError>;
+    pub struct Rerun { pub result: Outcome, pub data_effect: SetDiff, pub schema_effect: Option<SetDiff> }
+}
+
+pub mod dossier {
+    #[non_exhaustive] pub enum Intent { Define, Explain, Verify, Attribute, Trace, Locate, Depend, Compare }
+    pub fn classify(question: &str, lang: &str) -> Result<(Intent, String /* subject */), Diagnostic>;
+    pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, QueryError>;
+    pub struct Dossier { pub records: Vec<Record>, pub view: View, pub thread: Thread,
+                         pub slots: Vec<SlotResult>, pub purity: Purity }
+}
+```
+
+`smysl-embed-candle`:
+
+```rust
+pub struct Encoder { /* candle model, tokenizer, pooling */ }
+impl Encoder {
+    pub fn from_dir(path: impl AsRef<Path>, pooling: Pooling) -> Result<Encoder, Error>;
+    pub fn model_hash(&self) -> [u8; 32];
+    pub fn embed(&self, texts: &[String], role: TextRole /* Query | Passage */) -> Vec<Vec<f32>>;
+    // As built (TX-P10 step 3): `-> Result<Vec<Vec<f32>>, Error>`, since tokenizing can fail.
+}
+pub struct VectorCache { /* (model hash, uid) -> Vec<f32> */ }
+pub struct CandleSemantic { /* implements smysl_query::SemanticSource and smysl_retrieve::Retriever */ }
+```
+
+Facade `src/lib.rs`: `pub mod query { pub use smysl_query::*; }`, `pub mod schema` re-exporting
+`smysl_core::schema::*` plus `smysl_query::resolve`, and feature-gated adapters
+(`semantic`, `semantic-candle`, `providers`) for `SemanticSource` and `Translator`. This matches
+draft 3 §17's facade names (`smysl::query::{Query, Scope, Plan, Purity, Dossier, Intent}`,
+`smysl::schema::{Revision, Field, FieldType, Lens, LensOp, LensChain, resolve}`; `Lens` is
+`LensStep` here).
+
+### 4.3 Changes to existing crates, file by file
+
+| file | change |
+|---|---|
+| `crates/smysl-core/src/schema/{mod,decode,lens,infer}.rs` | new: §4.2 types, FC-9 decode, lens engine, revision inference |
+| `crates/smysl-core/src/cbor/keys.rs` | `schema_decl::LENSES = 5`, `HIGHEST = LENSES`; FC-9 shape keys |
+| `crates/smysl-core/src/cbor/envelope.rs` | `dec_schema_decl`/`schema_decl_bytes`: key 5 stays raw bytes on `SchemaDecl` (new field `lenses: Option<Vec<u8>>`, written back verbatim) so the record round-trips byte-identically |
+| `crates/smysl-core/src/types/annex.rs` | `SchemaDecl.lenses` field (struct is not `#[non_exhaustive]` today: a minor-API break, listed in CHANGELOG) |
+| `crates/smysl-core/src/surface/parse.rs`, `write.rs` | `@schema … fields: {…}, lenses: […]` (SMYSL-2.3 spelling); `schema_decl_has_surface_form` updated |
+| `crates/smysl-core/src/diag.rs` | 20 codes of §8; facade test count updated with SMYSL-2.3's 4xx codes |
+| `crates/smysl-graph/src/store/mod.rs` | `schema_decls()` |
+| `crates/smysl-graph/src/lineage.rs` | `dependents_trace` |
+| `crates/smysl-graph/src/relink.rs` | `successors` → `pub fn supersession_heads`; `relink` calls it |
+| `crates/smysl-graph/src/salience.rs` | `corroboration` → `pub fn corroboration_groups` (score unchanged) |
+| `crates/smysl-embed/Cargo.toml`, `src/lib.rs` | model2vec-rs 0.3 `wasm`; manifest note; `SemanticSource` impl lives in the facade adapter to avoid an embed → query dependency |
+| `crates/smysl-thread/src/schema.rs` | tables for `exposition`, `dialogue`, `dossier` once SMYSL-2.1 opens `ThreadSchema`/`Role` and SMYSL-2.3 assigns codes; `dossier` has no rules |
+| `crates/smysl-thread/src/derive.rs` | refuse `Dossier`; `exposition`/`dialogue` ordering from SMYSL-2.4 span order and reply edges |
+| `crates/smysl-render/src/profile.rs` | headings for new roles |
+| `src/lib.rs` | `query`, `schema` modules; adapters |
+| `src/main.rs` | §4.4 |
+| `crates/smysl-text/src/scope.rs` | new in TX-P6 step 6: `LibraryScope`, the `Scope`, `Times` and `Entities` implementations over a `Library` (§3.3's last column) |
+| `crates/smysl-text/Cargo.toml` | `smysl-query` dependency (TX-P6 step 6). This way round and not the other: the planner must not know what a catalogue is, and a catalogue can know what a scope is |
+| `crates/smysl-query/src/ports.rs` | `Times`, `Entities`, `Bounds`, `Axis`; `Scope::analyzer`, `Scope::restrict_lang`; `Partition.chain` (TX-P6 step 6) |
+| `crates/smysl-core/src/diag.rs` | `SMY-W415` registered (TX-P6 step 6), draft 3's allocation, withheld until a query could name a time |
+| `xtask/src/purity.rs` | `PURE_CRATES += "smysl-query"`; new `check-native` (below) |
+| `fuzz/fuzz_targets/{sq_parse,lens_laws}.rs`, `fuzz/Cargo.toml` | new targets |
+
+### 4.4 CLI
+
+New `Cmd` rows (phase string = the release that wires them; written here as `<rel>`):
+
+| name | about | purity |
+|---|---|---|
+| `q` | Run an sq query; explain, save, rerun | `Mixed` |
+| `ask` | Experimental (GE-T10, TX-P8 step 4): a dossier for a question; optional model answer | `Mixed` |
+| `schema` | Show schema revisions; check the naming rule and lens totality | `Pure` |
+| `migrate` | Re-derive units under a newer revision; staged | `Mixed` |
+
+Flags:
+- `q '<sq>' | --file Q.sq` · `--explain` · `--why` · `--save [--agent A]` · `--rerun <uid>
+  [--current] [--save]` · `--param k=v` · `--all-versions` · `--idf partition|collection|library`
+  · `--from-question "…" [--yes]` · `--engine-model DIR` (S0) / `--candle-model DIR` (S1).
+  Output: `--json` (global), else a table; diagnostics and counts on stderr, as `find` does.
+- `ask "…" [--scope '<sq scope>'] [--intent I] [--subject UID] [--budget N] [--answer]
+  [--provider P] [--save]`.
+- `schema show <id>` / `schema check [<id>]`.
+- `migrate --schema <id> --to <rev> [--recipe R] [--stage DIR]`.
+- `find` gains `--lang L` and `--analyzer A` (SMYSL-2.4 analyzers) and, through the shared planner
+  helper, `--explain`. `find`'s `Cmd.purity` becomes `Mixed`, since `--engine semantic|hybrid`
+  already depends on a model (OQ-54).
+- `--seed-check` (global, today inert) is honoured by `q`, `ask`, `schema` and `migrate`
+  (§3.2); `SMY-E416` on a model-dependent plan.
+- **As built in TX-P6 step 7:** `q '<sq>' | --file Q.sq` · `--explain` · `--why` · `--param
+  k=v` · `--all-versions` · `--idf partition|collection|library` · `--per-partition N` ·
+  `--library` · `--view ID` (the id `pack … as view` writes under). `--save`, `--rerun` and
+  `--from-question` arrive with TX-P8 and TX-P10, as do the model flags, and `ask`, `schema`
+  and `migrate` are their own phases'. `--seed-check` runs a pure plan twice and compares; a
+  model-dependent plan cannot be produced by this build (§6 step 7 has why `E416` waits).
+- **As built in TX-P8 step 3:** `ask "…" [STORE] [--scope ITEMS] [--intent I] [--lang L]
+  [--subject UID] [--templates ID] [--budget N] [--target T] [--save] [--answer [--at MS]
+  [--yes]]`. The store is a library when its root holds one, as for `link` and `summarise`, so
+  there is no `--library`. The dossier is rendered to stdout through the plain profile (`--target`
+  as `render` takes it); a summary line and the slots' warnings go to stderr. `--answer` needs
+  `--save`, because the model's units ground on the dossier's and a staged unit grounded on a
+  question the store does not hold cannot be committed; it routes as `content-ingest`, like
+  `summarise`, so any configured provider — local or hosted — answers it. `--provider` is not a
+  flag: routing is the configuration's, as for every model-backed command. `--seed-check` asks
+  twice and compares the dossiers record for record, and refuses `--answer`. `q` over a plain
+  store now binds the entity port as well, so a dossier slot saved there can be rerun.
+
+Test updates: `command_table_matches_section_23` (30 names), `only_ingest_and_attest_are_model_dependent`
+(mixed = `thread, find, q, ask, migrate`), `tests/dispatch.rs` (30), `tests/cli-surface.txt`,
+`tests/public-api*.txt`.
+
+`--explain` format (text; `--json` gives the same fields):
+
+```
+sq/1  purity: pure  recipe: 7f3c…a1
+pins:      x.text/v1@1 (compiled forward to @2)
+lenses:    x.text/v1 1->2  chain 3b9e…02  312 units read, 0 unmappable
+rewrites:  mode = reported  =>  mode = reported and text:verbatim = false   (widening, paired key)
+scope:     store:bible.smy  → 41,287 candidates  (supersession: 12 heads substituted, 0 forks)
+partitions (IDF: collection): kjv-1769/en  synodal/ru  luther-1912/de
+  find "covenant" ~lex   analyzer en/v1, ru/v1, de/v1   fused RRF k=60
+bridges:   ru↔en structural (verse ids); de↔en structural
+filters:   kind in (claim, finding); status >= cited; mode = asserted
+time:      said during 1600..1920   undated excluded: 0 (W415 not raised)
+expand:    <-grounds depth 3  (truncated frontier: 0)
+closure:   with rebuttals (live)
+order:     salience desc (renormalised over result)
+output:    pack 2000 tokens  estimator smysl/script-aware/1
+```
+
+### 4.5 Features, dependencies, purity gate, no-C status
+
+- `smysl-query` dependencies: `smysl-core`, `smysl-graph`, `smysl-retrieve`, `smysl-pack`,
+  `smysl-thread`, and `smysl-text` (SMYSL-2.4) for its core types. No third-party dependency.
+  Joins `PURE_CRATES`; must pass the source grep (no `tokio`, `std::net`, `async fn`).
+- Facade features: `query` is always on (pure). `semantic` (S0, existing), `semantic-candle`
+  (S1, new, implies `semantic`), `providers` for the `Translator` adapter and `ask --answer`.
+  `cli` enables `semantic` only if the project decides to ship a default model path (it does not
+  today: `default = ["cli", "local", "render-typst"]`).
+- **No-C status, as a check rather than a sentence.** A new `xtask check-native` runs `cargo tree
+  -e normal,build` for each feature set (`--no-default-features`, `cli`, `cli,semantic`,
+  `cli,semantic-candle`) and fails on any `-sys` crate other than `linux-raw-sys`, and on `cc`
+  reached by anything except `blake3`'s build script (verified present, §2.2). This puts F-11's
+  and draft 3 §18's no-C claims under CI, and would have caught the imprecision in F-11.
+
+## 5. Tests, fixtures and harnesses
+
+### 5.1 Grammar golden tests (`crates/smysl-query/tests/grammar.rs`)
+
+- `fixtures/sq/accept/*.sq` with `*.ast` (pretty-printed AST): every SMYSL-2.9 §4 production,
+  comments and `#` in locators, multi-word keywords, parameters.
+  - This clause asked for "the §11.1 and §11.5 examples" until 2026-10-16. **There is no §11**
+    — those are sections of RFC SMYSL-2 draft 3, which is not in this repository, the same gap
+    that sent TX-P6 step 1 to write SMYSL-2.9 before writing a parser. The clause was therefore
+    unsatisfiable from the day the goldens were built, and step 1 covered §4's productions
+    instead. Dropped rather than reconstructed: the productions are the enumeration that
+    matters for a grammar golden, and an example set numbered to match sections nobody can read
+    would be invention wearing a citation.
+- `fixtures/sq/reject/*.sq` with `*.diag`: one expected `SMY-E460` (span, message) per file:
+  unterminated string, dangling `|`, `depth` without number, `using sq/2` (`E427`), unbound `$x`.
+- Regenerated with `SMYSL_BLESS=1` (render's convention; the pack golden uses another spelling,
+  which this RFC does not add to).
+- Round trip: `parse(print(parse(q))) == parse(q)` for every accept fixture.
+
+### 5.2 Planner snapshot tests (`tests/plan.rs`)
+
+- For each query in `fixtures/sq/plan/` over `fixtures/corpus/F1…F13` (and the SMYSL-2.4 Bible
+  fixtures once present), the `--explain --json` output is snapshotted. A changed plan is a
+  reviewable diff.
+- Mapping coverage: one test per row of §3.3 asserting the plan names the expected function, so a
+  stage silently reimplemented beside an existing API fails a test.
+- Determinism: plans and results identical when the store's records are appended in shuffled
+  order (seeded), as `merge_algebra.rs` does for merge.
+
+### 5.3 Lens laws (D-11): seeded property tests + fuzz
+
+`crates/smysl-core/tests/lens_laws.rs`, using the repository's seeded xorshift generator (no new
+dev-dependency; `proptest` is not in `Cargo.lock`). Generators: random revision histories of
+1–4 steps over closed ops, random payloads drawn from the declared fields.
+
+| law | statement |
+|---|---|
+| L1 round trip | for an invertible chain `c` and a unit `u` in its domain: `backward(forward(u)) == u` |
+| L2 image | `forward(backward(v)) == v` for `v` in the image of `forward` |
+| L3 associativity | `compose(compose(a,b),c)` and `compose(a,compose(b,c))` agree on hash and on application |
+| L4 identity | `identity ∘ c == c` |
+| L5 inference harmless | lensing from any revision consistent with a unit's clues gives the same view |
+| L6 retire | any chain containing `retire` refuses `backward` with `E422` |
+| L7 never guess | a value outside every map is reported unmappable, never mapped |
+| L8 GE-T16 (query-compile equivalence) | for a pinned query `q@r` and a store `S`: `eval(compile_forward(q), lens(S)) == eval(q', migrate(S))` with `q'` the same compile run on migrated data; equality of result uid sets |
+| L9 byte stability | `encode_lenses(decode(bytes)) == bytes` |
+
+Fuzz: `fuzz/fuzz_targets/lens_laws.rs` (arbitrary bytes → decode → L1, L3, L9 must hold or the
+decode must report) and `sq_parse.rs` (never panics; accepted text re-prints and re-parses).
+
+### 5.4 Saved queries and reruns
+
+- Save, append data, rerun pinned: `schema_effect` absent, `data_effect` equals the appended set.
+- §19.5 reproduction: revision 2 with the `quoted → reported + verbatim` widening; a saved
+  `mode = reported` query; rerun pinned shows only the data effect; `--current` reports the
+  schema effect exactly equal to the injected `quoted` units.
+- `E466` when a declaration is missing; `W467` when a model hash changes (stub source).
+- Salience isolation: saving a query does not change `salience` of any result (guards OQ-49's
+  hazard whichever edge kind is chosen).
+
+### 5.5 Dossiers (GE-T10)
+
+- Unit: intent rules per tier-1 language (positive and negative examples), `W417` on an
+  ambiguous subject fixture ("Mary"), `E468` on an unclassifiable question, `gap` steps for
+  empty slots, the view's membership reaching every slot result, rule R in the pack.
+- Answer step with a stub provider: units grounding outside the dossier dropped (`W478`), a
+  `cited`-grounded answer over an `inferred` slot lowered (`W036`), injected instructions in a
+  passage ignored (canary from SMYSL-2.1).
+- **GE-T10 harness** (`crates/smysl-query/tests/ge_t10.rs`, ignored by default): 30 questions ×
+  5 languages, expert-filled slots as uid sets in `fixtures/dossier/gold/`; reports slot
+  precision and recall per intent and slot. Kill criterion from draft 3 §23: precision < 0.8 for
+  *definition* or *counter-evidence* keeps `ask` out of defaults.
+  *As built (TX-P8 step 4)* the harness is **not** ignored: it is pure, needs no provider and
+  runs in under a second, so it runs on every `make test` and pins the figures §6 records, as
+  GE-T11's does. The gold is labels, not uids, because a uid is a hash of the unit and a label
+  survives an edit to a gist; it is single-hand, not expert-filled (§6 step 4), and
+  `SMYSL_GE_T10_{CORPUS,QUESTIONS,GOLD,SUBJECTS,OUT}` take somebody else's without a code change.
+
+### 5.6 NL front end (GE-T12)
+
+- Unit: model outputs that do not parse, name undeclared fields, or use a disallowed stage are
+  rejected (`E474`) and never executed; the translated query is printed before running.
+- **GE-T12 harness** (ignored by default, needs a provider): 100 questions with expert-written
+  queries; the metric is **equivalent results** (equal result-uid sets), not textual equality.
+  < 70% keeps the front end experimental.
+
+### 5.7 Seed-check, schema check, migrate, embeddings
+
+- Every pure query in `fixtures/sq/plan/` passes `--seed-check`; every model-dependent one fails
+  with `E416` before executing (no model loaded).
+- `schema check`: fixtures for each rule N violation (renamed meaning, reintroduced retired name,
+  unpaired widening, fork) with the expected code.
+- `migrate`: deterministic migration of the GE-T16 corpus; attestations `op: Transformed` with
+  the chain hash; rule M respected; old units superseded; `relink` re-points; commitments only
+  proposed (`W472`).
+- S0: existing `smysl-embed` tests pass on 0.3 (done in a scratch worktree, §2.2); add a
+  multilingual smoke test gated on `SMYSL_EMBED_MODEL`.
+- S1: encoder determinism within a build (two runs equal), cache invalidation by model hash
+  (`W476`), pooling unit tests against reference vectors computed once and stored (tolerance
+  stated, since cross-machine agreement is not claimed).
+
+### 5.8 Cross-implementation
+
+- The Python, JavaScript and Go implementations target C-Read first (D-8). For this RFC they
+  need only FC-9 decoding and `encode_lenses` byte stability (L9) on the fixtures in
+  `fixtures/schema/fc9/`; lens application is not a conformance obligation (D-8).
+
+## 6. Delivery steps
+
+Each step has an exit test. Steps within a phase are ordered.
+
+**TX-P6 — `sq` core (pure)**
+1. `smysl-query` skeleton, lexer, parser, AST printer. *Exit:* §5.1 accept/reject goldens pass;
+   `sq_parse` fuzz runs 10 minutes clean.
+2. `Scope` port with a `Store` implementation; planner phases 1–4; `--explain`. *Exit:* plan
+   snapshots for `from store:` queries over `fixtures/corpus`.
+3. Lexical source over a postings view (`Bm25::over`, not the `index_subset` this RFC once
+   asked for — §3.4), RRF, `--why`. *Exit:* single-partition results equal today's `find`
+   ranking on `fixtures/retrieval/queries.tsv`; RRF determinism test.
+4. Filters (kernel fields, raw payload — lenses come in TX-P12), traversals with
+   `dependents_trace`, closures, set ops, ordering, `limit`, `pack`, outputs. *Exit:* §3.3
+   mapping-coverage tests; shuffled-append determinism.
+5. Supersession pass with `supersession_heads`; `relink` refactored onto it. *Exit:* existing
+   relink tests unchanged; `W464` on a fork fixture.
+6. `smysl-text` scope, partitions, time stages, entity bridge (needs SMYSL-2.4 TX-P1–P5).
+   *Exit:* a query for each capability this step newly enables runs on the Bible
+   (`fixtures/library/bibles/slice/eng-kjv`) and chat (`fixtures/library/chat-wire`) fixtures,
+   committed as `fixtures/sq/` goldens, and `W415` counts match. The capabilities, from §3.3's
+   table and §3.4:
+   - **scope** — `texts`, `library`, `collection:<name>`, `channels`, `channel:<name>`,
+     `import:<name>`: the six items `StoreScope` refuses with `SMY-E461` today, each answered
+     by the `Scope` implementation in `smysl-text`;
+   - **partitions** — a catalogued store partitioned by `(manifest, lang)` from the library
+     catalog rather than from the log, with each partition searched under its own analyzer
+     (§3.4) and the chain id recorded;
+   - **the `lang:` source option** — `lang:<code>` becomes lowerable here, because it needs the
+     catalog's language facts. `lang:any` does **not**: it asks for the strongest bridge per
+     pair of partitions (§3.5), which is TX-P10's. Step 3 refuses both and names which is
+     waiting for what;
+   - **time stages** — `said` and `observed` across `during`, `overlaps`, `before` and `after`,
+     over SMYSL-2.4's effective-time engine, with undated units excluded and counted
+     (`SMY-W415`), which is the half of this exit that was always checkable;
+   - **the entity bridge** — `about entity("…")` resolved through aliases and same-as.
+
+   *Done 2026-10-16.* Sixteen goldens in `fixtures/sq/library/`, one or more per capability,
+   over a library the test builds from the three committed Bible slices (en, ru, de), the KJV
+   Ruth a second time under `import:gutenberg/`, and the three chat exports. The partitions
+   print their chain ids — `smysl/an-en/1`, `an-ru`, `an-de`, and `an/1` for the `mul` chats —
+   `lang:de` finds *Boas* where `lang:en` would find *Boaz*, the four time predicates run on
+   both axes over the chats' `observed` instants, `said during 1769` over the undated Bible
+   excludes all 110 units and `W415` says 110, which the test counts independently, and
+   `about entity("Naomi")` answers in Russian as well, across one `same-as` edge. Two findings.
+   **Nothing in SMYSL-2.4 or here said what the six scope items were,** so they are defined
+   above in §3.3 in terms of what the catalogue records, the way step 2 wrote the `Scope`
+   signature from its four constraints. **A part two manifests share places a unit twice**
+   unless the unit's own `source.manifest` decides, which the import fixture is there to show.
+   What the step did not build: `lang:any` (TX-P10's bridge, refused by name), a `said` time
+   on the Bible, which the fixtures do not date and the test does not pretend they do.
+
+   *This exit read "§11.1 and §11.5 examples run on the Bible and chat fixtures" until
+   2026-10-16.* There is no §11 in this document; they are RFC SMYSL-2 draft 3's, absent here.
+   The examples were only ever a way of naming the set above, so the set is named directly and
+   the examples arrive as fixtures during the step — which is where every other example in this
+   repository lives, is executable, and is what the Python, Go and JavaScript ports validate
+   against. Writing them as prose now, ahead of the scope that gives them meaning, would be
+   guessing at queries nothing can yet run.
+7. CLI `q`, `--seed-check`; purity gate. *Exit:* draft 3 TX-P6 exit — every pure query passes
+   `--seed-check`, plans stable; `xtask check-purity` green with `smysl-query` listed.
+
+   *Done 2026-10-17.* `smysl q` is the thirty-second command and a thin dispatcher over the
+   facade's `query` module: `'<sq>' | --file`, `--explain`, `--why`, `--param k=v`,
+   `--all-versions`, `--idf`, `--per-partition N`, `--library`, and `--view ID` for the one
+   stage the pure crate refused because it writes — `pack … as view` is planned without its
+   write and the `View` is appended here, through `persist` for a store and through the
+   library for a library. **The two halves of the exit are asserted against things that
+   already existed.** "Plans stable": `q --explain` over every corpus fixture prints the
+   planner golden step 2 blessed from the crate directly, byte for byte, which is why the
+   command names a scope after the file's stem. "Every pure query passes `--seed-check`": the
+   flag now performs §3.2's stronger assertion rather than the label check §2.6 recorded —
+   the plan runs twice and the answers are compared, the second run fresh by construction
+   because the executor builds its tables per run. The judgement in `reproducible` is
+   `Some(true)` for `q` with the reasoning recorded: the planner refuses every
+   model-dependent stage with `SMY-E461` before purity is asked, so no plan this build makes
+   can reach a model, and **`SMY-E416` stays withheld** — allocated for the refusal of a
+   model-dependent plan, registered the day TX-P10 lowers one, on the registry's own rule
+   that a code nothing can raise is worse than a missing one. The purity gate was already
+   green with `smysl-query` listed, as step 2 left it. What §4.4 lists and this step did not
+   build is each another phase's: `--save`, `--rerun` (TX-P8), `--from-question` (TX-P10),
+   `--engine-model`/`--candle-model` (TX-P10), and the `ask`, `schema` and `migrate` rows.
+   **TX-P6 is complete.**
+
+**TX-P8 — dossiers, saved queries, thread schemas** (after TX-P7 for classes)
+1. `x.query/v1` save/load, result edges (`x.query/answers`, OQ-49 resolved), reruns with the data effect. *Exit:*
+   §5.4 first and last bullets.
+
+   *Done 2026-10-17.* `smysl_core::schemas::query` declares the schema A-11 left open —
+   one type, one relation kind, seven fields (eight since OQ-84) — and `crates/smysl-query/src/saved.rs` writes
+   and reads it: `to_records` takes a `Plan` and a `Run` and nothing else can produce a saved
+   query, which is OQ-82 made into a signature; `bind` substitutes every `$parameter` first so
+   the text saved is the text after binding; `load` reads the seven keys back and the result
+   from the `x.query/answers` edges; `rerun` runs the saved text pinned and reports the data
+   effect. `q --save` and `q --rerun <uid>` are the CLI, with the declaration appended to a
+   store with the first saved query it receives, as `x.text/v1` goes with the first batch.
+   **Both exit bullets are asserted on scores and sets, not on labels:** the rerun over two
+   appended claims reports exactly those two, and saving changes the salience of no unit that
+   existed before — the latter asserted bit for bit over every unit, because OQ-49 was a
+   mistake about a label. Two findings, both recorded as open questions. **A saved query ranks
+   for its own terms** (OQ-85): its gist is its text, so `find "connection pool"` over the
+   store it was saved in finds the unit that says `find "connection pool"`; a rerun excludes
+   the unit a save wrote, since the record of a save is not data the query found, and a fresh
+   `find` has it in reach. **The per-partition limit is a recipe input the table omits**
+   (OQ-84): it changes a result as `k` does, so it is hashed, but the payload has no declared
+   key to carry it and a rerun under another limit is reported as not comparable. What the
+   step did not build is named by code: `--current`, the schema effect, is `SMY-E461` until
+   TX-P12's lens engine lowers a query at two revisions (lifted by TX-P12 step 4), and with it
+   `--current --save`;
+   `SMY-W467` stays withheld with the model-dependent plans that would raise it.
+2. FC-8 tables in `smysl-thread` (after SMYSL-2.1 opens the enumerations and SMYSL-2.3 assigns
+   codes); `exposition`/`dialogue` derivation; `dossier` refused by `--derive`. *Exit:* derivation
+   tests on chat and book fixtures; old binaries' behaviour per F-12 documented.
+
+   *Done 2026-10-17.* Both preconditions had already held for ten days — SMYSL-2.1 F-12 opened
+   the enumerations in TX-P0 and SMYSL-2.3 A-8.2 assigned the codes — so the step was the tables
+   and the derivation. `ThreadSchema` gains `exposition` 6, `dialogue` 7 and `dossier` 8 (5 stays
+   `timeline`'s, unassigned); `Role` gains 24–48, reusing `question`, `evidence` and `support`
+   where A-8.2 says the meaning matches. `smysl-thread` has three new tables, two new matchers
+   for extension relation kinds (`SourceOfExt`, `TargetOfExt`, since a rule table is `static` and
+   an extension kind holds a `String`), and `derivable`, which the CLI reads to refuse
+   `thread --derive dossier` and name `ask` as the command that makes one. **Three findings,
+   each fixed where it was found.** *Derivation grouped steps by role*, which is an argument's
+   layout and a conversation backwards — every reply ahead of every message it answered — so
+   `SchemaDef` gained `in_order`, on for `exposition` and `dialogue`: the units' own order leads
+   (observation time, then **span order**, a new key, then the chain) and the role annotates.
+   *A text with no ordering edges had no first or last unit*, so an exposition of Ruth had no
+   introduction; when the chain is wholly absent and every unit has an order of its own, the
+   ends of that order are the first and last. *Nothing writes `x.text/replies`*: `x.text/v1`
+   declares it and rule E reads it, and the readers record `reply` ids on rows that no path turns
+   into edges; the dialogue test draws them from the ids, and **the producer is owed** — it
+   belongs with the converter that already turns rows into units. **The five existing schemas
+   derive byte for byte what they did:** the H-18 golden is now pinned to those five by name,
+   because a digest over `ThreadSchema::ALL` would have moved for the new schemas alone and hidden
+   the answer, and it holds the digest recorded before H-18. The exit's tests are
+   `crates/smysl-text/tests/thread_schemas.rs` — an exposition of Ruth from 1:1 to its last verse
+   in the text's order, and a dialogue over the Telegram fixture where both answered messages are
+   uptake, both answers are replies, and each reply follows what it answers.
+
+   **What an older binary does with these threads (F-12).** A build before this step decodes
+   schema 6, 7 or 8 as `ThreadSchema::Unknown` with the code kept, and role 24–48 as
+   `Role::Unknown` with the code kept; it re-encodes both byte for byte, so the uid of every unit
+   is unchanged and a thread passes through it intact. It does not derive, walk or render such a
+   thread — `definition_of` returns `None`, render counts it as skipped — and `check` reports
+   each code once as `SMY-W409`. Nothing is refused and nothing is lost: the store stays
+   openable, which was F-12's whole purpose. The wire fixture that pins this behaviour,
+   `fixtures/wire/F14-unknown-codes.cbor`, used schema 7 and role 30 as its "unknown" codes;
+   this step made both known, so the fixture now uses 9 and 64 and was re-blessed — the first
+   time an open enumeration's unknown code became a known one, and the case the fixture was
+   written for, shown from the other side.
+3. Intents, templates, `ask`, dossier view and thread, rendering headings. *Exit:* §5.5 unit tests.
+
+   *Done 2026-10-17.* `smysl_query::dossier` is §3.13's pipeline, pure: `intent::classify` reads
+   the question against a closed table of prefix, infix and suffix rules for the five tier-1
+   languages, **longest match winning**, so `what is the difference between` is a comparison
+   because it is longer than `what is` and not because somebody listed it first; the subject is
+   the longest run of the topic's words the entity port has candidates for, so `why did Naomi
+   return` finds `Naomi` without the rule knowing where a name ends; each slot is planned, run and
+   saved through `saved::to_records` with the template set in its recipe
+   (`PlanOptions::template_set`, the input §3.6 listed and step 1 hashed as empty); ranking is the
+   product of retrieval score, salience renormalised over the slot and status rank, quantised;
+   and a budget packs the slots' units with each slot's best in focus, so rule R pins the
+   rebuttals of what is packed. The port gained `Entities::candidates`, one group per thing a
+   name means, with a default that cannot report an ambiguity it cannot see; `StoreScope` and
+   `LibraryScope` both answer it from the same two functions in `store_scope.rs`, since what
+   resolution reads is the store's own records. `smysl-render` profiles gained `headings` and
+   blocks a `heading`, with defaults for roles 24–48 only — a default renaming `question` would
+   change every `qa` render — and a step's note now travels as `NoteKind::Step`, which is how a
+   `gap` shows which slot it is. `smysl_ingest::answer` is the answer step: the dossier one line
+   per unit, fenced, markers neutralised; what grounds outside it dropped as `SMY-W478`; what
+   survives staged through `prepare_under`, so rule M is the one implementation it always was.
+   The four codes — `W417`, `E468`, `E477`, `W478` — take the registry to 103. The exit's tests
+   are `crates/smysl-query/tests/dossier.rs` over `fixtures/dossier/subjects.smy` (every intent
+   recognised in every tier-1 language and claimed by no other, six questions no rule matches,
+   two Marys and `--subject`, each slot of `define` finding exactly the unit the fixture marks
+   for it, the `gap`, the view's membership, rule R in the pack, rule D),
+   `crates/smysl-ingest/tests/answer.rs` against a scripted provider (an answer proposing four
+   records keeps one, and rule M lowers it from `cited` to `speculative`; SMYSL-2.1's canary
+   reaches the model only inside a derived fence with its forged marker neutralised; an
+   unparseable answer stages nothing in one turn), and `tests/cmd_ask.rs`.
+
+   **Six findings, each fixed where it was found.** *The sketch's arrow was backwards*
+   (§3.13 above): `->k` walks what a unit rests on, and a rebuttal is the source of `rebuts`, so
+   the counter slot is `->rebuts`; the first run of the fixture test had every edge-defined slot
+   empty and is how this was found. *`Target::Text` abbreviates a uid*, and the surface parser
+   refuses an abbreviated reference — rightly — so a model shown the text rendering could cite
+   nothing it was shown; the answer step renders a line per unit with the canonical uid, and
+   the test that found it had every grounded record dropped. *A slot saved over a plain store
+   could not be rerun*, because `q` bound no entity port there; it does now. *A dossier saved to
+   a surface store is refused*, as `q --save` is: the `x.query/v1` declaration carries fields
+   `@schema` cannot spell until TX-P12 step 7, so a dossier is saved to a CBOR store or a
+   library. *A slot whose every unit an earlier slot placed* would otherwise vanish from the
+   thread; it is a `gap` whose note says so, which keeps "found nothing" and "found nothing new"
+   apart. *A subject and an intent rule fold case, and QG-4 forbids Unicode's fold*: the gate
+   that enforces it scanned only the crate's top directory and so had not seen `dossier/`; it
+   recurses now, and `smysl_query::fold` is a pinned one-char-to-one-char table over the scripts
+   the five languages use (ASCII, Latin-1, Latin Extended-A, Greek, Cyrillic), leaving every other
+   char as it is. One question is open, **OQ-86**. What the step did not build is named: the
+   independent-witness term of §3.13 step 4 (`Witnesses`, §3.7, is not built, and counting
+   attestations would be `W479`'s fallback presented as the thing itself; salience is floored at
+   one quantum instead, so a slot nothing points at is ordered by status); `$lang`, bound and read
+   by no slot, because a slot filtered on the question's language would undo the `same-as` that
+   makes a dossier answer in more than one; a rerun of a dossier as a whole — each slot reruns
+   with `q --rerun`, and `E477` is raised by `--templates` until a whole-dossier rerun has a set
+   id to read back; and a `Classifier` port (OQ-22), which stays model-dependent and unbuilt.
+4. GE-T10 run. *Exit:* draft 3 TX-P8 exit (GE-T10 numbers recorded; kill criterion applied).
+   *Done 2026-10-17.* `crates/smysl-query/tests/ge_t10.rs` over `fixtures/dossier/gold/`: ten
+   subjects from the history of medicine and chemistry (169 units, each subject named once per
+   spelling in the five tier-1 languages), thirty questions over all eight intents each asked in
+   all five languages — 150 rows — and gold for the 118 (question, slot) pairs the intents fill.
+   **The gold is single-hand.** §5.5 asks for expert-filled slots and the project has no
+   independent coders, so one hand wrote corpus, questions and gold, after the templates, to
+   criteria stated at the head of `slots.tsv` that select by what a unit *says* rather than by
+   its kind or edges; the corpus plants the cases where those come apart and marks each. The
+   figures measure the templates against one careful reading, not against an expert's, and the
+   harness takes an expert's set through five environment variables when one exists.
+
+   The harness measures three things apart, because one pooled figure would not say where a
+   dossier went wrong. *The slots alone* — each question once, gold intent given, subject named
+   in English — micro-averaged over (question, slot) pairs:
+
+   | slot | P | R | | slot | P | R |
+   |---|---|---|---|---|---|---|
+   | definition | 1.000 | 1.000 | | introduction | 0.636 | 1.000 |
+   | characteristic | 0.554 | 1.000 | | revision | — | 0.000 |
+   | exemplifies | 1.000 | 0.800 | | location | 1.000 | 0.875 |
+   | **counter** | **0.750** | 0.750 | | related | 1.000 | 1.000 |
+   | open-question | 1.000 | 1.000 | | dependent | 1.000 | 0.833 |
+   | cause | 1.000 | 0.667 | | contrast | 1.000 | 1.000 |
+   | evidence | 0.667 | 0.889 | | reported | 0.636 | 1.000 |
+   | hypothesis | 1.000 | 1.000 | | holder | 1.000 | 1.000 |
+   | support | 1.000 | 1.000 | | stance | 1.000 | 0.667 |
+
+   All slots 0.774 / 0.890. *End to end*, as typed with no `--lang`: en 0.774 / 0.890, de
+   0.728 / 0.652, es 0.770 / 0.834, fr 0.767 / 0.818, ru 0.773 / 0.751. *The front* — intent
+   right, subject found — en 30 / 30 and 30 / 30, de 23 and 22, es 27 and 27, fr 26 and 26, ru
+   29 and 23.
+
+   **The kill criterion fires, on counter-evidence: 0.750 against 0.8.** *Definition* is 1.000.
+   Applied as the user chose: this build has no tier of commands built but not offered, so `ask`
+   is labelled *Experimental* where it is listed, and every run says so on stderr with the
+   figure (`ASK_EXPERIMENTAL` in `src/main.rs`); stdout, which a script reads, is unchanged.
+   The harness asserts the criterion still fires, so lifting the label is a recorded act. What
+   fires it is worth stating exactly, because it is not what OQ-86 predicted. Counter's
+   precision by intent is define 0.909, compare 1.000, verify 0.667, explain 0.500; of its six
+   false positives, four are **rebuttals of a claim the question did not ask about** — a verify
+   or explain slot binds `$subject` and nothing of what was asked of it, so "is scurvy cured by
+   citrus" collects the rebuttal of "scurvy strikes long voyages" (OQ-88) — and two are a
+   **rebuttal of a superseded account**, which the walk reaches from the old version before the
+   supersession pass replaces it (OQ-87). OQ-86 costs recall, not precision: the six counter
+   units it loses are each a rebuttal naming the subject, and with the cause, example and
+   dependent it also loses, eleven gold units leave their slot and seven reappear in
+   *characteristic*. So the grammar change OQ-86 weighs would not lift the criterion, and
+   binding what was asked would.
+
+   *Characteristic* is the weakest slot (0.554) and is not under the criterion: of its 29 false
+   positives, 14 are reported speech or a holder's stance (the slot takes every claim about the
+   subject, including "his colleagues said Semmelweis had gone mad"), 7 are OQ-86's, 5 are
+   passing mentions and 3 are mentions in another sense. *Revision* is structurally empty: a
+   replaced account is hidden under the current lens and, under `--all-versions`, names the
+   subject and is removed by the `except` — sq/1 has no way to select a superseded unit (OQ-87).
+   *Location* keeps twelve of fourteen visible mentions (the `limit 12`, planted) and hides the
+   superseded one. *Stance* misses a holder's claim that has no `text:mode`, since `!= reported`
+   is never true of an absent field (planted).
+
+   **The front's losses are each named in the report.** Of 150 questions the intent was right
+   for 135 and the subject found for 128, and the 22 lost fall into four kinds: a comma after the rule's verb (`wer sagte,`,
+   `wer behauptet,`, `кто утверждает,` — five), a contraction the table does not spell (`vom`,
+   `del`, `du` — eight), a plural verb (`wo werden … erwähnt`, `woher kommen` — two), and an
+   inflected subject (`холеры`, `цингой`, `цингу`, `миазмов`, `флогистона`, `Дженнера`,
+   `Jenners` — seven), which the subject finder cannot meet without morphology. None was
+   rephrased to resolve and none of the table was changed after the run: a fix measured on the
+   questions that found it is a fix measured in-sample, so they are owed to a follow-up with
+   fresh questions.
+
+   **Five findings, two fixed where found.** *The example slot walked the wrong way*: step 3
+   wrote `<-exemplifies` on the belief that the example kinds point the other way from
+   `rebuts`; they do not — for every edge kind `->k` walks from target to source — and the
+   step-3 fixture's `exemplifies` slot was meant to be empty, so nothing caught it until this run
+   found the slot empty for all ten `define` questions. Fixed (0.000 recall to 0.800); the set
+   is still `smysl/dossier/1`, whose hash changes, since 1.10.0 is unreleased and no saved
+   dossier exists outside this branch. *A star of `same-as` edges is not a class*: the corpus
+   first joined each subject's spellings to its English one, and A-12.4's strict class is a
+   greedy clique partition, so a star joins the hub to one spelling and leaves the rest alone —
+   the first run resolved a third of the Spanish, French and Russian subjects to an entity with
+   no units. The corpus now asserts every pair, which is what a careful author must do, and is
+   worth a line in the manual's entity chapter. *A plant missed*: the depth-3 dependent is two
+   hops from a unit that itself names the subject, so it probes nothing; kept, and marked so.
+   *OQ-87* and *OQ-88*, raised above. And **OQ-52 is not decided here** (it was decided later,
+   on 2026-10-28; its row has the figures): a slot's membership is
+   fixed by its template's `order by salience` and `limit`, and `rank` only reorders what is
+   already in, so precision and recall cannot see the ranking; only `location`'s limit binds,
+   and it binds on salience. Comparing rankings needs graded gold (a best-first order per slot),
+   which this set does not have.
+
+**TX-P10 — embeddings and NL front end**
+1. Verify S1 dependencies: versions, XLM-R support, `cargo tree` with no `-sys`/`cc` beyond the
+   allowlist; add `xtask check-native`. *Exit:* `check-native` green on all four feature sets.
+   — **done 2026-10-26**, below.
+2. S0 upgrade to model2vec-rs 0.3 `wasm`; manifest note. *Exit:* `smysl-embed` tests pass (already
+   shown in a worktree); multilingual smoke test with `potion-multilingual-128M` loads.
+   — *the pin and the manifest note taken at step 1;* **done 2026-10-26**, below.
+3. `smysl-embed-candle`: encoders, pooling, cache. *Exit:* §5.7 S1 tests.
+   — **done 2026-10-27**, below.
+4. `SemanticSource` adapters; `~sem`, `~hybrid`, `near`, embedding bridge. *Exit:* purity labels
+   and `E416` on every semantic plan; GE-T5 cross-lingual arm run (SMYSL-2.4 owns GE-T5).
+   — **done 2026-10-27**, below.
+5. `Translator` port and provider adapter; `q --from-question`. *Exit:* §5.6 unit tests; GE-T12 run.
+   — **done 2026-10-27**, below. **TX-P10 is complete.**
+
+   **Step 1 done 2026-10-26: S1's dependencies, and the no-C claims as a check.**
+   - **candle 0.9.2, not the newest.** From 0.10.0, `candle-core` depends on `tokenizers` 0.22
+     with `features = ["onig"]` on every target but wasm, unconditionally — no candle feature
+     turns it off — and `onig` is Oniguruma, compiled through `onig_sys` and `cc`. 0.9.2
+     (2026-01-24) has no `tokenizers` dependency; `candle-core`, `candle-nn` and
+     `candle-transformers` 0.9.2 with default features off, beside `tokenizers` 0.21 with
+     `fancy-regex`, are 161 crates with no `-sys` crate and no `cc`. 0.10.2 and 0.11.0 were
+     each resolved and both reach `onig_sys`. Recorded as an upstream fact rather than worked
+     around: a `[patch]` would hold here and not for anyone depending on smysl.
+   - **XLM-R is in 0.9.2:** `candle_transformers::models::xlm_roberta::XLMRobertaModel`, the
+     family of `multilingual-e5-small`/`-base` and `bge-m3`'s encoder. A scratch crate loading a
+     `Config` from `config.json`, a `Tokenizer` from `tokenizer.json` and the model from
+     `model.safetensors` builds at 1.88. No model was in the sandbox, so loading real weights
+     is step 3's test.
+   - **1.88:** `candle-core` 0.9.2 pulls `zip` 7, which declares 1.88; 1.85–1.87 refuse it. The
+     facade is 1.88 already, so `semantic-candle` raises no floor.
+   - **`tokenizers` 0.21 is shared with S0**: `model2vec-rs` takes `^0.21` in 0.2 and 0.3.
+   - **`smysl-embed-candle`** is the crate, with the dependencies and no code, and the facade
+     has `semantic-candle = ["semantic", "dep:smysl-embed-candle"]`, so the check reads the tree
+     the encoders will be built on. Published surface: the crate's root alone.
+   - **`xtask check-native`**, in `gates` and in CI as a job of its own: `cargo tree -p smysl
+     -e normal,build` for `--no-default-features` and with `cli`, `cli,semantic` and
+     `cli,semantic-candle`, failing on a `-sys` crate other than `linux-raw-sys` (either
+     spelling, since `onig_sys` is how candle would bring C in) and on `cc` reached by anything
+     but `blake3`. It was red on its first run, as it should have been, in both semantic sets:
+     `cc` reached by `esaxx-rs`, through `model2vec-rs` 0.2.1. **Step 2's pin is therefore taken
+     here** (with the owner): `model2vec-rs = { version = "0.3", default-features = false,
+     features = ["wasm"] }`, as §2.2 verified. The four sets are then clean at 23, 76, 140 and
+     180 crates; `smysl-embed`'s tests pass as §2.2 recorded (unit 7, evaluation 1, gate 5,
+     semantic 4). 0.3.0's `fancy-regex` feature still enables `esaxx_fast`; only `wasm` leaves
+     it out, which the manifest now says. **`smysl-embed` moves to 1.88** with it: `model2vec-rs` 0.3.0 declares
+     1.88 and a 1.85 toolchain refuses it, which `make msrv` caught and §2.2's worktree, built
+     on a newer toolchain, could not. The facade is 1.88 already, so `semantic` costs no build
+     of `smysl` anything; the crate leaves CI's 1.85 job.
+   - Left for step 2: `potion-multilingual-128M` through `from_dir`.
+
+   **Step 2 done 2026-10-26: a multilingual model, loaded.** `potion-multilingual-128M`
+   (revision `73908c3`, `model.safetensors` 512 MB, 256-d) loads through the existing
+   `from_dir` on `model2vec-rs` 0.3 unchanged — §3.14's "unverified until a model directory is
+   tried" is now tried. `tests/multilingual.rs`, behind `SMYSL_EMBED_MODEL_MULTILINGUAL`: four
+   claims on unrelated subjects, each written in the five tier-1 languages, every one searched
+   within each language's four units. The bar was set before the first run — every unit
+   embedded, every claim finding itself in its own language, the right claim first in at
+   least half of the 80 cross-language searches (chance a quarter) — and the model meets it at
+   **80 of 80**. A smoke test: four distinct subjects is an easy set, and cross-lingual
+   retrieval is measured by GE-T5's cross-lingual arm at step 4.
+   - **`smysl-embed`'s tests pass on 0.3** with `potion-base-8M` (revision `bf8b056`), the
+     model they were written with: semantic 4, evaluation 1.
+   - **Finding:** `semantic.rs`'s rankings are that model's. Under `potion-multilingual-128M`
+     the paraphrase test fails — the connection-pool claim first at 0.173, the serialiser it
+     paraphrases last at 0.106, where `potion-base-8M` ranks the serialiser first by 0.010 —
+     so the multilingual model has a test of its own and a variable of its own, and the file's
+     header says whose rankings it asserts. Not a defect of 0.3: the same file passes under
+     the model it was written for.
+
+   **Step 3 done 2026-10-27: S1's encoder, pooling and vector cache.** `smysl-embed-candle`
+   has `Encoder`, `Pooling`, `TextRole`, `VectorCache` and `CandleSemantic`, as §4.2 sketched,
+   and the facade re-exports them under `semantic-candle` (`Encoder` as `CandleEncoder`, as
+   S0's `Model` is `EmbedModel`). `SMY-W476` is registered with the cache that raises it.
+   - **Two architectures, not one.** `multilingual-e5-small`'s `config.json` says
+     `"model_type": "bert"`: a BERT with XLM-R's vocabulary, positions from zero.
+     `multilingual-e5-base` and `bge-m3` are XLM-R, positions from one past the padding id.
+     So `Encoder::from_dir` reads `model_type` and runs candle's `bert::BertModel` or
+     `xlm_roberta::XLMRobertaModel`; anything else is refused by name. Step 1's "XLM-R is
+     present" was true and was half of what e5 needs.
+   - **One text a forward pass.** A batch pads its texts to one length, and a padded position,
+     masked to zero weight, still enters every reduction a matmul makes — so a text's vector
+     would depend on its batch, and a cached vector would differ in its low bits from a fresh
+     one. Encoded alone, a vector is a function of its text and the model hash; the tests
+     hold this bit for bit, in either order, alone or among others, and from a cache.
+   - **Pooling in plain loops** (`pool.rs`), not tensor ops, so the summation order is the
+     crate's: mean over the mask for `Mean`, the first token for `Cls`, then L2. The reference
+     vectors §5.7 asks for are hand-worked here — small integer states, a masked padding
+     position, tolerance 1e-6.
+   - **Prefixes are in the model hash.** `Mean` takes the e5 card's `query: `/`passage: `,
+     `Cls` none, and `with_prefixes` sets others. A prefix changes every vector as surely as
+     the pooling does, so the hash is BLAKE3 over the three files (length-prefixed), the
+     pooling id *and* both prefixes — one more input than §3.14 named.
+   - **The sidecar stores bytes, not CBOR floats.** `<store>.vec-<hash12>` is a CBOR sequence,
+     `["smysl-vec/1", hash, dim]` and then `[uid, bstr]` in uid order, each vector `dim`
+     little-endian `f32`s: the format's floats are quantised to 1/1024 (constraint 4), and a
+     cached vector has to be the encoder's to the bit. A file under another hash is ignored
+     with `W476` and a count; one that does not decode is an error, not deleted; a store's
+     units bound the cache, so a unit gone leaves it. Written through a rename.
+   - **No `unsafe`, no mapped file.** `from_mmaped_safetensors` is `unsafe` and the crate
+     forbids it; the weights are read (they are hashed anyway) and loaded with
+     `from_slice_safetensors`. Truncation is set from the position table (512, or 512 less
+     the XLM-R offset) whatever `tokenizer.json` asks, so a long gist is cut, not an
+     out-of-range index.
+   - **Tests.** Ten in `tests/s1.rs` on models written by the test — random weights, a
+     word-level tokenizer, both architectures — so CI runs them with no download: loading,
+     determinism, the hash's inputs, roles, the seam, truncation, the cache's round trip, `W476`,
+     a cache that does not decode, refusals. Five pooling unit tests. `tests/e5.rs`, behind
+     `SMYSL_EMBED_CANDLE_MODEL`, on `multilingual-e5-small` (revision `614241f`, 471 MB):
+     reference vectors (first eight components of three texts as passage and query, 1e-4) and
+     step 2's cross-language set, whose bar it meets at **80 of 80**, 20 units in 397 ms in a
+     release build. The reference vectors are this crate's own first output, stored: no
+     PyTorch was at hand, so they catch the crate changing its mind and not a mistake made the
+     first time — the cross-language set is what says the vectors mean something.
+   - Not tried: `bge-m3` (2.3 GB) and `multilingual-e5-base` on real weights; their
+     architecture is exercised on the generated XLM-R only.
+
+   **Step 4 done 2026-10-27: the semantic stages, labelled, and GE-T5's cross-lingual arm.**
+   - **The port.** `smysl_query::SemanticSource` (above, as built), bound on `Env::with_semantic`;
+     `RetrieverSource` adapts S0's `Semantic` and S1's `CandleSemantic` alike. S0's `Model`
+     gained a hash (BLAKE3 over its three files), so both models can be named.
+   - **`~sem`** ranks each partition by the source's cosine and fuses by RRF, as `~lex` does
+     (§3.4): cosines are no more comparable across partitions by default than BM25 scores.
+   - **`lang:any` is the embedding bridge** (§3.5), with the owner: it lowers with `~sem`, or a
+     `~hybrid` that routes semantic, and a bound source, and is **one cosine ranking over every
+     partition** — the fused score the cosine, each hit placed in its own partition. A lexical
+     `lang:any` is still `E461`, now naming the pure bridges as unbuilt; `W465` stays
+     unregistered, since with the bridge every partition is reachable.
+   - **`~hybrid`** routes by `Hybrid`'s measured rule (an identifier to BM25), restated as
+     `smysl_query::routes_to_lexical` because the pure crate cannot reach `smysl-embed`; a
+     facade test holds the two to one answer. A literal routes at planning — an identifier
+     plans **pure** with no model bound — and a `$parameter` on the bound text, so its plan is
+     model-dependent. `Hybrid`'s `kinds` half has no counterpart: a `where kind` comes after
+     the source in sq/1.
+   - **`near("…", t)`** lowers with a bound source; each text is embedded once per run, against
+     the units still in the answer. A threshold outside (0, 1] is `E460` — the source returns no
+     unit at or below zero.
+   - **Purity.** `Plan::purity` names each reason once (`~sem`, `~hybrid routed semantic`,
+     `~hybrid routed on a parameter`, `embedding bridge`, `near`); `Plan::models` holds the
+     model's hash, which a save writes to `query:models` (empty before). `Plan::seed_check`
+     is **`SMY-E416`**, now registered, and `q --seed-check` raises it before anything runs. A
+     rerun under another model is **`SMY-W467`**, registered, and the answer still prints.
+     `fixtures/sq/plans/semantic.explain` snapshots seven semantic plans over a stub source;
+     every one is model-dependent and refused (`smysl-query/tests/semantic.rs`).
+   - **CLI.** `q --engine-model DIR` (S0, `semantic`) and `--candle-model DIR` (S1,
+     `semantic-candle`; vectors in `<store>.vec-<hash12>`, or `index/units.vec-…` in a library;
+     pooling from the directory's `1_Pooling/config.json`, else mean). In a build without the
+     feature the flag is refused by name. `cmd_q.rs` runs it on a Model2Vec model the test
+     writes.
+   - **GE-T5's cross-lingual arm** (`tests/ge_t5_cross.rs`, owner's choice of gold): the 59
+     verses of `fixtures/stability/corpus/` in five languages, the same line in two files the
+     same verse — of record, and Russian's Ps.13 checked as the Synodal Ps.14. Against no bar
+     (§5.5's coder clause needs a sheet; owed), with a smoke bar of ten times chance set first:
+
+     | model | top-1, 20 ordered pairs | precision at recall 0.7 | threshold |
+     |---|---:|---:|---:|
+     | S0 `potion-multilingual-128M` | 0.6814 | 0.2012 | 0.4078 |
+     | S1 `multilingual-e5-small` | **0.9322** | **0.8568** | 0.8884 |
+
+     Chance is 0.0169; 590 gold pairs among 34,810. **The finding is S0's second column**: its
+     nearest neighbour in a language is right two times in three, but its scores do not
+     compare across pairs, so no one threshold separates — which is what a same-as engine
+     needs. S1's do. And e5's cosines sit in a narrow high band (0.74–0.82 over F1's eight
+     units for one query; 0.89 at recall 0.7 here), so a `near` threshold is a fact about a
+     model, not a constant to carry between them.
+
+   **Step 5 done 2026-10-27: the natural-language front end, and GE-T12.**
+   - **The port and the check** (`smysl_query::nl`; §3.15 as built, above). `accept` is the
+     whole defence: a translation must parse, bind nothing, use no refused stage and **plan in
+     the environment it will run in**, so an undeclared field (`E421`), an unknown relation kind
+     (`E462`), a scope not open (`E511`) or a semantic stage with no model (`E461`) is
+     **`SMY-E474`**, now registered (149 codes), and nothing runs. §5.6's unit clause is
+     `smysl-query/tests/nl.rs`: ten unacceptable replies, each `E474`, from a scripted
+     translator.
+   - **`q --from-question "…" [--yes]`.** The translator is the provider routed for
+     `content-ingest`, as `ask --answer`'s is. The accepted query is printed on stderr; it runs
+     with `--yes` or a `y` at a terminal, and otherwise goes to stdout with exit 10, a decision
+     waiting. `--seed-check` refuses the invocation — a translation is not reproducible, whatever
+     the query's purity. A save writes the question as the unit's body and the translator's hash
+     to `query:models` beside any model the plan consults; `W467` compares only the latter, so a
+     pure rerun of a translated query warns of nothing.
+   - **Found on the first live call:** examples written over a store of their own (`notes`) had
+     `llama3.2` copy that store's name into every query, refused as `E511`. The examples now name
+     the scope being asked, their subjects still none of the fixtures'. That was before the
+     question set existed; nothing was tuned against it.
+   - **GE-T12** (`tests/ge_t12.rs`, `fixtures/nl/ge-t12/questions.tsv`): a hundred questions,
+     twenty over each of `fixtures/corpus` F1–F5, with gold queries written by one hand, before
+     any model saw them, each checked to pass `accept` and to answer (on every `make test`).
+     Equivalent results, not equal text — the same uid set, or the same `count`. Against local
+     **`qwen2.5:14b-instruct`** (owner's choice: no key, nothing leaves the machine), in 83 s:
+
+     | F1 | F2 | F3 | F4 | F5 | total | refused (`E474`) |
+     |---:|---:|---:|---:|---:|---:|---:|
+     | 18 | 16 | 17 | 17 | 14 | **82/100** | 7 |
+
+     **0.82 against §5.6's 0.70: the front end is not experimental.** The eighteen misses, in
+     four kinds: *vocabulary* (3) — "datasets" read as `artifact-ref`, the kind list naming
+     `data` without saying it is one; *direction* (4) — `->` for `<-` on `causes` and `backs`,
+     though the prompt states the rule; *invented stages* (7) — `include self`, `with
+     definition`, `with dependents`, each refused by the check, which is the check working;
+     *over-specific terms* (3) — the question's whole phrase as `matches`, which needs every
+     word. One more added `order by salience` to a set answer, harmlessly in intent and not in
+     result. The set's limit is its hand, as GE-T11's planted set's is; `SMYSL_GE_T12_SET` and
+     `SMYSL_GE_T12_PROVIDER` (`deepseek`, `gemini`) take somebody else's set or model.
+
+**TX-P12 — schema evolution**
+1. FC-9 decode/encode in `smysl-core`, `SchemaDecl.lenses`, `Store::schema_decls`, `W430`, `W429`.
+   *Exit:* L9 on fixtures; round-trip suite (`smysl-core/tests/roundtrip.rs`) green.
+   — **done 2026-10-22**, below.
+2. Lens engine and chains. *Exit:* laws L1–L7 at 10,000 seeded cases each; `lens_laws` fuzz.
+   — **done 2026-10-22**, below.
+3. Field resolution, lensed predicates in `sq`, pins, compile-forward, `E421`/`E422`, explain
+   lines. *Exit:* §19.5 rewrite printed exactly as in §4.4.
+   — **done 2026-10-22**, below.
+4. Schema/data effect split. *Exit:* §5.4 §19.5 reproduction.
+   — **done 2026-10-22**, below.
+5. `schema show|check`. *Exit:* rule N fixtures.
+   — **done 2026-10-22**, below.
+6. `migrate`. *Exit:* §5.7 migrate tests.
+   — **done 2026-10-22**, below.
+7. `@schema` surface form for `fields:`/`lenses:`. *Exit:* `fmt` round trip of an FC-9 declaration.
+   — **done 2026-10-22**, below.
+8. Pointer lenses (with the `json/1` reader, SMYSL-2.4). *Exit:* a two-version snapshot series
+   answers `pointer(…)` across the rename.
+   — **done 2026-10-22**, below.
+9. GE-T16. *Exit:* draft 3 TX-P12 exit — lens path equals migrate path on all 100 saved queries
+   and 30 dossiers; the effect split reproduces the injected change; unmappable rate reported.
+   — **done 2026-10-23**, below. **TX-P12 is complete.**
+
+   *Steps 1 and 2 were taken out of order, on 2026-10-22, before TX-P8 closed:* SMYSL-2.7's
+   `--target-revision` (TX-P11's step 13) needs the lens engine and nothing else of this phase,
+   so the engine was built first and steps 3–9 wait for the phase in its place.
+
+   **Step 1 done 2026-10-22: FC-9 in `smysl-core`.** `smysl_core::schema` is §4.2's sketch:
+   `decode` reads a declaration into a `Revision` (field table, lens steps, the declaration's
+   hash), `encode_lenses` and `encode_shape` write them, `SchemaSet` collects every revision of
+   every id with its current one and its forks, and `Store::schema_decls` saves each caller the
+   filter. `SMY-W430`, `SMY-W429` and `SMY-W469` open a thirteenth registry group, `Schema`.
+   The exit holds: L9 over `fixtures/schema/fc9/` — Appendix C's `x.text/v1` with its fields, a
+   three-revision series using every closed op, an unknown op and an opaque declaration — which
+   the generator test rebuilds and compares (`SMYSL_BLESS=1` rewrites it), and the round-trip
+   suite unchanged. Six findings:
+   - **No byte moved.** Key 5 had always travelled in `extra`, at the same place in the map, so
+     `SchemaDecl.lenses: Option<Vec<u8>>` (the item as received) re-encodes every existing
+     declaration to what it was. §4.3's "minor-API break" is stale: the struct has been
+     `#[non_exhaustive]` since, and the field is additive.
+   - **`W430` covers key 5 too.** §3.8 names it for a key 4 that does not match; a key 5 that
+     is not an array of steps had no code, and it must not be misread either. One warning per
+     key, the revision keeping no usable steps (`lenses_opaque`).
+   - **A known tag with a key this build does not know is unknown** (`W469`, the step
+     unusable), not a mismatch: a later `retire` with an option is not this `retire`, and D-5
+     says an op not understood is not applied.
+   - **A step that does not go up is not a step** (§3.10: `to > from`), and reads as a mismatch.
+   - **An empty op list was not written.** `MapBuilder::put_array` omits an empty sequence, as
+     every optional array in the envelope wants, and a step's key 2 is required — so a step with
+     no ops encoded without it and did not decode. Found by step 2's `E470` test, not by the
+     fixtures, none of which has an empty step.
+   - **Cross-implementation (§5.8).** Python (`python/smysl/schema.py`), JavaScript
+     (`nodejs/src/schema.js`) and Go (`go/schema.go`) decode FC-9 and hold L9 and the four
+     chain hashes on every fixture: each file re-encodes byte for byte, each declaration decodes
+     to the field count, op tags, step bytes and codes `cases.json` records, and key 5 rebuilt
+     from its decoded steps is the bytes that arrived. Lens application stays outside them (D-8).
+
+   **Step 2 done 2026-10-22: the lens engine.** `LensChain` (identity, composition, the chain
+   hash of Appendix B, forward and backward application, widenings, relation renaming),
+   `UnitView`, `Mapped` and `SchemaSet::chain` and `infer_revision`, with `SMY-E470`, `SMY-E471`,
+   `SMY-E422` and `SMY-W420`. `crates/smysl-core/tests/lens_laws.rs` holds L1–L7 at 10,000
+   seeded cases each over generated histories of one to four steps, each history obeying rule N
+   (names never reused, a renamed or retired key marked retired, a widening paired, a default
+   only for a key required from the same revision); the `lens_laws` fuzz target holds L9 and L3
+   over arbitrary bytes (an hour, 80,180,179 runs, cov 6,334, no finding). What the engine decided:
+   - **Revision inference is one rule over the steps: a unit a step would change was written
+     before that step**, beside the field clues A-12.1 lists (a retired key held, a required key
+     lacking). Under rule N a step only ever changes what an earlier revision named, so the rule
+     is sound — L5's test asserts the revision a unit was written at lies in the inferred
+     interval — and it is what makes L5 hold: every step below the inferred revision leaves the
+     unit alone, so lensing from any consistent revision reads it the same. It covers renamed
+     types, renamed and retired keys, mapped and split values and defaulted keys at once.
+   - **A chain carries the field table of the revision each step leaves.** Widening detection
+     needs the source revision's values, and backward application checks its result against
+     the revision it arrives at; a chain built from steps alone (`LensChain::from_steps`) has
+     neither, and applies without the checks.
+   - **Backward is all or nothing.** A path through a `retire`, a many-to-one `map-value` or an
+     unknown op is refused before any op runs, so a refused unit is untouched; `E422` for the
+     first two (SMYSL-2.7 §3.11 gives it every step without an inverse), `W469` for the third.
+     Forward never fails: an unusable step reads the unit as `Mapped::Unusable`, counted under
+     `W420`, and an enum value outside every map and the target's values is reported, never
+     mapped (L7).
+   - **L1 is a law about rule-N histories,** and the fuzz target does not assert it: arbitrary
+     steps are not one (a rename onto a key the unit already holds has no inverse on that unit).
+     The seeded test holds L1; the target searches for panics and for L3 and L9.
+
+   **Step 3 done 2026-10-22: field resolution and compile-forward in `sq`.** Phase 2's typed
+   half (`smysl_query::resolve`), the lensed reading of units (`pred::Reader`, carried by
+   `Env`), and `--explain`'s §4.4 lines under phase 2. The exit holds
+   (`crates/smysl-query/tests/lensed.rs`): over §19.5's store — Appendix C's `x.text/v1` and a
+   revision 2 that splits `quoted` into `reported` plus `text:verbatim = true`, a widening
+   because `reported` existed at 1 — `using x.text/v1@1 | where mode = reported` prints
+   `rewrites:  mode = reported  =>  mode = reported and text:verbatim = false   (widening,
+   paired key)` byte for byte, with `pins:` and `lenses:` lines as §4.4 spells them, and
+   answers the old, narrow question over lensed units. `SMY-E421` is registered (136 codes).
+   What the step decided:
+   - **A name resolves by its declared key or by the part after its namespace.** §4.4 writes
+     `mode` and Appendix C declares `text:mode`; the example is only readable if the short form
+     resolves. Two keys or two schemas sharing it is `E421` with the candidates listed.
+   - **The schemas in scope are the store's.** Phase 2 runs before phase 3 has a scope; a
+     narrower scope can only have fewer names, so this refuses nothing a narrower reading
+     would accept.
+   - **`E421` only where every unit's type is typed.** Kernel types are never declared, and
+     nothing written before FC-9 has a field table, so refusing a name no table declares in a
+     store holding such units would refuse every query written before this step. There the
+     name is read raw and the plan says `(raw)`; `fields … (no declaration in this store types
+     a field)` replaces the old "fields not checked" line, which is dropped from every plan
+     that names no payload field (the fifteen planner goldens change by that line alone).
+   - **Compile-forward is §3.9's rules over the chain, op by op**: a rename renames, a split
+     value becomes its parts, a widened value gains its paired default (no default is
+     `SMY-E471`), and a predicate on a retired key or on a value the current revision does not
+     admit and no op carried is `SMY-E422`. `in` lists split into an `or` of their parts. A
+     sort key (`order by`, `group by`, `compare by`) takes renames only — it has no value to
+     map — and a retired one is `E422`.
+   - **`with lens none` exposed a limit of inference.** A-12.1's clues place a unit *before* a
+     step that would change it or before a key became required; nothing places a unit *after*
+     a revision except its type. So a unit written at 2 that merely carries a key 2 added is
+     consistent with 1 and reads raw, and only units whose type the named revision does not
+     declare are unmappable (`W420`, counted beside the answer).
+   - **A key declared `int` is ordered.** `SMY-E512` now refuses `<` only on names and on
+     payload keys no declaration types.
+   - **Lens counts are plan-time.** `lenses:` counts the candidates read through each chain
+     below the current revision, so `--explain` says it without running; `W420` comes from
+     the run, per field.
+   - **Owed:** a pinned traversal is not renamed — edges are followed by the kind they were
+     written with, and `rename-relation` reaches `expand` only through phase 2's acceptance of
+     any revision's kinds. §3.9's "edges renamed lazily" waits for a store whose relations
+     carry a schema revision.
+
+   **Step 4 done 2026-10-22: the schema/data effect split.** A save records the revisions in
+   force and the chains applied; `rerun` pins to them and, with `current`, runs again with
+   every schema pin dropped; `q --rerun --current` returns `E_cur` and prints the schema effect
+   beside the data effect, and `--current --save` writes a new saved query with a
+   `supersedes` edge to the old one. The exit holds (`tests/lensed.rs`): a `mode = reported`
+   query saved over revision 1, then revision 2's widening declared and three units appended
+   — a plain `reported` written at 2, a `quoted` written at 1 and a `reported` with
+   `text:verbatim = true` written at 2 — reruns pinned with a data effect of the plain unit
+   alone, and `--current` reports a schema effect of exactly the two quotations. Decided:
+   - **"The revisions in force" includes the unpinned ones.** §19.5's query is unpinned and
+     saved before revision 2 exists; recording only `using` pins would make its rerun ask
+     today's question, and the effect split would vanish. So `query:schemas` holds the pins
+     and the current revision of every schema an unpinned field resolved against, and a
+     pinned rerun adds each as a `using` the text does not already carry.
+   - **`query:lens-chain` is `id@from->to:hash`, space-separated,** one per chain a pin
+     compiled through, and empty when none was. A rerun rebuilds each from the store's
+     declarations and compares hashes; a chain it cannot build to the same hash is `SMY-E466`
+     (§3.6). Not "the chain this rerun compiles through": a revision declared since the save
+     moves the current end, and that is the schema effect, not a reason to refuse.
+   - **The data effect under `--current` is the pinned one,** as §3.6 defines it; the answer
+     returned is `E_cur`.
+
+   **Step 5 done 2026-10-22: `schema show|check`.** `SchemaSet::check_rule_n` and
+   `check_units` in `smysl-core` and `smysl schema <show|check> [ID] [STORE]`, the
+   thirty-seventh command (pure; errors exit 3, as `check`'s do). `SMY-E426` is registered (137
+   codes). The exit holds: `fixtures/schema/rule-n/` — Appendix D's class, generated by
+   `crates/smysl-core/tests/rule_n.rs` (`SMYSL_BLESS=1`) with `cases.json` — is a declared
+   widening that checks clean beside a widening without its paired key (`E426` and `E471`), a
+   retired key reintroduced, a dropped value reintroduced, a key renamed onto an existing
+   one, a key whose type changes (`E426` each) and a fork (`W429`). What it decided:
+   - **"A new meaning" is read from the declarations,** as five shapes: a type change, a
+     rename onto a name the source revision has (the survivor now means both), a `map-value`
+     onto an existing value, a `split-value` onto one that is not a declared widening, and a
+     name reintroduced after it was retired or dropped — in a later table or as a lens target
+     (`rename-key`, `split-value`'s added keys, `require`, `default`). Dropping an enum value
+     is retiring a name (A-12.1 item 1), not a change of meaning.
+   - **A declared widening is checked on both ends:** each paired key required from the
+     widening revision under `k = v'` (or unconditionally) *and* defaulted under the same
+     condition in the step. The step's own `E471` sees only the step, so an unpaired widening
+     is both codes, as §3.9 says.
+   - **`SMY-W431` stays withheld.** It needs the revisions an extracted unit's recipe names,
+     and an attestation's recipe is a hash: nothing in a store says which revisions went into
+     it. The code is registered when recipes carry them, as inference's third clue waits too.
+   - **Rust only.** The ports decode FC-9 and hold L9 (step 1); judging rule N is a producer's
+     obligation (C-Produce, D-8) and the fixtures carry the codes for a port that takes it on.
+
+   **Step 6 done 2026-10-22: `migrate`.** `smysl_ingest::migrate` and `smysl migrate --schema ID
+   --to REV [--agent A] [--clock MS] [--dry-run] [STORE]`, the thirty-eighth command; `SMY-W472`
+   and `SMY-E473` registered (139 codes). The exit holds over the GE-T16 corpus, which did not
+   exist and is built by `tests/ge_t16.rs` (GE-T10's dossier corpus under three typed revisions
+   of `x.text/v1`, with a quoted twin injected beside every `reported` claim, and a synthetic
+   `x.ge16/v1` whose three revisions use every closed op but `rename-relation`, over two
+   hundred units, forty grounded): 97 units of `x.ge16/v1` and 16 of `x.text/v1` re-derived,
+   identically on a second run; each attested `Transformed` from the unit it replaces, the
+   chain hash as recipe; no unit above the one it replaces, and the batch checks clean (rule
+   M); every old unit superseded by its new one once committed; `relink` then leaves no live
+   unit grounded on a superseded one; 9 commitments and 8 datings proposed for the new uids,
+   staged and not transferred (`W472`). Decided:
+   - **A unit is governed by its type's schema or, failing that, by the one schema whose
+     tables declare its payload keys** (`SchemaSet::governing_unit`). GE-T10's corpus carries
+     `text:mode` on kernel `claim`s, as rule X allows; governed by type alone, none of them
+     would be lensed, migrated or counted, and §19.5's question would not reach the units it
+     is about. Keys two schemas declare govern by neither. Field resolution, inference,
+     `schema check`, `migrate` and `--target-revision` all read this one rule.
+   - **A migration is the units, their `supersedes` edges and proposals, and nothing else.**
+     Grounds keep naming the old units, which remain; `relink` re-points them after
+     acceptance, as §3.11 says, so the batch a reviewer reads is the migration and not a
+     cascade.
+   - **The batch carries proposals.** `Staged` gained `proposals`, records committed only if
+     the reviewed text keeps them; commitments and datings have surface forms, so they are
+     reviewed as the units are.
+   - **No `--recipe`.** §3.11's model path — an extraction run through `ingest` to supply what
+     a unit lacks — is not built: without it `migrate` is pure, and `SMY-E473` names the units
+     that would need it. It lands with a provider route, local or hosted, as `ingest` routes.
+
+   **Step 7 done 2026-10-22: `fields:` and `lenses:` at the surface.** `@schema` takes A-7's
+   field table and Appendix B's steps with their keys as names (A-10 item 4) — `type`,
+   `values`, `retired-in`, `note`, `required-from`, `required-when`, `literals`; a step's
+   `from`, `to`, `ops`; an op's `tag` and then `from`/`to`, `key`, `map`, `add`, `value`,
+   `when` — and writes them one entry per line, as Appendix C does. The exit holds at the
+   library (`crates/smysl-core/tests/fc9_surface.rs`: every declaration in `fixtures/schema/`
+   that can be spelled is written, read back and written again byte for byte) and at the
+   command (`smysl fmt` of Appendix C's text, then `fmt --check` of what it wrote); Appendix C
+   as printed in SMYSL-2.3 reads to the bytes `fixtures/schema/fc9/text-v1.cbor` holds. Decided:
+   - **Spelled only when nothing is lost.** A declaration has a surface form when what keys 4
+     and 5 decode to re-encodes to the bytes they hold; one that is opaque, carries an op this
+     build does not know, or arrived in another encoding stays CBOR-only and is counted (F-18).
+     Of the fixtures, two are: the opaque declaration and the unknown op.
+   - **An unknown key or tag is refused** (`SMY-E001`), not carried: a misspelt
+     `required_from` passed over would leave a key unrequired under a file that visibly
+     requires it, and an op the surface cannot name cannot be the op the author meant.
+   - **A declaration without them keeps its one line,** so every `.smy` written before this
+     step formats as it did.
+
+   **Step 8 done 2026-10-22: pointer lenses.** `smysl_query::pointer` and the `pointer("…")`
+   source, which the planner refused since TX-P6; `SMY-W475` registered (140 codes). The exit
+   holds (`crates/smysl-text/tests/pointer.rs`): two configuration snapshots read by `json/1`,
+   the second renaming `/database` to `/db` and `max_size` to `maxSize`, answer
+   `pointer("/database/pool/max_size")` with the value from both, and the new spelling finds
+   both too; `--explain` prints the pointer at each revision; a third snapshot with no marker
+   is matched as written and counted (`W475`). §3.12 is a sketch, and four things it leaves
+   open are decided in the module:
+   - **A pointer lens is a schema declaration whose `rename-key` or `retire` ops name
+     pointers** (keys starting with `/`), with the op set and step machinery of every other
+     lens and no field table; its id is the snapshot family's.
+   - **A rename moves its subtree.** A pointer is a path: renaming `/database` renames every
+     pointer under it, and `retire` takes the subtree.
+   - **The version marker is a manifest field,** `identifiers[<schema id>] = <revision>`, and
+     a unit is in a snapshot by its source's manifest; the shape fingerprint §3.12 offers as
+     the other marker is not built.
+   - **A unit's locator is its source reference after the last `#`.** Matching is by that
+     locator and its prefix (`units_with_source_prefix`'s reading, with the pointer's own
+     boundary at `/`), never by rewriting it. SMYSL-2.4's `locators` table, when it lands,
+     replaces the reading and not the rule.
+
+   **Step 9 done 2026-10-23: GE-T16, and the phase closes.** `tests/ge_t16.rs` over the
+   corpus step 6 built: **the lens path equals the migrate path on all 100 saved queries and
+   all 30 dossiers** (L8) — each query saved, then rerun pinned over the store as it is and
+   over the store with both migrations committed, the migrated result read back through the
+   migration's pairs; each of GE-T10's thirty English questions asked over both, slot by slot.
+   **The effect split reproduces the injected change:** `text:mode = reported` saved before
+   revisions 2 and 3 and the quotations, rerun after, has an empty data effect and a schema
+   effect of exactly the 8 injected quotations. **Unmappable rate: 0 of 254 units** of the two
+   schemas. Two findings, both fixed where found:
+   - **A compiled atom kept its short spelling into a store where it was ambiguous.**
+     `using x.ge16/v1@1 | where mode = quoted` compiled to a `mode = reported and …` that the
+     current revision then refused (`E421`), because `x.text/v1` declares a `mode` too. A
+     short spelling now survives compile-forward only where it still resolves to the same key;
+     otherwise the atom is written with the key in full. §19.5's exit, in a store with one
+     `mode`, prints as before.
+   - **The harness, not the law:** the first L8 comparison set a query's result at save time
+     against its rerun after ninety-nine more saves, and the saved units themselves were the
+     difference. Both paths now rerun over one store.
+
+**TX-P6 follow-up — `find` over the library's postings (OQ-91)**, decided 2026-10-26, its own
+step; **done 2026-10-26**, as-built below. SMYSL-2.8's GE-T7 stand-in (§6.1 P13c.2 there: a thousand works, five
+languages, 10⁶ units) measured a `find` over one twenty-work shelf at 13 s p95 and over the
+library at 158 s, against GE-T7's 1 s: the lexical source builds a postings table over the whole
+store for every query, one per analyzer, and reads none of the postings the library already
+keeps. *Work:* the library's `Scope` hands the executor its persisted postings per analyzer
+chain, and the executor builds in memory only for a store with none, or a stamp that no longer
+matches. *Exit:* GE-T7's scoped-query p95 < 1 s on the stand-in, at the shelf, a language and
+the library; every `fixtures/sq/` golden and `fixtures/retrieval` ranking unchanged, bit for bit
+— a persisted table must give the `Subset` statistics a fresh one gives (`Db::agrees`); a stale
+sidecar answers as a fresh build does; under `--shard` the universe is the loaded shards.
+*As built:* the `Scope` port's `postings(universe)`, the library scope's answer (the kept
+table, or `Library::postings_over` the universe), and §3.4's amendment. Three costs found and
+removed on the way, each proportional to the library rather than the query: every partition
+filtered the universe's postings of each term and counted the universe's statistics again —
+a per-query fan-out now reads each term once and deals it to the partitions, held by a test to
+score as each partition's `Subset` did; the stored view read every document length on each
+query, and is now kept by the library until its next write; and the in-memory view looked a
+length up partition by partition, and now reads one map. On GE-T7's stand-in (10⁶ units, 1,001
+partitions): p95 141 ms over a shelf, 219 ms over a language, 579 ms over the library — 566 ms
+over all three, **under 1 s**. A library has kept postings once `text index --rebuild` has run;
+without them a query builds its own over its candidates.
+
+## 7. Risks and mitigations
+
+| risk | mitigation |
+|---|---|
+| Saved-query result edges perturb salience (`answers` carries rank) | `RESULT_EDGE` constant, `x.query/answers` proposed, salience-isolation test (§5.4); no `--save` with kernel `answers` until salience excludes `x.query/*` sources |
+| RRF over engines reintroduces the merge measured worse than routing | RRF only across partitions of one engine; `Hybrid` routing kept and recorded (OQ-46) |
+| Per-partition indexes rebuilt per call make `q` slower than `find` (F-10: 13 s at 156k) | cache within one invocation; persistent postings in SMYSL-2.4 TX-P4; plan snapshots record partition counts so regressions are visible |
+| Revision inference wrong for hand-written units | rule N makes ambiguity harmless; law L5 tests it; `W431` covers extracted units |
+| Unknown lens ops from a newer peer | `LensOp::Unknown`, `W469`, units unmappable and counted; bytes preserved |
+| `SchemaDecl` gains a field (not `#[non_exhaustive]`) | one minor-API break in the release that ships FC-9, recorded in CHANGELOG; `tests/public-api.txt` updated deliberately |
+| Dossier ranking by product of incomparable scales | quantised terms; GE-T10 compared three and kept the product (OQ-52) |
+| NL translator emits a query that reads more than asked | parse + resolve + stage allowlist, query shown before running, `--yes` required |
+| Prompt injection through dossier passages in `ask --answer` | SMYSL-2.1 guard; ground-only-on-dossier filter (`W478`); rule M cap |
+| S1 dependencies bring native code | verification is TX-P10 step 1; `check-native` in CI — *done: candle 0.10+ do (`onig_sys`), so 0.9* |
+| Templates drift from GE-T10 gold | template-set id and hash in every recipe; reruns refuse an unknown set (`E477`) |
+| `smysl-query` grows a dependency the gate forbids | `PURE_CRATES` membership checked per crate by `xtask check-purity` |
+
+## 8. Diagnostics allocated in this RFC (SMY-E/W460–479)
+
+| code | meaning |
+|---|---|
+| E460 | `sq` syntax error, or an unbound `$parameter` (span reported) |
+| E461 | a stage is not available in this build or phase (`match`; `~sem` without a semantic feature; `text(…)` without `smysl-text`) |
+| E462 | a traversal names a relation kind no schema in scope declares and the kernel does not define |
+| W463 | a traversal stopped at `depth` with an unexplored frontier; count reported |
+| W464 | supersession fork in scope: no single head, every successor kept; count reported |
+| W465 | `lang:any` found no bridge for some partitions; they answered in their own language only; count reported |
+| E466 | a saved or pinned query cannot be pinned: a recorded revision or lens-chain hash is not reproducible from the store's declarations |
+| W467 | a model-dependent saved query was rerun under a different model hash; diffs are not comparable |
+| E468 | the question matches no intent rule; `--intent` required |
+| W469 | a lens step carries an op this build does not know; the step is unusable (units counted under W420) |
+| E470 | no lens path between the requested revisions (gap or cycle) |
+| E471 | a lens step is ill-formed: `default` without a paired `require` under the same condition, an op on an undeclared key, a widening without its paired key |
+| W472 | migration proposed commitments or datings for review instead of transferring them; counts reported |
+| E473 | migration needs information the old units lack; a model recipe is required |
+| E474 | the natural-language front end produced text that is not an acceptable `sq/1` query; nothing was executed |
+| W475 | a `json/1` snapshot has no version marker; read without a pointer lens; count reported |
+| W476 | a cached vector under another model hash was ignored and recomputed |
+| E477 | unknown dossier template set on `ask` or rerun |
+| W478 | an answer-step unit grounds outside its dossier and was dropped |
+| W479 | independent-witness counting fell back to attestation groups for units whose sources the derivation graph does not cover |
+
+Codes from draft 3 used here (meanings in the set's registry, SMYSL-2.0 §6.1; W409, E410, W420,
+E426, W429, W430 are also referenced by SMYSL-2.3): W409, E410, W415, E416, W417, W420,
+E421, E422, E426, E427, W429, W430, W431. Existing: W036, E001.
+
+## 9. Open questions
+
+Draft 3 questions this RFC touches: ~~**OQ-14**~~ **answered** (IDF over the query's declared
+scope, default collection, recorded per query — §3.2 step 4 has the reasoning and the two
+defects that decided it), **OQ-15** (partial dependence; `Witnesses` trait leaves room), **OQ-16** (contentions
+across stores; computed by merge into the scratch store until SMYSL-2.8), ~~**OQ-21**~~ **decided
+2026-10-28: the name stays `sq`**, because it is no longer only a name — `using sq/1` is how a
+query states its version (`SMY-E427` for one this build does not support), the three ports
+parse it, and every `x.query/saved` unit written since TX-P8 carries it in its text, so a rename
+is a new language version and a migration of saved queries for no gain in meaning; saved
+queries are in the format as `x.query/v1` (SMYSL-2.3 A-11), ~~**OQ-22**~~ (intent
+classifier) **decided 2026-10-29: the rule table, and no `Classifier` port in SMYSL-2.** GE-T10's
+fresh questions, which the table never saw, classify 84 of 85 (set 1: 135 of 150); every miss in
+either set is a spelling the table does not write — a comma after the verb, a contraction
+(`vom`, `del`, `du`), a plural verb, and on the fresh set French elision (`qu'un` against `est-il
+vrai que `) — which is a rule to add, not a judgement to hand a model. The front's larger loss is
+the subject (8 of 85 fresh, 7 of set 1's 22 losses), inflected names an alias does not spell,
+which no intent classifier touches. A model classifier would make every `ask` model-dependent
+for that margin, and `--intent` already names what the table misses. **The spelling fixes,
+measured out of sample (2026-10-29):** commas folded away, contractions (`vom`, `des`, `del`,
+`du`, `des`), plural verbs and French elision, declared before a third set of sixteen questions
+over all eight intents in five languages was written (`fixtures/dossier/third/`) and scored
+first without them (`baseline.txt`). Intent there 57 → 69 of 80; every remaining miss is a verb
+or tense no rule spells (`¿Quién fue`, `Кем был`, `What exactly was`, `Gibt es Belege`, `where do
+the texts mention`, `se menciona`), a vocabulary gap, not a spelling. In-sample, set 1 reads 150
+of 150 and the fresh set 85 of 85. **The vocabulary, measured out of sample (2026-10-29):** the
+rules for those gaps — a definition in the past or with *exactly* (`quién fue`, `кем был`, `was
+genau war`, `qu'était`), evidence asked as existence (`gibt es belege dafür dass`, `hay pruebas
+de que`, `есть ли доказательства что`), *mention* as the verb (`dónde se menciona`, `where do the
+texts mention`) — were listed exactly, then a fourth set of sixteen questions in five languages
+was written (`fixtures/dossier/fourth/`, the list in its header) and scored without them
+(`baseline.txt`). Intent there **40 → 55 of 80**; the third set, now in-sample, 80 of 80. Of the
+25 left, ten are a verb in a tense the table writes only in another (`depended`, `hing … ab`,
+`vino`, `venait`, `утверждал`), the rest other words for the same openers (`Nachweis`,
+`existen pruebas`, `свидетельства`, `who believed`, `où parle-t-on`, `se habla de`, `what made`,
+`how does … compare with`). They are owed to a fifth set, not added here, and none is a case
+for a model: each is a rule `--intent` covers until it is written. **A second round
+(2026-10-29):** rules for those 25 — the past of a rule's verb (`depended on`, `hing … ab`,
+`vino`, `venait`, `утверждал`), other words for evidence (`Nachweis`, `existen pruebas`,
+`свидетельства`), belief as attribution (`who believed`, `qui croyait au`), `se habla de` and
+`parle-t-on de`, and four openers met once — declared the same way before a fifth set was
+written (`fixtures/dossier/fifth/`). Intent there **21 → 43 of 80**; the fourth set, now
+in-sample, 79 of 80 (the miss is `wer behauptete`, which the declaration left out). The fifth
+set was written to reach further than the rules, and its 37 losses are mostly constructions
+rather than words — `how did X arise` in four languages, a definition asked as `describe` or
+`en qué consiste`, a comparison as a verb of difference or as `X versus Y` in the language's own
+word, attribution as doubt, dependence as `built on` — with one question read as the wrong
+intent (`What was built on …` as define). Each round reads more and finds a new kind of phrasing,
+so the table is a vocabulary that grows with use, not one a set closes; further rounds wait for
+questions people ask. One subject finding, fixed the same day: a comparison took the longest
+name it held, so `How does Semmelweis compare with Joseph Lister?` asked about Lister; it now
+takes the name written first (step 1), and the fifth set's subjects go 43 → 44. **A third round
+(2026-10-29):** rules for the fifth set's losses — a definition as `describe` or `en qué
+consiste`, an explanation as `aus welchem Grund` or `comment se fait-il que`, a yes-or-no
+question as verification (`hat`, `est-ce que`, as English `did` already was), attribution as
+doubt, how a thing arose as trace (`wie entstand`, `cómo surgió`, `как возник`), location by
+another verb (`wo taucht … auf`, `dans quels textes`), dependence as resting on, comparison by a
+verb of difference — declared before a sixth set was written (`fixtures/dossier/sixth/`, which
+also says why a bare preposition, `frente a`, `contre`, `против`, was left out). Intent there
+**10 → 43 of 80**; the fifth, now in-sample, 76 of 80, the fourth 80 of 80. Three of the
+sixth's 37 losses are a question read as the wrong intent, each by a rule already in the table
+(`what is the origin of` as define, `Erkläre mir den Begriff` as explain); none by the new
+rules, `hat` and `est-ce que` included. The rest are openers again new — `for what reason`,
+`who opposed`, `what came out of`, `where can I read about`, `contrast`, `que signifie` — so
+the third round confirms the second's reading: the rounds are finding a language's ways of
+asking, and that set is not closed by sets one hand writes. **OQ-23** (closed op set; `Unknown` preserved),
+~~**OQ-24**~~ **decided 2026-10-29 as proposed**: one stderr line whenever a lens touched a
+unit, silence when none did (§3.9).
+
+New:
+
+| id | question |
+|---|---|
+| OQ-45 | RRF constant: fixed `k = 60` recorded in the recipe, or a per-query parameter? A parameter makes reruns depend on one more number. **Decided 2026-10-28: fixed, recorded, not a parameter** (§3.4). Over partition fusion `k` cannot reorder a unit only one partition ranks, which is every unit not cited from two partitions; where a unit is ranked twice it moves MRR by up to 0.035 and the best `k` changes with the corpus and the model. |
+| OQ-46 | Should `~hybrid` ever fuse lexical and semantic results (RRF) rather than route? The 0.78 vs 0.84 MRR measurement says no for the English corpus it was taken on; a multilingual corpus may differ. **Decided 2026-10-28: route** (§3.4's table). RRF ties routing on the English set with the English model, loses to it with the multilingual one (0.867 against 0.900), and loses 0.14 MRR across five languages (0.725 against 0.866). It beats routing within English over Ruth's restatements, where lexical alone beats both — an engine choice `~lex` already offers, not a case for merging. Reopen with a within-language set outside English. |
+| OQ-47 | `INTERPRETIVE` in `smysl-embed` includes `Question`; draft 3 §11.2 lists claim, finding, hypothesis. Which is the routing rule `sq` records? **Decided 2026-10-28: `sq` records the text's shape and nothing of kinds, and `Question` stays interpretive in `Hybrid`.** The kinds half of `Hybrid::routes_to_lexical` cannot reach `sq`: a `where kind` stage comes after the source in sq/1, so the source routes on its text alone (`ports::routes_to_lexical`, held to `looks_like_identifier` by the facade's test), and the route is recorded per partition. For the library `Hybrid` the list answers a different question from draft 3's — not "whose content is an interpretation" but "whose wording varies between two people saying one thing", and a question is a sentence, not a name. It matters only for a filter made entirely of non-interpretive kinds, so a filter of `Question` alone stays with the embedder. |
+| OQ-48 | **Decided (SMYSL-2.0 §3):** the lens engine lives in `smysl-core`, because check, render and retrieval need it below `smysl-query`. |
+| OQ-49 | **Resolved in SMYSL-2.3 A-11:** `x.query/answers`, inert for salience. |
+| OQ-50 | `match` (graph patterns): which subset, and in which phase? Refused (`E461`) until decided. **Decided 2026-10-28: no subset and no phase in SMYSL-2.** Every phase that might have needed it closed without it — the edge slots of every dossier template are `expand … only` (OQ-86), and no gate, template or measured question asked for a pattern a walk cannot write. SMYSL-2.9 §4.9's capture stays (OQ-82), so `match` keeps answering `SMY-E461` and a later RFC can specify the language without reopening the grammar; the case for one is a query somebody needed and could not write as a walk. |
+| ~~OQ-51~~ | NL front end: is printing the query and requiring `--yes` enough, or must a saved translated query also record a human approval attestation? **Decided 2026-10-29: a saved translation records who approved it.** Printing and `--yes` decide whether a query runs; a save makes it a unit others rerun and cite, and until now nothing on it said a person had read what the model wrote — `q` attested no saved unit at all, so a translated save was told from a hand-written one only by `query:models`. `q --from-question … --save` now requires `--approved-by human:<id>`, refused (exit 2) before any model is asked when it is missing or names no person, and the save gains that person's attestation (`Op::Attested`, `Rung::Document`, the rung GE-T9 gives an annotator). It is outside the core, so the query's uid and its reruns are unchanged. `--yes` and a `y` at the terminal record the same thing — the named person's claim to have approved it — because the tool cannot tell a person who read from one who did not. Tested in `tests/cmd_q.rs` for every refusal, and once end to end through a local model (llama3.2), which saved the unit with `human:ada`'s attestation in a store that checks clean. |
+| OQ-52 | Dossier slot ranking: product of quantised terms (draft 3), lexicographic, or RRF over per-criterion ranks? GE-T10 should compare at least two. **Decided 2026-10-28: the product, kept.** All three are built (`AskOptions::ranking`) and GE-T10's fourth table scores them. Membership is the template's (`order by salience … limit`), so precision and recall cannot see an order, and the gold is binary, not graded; what can be scored is whether a slot's gold units come before its strays, over the slots that hold both. Over set 1's thirty questions (16 such slots) the product and the lexicographic order agree everywhere (AP 0.749, MRR 0.875, P@1 0.750): no template has a `find`, so the retrieval term is constant and salience decides, with status breaking ties. RRF scores 0.728 / 0.771 / 0.562, because it gives status a share equal to salience's and so loses `characteristic`'s order; it orders `introduction` better (AP 0.958 against 0.875, two slots). Over the seventeen fresh questions only three slots hold both, and the three tie (0.694 / 0.667 / 0.333). The samples are small and in-sample, and single-hand gold. A choice other than the product is a recipe input. Reopen with graded gold, or when a template ranks by `find`. |
+| OQ-53 | Lens ops address top-level payload keys. Do nested keys (`payload_strings`' dotted paths) need lenses, and if so, is the dotted path the key? **Decided 2026-10-29: no, and a lens key is a field name.** A lens step is checked against its revision's `fields:` table (`SMY-E471`), which is flat: FC-9 has no object type, so no declaration can type a nested key and no step can be checked against one. The shipped schemas are flat by convention (`text:mode`, `query:recipe`). `payload_strings`' dotted path is a retrieval key, and it deliberately merges `a.b` with `{a: {b}}`; making it a lens address would give one step two meanings. A key spelled with a dot is an ordinary top-level name. Found on the way: raw sq field access (`where a.b = …`) reads a top-level key only, so it misses a nested value `find` indexes — reading as written, not through a lens. **Fixed the same day:** a raw key no top-level key spells is read as the nested path it names, so `where a.b = …` sees what `find` indexes, and a literal dotted key still wins (`lensed.rs`). |
+| OQ-54 | **Resolved by SMYSL-2.1 H-20** (TX-P0): `find` and `pack` are retagged `Mixed`. |
+| OQ-84 | **The per-partition limit is a recipe input §3.6's table omits.** Raised by TX-P8 step 1, which hashed the eight listed inputs and found a ninth that changes a result as surely as `k` does: how many hits a source keeps per partition before fusion (`PlanOptions::limit`, `q --per-partition`). It is hashed into `query:recipe` now, so two saves under two limits have two recipes and a rerun under another limit is labelled not comparable — but the payload has no declared key to carry the value, and a key the schema does not declare is a key a reader cannot trust. *Options:* add `query:per-partition` to FC-5 in a SMYSL-2.3 revision (the honest one; one more field, same rule N); or fold it into `parameters` under a reserved name (needs no schema change and misdescribes what it is). *Recommended:* the first, when SMYSL-2.3 next opens. **Decided 2026-10-28: the first.** SMYSL-2.3 A-11 is still for discussion, so `x.query/v1` takes the key at revision 1 rather than a revision 2 (Appendix C). It is an `int`, written by every save and read back as optional, so a save made before it loads; a CLI rerun without `--per-partition` runs under the recorded limit, and its recipe is the saved one. |
+| OQ-85 | **A saved query ranks for its own terms.** Found by §5.4's first test: a saved unit's gist is its text, so `find "connection pool"` over the store it was saved in finds the unit that says `find "connection pool"`. A rerun excludes the unit a save wrote — the record of a save is not data the query found — but a fresh `find` has every saved query in reach. *Options:* exclude `x.query/saved` units from lexical sources unless the query names the schema (`where schema = x.query/saved`); exclude them from `from store:` resolution altogether; or leave them in, on the ground that a store is a log and a saved query is a record in it. *Recommended:* the first, as the default a reader expects — a question about a corpus is not a question about the questions asked of it — with the schema predicate as the way to ask the other one. Not done in step 1, which is about saving and rerunning; it is a change to phase 5. **Decided 2026-10-28: the first** (§3.6). Scoped to a pipeline whose source is `find`, of any engine, and taken out at phase 3 so the saved units neither rank nor count toward IDF; a `schema` predicate naming `x.query/saved` turns it off. The rerun keeps excluding its own unit, for a saved query that names the schema. |
+| OQ-86 | **Decided 2026-10-28: `expand … only`** (SMYSL-2.9 §4.7), the traversal modifier recommended below, additive under QG-9, and taken by template set 3 for every edge slot. A unit reached at depth one or more is kept even when it is a seed, which is the case the `except` lost. GE-T10, slots alone, set 2 → set 3: over set 1's questions counter 1.000 / 0.667 → **1.000 / 0.917**, cause 0.667 → 1.000 recall, exemplifies 0.800 → 1.000, dependent 0.833 → 1.000, all slots 0.806 / 0.873 → 0.815 / 0.950; over the fresh questions counter 1.000 / 0.471 → **1.000 / 0.706**. Both sets are in-sample for this choice — OQ-86 was found on set 1's, and the fresh set holds four of its cases. What it costs: `support` now takes a ground that names the subject, which the gold does not want once over set 1's questions (0.800 precision) and five times over the fresh ones, and `cause` (not narrowed) takes the causes of other claims about the subject three times over the fresh ones. The prediction that `characteristic` would lose the units it had taken did not hold: `characteristic` selects by kind, so a rebuttal that names the subject is still a claim about it there, and the slot stays at 0.554. The translator's prompt (§3.15, `sq.translate` version 1) is not changed to teach `only`, so GE-T12's 82 of 100 still describes the prompt that ships; `accept` takes a query that uses it. *As raised:* **sq/1 cannot ask for only what a walk reached.** Raised by TX-P8 step 3: `expand` *adds* to the set it was given, so a slot defined by an edge — what rebuts, causes or exemplifies the units about a subject — is written `about entity($subject) expand ->rebuts depth 1 except about entity($subject)`, and the subtraction also removes a rebuttal that itself names the subject, which then answers `characteristic` instead. *Options:* a traversal modifier (`expand ->rebuts depth 1 only`, the frontier without the seeds), which is a grammar change and so SMYSL-2.9's and the three ports'; a `reached` source over the previous stage; or leave it, if GE-T10 shows the lost rebuttals are rare. *Recommended:* measure first — step 4's GE-T10 counts counter-evidence recall per slot, and a kill criterion on that slot is what would make the grammar change worth its cost. **Measured (TX-P8 step 4):** over GE-T10's single-hand gold it costs recall and not precision — six of 24 counter units, three of nine causes, one of five examples and one of six dependents leave their slot, and seven of them reappear in `characteristic`. The kill criterion that fired is on counter *precision*, which OQ-87 and OQ-88 account for, so this change would not lift it. Still recommended against for now; worth taking with OQ-87 if the grammar is opened for that. |
+| OQ-87 | **Decided 2026-10-28.** Part (a) by SMYSL-2.9 §4.7's walk into history, not by a predicate — `where superseded` would recognise inside a filter a word that is a legal field name, which QG-9 forbids in sq/1 — and `revision` is back in `trace` under template set 3, at 1.000 / 1.000 over set 1's three trace questions. Part (b) as below. *Set 2's record:* **(template set 2), part (a) deferred.** (b) is the template-set change recommended: every slot is planned with `PlanOptions::supersede_before_walk`, a recipe input when on, and the plan prints the step — a walk starts from the current account. (a) is not solved: `revision` is withdrawn from `trace` rather than left in it empty, until a `where superseded` predicate is taken with OQ-86's `only`. Measured with OQ-88 below. *As raised:* **sq/1 cannot select a superseded unit, and a walk starts from one.** Raised by TX-P8 step 4. The supersession pass runs after sources and traversals (§3.2), so (a) `revision` — what a later account replaced — is empty for every question: the old unit is hidden under the current lens, and under `--all-versions` it names the subject and the `except` removes it; and (b) a walk from a superseded seed reaches *its* rebuttals before the pass replaces the seed, so `counter` holds a rebuttal of an account nobody now holds (two of counter's six false positives). *Options:* a `where superseded` predicate (grammar, SMYSL-2.9 and the ports); a per-slot lens setting in the template set, with the pass run before the walk for the edge slots; or drop `revision` from `trace` until one exists. *Recommended:* the predicate, taken with OQ-86's `only` if the grammar is opened, and the pass moved before the walk for edge slots now, since that is a template-set change and not a grammar one. |
+| OQ-88 | **Decided 2026-10-28 (template set 2): `$topic` as an `or` of `matches`, on `counter` and `reported` only.** The topic's words (less the subject's, words under three characters, and the question language's function words — every tier-1 language's when `--intent` leaves the language unknown) are written into the slot's first pipeline, after its `about entity($subject)`; a probe asks whether any unit about the subject says one, and a slot narrows only if one does. Measured over set 1's questions (in-sample: they found the defect) and over **seventeen fresh verify and explain questions** in five languages written before set 2 ran (`fixtures/dossier/fresh/`, single-hand, by the hand that wrote set 2). Counter, slots alone: set 1's questions **1.000 / 0.667** (was 0.750 / 0.750); fresh questions **1.000 / 0.471** against set 1's 0.478 / 0.647 on the same questions. Reported: 0.857 / 0.857 (was 0.636 / 1.000); fresh 1.000 / 0.500 (set 1: 0.250 / 1.000). **`evidence` was narrowed too and is out on measurement**: an observation is told in its own words, not the question's, and narrowing it took its recall to 0 of 9 on set 1's questions and from 0.714 to 0.357 on the fresh ones — decided after both runs, so for that one choice the fresh set is in-sample as well. The kill criterion no longer fires on either set; `ask` stays *Experimental* by decision, since every gold set is single-hand and counter's recall fell. Of counter's nine fresh misses, four are OQ-86's named rebuttals, two a `contrasts` edge no template walks, and three a seed that does not say the question's words (one of them `spread` against `spreads`: `matches` does not fold). Questions in the four other languages mostly fall back to the subject alone over this English corpus. *As raised:* **A slot binds the subject and nothing of what was asked of it.** Raised by TX-P8 step 4. `classify` returns the question's remainder ("is cured by citrus fruit") and the slots bind only `$subject`, so a verify or explain dossier's `counter`, `evidence` and `reported` hold everything of that kind about the subject: four of counter's six false positives, which is what fires GE-T10's kill criterion (verify 0.667, explain 0.500, define 0.909). *Options:* a `$topic` parameter the verify and explain templates intersect with a lexical `find` (pure; recall falls when the remainder's words are not the corpus's); the `Classifier` port of OQ-22 extended to pick the claim the question asks about (model-dependent); or rank by the remainder without filtering, which leaves precision where it is. *Recommended:* `$topic` with `find`, measured on fresh questions rather than these, since a fix scored on the questions that found it is scored in-sample. |
+| ~~OQ-91~~ | **`find` builds its postings for every query, over the whole store.** Raised by SMYSL-2.8's GE-T7 stand-in (P13c.2). `lexical` (`exec.rs`) calls `MemPostings::index(env.store, analyzer)` per query and per analyzer, so a query's cost is the library's size times its languages, whatever its scope: 13 s for a twenty-work shelf of 10⁶ units, 158 s for the library. The library already keeps postings (`write_index`, the substrate store), stamped against its logs. | **Decided 2026-10-26: its own step** (§6, the TX-P6 follow-up). The library scope supplies its persisted postings per analyzer; a build in memory only where there are none or they are stale. Results bit-identical to a fresh build; a `--shard` subset restricts the universe, as a partition already does. **Done 2026-10-26** (§6, §3.4's amendment): each unit cut by its own partition's analyzer, the kept table or one built over the universe; p95 under 1 s at every scope on GE-T7's stand-in. |

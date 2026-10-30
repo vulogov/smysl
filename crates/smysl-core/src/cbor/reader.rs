@@ -167,6 +167,32 @@ impl<'a> Dec<'a> {
         self.expect(major::UINT)
     }
 
+    /// Read a signed integer, from either of the two integer major types.
+    ///
+    /// A negative argument of 2^63 or more is malformed rather than clamped: it names an
+    /// integer no `i64` holds, and silently saturating it would decode one value as another.
+    pub fn int(&mut self) -> Res<i64> {
+        let at = self.pos;
+        let (m, arg) = self.head()?;
+        match m {
+            major::UINT => i64::try_from(arg).map_err(|_| {
+                self.pos = at;
+                self.malformed()
+            }),
+            major::NEGINT => {
+                let v = -(arg as i128) - 1;
+                i64::try_from(v).map_err(|_| {
+                    self.pos = at;
+                    self.malformed()
+                })
+            }
+            _ => {
+                self.pos = at;
+                Err(self.malformed())
+            }
+        }
+    }
+
     pub fn bytes(&mut self) -> Res<&'a [u8]> {
         let n = self.expect(major::BYTES)? as usize;
         self.take(n)

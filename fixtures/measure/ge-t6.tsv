@@ -1,0 +1,154 @@
+# GE-T6's pure arm (SMYSL-2.6 §5.4): T2 and T3 across the Bible's genres, per edition.
+# Written by crates/smysl-measure/tests/ge_t6.rs under SMYSL_BLESS=1 with SMYSL_GE_T6
+# naming GE-T1's five Bibles. Values to 4 places; H is Kruskal-Wallis, ties corrected.
+# edition	measure	key	value
+deu1912	T2	books	33
+deu1912	T2	genres	5
+deu1912	T2	excluded	RUT(12721) 1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled) SNG(14043) LAM(18172) JOL(10513) OBA(3403) JON(6490) MIC(15687) NAM(6820) HAB(7860) ZEP(8276) HAG(5666) MAL(9327) GAL(17572) EPH(17263) PHP(12127) COL(11364) 1TH(10537) 2TH(5734) 1TI(13136) 2TI(9380) TIT(5507) PHM(2428) JAS(12946) 1PE(13789) 2PE(9012) 1JN(13219) 2JN(1655) 3JN(1631) JUD(3565)
+deu1912	T2	H	13.7184
+deu1912	T2	epsilon2	0.4287
+deu1912	T2	p	0.0028
+deu1912	T2	ms:between	0.111056
+deu1912	T2	ms:within	0.016159
+deu1912	T2	var:window	0.001206
+deu1912	T2	against	false
+deu1912	T2	median:epistle	2.8378 [2.7712, 2.8938] n=4
+deu1912	T2	median:law	2.5286 [2.2166, 2.6202] n=4
+deu1912	T2	median:narrative	2.7170 [2.7028, 2.7860] n=13
+deu1912	T2	median:poetry	2.9140 [2.7820, 3.0436] n=4
+deu1912	T2	median:prophecy	2.7564 [2.5636, 2.8741] n=8
+deu1912	T3	books	26
+deu1912	T3	genres	5
+deu1912	T3	excluded	RUT(12721) 1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled) EST(28757) ECC(27560) SNG(14043) LAM(18172) HOS(27583) JOL(10513) AMO(21844) OBA(3403) JON(6490) MIC(15687) NAM(6820) HAB(7860) ZEP(8276) HAG(5666) ZEC(31926) MAL(9327) 2CO(34171) GAL(17572) EPH(17263) PHP(12127) COL(11364) 1TH(10537) 2TH(5734) 1TI(13136) 2TI(9380) TIT(5507) PHM(2428) HEB(38459) JAS(12946) 1PE(13789) 2PE(9012) 1JN(13219) 2JN(1655) 3JN(1631) JUD(3565)
+deu1912	T3	H	13.0789
+deu1912	T3	epsilon2	0.5232
+deu1912	T3	p	0.0014
+deu1912	T3	ms:between	0.171129
+deu1912	T3	ms:within	0.029466
+deu1912	T3	var:window	0.000675
+deu1912	T3	against	false
+deu1912	T3	median:epistle	1.7956 [1.7819, 1.8093] n=2
+deu1912	T3	median:law	1.3331 [0.9660, 1.5427] n=4
+deu1912	T3	median:narrative	1.6879 [1.6231, 1.7683] n=12
+deu1912	T3	median:poetry	1.8268 [1.7949, 1.9664] n=3
+deu1912	T3	median:prophecy	1.5410 [1.4341, 1.8893] n=5
+eng-kjv	T2	books	33
+eng-kjv	T2	genres	5
+eng-kjv	T2	excluded	RUT(13189) 1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled) SNG(14069) LAM(18347) JOL(10815) OBA(3631) JON(6703) MIC(16551) NAM(7013) HAB(8060) ZEP(8609) HAG(5821) MAL(9327) GAL(16353) EPH(16388) PHP(11666) COL(10820) 1TH(9739) 2TH(5477) 1TI(12795) 2TI(9270) TIT(5167) PHM(2333) JAS(12234) 1PE(13610) 2PE(8773) 1JN(12819) 2JN(1558) 3JN(1602) JUD(3540)
+eng-kjv	T2	H	16.9652
+eng-kjv	T2	epsilon2	0.5302
+eng-kjv	T2	p	0.0002
+eng-kjv	T2	ms:between	0.147059
+eng-kjv	T2	ms:within	0.016827
+eng-kjv	T2	var:window	0.001344
+eng-kjv	T2	against	false
+eng-kjv	T2	median:epistle	2.5683 [2.4950, 2.6622] n=4
+eng-kjv	T2	median:law	2.1666 [2.0962, 2.2842] n=4
+eng-kjv	T2	median:narrative	2.4094 [2.3504, 2.5054] n=13
+eng-kjv	T2	median:poetry	2.6810 [2.5494, 2.8104] n=4
+eng-kjv	T2	median:prophecy	2.3950 [2.1902, 2.5570] n=8
+eng-kjv	T3	books	25
+eng-kjv	T3	genres	5
+eng-kjv	T3	excluded	RUT(13189) 1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled) EST(30581) ECC(28977) SNG(14069) LAM(18347) HOS(27525) JOL(10815) AMO(22102) OBA(3631) JON(6703) MIC(16551) NAM(7013) HAB(8060) ZEP(8609) HAG(5821) ZEC(33371) MAL(9327) 1CO(49439) 2CO(32426) GAL(16353) EPH(16388) PHP(11666) COL(10820) 1TH(9739) 2TH(5477) 1TI(12795) 2TI(9270) TIT(5167) PHM(2333) HEB(37545) JAS(12234) 1PE(13610) 2PE(8773) 1JN(12819) 2JN(1558) 3JN(1602) JUD(3540)
+eng-kjv	T3	H	13.4655
+eng-kjv	T3	epsilon2	0.5611
+eng-kjv	T3	p	0.0016
+eng-kjv	T3	ms:between	0.293608
+eng-kjv	T3	ms:within	0.041019
+eng-kjv	T3	var:window	0.004143
+eng-kjv	T3	against	false
+eng-kjv	T3	median:epistle	1.8116 [1.8116, 1.8116] n=1
+eng-kjv	T3	median:law	1.1518 [0.6089, 1.3358] n=4
+eng-kjv	T3	median:narrative	1.5988 [1.4757, 1.6511] n=12
+eng-kjv	T3	median:poetry	1.7470 [1.6784, 1.9601] n=3
+eng-kjv	T3	median:prophecy	1.4009 [1.2869, 1.7597] n=5
+fraLSG	T2	books	33
+fraLSG	T2	genres	5
+fraLSG	T2	excluded	RUT(12641) 1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled) SNG(14312) LAM(17988) JOL(10396) OBA(3207) JON(6542) MIC(15886) NAM(6392) HAB(7996) ZEP(8403) HAG(5939) MAL(9386) GAL(17700) EPH(17516) PHP(12679) COL(11896) 1TH(11250) 2TH(6152) 1TI(14017) 2TI(9642) TIT(5676) PHM(2509) JAS(13448) 1PE(14508) 2PE(9204) 1JN(13707) 2JN(1746) 3JN(1713) JUD(3774)
+fraLSG	T2	H	11.0208
+fraLSG	T2	epsilon2	0.3444
+fraLSG	T2	p	0.0157
+fraLSG	T2	ms:between	0.188232
+fraLSG	T2	ms:within	0.028785
+fraLSG	T2	var:window	0.001730
+fraLSG	T2	against	false
+fraLSG	T2	median:epistle	2.7863 [2.6918, 2.8520] n=4
+fraLSG	T2	median:law	2.3746 [2.1372, 2.5918] n=4
+fraLSG	T2	median:narrative	2.7246 [2.7012, 2.8510] n=13
+fraLSG	T2	median:poetry	2.9572 [2.7100, 3.1504] n=4
+fraLSG	T2	median:prophecy	2.8097 [2.6088, 2.9343] n=8
+fraLSG	T3	books	26
+fraLSG	T3	genres	5
+fraLSG	T3	excluded	RUT(12641) 1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled) EST(29390) ECC(29216) SNG(14312) LAM(17988) HOS(26789) JOL(10396) AMO(21473) OBA(3207) JON(6542) MIC(15886) NAM(6392) HAB(7996) ZEP(8403) HAG(5939) ZEC(31424) MAL(9386) 2CO(35931) GAL(17700) EPH(17516) PHP(12679) COL(11896) 1TH(11250) 2TH(6152) 1TI(14017) 2TI(9642) TIT(5676) PHM(2509) HEB(40121) JAS(13448) 1PE(14508) 2PE(9204) 1JN(13707) 2JN(1746) 3JN(1713) JUD(3774)
+fraLSG	T3	H	10.5379
+fraLSG	T3	epsilon2	0.4215
+fraLSG	T3	p	0.0136
+fraLSG	T3	ms:between	0.265344
+fraLSG	T3	ms:within	0.044269
+fraLSG	T3	var:window	0.001007
+fraLSG	T3	against	false
+fraLSG	T3	median:epistle	1.7704 [1.7425, 1.7982] n=2
+fraLSG	T3	median:law	1.1485 [0.8328, 1.4068] n=4
+fraLSG	T3	median:narrative	1.6360 [1.5189, 1.7923] n=12
+fraLSG	T3	median:poetry	1.6944 [1.6750, 2.0257] n=3
+fraLSG	T3	median:prophecy	1.4658 [1.2420, 1.8872] n=5
+russyn	T2	books	32
+russyn	T2	genres	5
+russyn	T2	excluded	RUT(10916) 1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled) SNG(12169) LAM(14547) JOL(8428) AMO(17629) OBA(2742) JON(5481) MIC(13056) NAM(5482) HAB(6472) ZEP(6829) HAG(4859) MAL(7937) GAL(13488) EPH(13309) PHP(9676) COL(9035) 1TH(8338) 2TH(4630) 1TI(10879) 2TI(7439) TIT(4463) PHM(1962) JAS(10483) 1PE(11015) 2PE(7088) 1JN(10919) 2JN(1342) 3JN(1348) JUD(2972)
+russyn	T2	H	14.3273
+russyn	T2	epsilon2	0.4622
+russyn	T2	p	0.0022
+russyn	T2	ms:between	0.222489
+russyn	T2	ms:within	0.034053
+russyn	T2	var:window	0.002158
+russyn	T2	against	false
+russyn	T2	median:epistle	3.5259 [3.3772, 3.6690] n=4
+russyn	T2	median:law	3.0502 [2.8086, 3.2084] n=4
+russyn	T2	median:narrative	3.3284 [3.2490, 3.5124] n=13
+russyn	T2	median:poetry	3.6324 [3.4060, 3.8254] n=4
+russyn	T2	median:prophecy	3.4592 [3.3434, 3.7622] n=7
+russyn	T3	books	23
+russyn	T3	genres	4
+russyn	T3	excluded	RUT(10916) 1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled) EST(25813) ECC(24331) SNG(12169) LAM(14547) HOS(21687) JOL(8428) AMO(17629) OBA(2742) JON(5481) MIC(13056) NAM(5482) HAB(6472) ZEP(6829) HAG(4859) ZEC(26205) MAL(7937) ROM(41217) 1CO(40285) 2CO(26733) GAL(13488) EPH(13309) PHP(9676) COL(9035) 1TH(8338) 2TH(4630) 1TI(10879) 2TI(7439) TIT(4463) PHM(1962) HEB(30646) JAS(10483) 1PE(11015) 2PE(7088) 1JN(10919) 2JN(1342) 3JN(1348) JUD(2972) REV(49948)
+russyn	T3	H	11.1830
+russyn	T3	epsilon2	0.5083
+russyn	T3	p	0.0030
+russyn	T3	ms:between	0.422617
+russyn	T3	ms:within	0.041544
+russyn	T3	var:window	0.000365
+russyn	T3	against	false
+russyn	T3	median:law	1.3944 [1.0760, 1.6094] n=4
+russyn	T3	median:narrative	1.9344 [1.8218, 2.0364] n=12
+russyn	T3	median:poetry	2.0997 [2.0280, 2.3431] n=3
+russyn	T3	median:prophecy	1.8368 [1.6440, 2.2192] n=4
+spaRV1909	T2	books	32
+spaRV1909	T2	genres	5
+spaRV1909	T2	excluded	RUT(11819) 1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled) SNG(12949) LAM(16305) JOL(9589) AMO(19462) OBA(3090) JON(6096) MIC(14150) NAM(6060) HAB(7107) ZEP(7706) HAG(5561) MAL(8787) GAL(16137) EPH(16205) PHP(11352) COL(10992) 1TH(10141) 2TH(5473) 1TI(12599) 2TI(8839) TIT(5296) PHM(2210) JAS(12244) 1PE(13916) 2PE(8925) 1JN(12674) 2JN(1584) 3JN(1583) JUD(3580)
+spaRV1909	T2	H	11.7580
+spaRV1909	T2	epsilon2	0.3793
+spaRV1909	T2	p	0.0090
+spaRV1909	T2	ms:between	0.124912
+spaRV1909	T2	ms:within	0.024055
+spaRV1909	T2	var:window	0.001456
+spaRV1909	T2	against	false
+spaRV1909	T2	median:epistle	2.8018 [2.7542, 2.8422] n=4
+spaRV1909	T2	median:law	2.5379 [2.2180, 2.6194] n=4
+spaRV1909	T2	median:narrative	2.7472 [2.6960, 2.8340] n=13
+spaRV1909	T2	median:poetry	2.9622 [2.7796, 3.1724] n=4
+spaRV1909	T2	median:prophecy	2.7222 [2.5820, 3.0438] n=7
+spaRV1909	T3	books	24
+spaRV1909	T3	genres	4
+spaRV1909	T3	excluded	RUT(11819) 1CH(unlabelled) 2CH(unlabelled) EZR(unlabelled) NEH(unlabelled) EST(28038) ECC(27168) SNG(12949) LAM(16305) HOS(23869) JOL(9589) AMO(19462) OBA(3090) JON(6096) MIC(14150) NAM(6060) HAB(7107) ZEP(7706) HAG(5561) ZEC(29870) MAL(8787) ROM(49495) 1CO(47439) 2CO(32111) GAL(16137) EPH(16205) PHP(11352) COL(10992) 1TH(10141) 2TH(5473) 1TI(12599) 2TI(8839) TIT(5296) PHM(2210) HEB(36420) JAS(12244) 1PE(13916) 2PE(8925) 1JN(12674) 2JN(1584) 3JN(1583) JUD(3580)
+spaRV1909	T3	H	8.7333
+spaRV1909	T3	epsilon2	0.3797
+spaRV1909	T3	p	0.0194
+spaRV1909	T3	ms:between	0.200547
+spaRV1909	T3	ms:within	0.039252
+spaRV1909	T3	var:window	0.001419
+spaRV1909	T3	against	false
+spaRV1909	T3	median:law	1.3730 [1.0207, 1.6252] n=4
+spaRV1909	T3	median:narrative	1.7503 [1.6454, 1.8313] n=12
+spaRV1909	T3	median:poetry	1.8141 [1.7995, 2.0926] n=3
+spaRV1909	T3	median:prophecy	1.5614 [1.4257, 1.9730] n=5
+all	T2	verdict	kept (0 of 5 languages against)
+all	T3	verdict	kept (0 of 5 languages against)

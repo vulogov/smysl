@@ -8,7 +8,7 @@
 //! - deleting a command's arm in **`main`** removes its *routing*. The subcommand still parses;
 //!   the router falls through to "not wired in this build". Invoking the command finds this.
 //! - deleting its arm in **`cli()`** removes its *arguments*, and nothing else. `cli()` registers
-//!   all twenty-six subcommands from the `COMMANDS` table unconditionally, so the command is
+//!   all thirty-eight subcommands from the `COMMANDS` table unconditionally, so the command is
 //!   still there, still routes, still runs — it has simply lost every flag and positional of its
 //!   own. Invoking it with no arguments notices nothing at all.
 //!
@@ -27,7 +27,7 @@ use std::process::{Command, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_smysl");
 
-/// The twenty-six commands, written out rather than read from the binary.
+/// The thirty-eight commands, written out rather than read from the binary.
 ///
 /// This list must not come from the thing it is testing. Parsing `smysl --help` for the names
 /// and then checking each one dispatches is a check that cannot fail: delete a `cli` arm and the
@@ -37,7 +37,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_smysl");
 ///
 /// Hardcoding it costs one thing — the list can go stale when a command is added — and
 /// `the_help_lists_exactly_these_commands` below is what covers that, in both directions.
-const COMMANDS: [&str; 26] = [
+const COMMANDS: [&str; 38] = [
     "fmt",
     "check",
     "pack",
@@ -64,6 +64,18 @@ const COMMANDS: [&str; 26] = [
     "usage",
     "reindex",
     "ui",
+    "text",
+    "date",
+    "same-as",
+    "link",
+    "summarise",
+    "q",
+    "ask",
+    "measure",
+    "assess",
+    "lib",
+    "schema",
+    "migrate",
 ];
 
 /// Clap's answer when `cli()` never registered the subcommand.
@@ -103,7 +115,33 @@ fn minimal_args(command: &str) -> Vec<&'static str> {
             "human:x",
         ],
         "find" => vec!["a-query-matching-nothing"],
+        "ask" => vec!["What is nothing?"],
         "import" => vec!["no-such-file.json"],
+        // `ls` rather than `add`: the action is required, and `ls` is the one that needs
+        // nothing else. The point of this test is that the router is reached.
+        "text" => vec!["ls"],
+        // `show` rather than `set`: both need the action and a target, and `show` is the one
+        // that needs nothing further. The target names nothing, and failing is fine.
+        "date" => vec!["show", "b3:aaaaaaaaaaaaaaaaaaaaaaaaaa"],
+        // `classes` rather than `propose`: both need the action, and `classes` needs no
+        // engine. The store it then opens is not there, and failing is fine.
+        "same-as" => vec!["classes"],
+        // `--scope` is required, and the alias it names is one no library holds: the point of
+        // this test is that the router is reached, and failing after that is fine.
+        "summarise" => vec!["--scope", "no-such-alias"],
+        // A query over no store: the router is reached and `q` says no store was given.
+        "q" => vec!["from texts"],
+        // The ids and `--scope` are required; with no library given, `measure` says so.
+        "measure" => vec!["T1", "--scope", "from texts"],
+        // The action and target are required; with no store given, `assess` says so.
+        "assess" => vec!["diff", "b3:a", "b3:b"],
+        // `status` rather than `import`: the action is required, and `status` needs nothing
+        // else. With no store given, `lib` says so.
+        "lib" => vec!["status"],
+        // The action is required; `check` with no store given says so.
+        "schema" => vec!["check"],
+        // Both flags are required; with no store given, `migrate` says so.
+        "migrate" => vec!["--schema", "x.none/v1", "--to", "2"],
         _ => vec![],
     }
 }
@@ -111,7 +149,7 @@ fn minimal_args(command: &str) -> Vec<&'static str> {
 /// A directory of this command's own, because several of them write.
 ///
 /// `ingest` appends to `.smysl/staged.smy` and `usage` to `.smysl/usage.log`, both resolved
-/// against the working directory. Running the twenty-six in a checkout leaves two untracked
+/// against the working directory. Running the thirty-eight in a checkout leaves two untracked
 /// files behind — which is not hypothetical: probing this by hand did exactly that, and the
 /// `usage` invocation then read a ledger the `ingest` invocation had just written. A test that
 /// dirties the tree is one step from a test that depends on the tree.
@@ -181,7 +219,7 @@ fn every_command_dispatches() {
 /// binary and not to the array shows up as an extra. Either way somebody has to type the change,
 /// which is the whole point of a golden list.
 ///
-/// `help` is clap's own and is not one of the twenty-six.
+/// `help` is clap's own and is not one of the thirty-eight.
 #[test]
 fn the_help_lists_exactly_these_commands() {
     let out = Command::new(BIN)
@@ -221,10 +259,14 @@ fn the_argument_surface_is_recorded() {
         .lines()
         .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
         .map(|l| {
-            let mut it = l.split_whitespace();
-            let c = it.next().expect("a command").to_string();
-            let a = it.next().expect("an argument").to_string();
-            (c, a)
+            // The command, then **the rest of the line**: a recorded entry may itself hold
+            // spaces now that `[possible values: add, append, ls, show]` is one of them. It
+            // used to be the second whitespace-separated token, which would have reduced every
+            // such entry to `[possible`.
+            let (c, a) = l
+                .split_once(char::is_whitespace)
+                .unwrap_or_else(|| panic!("`{l}` is not a `command  argument` pair"));
+            (c.to_string(), a.trim().to_string())
         })
         .collect();
 
@@ -251,7 +293,10 @@ fn the_argument_surface_is_recorded() {
                 t.find("--").map(|at| {
                     let flag: String = t[at..]
                         .chars()
-                        .take_while(|c| c.is_ascii_lowercase() || *c == '-')
+                        // Digits too, as `make cli-surface`'s `--[a-z0-9-]+` takes them:
+                        // `lib verify --p2` (TX-P11 step 11) was the first flag with one, and
+                        // this parser read it as `--p`.
+                        .take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-')
                         .collect();
                     flag
                 })
@@ -266,11 +311,55 @@ fn the_argument_surface_is_recorded() {
             if let Some(a) = arg.filter(|s| s.len() > 2) {
                 actual.push((command.to_string(), a));
             }
+            // And the argument's choices, where it has any. Recorded beside the argument
+            // rather than inside it, so that adding a value shows up as one added line: a
+            // choice is a capability, and `text append` arrived as a new value of `<ACTION>`
+            // without moving this file by a line until TX-P2 step 3.
+            if let Some(at) = t.find("[possible values: ") {
+                if let Some(end) = t[at..].find(']') {
+                    actual.push((command.to_string(), t[at..=at + end].to_string()));
+                }
+            }
         }
     }
 
     assert_eq!(
         actual, recorded,
         "the CLI's argument surface moved. If deliberate, run `make cli-surface`."
+    );
+}
+
+/// Every test file that runs the binary is compiled only where there is one. The binary needs
+/// `cli` (`required-features`), so without the gate a `--no-default-features` build compiles
+/// the file, finds no `target/debug/smysl` and fails every test in it. Locally a binary left by
+/// an earlier build hides that, which is how `cmd_q.rs` failed eight CI cells for a week while
+/// every local run passed; read from the sources, the check does not depend on what is lying
+/// in `target/`.
+#[test]
+fn every_test_that_runs_the_binary_needs_cli() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut ungated = Vec::new();
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .expect("tests/")
+        .map(|e| e.expect("an entry").path())
+        .filter(|p| p.extension().is_some_and(|x| x == "rs"))
+        .collect();
+    files.sort();
+    for path in files {
+        let src = std::fs::read_to_string(&path).expect("a test file");
+        if !src.contains("CARGO_BIN_EXE_smysl") {
+            continue;
+        }
+        // The crate-level `#![cfg(...)]`, which may run over several lines.
+        let gate = src
+            .find("#![cfg(")
+            .map(|at| &src[at..at + src[at..].find(")]").map_or(0, |e| e + 2)]);
+        if !gate.is_some_and(|g| g.contains("feature = \"cli\"")) {
+            ungated.push(path.file_name().unwrap().to_string_lossy().to_string());
+        }
+    }
+    assert!(
+        ungated.is_empty(),
+        "these run the binary without `#![cfg(feature = \"cli\")]`: {ungated:?}"
     );
 }

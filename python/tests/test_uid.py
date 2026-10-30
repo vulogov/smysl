@@ -38,6 +38,12 @@ def build(spec: dict) -> UnitCore:
             kind=k["source"]["kind"],
             reference=k["source"]["reference"],
             captured=k["source"]["captured"],
+            observed=k["source"]["observed"],
+            published=k["source"]["published"],
+            span=tuple(k["source"]["span"]) if k["source"].get("span") else None,
+            manifest=(
+                bytes.fromhex(k["source"]["manifest"]) if k["source"].get("manifest") else None
+            ),
         )
     return UnitCore(
         schema=k["schema"],
@@ -49,6 +55,7 @@ def build(spec: dict) -> UnitCore:
         grounds=[bytes.fromhex(x) for x in k["grounds"]],
         source=src,
         payload=bytes.fromhex(k["payload_hex"]) if k["payload_hex"] else None,
+        lang=k.get("lang"),
     )
 
 

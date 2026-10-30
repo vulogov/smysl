@@ -1,0 +1,6 @@
+@doc smysl/0.1 { id: v/date-outside-the-instant-range }
+
+@claim c/old { status: speculative }
+~ A claim about something that happened a very long time ago indeed.
+
+@date c/old { axis: about, when: "Y300000000", agent: human:vu, ts: [1726500000000, 0] }

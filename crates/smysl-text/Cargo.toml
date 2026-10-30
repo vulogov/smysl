@@ -1,0 +1,141 @@
+[package]
+name        = "smysl-text"
+description = "smysl text library: normalisation, parts, readings, structure, locators, object store"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+# docs.rs builds with default features unless told otherwise, which for this crate meant
+# publishing a partial API: the feature-gated modules simply were not there. Set on every
+# published crate rather than only the five with features today, so a crate that gains one
+# later does not silently reintroduce the gap.
+[package.metadata.docs.rs]
+all-features = true
+
+# `default = []` is the tree the purity gate checks (SMYSL-2.4 §4.5, OQ-37). The readers that
+# need a serde stack arrive in TX-P1 step 3, each behind its own `reader-*` feature, and the
+# gate checks this crate at `--all-features` as well — a runtime behind one reader feature
+# would otherwise have passed a check that only looked at the defaults.
+[features]
+default = []
+
+# One feature per reader, as the gate's second list requires: a dependency that enters with a
+# reader is recorded against that reader rather than against the crate. `reader-txt` needs
+# nothing but std, which is why it is the one step 3 starts with — the contract gets tested
+# before any parser is argued about.
+reader-txt = []
+reader-usfm = []
+reader-md = ["dep:pulldown-cmark"]
+reader-json = ["dep:serde", "dep:serde_json"]
+reader-osis = ["dep:quick-xml"]
+reader-zefania = ["dep:quick-xml"]
+
+# The chat readers (SMYSL-2.4 §3.2, TX-P2 step 2). `telegram` and `slack` parse JSON, so they
+# pay the same `serde_json` seam `reader-json` does; `whatsapp` reads a text file and needs
+# nothing. `slack` additionally reads the export **archive**, and that choice was measured
+# rather than taken: see the workspace manifest's `zip` pin for the version it forced.
+reader-telegram = ["dep:serde", "dep:serde_json"]
+reader-slack = ["dep:serde", "dep:serde_json", "dep:zip", "dep:flate2"]
+reader-whatsapp = []
+
+# Language identification (SMYSL-2.4 §3.7). Its own feature, and off by default, because
+# measuring `lingua` is what TX-P2 step 1 did: five language features bring **57 crates** and
+# 14.4 MB of compiled-in models, among them `rayon`, `getrandom` and `wasm-bindgen`. None of
+# them is on the purity gate's `NEVER` list and none moves the MSRV — the pure tier stays at
+# 1.85 — but a pure crate that linked threads and a randomness source in every build would be
+# claiming something it had stopped being. `segment` and `analyze` are *given* a language;
+# only this module guesses one, so only this module costs that tree.
+detect = ["dep:lingua"]
+
+# Snowball stemming (step 4 of the analyzer chain). A feature for a reason nobody planned
+# for: `rust-stemmers` 1.2.0 depends on `serde` and `serde_derive` **unconditionally** — there
+# is no feature to turn them off — and SMYSL-2.4 OQ-37's answer is that the pure core carries
+# no serde stack. §4.1 listed the crate as a plain dependency; running `cargo tree` is what
+# found that the two cannot both be true. The purity gate is the stronger claim, so the
+# stemmer is opt-in, and a build without it has one chain and says so in `Chain::id`
+# (`smysl/an/1` rather than `smysl/an-ru/1`).
+stem = ["dep:rust-stemmers"]
+
+# The substrate index on disk (SMYSL-2.4 §3.8). Off by default and recorded in the purity
+# gate's second list, so a default build of the pure tier still links no database.
+#
+# What it buys is the one cost the sidecar cannot be made to pay. A posting is a 32-byte
+# content-addressed uid and a `u32`, so the `postings` table is about 1.1 KB a unit: 169 MB at
+# 155k units and 7 GB at the 10**6 SMYSL-2.8 sizes for, **all of it resident while the library is
+# open**. A uid is a hash, so a postings list of uids cannot be delta-encoded, and a dense
+# internal document id — the other half of the fix — cannot be maintained incrementally without
+# giving up §3.8's byte-for-byte rebuild gate: a content-derived id is a rank within its
+# partition, and appending one window to a partition of size *p* re-ranks *p* postings. Paging
+# the table instead makes the resident cost a configurable page cache and leaves the gate alone.
+#
+# It does not move the floor: redb 2.6.4 declares 1.85, this workspace's base. See the
+# workspace manifest's pin for why that is 2.6 and not 4.3.
+substrate-redb = ["dep:redb"]
+# Primary shards (SMYSL-2.8 §3.5.5, TX-P13d): a shard whose records the library's unit store
+# holds rather than a log. A library with one opens only in a build that can read the store;
+# one without it says so, by name, rather than opening a library with a shard missing.
+store-redb = ["smysl-graph/store-redb"]
+
+[dependencies]
+smysl-core            = { workspace = true }
+# `speaker.rs` derives a pseudonym with `blake3::keyed_hash`. No new crate in any tree:
+# `smysl-core` already links it for every identity in the format, and the `pure` feature keeps
+# the C SIMD backend out. A keyed hash is the one primitive a pseudonym needs that the id
+# module cannot lend — `digest_id!` hashes a domain byte and a preimage, and the whole point of
+# a pseudonym is that the preimage is not enough to reproduce it.
+blake3                = { workspace = true }
+# `library.rs` opens a catalog log into a `Store`: a library is a store and an object store
+# together, and either half alone cannot resolve a locator (SMYSL-2.4 §4.2). Both crates are in
+# the pure tier and `smysl-graph` does not depend on this one, so the edge adds no floor and no
+# cycle.
+smysl-graph           = { workspace = true }
+# `index/postings.rs` implements `smysl_retrieve::Postings` and `analyze.rs` implements
+# `smysl_retrieve::Analyze` (SMYSL-2.4 §4.3.5, TX-P4 step 2). The seams are in the crate that
+# *consumes* terms and the chains are here, where language lives, so the edge runs this way and
+# `smysl-retrieve` keeps needing neither a segmenter nor a stemmer. Both crates are pure and
+# base-tier, so no floor moves and there is no cycle: `smysl-retrieve` depends on core and graph
+# only.
+smysl-retrieve        = { workspace = true }
+# TX-P6 step 6. The `Scope`, `Times` and `Entities` ports a query is planned through are
+# `smysl-query`'s, and this crate implements them over a library (`src/scope.rs`) — the
+# dependency runs this way and not the other because the planner must not know what a
+# catalogue is, while a catalogue can perfectly well know what a scope is. `smysl-query` is a
+# pure crate, so the pure tree does not grow a runtime.
+smysl-query           = { workspace = true }
+unicode-normalization = { workspace = true }
+# `segment.rs`. Not behind a feature and not optional: a sentence is what ingest windows,
+# spans and propositions are counted in, so a build of this crate that could not find one
+# would be a library layer with no unit of text. Pinned exactly for the reason the readers
+# are — segment offsets go into a reading, and a reading's rdid is an identity.
+unicode-segmentation  = { workspace = true }
+# `analyze.rs`. Not optional for the same reason: a term is what `find` matches and what a
+# proposition class is computed over, so a build with no analyzer could index nothing.
+caseless              = { workspace = true }
+rust-stemmers         = { workspace = true, optional = true }
+lingua                = { workspace = true, optional = true }
+pulldown-cmark        = { workspace = true, optional = true }
+serde                 = { workspace = true, optional = true }
+serde_json            = { workspace = true, optional = true }
+redb                  = { workspace = true, optional = true }
+quick-xml             = { workspace = true, optional = true }
+zip                   = { workspace = true, optional = true }
+flate2                = { workspace = true, optional = true }
+
+# `tests/object_check.rs` runs `check`'s library pass against a real object store: this crate
+# owns the only `PartResolver` implementation, and `smysl-check` may not depend on it (the
+# `Time` pass's `text` feature is the one such edge SMYSL-2.4 §4.3.3 allows). A dev-dependency
+# is the other direction and costs nothing: every crate here shares the workspace
+# `rust-version`, so no floor moves, and nothing in the published tree gains an edge.
+[dev-dependencies]
+# Path-only, with no version, so `cargo publish` strips it from the published manifest: this
+# crate is published before `smysl-check`, which reaches it through `smysl-text` when `check`'s
+# `text` feature is on, and a dev-dependency on a sibling version the registry does not have
+# yet refuses the upload. The tests run here, from paths, as before.
+smysl-check = { path = "../smysl-check" }
+smysl-graph = { workspace = true }
+# TX-P8 step 2: the exposition and dialogue derivation tests run over a library this crate
+# builds, because the fixtures that order a text and a conversation are this crate's readers'.
+smysl-thread = { workspace = true }

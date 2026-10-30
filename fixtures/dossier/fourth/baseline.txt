@@ -1,0 +1,56 @@
+# GE-T10's fourth set, the front before the declared rules 6-8 (intent table and entity port as
+# of commit e95ac6a), written by `cargo test -p smysl-text --features stem --test ge_t10_third -- --nocapture`.
+GE-T10, fourth set: the front
+  lang     intent   subject spelled   subject stemmed
+  de         8/16      7/16              8/16 
+  en         7/16      7/16              7/16 
+  es         7/16      7/16              7/16 
+  fr         9/16      9/16              9/16 
+  ru         9/16      5/16              9/16 
+  all       40/80     35/80             40/80 
+  every question lost, and every subject only the stems found:
+    se-define3     en  SMY-E468: Who exactly was Semmelweis?
+    se-define3     de  SMY-E468: Wer genau war Semmelweis?
+    se-define3     es  SMY-E468: ¿Quién fue Semmelweis?
+    se-define3     ru  SMY-E468: Кем был Земмельвейс?
+    mi-define3     en  SMY-E468: What precisely was a miasma?
+    mi-define3     de  SMY-E468: Was war ein Miasma eigentlich?
+    mi-define3     es  SMY-E468: ¿Qué fue el miasma?
+    mi-define3     fr  SMY-E468: Qu'était au juste le miasme ?
+    mi-define3     ru  SMY-E468: Что представляли собой миазмы?
+    ch-explain3    en  SMY-E468: What made cholera spread so fast?
+    sc-verify3     en  SMY-E468: Is there any evidence that citrus cures scurvy?
+    sc-verify3     de  SMY-E468: Gibt es Beweise, dass Zitrusfrüchte Skorbut heilen?
+    sc-verify3     es  SMY-E468: ¿Hay evidencia de que los cítricos curan el escorbuto?
+    sc-verify3     fr  SMY-E468: Y a-t-il des preuves que les agrumes guérissent le scorbut ?
+    sc-verify3     ru  SMY-E468: Есть ли доказательства того, что цитрусовые лечат цингу?
+    sp-verify3     en  SMY-E468: Is there proof that smallpox vaccination worked?
+    sp-verify3     de  SMY-E468: Gibt es einen Nachweis, dass die Pockenimpfung wirkte?
+    sp-verify3     es  SMY-E468: ¿Existen pruebas de que la vacuna contra la viruela funcionaba?
+    sp-verify3     fr  SMY-E468: Existe-t-il des preuves que la vaccination contre la variole fonctionnait ?
+    sp-verify3     ru  SMY-E468: Есть ли свидетельства, что прививка от оспы работала?
+    mi-attribute2  en  SMY-E468: Who believed in miasma?
+    mi-attribute2  de  SMY-E468: Wer glaubte an das Miasma?
+    mi-attribute2  es  SMY-E468: ¿Quién creía en el miasma?
+    mi-attribute2  fr  SMY-E468: Qui croyait au miasme ?
+    mi-attribute2  ru  SMY-E468: Кто верил в миазмы?
+    ls-attribute2  de  SMY-E468: Wer behauptete, Joseph Lister habe sich geirrt?
+    ls-attribute2  ru  SMY-E468: Кто утверждал, что Джозеф Листер ошибался?
+    ch-trace3      de  SMY-E468: Woher kam die Cholera?
+    ch-trace3      es  SMY-E468: ¿De dónde vino el cólera?
+    ch-trace3      fr  SMY-E468: D'où venait le choléra ?
+    je-trace2      de  found by stems only: Geschichte von Jenners Impfstoff
+    je-trace2      ru  found by stems only: История вакцины Дженнера
+    sc-locate2     en  SMY-E468: Where do the sources mention scurvy?
+    sc-locate2     es  SMY-E468: ¿Dónde se menciona el escorbuto?
+    sc-locate2     fr  SMY-E468: Où parle-t-on du scorbut ?
+    sc-locate2     ru  found by stems only: Где говорится о цинге?
+    li-locate2     es  SMY-E468: ¿Dónde se habla de James Lind?
+    ph-depend2     en  SMY-E468: What depended on phlogiston?
+    ph-depend2     de  SMY-E468: Was hing vom Phlogiston ab?
+    ph-depend2     es  SMY-E468: ¿Qué dependía del flogisto?
+    ph-depend2     fr  SMY-E468: Qu'est-ce qui dépendait du phlogistique ?
+    ph-depend2     ru  SMY-E468: Что зависело от флогистона?
+    se-depend2     ru  found by stems only: Что следует из открытий Земмельвейса?
+    sp-compare2    ru  found by stems only: Сравни оспу и холеру
+    li-compare2    en  SMY-E468: How does James Lind compare with Joseph Lister?

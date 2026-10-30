@@ -9,5 +9,9 @@ pub mod epistemics;
 pub mod extension;
 pub mod granularity;
 pub mod integrity;
+pub mod library;
 pub mod shape;
+/// Pass 13, behind the `text` feature: rule E's engine lives in `smysl-text`.
+#[cfg(feature = "text")]
+pub mod time;
 pub mod trust;

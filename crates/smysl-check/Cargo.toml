@@ -15,6 +15,19 @@ repository.workspace   = true
 [package.metadata.docs.rs]
 all-features = true
 
+[features]
+# The `Time` pass (RFC SMYSL-2.4 §4.3, TX-P3 step 3). Behind a feature because rule E's engine
+# lives in `smysl-text` — the calendar arithmetic and the EDTF extent are there — and a
+# dependency direction this crate did not have before is worth opting into. §4.1 sanctions it:
+# `smysl-text` has no `smysl-check` dependency, so the edge adds no cycle, and `smysl-text`'s
+# default tree is pure, so it adds no crates either.
+#
+# With the feature off, `Pass::Time` is in `ALL` and not in `IMPLEMENTED`, so a report says the
+# pass did not run — the machinery `Pass::Codec`, `Retraction` and `Hashes` already use. A
+# caller reads that rather than inferring it from silence.
+text = ["dep:smysl-text"]
+
 [dependencies]
 smysl-core  = { workspace = true }
 smysl-graph = { workspace = true }
+smysl-text  = { workspace = true, optional = true }

@@ -14,7 +14,7 @@
 use std::collections::BTreeSet;
 
 use smysl_core::{Lod, Uid};
-use smysl_graph::{salience, SalienceRequest, Store};
+use smysl_graph::{salience, SalienceRequest, Store, StoreRead};
 use smysl_pack::{pack, Estimator, PackRequest, Selection};
 
 /// Which side of the comparison a run belongs to.
@@ -144,7 +144,12 @@ impl Run {
 /// sent - and would report no saving on a corpus where the saving is exactly the bodies
 /// that were left behind. Measured with the same estimator `pack` budgets against, so E1 is
 /// in the units the budget was spent in.
-pub fn unit_tokens(store: &Store, uid: &Uid, level: Lod, est: &Estimator) -> u64 {
+pub fn unit_tokens(
+    store: &(impl StoreRead + ?Sized),
+    uid: &Uid,
+    level: Lod,
+    est: &Estimator,
+) -> u64 {
     store
         .get(uid)
         .map(|u| est.unit(&u.core, level))
@@ -152,38 +157,15 @@ pub fn unit_tokens(store: &Store, uid: &Uid, level: Lod, est: &Estimator) -> u64
 }
 
 /// Tokens for a whole selection, at each unit's own level.
-fn selection_tokens(store: &Store, sel: &Selection, est: &Estimator) -> u64 {
+fn selection_tokens(store: &(impl StoreRead + ?Sized), sel: &Selection, est: &Estimator) -> u64 {
     sel.iter()
         .map(|(uid, level)| unit_tokens(store, uid, *level, est))
         .sum()
 }
 
-/// The cheapest way to carry every unit: all of them at `L0`, gist only.
-///
-/// This is the line below which units *have* to be dropped. Above it, a budget can be met
-/// by shedding detail alone, so a unit going missing means something other than arithmetic
-/// decided it - which is what makes this worth exposing rather than inlining.
-pub fn floor_tokens(store: &Store, uids: &BTreeSet<Uid>, est: &Estimator) -> u64 {
-    uids.iter()
-        .filter_map(|u| store.get(u))
-        .map(|u| est.unit(&u.core, Lod::L0))
-        .sum()
-}
-
-/// The input's cost with nothing left behind: every unit at its richest available level.
-/// This is the denominator E1 is a fraction of - what handing the whole graph over costs.
-pub fn full_tokens(store: &Store, uids: &BTreeSet<Uid>, est: &Estimator) -> u64 {
-    uids.iter()
-        .filter_map(|u| store.get(u))
-        .map(|u| {
-            let level = smysl_pack::available_levels(&u.core)
-                .last()
-                .copied()
-                .unwrap_or(Lod::L0);
-            est.unit(&u.core, level)
-        })
-        .sum()
-}
+// `floor_tokens` and `full_tokens` moved to `smysl-measure` with A8 (SMYSL-2.6 §4.3, TX-P9 N2),
+// which packs a scope at fractions of the second; the names stay here, signatures unchanged.
+pub use smysl_measure::graph::rd::{floor_tokens, full_tokens};
 
 /// Count the rebuttal pairs among a surviving set.
 ///
@@ -191,7 +173,7 @@ pub fn full_tokens(store: &Store, uids: &BTreeSet<Uid>, est: &Estimator) -> u64 
 /// `honoured` counts those whose rebutter survived with them. Rule R is the claim that
 /// these two numbers are equal, so measuring them apart is what makes the claim falsifiable
 /// rather than assumed.
-fn rebuttal_pairs(store: &Store, surviving: &BTreeSet<Uid>) -> (usize, usize) {
+fn rebuttal_pairs(store: &(impl StoreRead + ?Sized), surviving: &BTreeSet<Uid>) -> (usize, usize) {
     let mut possible = 0;
     let mut honoured = 0;
     for uid in surviving {

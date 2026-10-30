@@ -33,11 +33,16 @@ type uidCase struct {
 		Grounds []string `json:"grounds"`
 		Status  uint64   `json:"status"`
 		Source  *struct {
-			Kind      uint64  `json:"kind"`
-			Reference string  `json:"reference"`
-			Captured  *string `json:"captured"`
+			Kind      uint64   `json:"kind"`
+			Reference string   `json:"reference"`
+			Captured  *string  `json:"captured"`
+			Observed  *uint64  `json:"observed"`
+			Published *string  `json:"published"`
+			Span      []uint64 `json:"span"`
+			Manifest  *string  `json:"manifest"`
 		} `json:"source"`
 		PayloadHex *string `json:"payload_hex"`
+		Lang       *string `json:"lang"`
 	} `json:"core"`
 	CoreBytesHex string `json:"core_bytes_hex"`
 	UidHex       string `json:"uid_hex"`
@@ -92,10 +97,23 @@ func build(t *testing.T, c uidCase) *UnitCore {
 		if c.Core.Source.Captured != nil {
 			s.Captured = *c.Core.Source.Captured
 		}
+		if c.Core.Source.Observed != nil {
+			s.Observed = *c.Core.Source.Observed
+		}
+		if c.Core.Source.Published != nil {
+			s.Published = *c.Core.Source.Published
+		}
+		s.Span = c.Core.Source.Span
+		if c.Core.Source.Manifest != nil {
+			s.Manifest = mustHex(t, *c.Core.Source.Manifest)
+		}
 		u.Source = s
 	}
 	if c.Core.PayloadHex != nil {
 		u.Payload = mustHex(t, *c.Core.PayloadHex)
+	}
+	if c.Core.Lang != nil {
+		u.Lang = *c.Core.Lang
 	}
 	return u
 }

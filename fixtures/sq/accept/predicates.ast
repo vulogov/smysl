@@ -1,0 +1,86 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: None,
+            filters: [
+                Filter {
+                    pred: And(
+                        [
+                            Not(
+                                Or(
+                                    [
+                                        Cmp {
+                                            field: FieldRef {
+                                                pin: None,
+                                                name: "kind",
+                                            },
+                                            op: Eq,
+                                            value: Word(
+                                                "claim",
+                                            ),
+                                        },
+                                        Cmp {
+                                            field: FieldRef {
+                                                pin: None,
+                                                name: "kind",
+                                            },
+                                            op: Eq,
+                                            value: Word(
+                                                "finding",
+                                            ),
+                                        },
+                                    ],
+                                ),
+                            ),
+                            Cmp {
+                                field: FieldRef {
+                                    pin: None,
+                                    name: "status",
+                                },
+                                op: Ge,
+                                value: Word(
+                                    "attested",
+                                ),
+                            },
+                            Cmp {
+                                field: FieldRef {
+                                    pin: None,
+                                    name: "lang",
+                                },
+                                op: In,
+                                value: List(
+                                    [
+                                        Word(
+                                            "en",
+                                        ),
+                                        Word(
+                                            "ru",
+                                        ),
+                                        Word(
+                                            "de",
+                                        ),
+                                    ],
+                                ),
+                            },
+                        ],
+                    ),
+                    lens_none: false,
+                },
+            ],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: None,
+}

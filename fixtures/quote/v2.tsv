@@ -1,0 +1,32 @@
+# V2's comparison form, as a conformance set (SMYSL-2.1 §4.3.3).
+#
+# Tab-separated: quote, source, the V1 verdict, the V2 verdict. Asserted by
+# `crates/smysl-core/tests/quote_v2.rs` in both directions, so a row is a claim about
+# both normalisers and not only about the new one.
+#
+# The last three rows are the boundary: V2 is not accent stripping and not stemming, and
+# an underscore is content. A fold that passed them would be a different instrument.
+#
+# The two narrow-space rows read `present` under V1 as well. They are here because the RFC's
+# table names U+202F and U+2009 as V2 entries, and they are not: `char::is_whitespace` already
+# covers them, so V1 collapses them too. The rows pin that, which is the only thing the table
+# was asking for — and they are what caught the claim.
+#
+«Liberté»	Il a dit « Liberté » hier.	loose	present
+«Freiheit»	„Freiheit“	loose	present
+всё	все	absent	present
+все	всё	absent	present
+Straße	STRASSE	absent	present
+STRASSE	Straße	absent	present
+l'homme	lʼhomme	absent	present
+l’homme	l'homme	present	present
+aujourd’hui	aujourd'hui	present	present
+qu’il	qu'il	present	present
+¿Qué pasa?	Qué pasa?	loose	present
+¡Hola!	Hola!	loose	present
+「引用」	引用	loose	present
+one two	one two	present	present
+one two	one two	present	present
+Liberté	Liberte	absent	absent
+requires	require	absent	absent
+foobar is set	foo_bar is set	absent	absent

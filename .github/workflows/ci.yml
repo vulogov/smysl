@@ -52,7 +52,12 @@ jobs:
   api:
     runs-on: ubuntu-latest
     steps:
+      # The whole history, for its tags: `make semver` compares against `v<last>`, and a shallow
+      # checkout has no tag to resolve — "couldn't parse revision v1.9.0^{tree}", which failed
+      # this job on every push of 1.10.0 until it was read.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@nightly     # cargo-public-api reads rustdoc JSON
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
@@ -119,6 +124,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo xtask check-purity
+
+  # The no-C claims (SMYSL-2.5 §4): no -sys crate and no `cc` but blake3's build script, in each
+  # feature set a user is offered.
+  check-native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo xtask check-native
 
   # Rule D: every pure operation is bit-reproducible across locale, timezone, and hash
   # seed.
@@ -215,8 +230,23 @@ jobs:
   # touches §2.3 — status is part of identity. C-Read never derives a uid, so this is the job
   # that checks the format's central claim against something other than the implementation
   # that defined it.
+  # **Two platforms, which is GE-T1's second half** (RFC SMYSL-2.4 §6). The criterion asks for
+  # each implementation to be built on Linux x86-64 and one other platform, and until 1.10 every
+  # job here was `ubuntu-latest`, so the second platform did not exist and the plan said so.
+  #
+  # What a second runner tests is worth naming, because it is *not* the identities: BLAKE3 over
+  # bytes and canonical CBOR are platform-independent by construction, and three implementations
+  # already agree on every vector on one machine. What varies across platforms is **reading
+  # files** — line endings, NFC through a different Unicode table version, path behaviour — and
+  # the normalisation rule a part's identity depends on is exactly that code. A BOM check that
+  # passed on Linux and failed on macOS would be the same class of defect as the one the Node
+  # port had, and this is what would catch it.
   conformance-python:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -253,6 +283,115 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 scripts/verify-spec-tables.py
 
+  # **GE-T1's second platform for the library itself** (TX-P2 step 6). The criterion asks for
+  # each implementation to be built on Linux x86-64 and one other platform; since 1.10 the three
+  # port jobs run on both, and the Rust library did not — so the implementation that *writes* the
+  # identities was the one checked on a single platform.
+  #
+  # What this job runs is the suites that pin identities: the reader fixtures, whose `.expected`
+  # files hold every tid, structure hash, rdid and mid for nine readers, and the two wire
+  # generators, which compare the committed bytes against what this build produces. A difference
+  # between platforms shows up as a changed identity rather than as a changed test.
+  #
+  # Worth naming what it tests, because it is not the hashing: BLAKE3 over bytes and canonical
+  # CBOR are platform-independent by construction. What varies is **reading files** — line
+  # endings, NFC through a different Unicode table version, path behaviour — and a part's
+  # identity is a hash of exactly that code's output. The Slack reader's zip path is new here
+  # too, and an archive reader is the one place a path separator could reach a locator.
+  library-platforms:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: the identities the readers produce are the recorded ones
+        run: cargo test -p smysl-text --all-features --test readers --test gen_chat_wire
+      - name: the library wire fixture matches this build
+        run: cargo test -p smysl-core --test gen_library_fixtures
+      - name: and the library's own suites pass
+        run: cargo test -p smysl-text --all-features
+
+  # Measures, bit for bit, on four platforms (SMYSL-2.6 §5.3, TX-P8 M7). A measure's value is a
+  # payload integer and the payload is part of a uid, so a last bit that differs between two
+  # libms is two units for one computation. The crate's goldens — recipe CBOR, payload bytes,
+  # `libm` outputs by bit pattern, every measure over the Bible slices, the T3 calibration table
+  # with each row's payload hash — are committed, so each platform is compared with the same
+  # bytes and two platforms that pass agree with each other: the comparison job §5.3 sketches is
+  # the golden itself. musl is here because its system libm is not glibc's, which is what the
+  # `libm` crate exists to make irrelevant; Windows because it is the one target whose
+  # checkout, left alone, rewrites every line ending of every input.
+  measure-platforms:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-musl }
+          - { os: macos-latest,   target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - name: check out the bytes that were committed
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: every measure golden on ${{ matrix.target }}
+        run: cargo test -p smysl-measure --target ${{ matrix.target }}
+
+  # Proposition classes (SMYSL-2.3 A-12.4), which is normative for the same reason the tables
+  # above are checked: the number of classes is the number of propositions, and every corpus
+  # measure is divided by it. Two implementations have to count the same ones, so the Rust side
+  # writes the store and reads the expectation while the Python reference writes the expectation
+  # and reads the store. A job of its own, because it needs no Rust toolchain — the Rust half
+  # runs inside `cargo test`.
+  proposition-classes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/gen-proposition-classes.py
+
+  # `rust-version = "1.79"` stood for eleven releases, was false in every selection, and
+  # nothing tested it — the pure core could not be built at 1.79 at all, because `blake3`
+  # pulls `constant_time_eq` 0.4.2, whose manifest is edition 2024 and which a 1.79 Cargo
+  # cannot parse. RFC SMYSL-2.4 OQ-40 and 2.8 OQ-66 asked whether a 1.79 toolchain could even
+  # resolve such a lockfile; it cannot, and `redb` was never the reason.
+  #
+  # Two halves, because neither alone is enough. The script compares each crate's declared
+  # floor against what its dependencies require and needs no second toolchain, so it catches a
+  # dependency raising its MSRV under us. It cannot see *our* source using a newer language
+  # feature than any dependency needs — that is what compiling at the declared base does.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The script only reads `cargo metadata`, so any toolchain will do — named rather than
+      # inherited from the image so that what it read is on the record.
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python3 scripts/verify-msrv.py
+      # The base is the floor of the crates that carry the pure path, which is the surface an
+      # embedder takes. The ones above it — provider, ingest, tui, both embedders (`smysl-embed`
+      # since `model2vec-rs` 0.3, TX-P10 step 1) and the facade — declare their own, and the
+      # script is what checks those.
+      - uses: dtolnay/rust-toolchain@1.85
+      - run: >
+          cargo check --locked --no-default-features
+          -p smysl-core -p smysl-graph -p smysl-check -p smysl-pack -p smysl-thread
+          -p smysl-render -p smysl-retrieve -p smysl-eval
+
   # Internal requirements name the workspace version. Every build here uses paths, so a
   # requirement left at 1.1.0 while `smysl-ingest` calls a 1.3 item is invisible until a
   # consumer's lockfile pairs the new crate with an old sibling.
@@ -275,7 +414,11 @@ jobs:
   # uid from — including one where it says the opposite of what the encoder does — all four now
   # written into the document and marked `SPEC:` in `nodejs/src/uid.js`.
   conformance-node:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -291,7 +434,11 @@ jobs:
   # rests on — this job failing on `uid_test.go` means two implementations disagree about what
   # a unit *is*, not merely about how to spell it.
   conformance-go:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -381,10 +528,39 @@ jobs:
       # guarantee A1 across the pipeline — the same properties the seeded tests assert,
       # searched by coverage feedback rather than by a fixed seed and 200 blind rounds.
       # These are where a defect is *quiet*: a wrong merge still merges, a wrong pack still
-      # packs, and neither raises a diagnostic on the way past.
+      # packs, and neither raises a diagnostic on the way past. `store_union` (TX-P13c step 1)
+      # is the same shape for the union of shards: it answers as its records' store.
       - name: algebra
         run: |
-          for t in merge_algebra pack_constraints pipeline pack_exact; do
+          for t in merge_algebra pack_constraints pipeline pack_exact store_union; do
+            ls fuzz/artifacts/$t > /tmp/before-$t.txt 2>/dev/null || true
+            cargo +nightly fuzz run $t -- -max_total_time=60 || {
+              ls fuzz/artifacts/$t > /tmp/after-$t.txt 2>/dev/null || true
+              for f in $(comm -13 /tmp/before-$t.txt /tmp/after-$t.txt); do
+                echo "::error title=$t-crash::$f = $(base64 -w0 fuzz/artifacts/$t/$f)"
+              done
+              exit 1
+            }
+          done
+      # Schema evolution (TX-P12 step 2): FC-9 decoding over arbitrary bytes, with L9 and L3
+      # held on whatever decodes. Seeded from `fixtures/schema/fc9`, as `make seed-fuzz` is.
+      - name: lens laws
+        run: |
+          mkdir -p fuzz/corpus/lens_laws
+          cp -f fixtures/schema/fc9/*.cbor fuzz/corpus/lens_laws/
+          ls fuzz/artifacts/lens_laws > /tmp/before-lens_laws.txt 2>/dev/null || true
+          cargo +nightly fuzz run lens_laws -- -max_total_time=60 || {
+            ls fuzz/artifacts/lens_laws > /tmp/after-lens_laws.txt 2>/dev/null || true
+            for f in $(comm -13 /tmp/before-lens_laws.txt /tmp/after-lens_laws.txt); do
+              echo "::error title=lens_laws-crash::$f = $(base64 -w0 fuzz/artifacts/lens_laws/$f)"
+            done
+            exit 1
+          }
+      # Import and export (TX-P11 step 11): P1 and P3 over generated stores, and arbitrary
+      # bytes offered to `lib import`, which must classify every record it decodes once.
+      - name: import and export
+        run: |
+          for t in lib_roundtrip lib_import; do
             ls fuzz/artifacts/$t > /tmp/before-$t.txt 2>/dev/null || true
             cargo +nightly fuzz run $t -- -max_total_time=60 || {
               ls fuzz/artifacts/$t > /tmp/after-$t.txt 2>/dev/null || true
@@ -402,3 +578,35 @@ jobs:
         with:
           name: fuzz-artifacts
           path: fuzz/artifacts/
+
+  # GE-T15, the round-trip gate (RFC SMYSL-2.7 §5.2, TX-P11 step 12; gate G2), on the two
+  # platforms §5.2's axis names. The matrix and its duplication golden, the 10⁵ scale cell,
+  # and the cross-implementation harness with every implementation **required**: a runner
+  # missing `python3`, `node` or `go` fails rather than skips (`SMYSL_XI_REQUIRED`). The two
+  # platforms agree on every file's BLAKE3 because both compare against the same committed
+  # goldens. The 10⁶ cell needs about 13 GB and runs locally (`--ignored`).
+  ge-t15:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: the matrix, P2, the 10⁵ scale cell and the cross-implementation harness
+        env:
+          SMYSL_XI_REQUIRED: "1"
+        run: >
+          cargo test --release -p smysl-lib --test ge_t15 --test cross_impl --
+          --include-ignored --skip scale_cell_at_10e6

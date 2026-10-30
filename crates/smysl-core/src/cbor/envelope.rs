@@ -15,12 +15,19 @@ use crate::cbor::keys;
 use crate::cbor::reader::Dec;
 use crate::cbor::writer::{enc, Enc, MapBuilder};
 use crate::error::CodecError;
-use crate::ids::{AgentId, ContentionId, Label, LangTag, SchemaId, ThreadId, ViewId};
+use crate::ids::{
+    AgentId, ContentionId, Label, LangTag, Mid, Rdid, SchemaId, ThreadId, Tid, ViewId,
+};
 use crate::types::annex::{
     Contention, ContentionStatus, Detected, DetectionKind, DropReason, LabelBinding, Optimality,
     PackInfo, PackMode, SchemaDecl,
 };
 use crate::types::epistemics::{Date, Lod, SourceKind, SourceRef, Status};
+use crate::types::estimate::ProfileEstimator;
+use crate::types::library::{
+    Allen, Axis, Calendar, Carry, Dating, DatingTarget, DatingValue, Manifest, ParentKind,
+    PartEntry, PartReading, PartText, Redaction,
+};
 use crate::types::lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::{Attestation, Hlc, Op, Rung};
 use crate::types::record::{code, Record};
@@ -52,19 +59,33 @@ pub fn unit_core_bytes(u: &UnitCore) -> Vec<u8> {
     m.put(keys::unit::STATUS, |e| e.uint(u.status.as_u8() as u64));
     m.put_opt(keys::unit::SOURCE, u.source.as_ref(), enc_source);
     m.put_opt(keys::unit::PAYLOAD, u.payload.as_ref(), |e, v| e.bytes(v));
+    // Key 9, written only when present: a unit without a `lang` encodes to the bytes it always
+    // did, which is what lets an old store re-encode unchanged (SMYSL-2.3 §0, FC-1).
+    m.put_opt(keys::unit::LANG, u.lang.as_ref(), |e, t| e.text(t.as_str()));
     m.put_extra(&u.extra);
     m.into_bytes()
 }
 
 fn enc_source(e: &mut Enc, s: &SourceRef) {
     let mut m = MapBuilder::new();
-    m.put(keys::source::KIND, |e| e.uint(s.kind.as_u8() as u64));
+    m.put(keys::source::KIND, |e| e.uint(s.kind_code() as u64));
     m.put(keys::source::REFERENCE, |e| e.text(&s.reference));
     m.put_opt(keys::source::CAPTURED, s.captured.as_ref(), |e, d| {
         e.text(&d.to_string())
     });
     m.put_opt(keys::source::OBSERVED, s.observed.as_ref(), |e, ms| {
         e.uint(*ms)
+    });
+    m.put_opt(keys::source::PUBLISHED, s.published.as_ref(), |e, p| {
+        e.text(p)
+    });
+    m.put_opt(keys::source::SPAN, s.span().as_ref(), |e, (start, end)| {
+        e.array_head(2);
+        e.uint(*start);
+        e.uint(*end);
+    });
+    m.put_opt(keys::source::MANIFEST, s.manifest(), |e, mid| {
+        e.bytes(mid.as_bytes())
     });
     // Rule X inside the sub-map, as every record body has done since 0.2. Without it a reader
     // that met a key it did not know re-encoded the unit without it and changed its uid.
@@ -124,7 +145,7 @@ fn thread_bytes(t: &Thread) -> Vec<u8> {
         .map(|s| {
             enc(|e| {
                 e.array_head(if s.note.is_some() { 3 } else { 2 });
-                e.uint(s.role.as_u8() as u64);
+                e.uint(s.role_code() as u64);
                 e.uid(&s.unit);
                 if let Some(n) = &s.note {
                     e.text(n);
@@ -135,7 +156,7 @@ fn thread_bytes(t: &Thread) -> Vec<u8> {
 
     let mut m = MapBuilder::new();
     m.put(keys::thread::ID, |e| e.text(t.id.as_str()));
-    m.put(keys::thread::SCHEMA, |e| e.uint(t.schema.as_u8() as u64));
+    m.put(keys::thread::SCHEMA, |e| e.uint(t.schema_code() as u64));
     m.put(keys::thread::OWNER, |e| e.text(t.owner.as_str()));
     m.put(keys::thread::GIST, |e| e.text(&t.gist));
     m.put_array(keys::thread::STEPS, steps);
@@ -177,8 +198,15 @@ fn enc_granularity(e: &mut Enc, g: &GranularityProfile) {
     m.put(keys::granularity::L1_MIN, |e| e.uint(g.l1_min as u64));
     m.put(keys::granularity::L1_MAX, |e| e.uint(g.l1_max as u64));
     m.put(keys::granularity::ADMISSION, |e| {
-        e.uint(g.admission.as_u8() as u64)
+        e.uint(g.admission_code() as u64)
     });
+    // Absent for the pre-F-2 default: writing it would change the bytes of every view that
+    // predates F-2, which §8.1 forbids (A-9).
+    if let Some(id) = g.estimator.wire_id() {
+        let id = id.to_string();
+        m.put(keys::granularity::ESTIMATOR, move |e| e.text(&id));
+    }
+    m.put_extra(&g.extra);
     m.finish(e);
 }
 
@@ -190,7 +218,7 @@ fn contention_bytes(c: &Contention) -> Vec<u8> {
     m.put_array(keys::contention::POSITIONS, positions);
     m.put(keys::contention::DETECTED, |e| {
         e.array_head(2);
-        e.uint(c.detected.kind.as_u8() as u64);
+        e.uint(c.detected.kind_code() as u64);
         enc_hlc(e, &c.detected.ts);
     });
     m.put(keys::contention::STATUS, |e| {
@@ -269,6 +297,10 @@ fn schema_decl_bytes(d: &SchemaDecl) -> Vec<u8> {
         d.payload_shape.as_ref(),
         |e, p| e.bytes(p),
     );
+    // Written back verbatim: the bytes are what the lens-chain hash is over (Appendix B).
+    m.put_opt(keys::schema_decl::LENSES, d.lenses.as_ref(), |e, l| {
+        e.raw(l)
+    });
     m.put_extra(&d.extra);
     m.into_bytes()
 }
@@ -347,6 +379,228 @@ fn commit_bytes(c: &Commit) -> Vec<u8> {
     m.into_bytes()
 }
 
+/// `true` as a CBOR simple value.
+///
+/// A bool appears in exactly one kernel field — a manifest's `lossy` — and it is written only
+/// when true, so `false` has no encoding at all. That is what keeps one manifest to one byte
+/// string: admitting `0xF4` would give a lossless manifest two spellings.
+fn enc_true(e: &mut Enc) {
+    e.head(crate::cbor::major::SIMPLE, 21);
+}
+
+/// Write a pre-encoded CBOR item that this layer carries without interpreting.
+///
+/// `empty` is the item to write when the carried bytes are empty, and it is the reason this
+/// is a function. A reading's segment table is required and may be empty, and "empty" on the
+/// wire is an empty array, not zero bytes; writing nothing would emit a map with a key and no
+/// value and corrupt every record that followed it in the log. A caller that builds an empty
+/// table with `Vec::new()` is making an ordinary statement, not a mistake, so the encoder
+/// spells it rather than refusing it.
+fn enc_opaque(e: &mut Enc, bytes: &[u8], empty: u8) {
+    if bytes.is_empty() {
+        e.raw(&[empty]);
+    } else {
+        e.raw(bytes);
+    }
+}
+
+/// A CBOR map with text keys, sorted by encoded key bytes.
+///
+/// Not by the strings: constraint 4 orders a map by its encoded keys, and a text head carries
+/// its length first, so `"a" < "doi" < "isbn"` by bytes while `"doi" < "isbn" < "a"`… is what
+/// a `BTreeMap` iterates. Sorting the encoded pairs is the only order that agrees with what
+/// `skip_item` enforces when it meets the same map under an unknown key.
+fn enc_text_map<'a>(e: &mut Enc, entries: impl Iterator<Item = (&'a str, &'a str)>) {
+    let mut rows: Vec<(Vec<u8>, Vec<u8>)> = entries
+        .map(|(k, v)| (enc(|e| e.text(k)), enc(|e| e.text(v))))
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    debug_assert!(
+        rows.windows(2).all(|w| w[0].0 < w[1].0),
+        "duplicate text key in encoder output"
+    );
+    e.head(crate::cbor::major::MAP, rows.len() as u64);
+    for (k, v) in rows {
+        e.raw(&k);
+        e.raw(&v);
+    }
+}
+
+fn enc_part_entry(e: &mut Enc, p: &PartEntry) {
+    let mut m = MapBuilder::new();
+    m.put(keys::part_entry::TID, |e| e.bytes(p.tid.as_bytes()));
+    m.put(keys::part_entry::LENGTH, |e| e.uint(p.length));
+    m.put(keys::part_entry::STRUCTURE, |e| e.bytes(&p.structure));
+    m.put(keys::part_entry::RDID, |e| e.bytes(p.rdid.as_bytes()));
+    m.put_opt(keys::part_entry::LANG, p.lang.as_ref(), |e, l| {
+        e.text(l.as_str())
+    });
+    m.put_extra(&p.extra);
+    m.finish(e);
+}
+
+/// The canonical bytes of a manifest body — the mid's preimage after its domain byte (A-3).
+///
+/// Public for the same reason [`unit_core_bytes`] is: a second implementation derives a mid
+/// from these bytes, and a disagreement has to be attributable to the encoding or to the
+/// hashing rather than to the pair of them together.
+pub fn manifest_bytes(m: &Manifest) -> Vec<u8> {
+    let mut b = MapBuilder::new();
+    b.put(keys::manifest::ALIAS, |e| e.text(&m.alias));
+    // Not `put_array`: `parts` is required and may be empty. An import manifest records an
+    // expression whose text was never carried, and it has to encode to a key with an empty
+    // array rather than to no key at all.
+    b.put(keys::manifest::PARTS, |e| {
+        e.array(
+            m.parts
+                .iter()
+                .map(|p| enc(|e| enc_part_entry(e, p)))
+                .collect(),
+        )
+    });
+    b.put(keys::manifest::LANG, |e| e.text(m.lang.as_str()));
+    b.put(keys::manifest::READER, |e| e.text(&m.reader));
+    b.put(keys::manifest::LICENCE, |e| e.text(&m.licence));
+    b.put(keys::manifest::CARRY, |e| e.uint(m.carry.as_u8() as u64));
+    b.put_opt(keys::manifest::TITLE, m.title.as_ref(), |e, t| e.text(t));
+    b.put_array(
+        keys::manifest::CREATORS,
+        m.creators.iter().map(|c| enc(|e| e.text(c))).collect(),
+    );
+    b.put_opt(keys::manifest::PUBLISHED, m.published.as_ref(), |e, p| {
+        e.text(p)
+    });
+    if !m.identifiers.is_empty() {
+        b.put(keys::manifest::IDENTIFIERS, |e| {
+            enc_text_map(
+                e,
+                m.identifiers.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+            )
+        });
+    }
+    b.put_opt(keys::manifest::ORIGIN, m.origin.as_ref(), enc_source);
+    if let Some((mid, kind)) = &m.parent {
+        b.put(keys::manifest::PARENT, |e| e.bytes(mid.as_bytes()));
+        b.put(keys::manifest::PARENT_KIND, |e| e.text(kind.as_str()));
+    }
+    b.put_opt(keys::manifest::SUPERSEDES, m.supersedes.as_ref(), |e, s| {
+        e.bytes(s.as_bytes())
+    });
+    b.put_opt(
+        keys::manifest::VERSIFICATION,
+        m.versification.as_ref(),
+        |e, v| e.text(v),
+    );
+    if m.lossy {
+        b.put(keys::manifest::LOSSY, enc_true);
+    }
+    b.put_opt(keys::manifest::RAW, m.raw.as_ref(), |e, r| {
+        enc_opaque(e, r, 0xA0)
+    });
+    b.put(keys::manifest::PART_POLICY, |e| e.text(&m.part_policy));
+    b.put_opt(keys::manifest::CALENDAR, m.calendar.as_ref(), |e, c| {
+        e.text(c.as_str())
+    });
+    b.put_extra(&m.extra);
+    b.into_bytes()
+}
+
+fn part_text_bytes(p: &PartText) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    m.put(keys::part_text::TID, |e| e.bytes(p.tid.as_bytes()));
+    m.put(keys::part_text::TEXT, |e| e.bytes(&p.text));
+    m.put_extra(&p.extra);
+    m.into_bytes()
+}
+
+/// The canonical bytes of a reading body — the rdid's preimage after its domain byte (A-3).
+pub fn part_reading_bytes(r: &PartReading) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    m.put(keys::part_reading::TID, |e| e.bytes(r.tid.as_bytes()));
+    m.put(keys::part_reading::READER, |e| e.text(&r.reader));
+    m.put(keys::part_reading::SEGMENTS, |e| {
+        enc_opaque(e, &r.segments, 0x80)
+    });
+    m.put_opt(keys::part_reading::RAW, r.raw.as_ref(), |e, raw| {
+        enc_opaque(e, raw, 0xA0)
+    });
+    m.put_extra(&r.extra);
+    m.into_bytes()
+}
+
+/// The canonical bytes of a dating body — the did's preimage after its domain byte (A-3).
+pub fn dating_bytes(d: &Dating) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    m.put(keys::dating::TARGET, |e| enc_dating_target(e, &d.target));
+    m.put(keys::dating::AXIS, |e| e.uint(d.axis.as_u8() as u64));
+    m.put(keys::dating::VALUE, |e| {
+        let mut v = MapBuilder::new();
+        match &d.value {
+            DatingValue::Absolute(t) => {
+                v.put(keys::dating_value::ABSOLUTE, |e| e.text(t));
+            }
+            DatingValue::Offset(ms) => {
+                v.put(keys::dating_value::OFFSET, |e| e.int(*ms));
+            }
+            DatingValue::Relative { allen, target } => {
+                v.put(keys::dating_value::RELATIVE, |e| {
+                    e.array_head(2);
+                    e.text(allen.as_str());
+                    enc_dating_target(e, target);
+                });
+            }
+        }
+        v.finish(e);
+    });
+    m.put_opt(keys::dating::BASIS, d.basis.as_ref(), |e, u| {
+        e.bytes(u.as_bytes())
+    });
+    m.put(keys::dating::AGENT, |e| e.text(d.agent.as_str()));
+    m.put(keys::dating::TS, |e| enc_hlc(e, &d.ts));
+    m.put_extra(&d.extra);
+    m.into_bytes()
+}
+
+/// `[kind, id]` — and a window's id is itself an array, which is why this is a function
+/// rather than two lines inlined twice: a relative value holds a second target, and the two
+/// spellings drifting apart would give one dating two dids.
+fn enc_dating_target(e: &mut Enc, t: &DatingTarget) {
+    e.array_head(2);
+    e.uint(t.kind() as u64);
+    match t {
+        DatingTarget::Unit(u) => e.bytes(u.as_bytes()),
+        DatingTarget::Part(tid) => e.bytes(tid.as_bytes()),
+        DatingTarget::Manifest(mid) => e.bytes(mid.as_bytes()),
+        DatingTarget::Window {
+            tid,
+            from_ms,
+            to_ms,
+        } => {
+            e.array_head(3);
+            e.bytes(tid.as_bytes());
+            e.uint(*from_ms);
+            e.uint(*to_ms);
+        }
+    }
+}
+
+/// The canonical bytes of a redaction body (record 19, rule Z).
+///
+/// No identity of its own, and that is a decision rather than an omission: a redaction is not
+/// a thing the format refers to. A withdrawal has none either, for the same reason — both are
+/// statements about something else, named by the identity of that something else.
+pub fn redaction_bytes(r: &Redaction) -> Vec<u8> {
+    let mut m = MapBuilder::new();
+    m.put(keys::redaction::TID, |e| e.bytes(r.tid.as_bytes()));
+    m.put(keys::redaction::AGENT, |e| e.text(r.agent.as_str()));
+    m.put(keys::redaction::TS, |e| enc_hlc(e, &r.ts));
+    m.put_opt(keys::redaction::REASON, r.reason.as_ref(), |e, u| {
+        e.bytes(u.as_bytes())
+    });
+    m.put_extra(&r.extra);
+    m.into_bytes()
+}
+
 /// Encode one record as a complete envelope.
 pub fn to_cbor(r: &Record) -> Vec<u8> {
     let payload = match r {
@@ -362,6 +616,11 @@ pub fn to_cbor(r: &Record) -> Vec<u8> {
         Record::Withdrawal(w) => withdrawal_bytes(w),
         Record::Resolution(r) => resolution_bytes(r),
         Record::Commit(c) => commit_bytes(c),
+        Record::Manifest(m) => manifest_bytes(m),
+        Record::PartText(p) => part_text_bytes(p),
+        Record::PartReading(r) => part_reading_bytes(r),
+        Record::Dating(d) => dating_bytes(d),
+        Record::Redaction(r) => redaction_bytes(r),
         Record::Unknown { payload, .. } => payload.clone(),
     };
     let mut e = Enc::with_capacity(payload.len() + 4);
@@ -412,10 +671,18 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
     let mut reference = None;
     let mut captured = None;
     let mut observed = None;
+    let mut published = None;
+    let mut span = None;
+    let mut manifest = None;
+    let mut raw_kind = None;
     let mut extra = Extra::new();
     read_map(d, &mut extra, |d, k| match k {
         keys::source::KIND => {
-            kind = SourceKind::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?);
+            // Open from 1.9: a code this build cannot name is kept, not refused. Before, an
+            // unrecognised kind made the whole store unopenable.
+            let c = u8::try_from(d.uint()?).map_err(|_| bad(at))?;
+            raw_kind = Some(c);
+            kind = Some(SourceKind::from_u8(c).unwrap_or(SourceKind::Unknown));
             Ok(true)
         }
         keys::source::REFERENCE => {
@@ -430,15 +697,60 @@ fn dec_source(d: &mut Dec<'_>) -> Res<SourceRef> {
             observed = Some(d.uint()?);
             Ok(true)
         }
+        keys::source::PUBLISHED => {
+            // Not validated here. `source` is inside the uid, so a value that arrived has to
+            // leave again byte for byte; a malformed one is reported (`SMY-E410`) rather than
+            // refused, exactly as an unrecognised `source.kind` is kept rather than refused.
+            published = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::source::SPAN => {
+            // Two unsigned integers, `start < end`. Refused rather than kept for the reason
+            // `lang` is: no release before this one could write key 5, so a span that is not a
+            // span comes from a producer bound by A-2.1, and there is no corpus to keep readable.
+            if d.array_head()? != 2 {
+                return Err(bad(at));
+            }
+            let start = d.uint()?;
+            let end = d.uint()?;
+            if start >= end {
+                return Err(bad(at));
+            }
+            span = Some((start, end));
+            Ok(true)
+        }
+        keys::source::MANIFEST => {
+            manifest = Some(Mid::from_bytes(dec_bytes32(d)?));
+            Ok(true)
+        }
         _ => Ok(false),
     })?;
-    Ok(SourceRef {
-        kind: kind.ok_or_else(|| bad(at))?,
-        reference: reference.ok_or_else(|| bad(at))?,
-        captured,
-        observed,
-        extra,
-    })
+    let kind = kind.ok_or_else(|| bad(at))?;
+    let mut s = SourceRef::new(kind, reference.ok_or_else(|| bad(at))?);
+    s.captured = captured;
+    s.observed = observed;
+    s.published = published;
+    // A-2.4 rule 1 on the way in: a span with no manifestation names offsets into bytes nobody
+    // can say they obtained the same way. Enforced here as well as by `SourceRef::in_part`,
+    // because a record can arrive from any producer and the pair is inside the uid — a reader
+    // that dropped the span to make the record legal would change the unit's identity, and one
+    // that kept it would hold a record no rule allows.
+    match (span, manifest) {
+        (Some(_), None) => return Err(bad(at)),
+        (span, manifest) => {
+            s.span = span;
+            s.manifest = manifest;
+        }
+    }
+    s.extra = extra;
+    if kind == SourceKind::Unknown {
+        // `source.kind` is inside the uid, so the code has to leave again exactly as it
+        // arrived. `with_unknown_kind` refuses 255 and refuses a code we do know.
+        s = s
+            .with_unknown_kind(raw_kind.ok_or_else(|| bad(at))?)
+            .ok_or_else(|| bad(at))?;
+    }
+    Ok(s)
 }
 
 fn dec_hlc(d: &mut Dec<'_>) -> Res<Hlc> {
@@ -485,6 +797,7 @@ fn dec_unit(d: &mut Dec<'_>) -> Res<UnitCore> {
     let mut status = None;
     let mut source = None;
     let mut payload = None;
+    let mut lang = None;
     let mut extra = Extra::new();
 
     read_map(d, &mut extra, |d, k| match k {
@@ -528,6 +841,16 @@ fn dec_unit(d: &mut Dec<'_>) -> Res<UnitCore> {
             payload = Some(d.bytes()?.to_vec());
             Ok(true)
         }
+        keys::unit::LANG => {
+            // Refused rather than kept, which is the opposite of what this decoder does for an
+            // unrecognised `source.kind` or a malformed `published` — and A-1 says so outright:
+            // "a tag that is not well-formed BCP-47 is `SMY-E001` at the surface and a decode
+            // error in CBOR". The difference is that those two have a corpus behind them, and a
+            // producer that wrote a malformed tag here is a producer of this release or later,
+            // bound by a rule that did not exist when the old stores were written.
+            lang = Some(LangTag::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
         _ => Ok(false),
     })?;
 
@@ -542,6 +865,7 @@ fn dec_unit(d: &mut Dec<'_>) -> Res<UnitCore> {
     b.grounds = grounds;
     b.source = source;
     b.payload = payload;
+    b.lang = lang;
     b.extra = extra;
     UnitCore::new(b).map_err(|_| bad(at))
 }
@@ -667,6 +991,7 @@ fn dec_thread(d: &mut Dec<'_>) -> Res<Thread> {
     let at = d.position();
     let mut id = None;
     let mut schema = None;
+    let mut raw_schema = None;
     let mut owner = None;
     let mut gist = None;
     let mut steps = Vec::new();
@@ -679,7 +1004,10 @@ fn dec_thread(d: &mut Dec<'_>) -> Res<Thread> {
             Ok(true)
         }
         keys::thread::SCHEMA => {
-            schema = ThreadSchema::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?);
+            // Open from 1.9: an unrecognised schema is kept, not refused.
+            let c = u8::try_from(d.uint()?).map_err(|_| bad(at))?;
+            raw_schema = Some(c);
+            schema = Some(ThreadSchema::from_u8(c).unwrap_or(ThreadSchema::Unknown));
             Ok(true)
         }
         keys::thread::OWNER => {
@@ -697,15 +1025,21 @@ fn dec_thread(d: &mut Dec<'_>) -> Res<Thread> {
                 if !(2..=3).contains(&n) {
                     return Err(bad(at));
                 }
-                let role = Role::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?)
-                    .ok_or_else(|| bad(at))?;
+                // Open from 1.9: an unrecognised role is kept, not refused.
+                let rc = u8::try_from(d.uint()?).map_err(|_| bad(at))?;
+                let role = Role::from_u8(rc).unwrap_or(Role::Unknown);
                 let unit = d.uid()?;
                 let note = if n == 3 {
                     Some(d.text()?.to_string())
                 } else {
                     None
                 };
-                Ok(Step { role, unit, note })
+                let mut s = Step::new(role, unit);
+                s.note = note;
+                if role == Role::Unknown {
+                    s = s.with_unknown_role(rc).ok_or_else(|| bad(at))?;
+                }
+                Ok(s)
             })?;
             Ok(true)
         }
@@ -716,21 +1050,31 @@ fn dec_thread(d: &mut Dec<'_>) -> Res<Thread> {
         _ => Ok(false),
     })?;
 
-    Ok(Thread {
-        id: id.ok_or_else(|| bad(at))?,
-        schema: schema.ok_or_else(|| bad(at))?,
-        owner: owner.ok_or_else(|| bad(at))?,
-        gist: gist.ok_or_else(|| bad(at))?,
-        steps,
-        ts: ts.ok_or_else(|| bad(at))?,
-        extra,
-    })
+    let schema = schema.ok_or_else(|| bad(at))?;
+    let mut th = Thread::new(
+        id.ok_or_else(|| bad(at))?,
+        schema,
+        owner.ok_or_else(|| bad(at))?,
+        gist.ok_or_else(|| bad(at))?,
+        ts.ok_or_else(|| bad(at))?,
+    );
+    th.steps = steps;
+    th.extra = extra;
+    if schema == ThreadSchema::Unknown {
+        th = th
+            .with_unknown_schema(raw_schema.ok_or_else(|| bad(at))?)
+            .ok_or_else(|| bad(at))?;
+    }
+    Ok(th)
 }
 
 fn dec_granularity(d: &mut Dec<'_>) -> Res<GranularityProfile> {
     let at = d.position();
     let mut g = GranularityProfile::default();
+    // Collected into the profile, not a local: a key this build does not know has to leave
+    // again in the bytes it arrived in (§8.1).
     let mut extra = Extra::new();
+    let raw_admission = &mut None;
     read_map(d, &mut extra, |d, k| match k {
         keys::granularity::PROFILE => {
             g.profile = d.text()?.to_string();
@@ -749,12 +1093,33 @@ fn dec_granularity(d: &mut Dec<'_>) -> Res<GranularityProfile> {
             Ok(true)
         }
         keys::granularity::ADMISSION => {
-            g.admission = Admission::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?)
-                .ok_or_else(|| bad(at))?;
+            // Open from 1.10 (A-8.1): a code this build cannot name is kept and treated as
+            // unknown, where until 1.9 it failed the whole decode. The raw byte goes back out
+            // through `with_unknown_admission`, below, once the profile is built.
+            let c = u8::try_from(d.uint()?).map_err(|_| bad(at))?;
+            *raw_admission = Some(c);
+            g.admission = Admission::from_u8(c).unwrap_or(Admission::Unknown);
+            Ok(true)
+        }
+        keys::granularity::ESTIMATOR => {
+            // An id this build does not know is kept as it arrived, not dropped and not
+            // silently replaced by the default: it has to re-encode byte for byte (§8.1), and
+            // it makes the bounds unevaluable rather than evaluable under another count.
+            g.estimator = ProfileEstimator::from_wire(d.text()?);
             Ok(true)
         }
         _ => Ok(false),
     })?;
+    g.extra = extra;
+    if g.admission == Admission::Unknown {
+        // The code has to leave again exactly as it arrived, or two peers compute different
+        // record-set digests for one store. `with_unknown_admission` refuses 255 and refuses
+        // a code we do know, so a profile that claims `Unknown` for a named code is rejected
+        // rather than re-encoded as something else.
+        g = g
+            .with_unknown_admission(raw_admission.ok_or_else(|| bad(at))?)
+            .ok_or_else(|| bad(at))?;
+    }
     Ok(g)
 }
 
@@ -849,9 +1214,14 @@ fn dec_contention(d: &mut Dec<'_>) -> Res<Contention> {
             if d.array_head()? != 2 {
                 return Err(bad(a));
             }
-            let kind = DetectionKind::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(a))?)
-                .ok_or_else(|| bad(a))?;
-            detected = Some(Detected::new(kind, dec_hlc(d)?));
+            // Open from 1.9: an unrecognised detection kind is kept, not refused.
+            let c = u8::try_from(d.uint()?).map_err(|_| bad(a))?;
+            let kind = DetectionKind::from_u8(c).unwrap_or(DetectionKind::Unknown);
+            let mut det = Detected::new(kind, dec_hlc(d)?);
+            if kind == DetectionKind::Unknown {
+                det = det.with_unknown_kind(c).ok_or_else(|| bad(a))?;
+            }
+            detected = Some(det);
             Ok(true)
         }
         keys::contention::STATUS => {
@@ -975,6 +1345,7 @@ fn dec_schema_decl(d: &mut Dec<'_>) -> Res<SchemaDecl> {
     let mut types = Vec::new();
     let mut relations = Vec::new();
     let mut payload_shape = None;
+    let mut lenses = None;
     let mut extra = Extra::new();
 
     read_map(d, &mut extra, |d, k| match k {
@@ -998,6 +1369,13 @@ fn dec_schema_decl(d: &mut Dec<'_>) -> Res<SchemaDecl> {
             payload_shape = Some(d.bytes()?.to_vec());
             Ok(true)
         }
+        // Any well-formed item, held as received. Whether it is a lens array is
+        // `schema::decode`'s question, and a mismatch there is `SMY-W430`, not a store that
+        // will not open: the same degradation an unknown key has always had.
+        keys::schema_decl::LENSES => {
+            lenses = Some(d.skip_item()?.to_vec());
+            Ok(true)
+        }
         _ => Ok(false),
     })?;
 
@@ -1007,6 +1385,7 @@ fn dec_schema_decl(d: &mut Dec<'_>) -> Res<SchemaDecl> {
         types,
         relations,
         payload_shape,
+        lenses,
         extra,
     })
 }
@@ -1145,6 +1524,444 @@ fn dec_resolution(d: &mut Dec<'_>) -> Res<Resolution> {
     })
 }
 
+/// Read a 32-byte string into a fixed array.
+fn dec_32(d: &mut Dec<'_>) -> Res<[u8; 32]> {
+    let at = d.position();
+    d.bytes()?.try_into().map_err(|_| bad(at))
+}
+
+/// Read `true`, and only `true`.
+///
+/// `false` is not an encoding of anything here: the one bool in the format is written only
+/// when true (A-5, manifest key 15). Accepting `0xF4` would admit a second spelling of a
+/// lossless manifest, which is a different mid for the same facts.
+fn dec_true(d: &mut Dec<'_>) -> Res<bool> {
+    let at = d.position();
+    if d.peek_byte()? != 0xF5 {
+        return Err(bad(at));
+    }
+    d.advance(1);
+    Ok(true)
+}
+
+fn dec_text_map(d: &mut Dec<'_>) -> Res<std::collections::BTreeMap<String, String>> {
+    let at = d.position();
+    let n = d.map_head()?;
+    let mut out = std::collections::BTreeMap::new();
+    let mut prev: Option<Vec<u8>> = None;
+    for _ in 0..n {
+        let kstart = d.position();
+        // The key's own bytes, so the order check below compares what constraint 4 orders by.
+        // `skip_item` is what validates them — shortest-form head, valid UTF-8, NFC — and the
+        // text is read back out of them rather than decoded twice from the stream.
+        let kbytes = d.skip_item()?.to_vec();
+        let k = Dec::new(&kbytes)
+            .text()
+            .map_err(|_| bad(kstart))?
+            .to_string();
+        // Encoded-key order, which is what `skip_item` enforces for the same map when it
+        // arrives under a key this build does not know. Comparing the decoded strings instead
+        // would accept a map that a reader one version older rejects.
+        if let Some(p) = &prev {
+            if *p >= kbytes {
+                return Err(bad(kstart));
+            }
+        }
+        prev = Some(kbytes);
+        d.reject_null()?;
+        if out.insert(k, d.text()?.to_string()).is_some() {
+            return Err(bad(at));
+        }
+    }
+    Ok(out)
+}
+
+fn dec_part_entry(d: &mut Dec<'_>) -> Res<PartEntry> {
+    let at = d.position();
+    let mut tid = None;
+    let mut length = None;
+    let mut structure = None;
+    let mut rdid = None;
+    let mut lang = None;
+    let mut extra = Extra::new();
+    read_map(d, &mut extra, |d, k| match k {
+        keys::part_entry::TID => {
+            tid = Some(Tid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::part_entry::LENGTH => {
+            length = Some(d.uint()?);
+            Ok(true)
+        }
+        keys::part_entry::STRUCTURE => {
+            structure = Some(dec_32(d)?);
+            Ok(true)
+        }
+        keys::part_entry::RDID => {
+            rdid = Some(Rdid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::part_entry::LANG => {
+            lang = Some(LangTag::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+    let mut p = PartEntry::new(
+        tid.ok_or_else(|| bad(at))?,
+        length.ok_or_else(|| bad(at))?,
+        structure.ok_or_else(|| bad(at))?,
+        rdid.ok_or_else(|| bad(at))?,
+    );
+    p.lang = lang;
+    p.extra = extra;
+    Ok(p)
+}
+
+fn dec_manifest(d: &mut Dec<'_>) -> Res<Manifest> {
+    let at = d.position();
+    let mut alias = None;
+    let mut parts = None;
+    let mut lang = None;
+    let mut reader = None;
+    let mut licence = None;
+    let mut carry = None;
+    let mut title = None;
+    let mut creators = Vec::new();
+    let mut published = None;
+    let mut identifiers = std::collections::BTreeMap::new();
+    let mut origin = None;
+    let mut parent = None;
+    let mut parent_kind = None;
+    let mut supersedes = None;
+    let mut versification = None;
+    let mut lossy = false;
+    let mut raw = None;
+    let mut part_policy = None;
+    let mut calendar = None;
+    let mut extra = Extra::new();
+
+    read_map(d, &mut extra, |d, k| match k {
+        keys::manifest::ALIAS => {
+            alias = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::PARTS => {
+            parts = Some(d.array(dec_part_entry)?);
+            Ok(true)
+        }
+        keys::manifest::LANG => {
+            lang = Some(LangTag::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        keys::manifest::READER => {
+            reader = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::LICENCE => {
+            licence = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::CARRY => {
+            // Closed, unlike `source.kind`: `bundle` reads it to decide whether text may
+            // travel (`SMY-E402`), and a code it had to guess at would be a permission
+            // granted or refused on a guess.
+            carry = Some(
+                Carry::from_u8(u8::try_from(d.uint()?).map_err(|_| bad(at))?)
+                    .ok_or_else(|| bad(at))?,
+            );
+            Ok(true)
+        }
+        keys::manifest::TITLE => {
+            title = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::CREATORS => {
+            creators = d.array(|d| Ok(d.text()?.to_string()))?;
+            Ok(true)
+        }
+        keys::manifest::PUBLISHED => {
+            published = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::IDENTIFIERS => {
+            identifiers = dec_text_map(d)?;
+            Ok(true)
+        }
+        keys::manifest::ORIGIN => {
+            origin = Some(dec_source(d)?);
+            Ok(true)
+        }
+        keys::manifest::PARENT => {
+            parent = Some(Mid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::manifest::PARENT_KIND => {
+            parent_kind = Some(ParentKind::parse(d.text()?).ok_or_else(|| bad(at))?);
+            Ok(true)
+        }
+        keys::manifest::SUPERSEDES => {
+            supersedes = Some(Mid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::manifest::VERSIFICATION => {
+            versification = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::LOSSY => {
+            lossy = dec_true(d)?;
+            Ok(true)
+        }
+        keys::manifest::RAW => {
+            raw = Some(d.skip_item()?.to_vec());
+            Ok(true)
+        }
+        keys::manifest::PART_POLICY => {
+            part_policy = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::manifest::CALENDAR => {
+            calendar = Some(Calendar::parse(d.text()?).ok_or_else(|| bad(at))?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+
+    // Key 12 is required with key 11 and meaningless without it (A-5). Either half alone
+    // cannot be re-encoded as what was read, so it is refused rather than dropped.
+    let parent = match (parent, parent_kind) {
+        (Some(m), Some(k)) => Some((m, k)),
+        (None, None) => None,
+        _ => return Err(bad(at)),
+    };
+
+    let mut m = Manifest::new(
+        alias.ok_or_else(|| bad(at))?,
+        lang.ok_or_else(|| bad(at))?,
+        reader.ok_or_else(|| bad(at))?,
+        licence.ok_or_else(|| bad(at))?,
+        part_policy.ok_or_else(|| bad(at))?,
+    );
+    m.parts = parts.ok_or_else(|| bad(at))?;
+    m.carry = carry.ok_or_else(|| bad(at))?;
+    m.title = title;
+    m.creators = creators;
+    m.published = published;
+    m.identifiers = identifiers;
+    m.origin = origin;
+    m.parent = parent;
+    m.supersedes = supersedes;
+    m.versification = versification;
+    m.lossy = lossy;
+    m.raw = raw;
+    m.calendar = calendar;
+    m.extra = extra;
+    Ok(m)
+}
+
+fn dec_part_text(d: &mut Dec<'_>) -> Res<PartText> {
+    let at = d.position();
+    let mut tid = None;
+    let mut text = None;
+    let mut extra = Extra::new();
+    read_map(d, &mut extra, |d, k| match k {
+        keys::part_text::TID => {
+            tid = Some(Tid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::part_text::TEXT => {
+            text = Some(d.bytes()?.to_vec());
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+    // The tid is **not** verified here, and that is deliberate (SMYSL-2.4 §4.3.1). A record
+    // whose bytes do not hash to its tid has to decode, so that the layer above can report
+    // `SMY-E446` and name the part. Failing the decode would let one bad record stop
+    // `Store::open` — which is F-12, and once was enough.
+    let mut p =
+        PartText::with_claimed_tid(tid.ok_or_else(|| bad(at))?, text.ok_or_else(|| bad(at))?);
+    p.extra = extra;
+    Ok(p)
+}
+
+fn dec_part_reading(d: &mut Dec<'_>) -> Res<PartReading> {
+    let at = d.position();
+    let mut tid = None;
+    let mut reader = None;
+    let mut segments = None;
+    let mut raw = None;
+    let mut extra = Extra::new();
+    read_map(d, &mut extra, |d, k| match k {
+        keys::part_reading::TID => {
+            tid = Some(Tid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::part_reading::READER => {
+            reader = Some(d.text()?.to_string());
+            Ok(true)
+        }
+        keys::part_reading::SEGMENTS => {
+            segments = Some(d.skip_item()?.to_vec());
+            Ok(true)
+        }
+        keys::part_reading::RAW => {
+            raw = Some(d.skip_item()?.to_vec());
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+    let mut r = PartReading::new(
+        tid.ok_or_else(|| bad(at))?,
+        reader.ok_or_else(|| bad(at))?,
+        segments.ok_or_else(|| bad(at))?,
+    );
+    r.raw = raw;
+    r.extra = extra;
+    Ok(r)
+}
+
+fn dec_dating(d: &mut Dec<'_>) -> Res<Dating> {
+    let at = d.position();
+    let mut target = None;
+    let mut axis = None;
+    let mut value = None;
+    let mut basis = None;
+    let mut agent = None;
+    let mut ts = None;
+    let mut extra = Extra::new();
+    read_map(d, &mut extra, |d, k| match k {
+        keys::dating::TARGET => {
+            target = Some(dec_dating_target(d)?);
+            Ok(true)
+        }
+        keys::dating::AXIS => {
+            // Closed, unlike `source.kind` and the thread schemas: rule E is defined over
+            // three axes and an axis this build cannot name is an axis it cannot propagate,
+            // so there is nothing to preserve a code *for*. The amendment opens the
+            // enumerations whose unknown values a reader can still carry; this is not one.
+            let c = u8::try_from(d.uint()?).map_err(|_| bad(at))?;
+            axis = Some(Axis::from_u8(c).ok_or_else(|| bad(at))?);
+            Ok(true)
+        }
+        keys::dating::VALUE => {
+            value = Some(dec_dating_value(d)?);
+            Ok(true)
+        }
+        keys::dating::BASIS => {
+            basis = Some(d.uid()?);
+            Ok(true)
+        }
+        keys::dating::AGENT => {
+            agent = Some(AgentId::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        keys::dating::TS => {
+            ts = Some(dec_hlc(d)?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+    let mut dating = Dating::new(
+        target.ok_or_else(|| bad(at))?,
+        axis.ok_or_else(|| bad(at))?,
+        value.ok_or_else(|| bad(at))?,
+        agent.ok_or_else(|| bad(at))?,
+        ts.ok_or_else(|| bad(at))?,
+    );
+    dating.basis = basis;
+    dating.extra = extra;
+    Ok(dating)
+}
+
+fn dec_dating_target(d: &mut Dec<'_>) -> Res<DatingTarget> {
+    let at = d.position();
+    if d.array_head()? != 2 {
+        return Err(bad(at));
+    }
+    let kind = d.uint()?;
+    Ok(match kind {
+        0 => DatingTarget::Unit(d.uid()?),
+        1 => DatingTarget::Part(Tid::from_bytes(dec_32(d)?)),
+        2 => DatingTarget::Manifest(Mid::from_bytes(dec_32(d)?)),
+        3 => {
+            if d.array_head()? != 3 {
+                return Err(bad(at));
+            }
+            DatingTarget::Window {
+                tid: Tid::from_bytes(dec_32(d)?),
+                from_ms: d.uint()?,
+                to_ms: d.uint()?,
+            }
+        }
+        // A fourth kind would name a thing to date that this build cannot find, and the
+        // record's own `target` is inside its did — so there is no way to keep an unknown
+        // kind and still agree with the writer about which dating this is.
+        _ => return Err(bad(at)),
+    })
+}
+
+fn dec_dating_value(d: &mut Dec<'_>) -> Res<DatingValue> {
+    let at = d.position();
+    // Exactly one entry: A-5 says a one-entry map, and a two-entry one would be a dating
+    // that says two things with no rule for which wins.
+    if d.map_head()? != 1 {
+        return Err(bad(at));
+    }
+    let key = u16::try_from(d.uint()?).map_err(|_| bad(at))?;
+    Ok(match key {
+        keys::dating_value::ABSOLUTE => DatingValue::Absolute(d.text()?.to_string()),
+        keys::dating_value::OFFSET => DatingValue::Offset(d.int()?),
+        keys::dating_value::RELATIVE => {
+            if d.array_head()? != 2 {
+                return Err(bad(at));
+            }
+            let allen = Allen::parse(d.text()?).ok_or_else(|| bad(at))?;
+            DatingValue::Relative {
+                allen,
+                target: dec_dating_target(d)?,
+            }
+        }
+        _ => return Err(bad(at)),
+    })
+}
+
+fn dec_redaction(d: &mut Dec<'_>) -> Res<Redaction> {
+    let at = d.position();
+    let mut tid = None;
+    let mut agent = None;
+    let mut ts = None;
+    let mut reason = None;
+    let mut extra = Extra::new();
+    read_map(d, &mut extra, |d, k| match k {
+        keys::redaction::TID => {
+            tid = Some(Tid::from_bytes(dec_32(d)?));
+            Ok(true)
+        }
+        keys::redaction::AGENT => {
+            agent = Some(AgentId::new(d.text()?).map_err(|_| bad(at))?);
+            Ok(true)
+        }
+        keys::redaction::TS => {
+            ts = Some(dec_hlc(d)?);
+            Ok(true)
+        }
+        keys::redaction::REASON => {
+            reason = Some(d.uid()?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+    let mut r = Redaction::new(
+        tid.ok_or_else(|| bad(at))?,
+        agent.ok_or_else(|| bad(at))?,
+        ts.ok_or_else(|| bad(at))?,
+    );
+    r.reason = reason;
+    r.extra = extra;
+    Ok(r)
+}
+
 /// Decode one record envelope, returning it and the number of bytes consumed.
 pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
     let mut d = Dec::new(bytes);
@@ -1166,6 +1983,11 @@ pub fn from_cbor(bytes: &[u8]) -> Res<(Record, usize)> {
         code::WITHDRAWAL => Record::Withdrawal(dec_withdrawal(&mut d)?),
         code::RESOLUTION => Record::Resolution(dec_resolution(&mut d)?),
         code::COMMIT => Record::Commit(dec_commit(&mut d)?),
+        code::MANIFEST => Record::Manifest(dec_manifest(&mut d)?),
+        code::PART_TEXT => Record::PartText(dec_part_text(&mut d)?),
+        code::PART_READING => Record::PartReading(dec_part_reading(&mut d)?),
+        code::DATING => Record::Dating(dec_dating(&mut d)?),
+        code::REDACTION => Record::Redaction(dec_redaction(&mut d)?),
         other => {
             // `SMY-W014`: preserved verbatim, skipped semantically. The payload is parsed
             // strictly, so an unknown record cannot smuggle in a non-deterministic encoding.

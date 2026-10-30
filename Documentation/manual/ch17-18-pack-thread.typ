@@ -538,8 +538,8 @@ role each one plays in it, for one named audience at a time.
 
 #term("Role")[
   A named slot in a schema's narrative order — `finding`, `risk`, `question`,
-  `step`, and twenty more across the five schemas, sharing one wire-stable
-  numbering. A role belongs to whichever schemas declare it; `risk` happens
+  `step`, and forty-five more across the eight schemas, sharing one
+  wire-stable numbering that SMYSL-2.3 A-8.2 assigns. A role belongs to whichever schemas declare it; `risk` happens
   to appear in both `brief` and `plan` as the same role, not two
   coincidentally-named ones.
 ]
@@ -586,6 +586,76 @@ its status, or which edges point at or from it, first match wins.
 `narrative` is the one exception: it assigns by *position* in the graph's
 ordering chain (`--sequences-->` edges), because a narrative is about
 sequence, not about what kind of thing each beat is.
+
+The table above is the five schemas `--derive` has always produced. Three more
+arrived in 1.10.0 with the library layer, and they are different in kind.
+`exposition` (code 6) is a text in its own order — span order within a part —
+with an introduction and a conclusion at its ends; `dialogue` (7) is ordered by
+its replies, a message somebody answered taking `uptake` and the answer `reply`.
+Both derive like the original five. `dossier` (8) does not: it has roles and no
+rules, and `thread --derive dossier` refuses and names `ask`, because a dossier's
+steps are slots a template filled and a derivation that guessed them from the
+graph would be a dossier nobody asked for.
+
+`smysl ask "What is Naomi?" store` makes one. A closed rule table per tier-1
+language reads the question's intent — `define`, `explain`, `verify`,
+`attribute`, `trace`, `locate`, `depend` or `compare`, and `SMY-E468` with
+`--intent` to name one when no rule matches — and its subject, which is
+resolved to the store's `x.text/entity` units across `x.text/same-as`. A name
+that means two things, two women called Mary, is `SMY-W417`: the candidates
+are listed and nothing runs until `--subject` picks one. Each of the intent's
+slots is then an ordinary `sq/1` query, from the template set `smysl/dossier/3`
+compiled into the binary, planned, run and kept as a saved query — so every
+slot can be rerun with `q --rerun` like any other — and the dossier is a
+`question` unit, those saved queries, a `dossier` thread and a view over them.
+**An empty slot is a step**, role `gap`, on the slot's saved query, with a note
+naming the slot: an absence is a finding, and one that reruns. The thread
+renders through the same profiles as any other, which gained headings for the
+roles the three new schemas introduced — `Counter-evidence`, `Open questions`,
+`Gaps` — while every older role is headed by its own name as before.
+
+`ask --save --answer` is the one invocation that asks a model: it reads the
+dossier, fenced as data, and answers in surface records that may ground only on
+the dossier's units. A record grounding anywhere else is dropped and counted
+(`SMY-W478`), what survives is capped by rule M at its weakest ground
+(`SMY-W036`), and all of it is staged for review like any model output.
+
+*`ask` is experimental*, and says so on stderr every time it runs. Its slots
+were measured against a gold set (GE-T10: thirty questions, each in all five
+languages). Under the first template set, counter-evidence scored 0.750
+precision, under the 0.8 that keeps a dossier command out of the defaults,
+because a slot was bound to the question's *subject* and to nothing else it
+asked. The second set narrowed a `verify` question's
+counter-evidence and reported speech, and an `explain` question's
+counter-evidence, to the question's own words. "Is scurvy cured by citrus
+fruit?" now starts from the claims about scurvy that say _cured_, _citrus_ or
+_fruit_, and collects their rebuttals. The third, `smysl/dossier/3`, writes
+every edge slot with `expand … only`, so a rebuttal that names the subject is
+no longer dropped from counter-evidence. It also brings back `revision`, the
+accounts a later one replaced. Both the old questions and seventeen new ones
+score 1.000 on counter-evidence precision. Two things to know when you read
+one:
+
+- *The words must match.* `matches` does not stem, so _spread_ does not find
+  _spreads_, and a rebuttal of a claim worded differently from your question
+  is missed. Recall on the new questions is 0.706. Phrase the question in the
+  store's words if a slot comes back thin.
+- *A question the store has no words for is not narrowed.* If no unit about the
+  subject uses any of the question's words, as with a German question over an
+  English store, the slot runs on the subject alone, as the first set did.
+  `ask` says on stderr which slots were narrowed, and to which words.
+
+The gold was written by one person, not by independent experts, and the new
+questions by the same person who wrote the narrowing, so treat the figures as a
+careful reading, not a benchmark. That is why `ask` stays experimental.
+
+One thing to know when you write entities for `ask` to find: `same-as` makes a
+class only where every pair is asserted. Five spellings of one disease, each
+joined to the English one and to nothing else, form a class of two: the
+English spelling and one other. A question asked in any of the remaining three
+languages finds only the units that use its own spelling. Assert every pair. A class is
+a clique by design: one wrong edge shouldn't merge two things nobody said
+were the same.
 
 #section("Deriving all five, one worked example each")
 
@@ -868,8 +938,8 @@ writing one directly and having `thread --show` treat it identically.
 #section("Foreign roles: reported, not rejected")
 
 A schema's role table names which roles it *expects*; it is not a fence the
-parser enforces. `Role::parse` accepts any of the twenty-four roles across
-all five schemas, regardless of which schema a given thread declares — so a
+parser enforces. `Role::parse` accepts any of the forty-nine roles across
+all eight schemas, regardless of which schema a given thread declares — so a
 `brief` thread with a step in `coda` (a `narrative` role `brief` never
 lists) parses cleanly, shows cleanly, and passes `check` with zero
 diagnostics:

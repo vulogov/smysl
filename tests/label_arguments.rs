@@ -20,9 +20,12 @@ const STORE: &str = "fixtures/corpus/F1-incident.smy";
 const LABEL: &str = "c/pool-saturation";
 const UID: &str = "b3:cvhirtgs2mpvli2ethhyeo32uf";
 
+/// `--format surface` is on the two rows that emit a document, not on the harness.
+///
+/// It was global here while five of the seven commands below ignored it; H-17 made them refuse
+/// a flag they cannot honour, and their output was already text.
 fn run<S: AsRef<std::ffi::OsStr>>(args: &[S]) -> Output {
     Command::new(BIN)
-        .args(["--format", "surface"])
         .args(args)
         .output()
         .expect("the binary under test must run")
@@ -34,6 +37,8 @@ const COMMANDS: &[&[&str]] = &[
     &["retract", "--dry-run", "{}", STORE],
     &[
         "pack",
+        "--format",
+        "surface",
         "--budget",
         "200",
         "--explain",
@@ -44,7 +49,9 @@ const COMMANDS: &[&[&str]] = &[
     &["view", "--roots", "{}", STORE],
     &["salience", "--explain", "{}", STORE],
     &["salience", "--seed", "{}", STORE],
-    &["thread", "--derive", "brief", "--scope", "{}", STORE],
+    &[
+        "thread", "--format", "surface", "--derive", "brief", "--scope", "{}", STORE,
+    ],
 ];
 
 fn with<'a>(cmd: &[&'a str], unit: &'a str) -> Vec<&'a str> {

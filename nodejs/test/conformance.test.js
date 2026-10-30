@@ -60,16 +60,19 @@ test("§2.2 unit core keys match the table", () => {
   assert.deepEqual(
     [...smysl.UNIT_KEYS.entries()],
     [[0, "schema"], [1, "gist"], [2, "body"], [3, "detail"], [4, "deps"],
-     [5, "grounds"], [6, "status"], [7, "source"], [8, "payload"]],
+     [5, "grounds"], [6, "status"], [7, "source"], [8, "payload"], [9, "lang"]],
   );
 });
 
-test("§2.2/§5 keys at nine and above are unknown and kept", () => {
-  const body = new Map([[0, "claim"], [1, "a gist"], [6, 1], [9, "a later addition"]]);
+// Ten, not nine, since 1.10: `lang` took key 9 (SMYSL-2.3 A-1). The row moved and the rule did
+// not — an implementation still treating 9 as unknown would carry the language as opaque bytes and
+// hash to the same uid, so this integer and the key table's highest row move together.
+test("§2.2/§5 keys at ten and above are unknown and kept", () => {
+  const body = new Map([[0, "claim"], [1, "a gist"], [6, 1], [10, "a later addition"]]);
   const raw = smysl.encodeOne([1, body]);
   const [rec] = smysl.decodeStore(raw);
   assert.deepEqual(rec.reencode(), raw);
-  assert.equal(rec.unitFields().get(9), "a later addition");
+  assert.equal(rec.unitFields().get(10), "a later addition");
 });
 
 test("§2.2 an absent optional is omitted, not null", () => {
@@ -156,7 +159,9 @@ test("§3.1 record type codes match the table", () => {
     [...smysl.RECORD_NAMES.entries()],
     [[1, "unit"], [2, "attestation"], [3, "relation"], [4, "thread"], [5, "view"],
      [6, "contention"], [7, "pack_info"], [8, "schema_decl"], [9, "checkpoint"],
-     [10, "label_binding"], [11, "withdrawal"], [12, "resolution"], [13, "commitment"]],
+     [10, "label_binding"], [11, "withdrawal"], [12, "resolution"], [13, "commitment"],
+     [14, "manifest"], [15, "part_text"], [16, "reserved"], [17, "dating"],
+     [18, "part_reading"], [19, "redaction"]],
   );
 });
 

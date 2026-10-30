@@ -1,0 +1,85 @@
+# GE-T10's fresh gold (SMYSL-2.5 OQ-87, OQ-88): for each question in questions.tsv, each slot
+# its intent fills under `smysl/dossier/2`, and the units of `../gold/corpus.smy` a reader
+# asking that question would want there, by label.
+#
+# WHO WROTE THIS. See questions.tsv: one hand, before set 2 was run on these questions or on
+# `../gold/`'s, to the criteria at the top of `../gold/slots.tsv`, applied unchanged. A unit is
+# gold by what it says whether or not any template can reach it, so a unit that does not name
+# the subject is gold where it belongs, as in `../gold/`. Not changed after a run.
+#
+# Columns as `../gold/slots.tsv`.
+ch-verify2	support	-
+ch-verify2	evidence	ch/outbreak
+ch-verify2	counter	ch/counter
+ch-verify2	reported	-
+ch-verify3	support	-
+ch-verify3	evidence	-
+ch-verify3	counter	ch/counter-named
+ch-verify3	reported	-
+sc-verify2	support	-
+sc-verify2	evidence	sc/anson sc/siege
+sc-verify2	counter	sc/counter-voyage
+sc-verify2	reported	-
+mi-verify2	support	-
+mi-verify2	evidence	-
+mi-verify2	counter	-
+mi-verify2	reported	mi/reported
+se-verify2	support	-
+se-verify2	evidence	-
+se-verify2	counter	-
+se-verify2	reported	-
+sn-verify	support	-
+sn-verify	evidence	sn/workhouse
+sn-verify	counter	-
+sn-verify	reported	-
+li-verify2	support	-
+li-verify2	evidence	li/salisbury
+li-verify2	counter	li/counter-cure
+li-verify2	reported	li/proved
+ls-verify	support	-
+ls-verify	evidence	-
+ls-verify	counter	ls/counter
+ls-verify	reported	-
+ph-verify	support	-
+ph-verify	evidence	ph/counter
+ph-verify	counter	ph/counter ph/contrast
+ph-verify	reported	-
+je-verify	support	-
+je-verify	evidence	je/example
+je-verify	counter	je/counter-named
+je-verify	reported	-
+ch-explain2	cause	ch/cause
+ch-explain2	evidence	ch/outbreak ch/case ch/case-named
+ch-explain2	hypothesis	ch/hyp
+ch-explain2	counter	ch/counter
+ch-explain2	open-question	ch/oq
+sc-explain2	cause	-
+sc-explain2	evidence	-
+sc-explain2	hypothesis	-
+sc-explain2	counter	-
+sc-explain2	open-question	sc/oq
+se-explain	cause	-
+se-explain	evidence	se/clinics
+se-explain	hypothesis	-
+se-explain	counter	se/counter
+se-explain	open-question	-
+li-explain	cause	-
+li-explain	evidence	li/salisbury
+li-explain	hypothesis	-
+li-explain	counter	li/counter-cure
+li-explain	open-question	-
+ph-explain	cause	-
+ph-explain	evidence	ph/counter
+ph-explain	hypothesis	-
+ph-explain	counter	ph/counter ph/counter-named ph/contrast
+ph-explain	open-question	ph/oq
+ls-explain2	cause	-
+ls-explain2	evidence	-
+ls-explain2	hypothesis	-
+ls-explain2	counter	ls/counter
+ls-explain2	open-question	ls/oq
+mi-explain	cause	-
+mi-explain	evidence	mi/stench
+mi-explain	hypothesis	-
+mi-explain	counter	mi/counter mi/counter-named
+mi-explain	open-question	mi/oq

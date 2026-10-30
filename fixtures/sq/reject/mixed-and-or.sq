@@ -1,0 +1,2 @@
+from library
+where kind = claim and lang = en or status >= attested

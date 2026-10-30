@@ -311,3 +311,297 @@ fn an_unrepresentable_budget_is_refused_rather_than_wrapped() {
         ok.stderr.trim()
     );
 }
+
+/// `--format` is honoured or refused, for all twenty-six commands and both values.
+///
+/// H-17. It is global, so every command advertised it; three read it. The other twenty-three
+/// accepted it and wrote whatever they were going to — so `bundle --format surface` put CBOR on
+/// a terminal and `check --format cbor` printed prose to a caller who had asked for bytes. The
+/// flag was documentation of a feature that was not there.
+///
+/// The expectation is written out rather than read from the binary, for the reason
+/// `tests/dispatch.rs` gives at length: a list derived from the subject cannot fail. An empty
+/// list means the command writes no document at all — a report, a store updated in place, or an
+/// artifact with its own `--target`.
+#[test]
+fn every_command_honours_format_or_refuses_it() {
+    // Each row: the command, the forms it can write, and the arguments clap requires. The
+    // arguments matter because clap's own required-argument check runs before `main` is
+    // reached, so a bare `smysl diff --format surface` never gets as far as the refusal.
+    const FORMS: &[(&str, &[&str], &[&str])] = &[
+        ("fmt", &["surface", "cbor"], &[F1]),
+        ("check", &[], &[F1]),
+        ("pack", &["surface", "cbor"], &["--budget", "2000", F1]),
+        ("merge", &["surface", "cbor"], &[F1]),
+        ("diff", &[], &[F1, F3]),
+        ("trace", &[], &[ROOT, F1]),
+        ("view", &[], &["--id", "v/x", "--roots", ROOT, F1]),
+        ("bundle", &["surface", "cbor"], &[F1]),
+        ("thread", &["surface", "cbor"], &["--derive", "brief", F1]),
+        ("salience", &[], &[F1]),
+        ("find", &[], &["pool", F1]),
+        ("retract", &[], &["--dry-run", GROUND, F1]),
+        ("withdraw", &[], &["x", F1]),
+        ("resolve", &[], &["x", F1]),
+        ("review", &[], &[F1]),
+        (
+            "commit",
+            &[],
+            &["--level", "drafted", "--as", "a/x", ROOT, F1],
+        ),
+        ("render", &[], &[F1]),
+        // A store log, which has no surface spelling.
+        ("import", &["cbor"], &["-"]),
+        ("relink", &["cbor"], &[F1]),
+        ("compact", &["cbor"], &[F1]),
+        ("ingest", &[], &["--offline", "-"]),
+        ("attest", &[], &["--offline", F1]),
+        ("providers", &[], &[]),
+        ("usage", &[], &[]),
+        ("reindex", &[], &[F1]),
+        ("ui", &[], &[F1]),
+    ];
+    assert_eq!(FORMS.len(), 26, "one row per command");
+
+    // The refusal happens before the command runs, so an invocation that would fail for want of
+    // arguments still reaches it. That is the point of checking it in one place.
+    //
+    // `pack` since TX-P11 step 5, when the global flag was widened to it for `lib export`
+    // (SMYSL-2.7 §4.4, OQ-62): none of these writes one, so every row refuses it. `lib`'s own
+    // refusals are per action and are `tests/cmd_lib.rs`'s.
+    for (name, forms, args) in FORMS {
+        for form in ["surface", "cbor", "pack"] {
+            let mut argv = vec![*name];
+            argv.extend_from_slice(args);
+            argv.push("--format");
+            argv.push(form);
+            let out = run(&argv);
+            if forms.contains(&form) {
+                // The refusal's own wording, not the flag name: clap's missing-argument
+                // message repeats the whole usage line, `--format` included, for the several
+                // commands here that need an argument this invocation does not supply.
+                assert!(
+                    !out.stderr.contains("is not honoured here")
+                        && !out.stderr.contains("is not available"),
+                    "{name} refuses --format {form}, which it can produce: {}",
+                    out.stderr.trim()
+                );
+            } else {
+                assert_eq!(
+                    out.code,
+                    2,
+                    "{name} --format {form} must be a usage error; stderr: {}",
+                    out.stderr.trim()
+                );
+                assert!(
+                    out.stderr.contains("is not honoured here")
+                        || out.stderr.contains("is not available"),
+                    "{name} --format {form} was refused for some other reason: {}",
+                    out.stderr.trim()
+                );
+            }
+        }
+    }
+}
+
+/// And the honoured values produce the form they name, rather than the other one.
+///
+/// The half of H-17 that a refusal cannot cover: `bundle --format surface` was *accepted* and
+/// wrote CBOR. A surface document starts `@doc`; a CBOR sequence does not.
+#[test]
+fn an_honoured_format_produces_that_form() {
+    let dir = std::env::temp_dir().join(format!("smysl-format-matrix-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+
+    let cases: &[(&str, Vec<&str>)] = &[
+        ("fmt", vec!["fmt", F1]),
+        ("merge", vec!["merge", F1]),
+        ("pack", vec!["pack", "--budget", "2000", F1]),
+        ("bundle", vec!["bundle", F1]),
+        ("thread", vec!["thread", "--derive", "brief", F1]),
+    ];
+    for (name, base) in cases {
+        for form in ["surface", "cbor"] {
+            let dest = dir.join(format!("{name}.{form}"));
+            let mut args = base.clone();
+            args.insert(0, dest.to_str().unwrap());
+            args.insert(0, "-o");
+            args.push("--format");
+            args.push(form);
+            let out = run(&args);
+            let bytes = std::fs::read(&dest).unwrap_or_else(|e| {
+                panic!(
+                    "{name} --format {form} wrote nothing ({e}); exit {}, stderr: {}",
+                    out.code,
+                    out.stderr.trim()
+                )
+            });
+            let is_surface = bytes.starts_with(b"@doc");
+            assert_eq!(
+                is_surface,
+                form == "surface",
+                "{name} --format {form} wrote the other form (first bytes: {:?})",
+                &bytes[..bytes.len().min(8)]
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `fmt --format cbor` converts; `--check` and `--write` format in place. They do not combine.
+#[test]
+fn fmt_refuses_a_conversion_that_pretends_to_be_a_formatting() {
+    for flag in ["--check", "--write"] {
+        let out = run(&["fmt", "--format", "cbor", flag, F1]);
+        assert_eq!(
+            out.code,
+            2,
+            "fmt --format cbor {flag} must be refused; stderr: {}",
+            out.stderr.trim()
+        );
+        assert!(
+            out.stderr.contains("converts a document"),
+            "the refusal must say why: {}",
+            out.stderr.trim()
+        );
+    }
+}
+
+/// `--seed-check` asserts rule D, and the assertion is checked.
+///
+/// H-19. It was declared global, advertised on all twenty-six commands, and read by nothing: a
+/// caller asserting reproducibility had the assertion accepted and never checked, which is the
+/// worst possible shape for a flag whose only job is to be a check.
+///
+/// The table's label is not the answer on its own. `find` is lexical unless asked otherwise, so
+/// a `mixed` command is pure in most of its invocations and refusing all of them would make the
+/// flag useless in the cases it exists for. Each row below is a pair: the same command, once in
+/// an invocation that is reproducible and once in one that is not.
+#[test]
+fn seed_check_allows_a_pure_invocation_and_refuses_the_rest() {
+    // Reproducible: these must behave exactly as without the flag.
+    let allowed: &[(&str, Vec<&str>)] = &[
+        ("check", vec!["check", F1]),
+        ("find lexical", vec!["find", "pool", F1]),
+        (
+            "find --engine lexical",
+            vec!["find", "--engine", "lexical", "pool", F1],
+        ),
+        ("pack", vec!["pack", "--budget", "2000", F1]),
+        // `pack` reads `--engine` only inside its `--query` branch, so an engine with no query
+        // cannot reach an embedding. Asserted, because refusing it would be a false negative
+        // and the kind that trains people to drop the flag.
+        (
+            "pack --engine semantic without --query",
+            vec!["pack", "--budget", "2000", "--engine", "semantic", F1],
+        ),
+        // Derivation consults no model. `thread` was labelled mixed for `--refine`, which does
+        // not exist as a flag, so every invocation of it is pure.
+        ("thread --derive", vec!["thread", "--derive", "brief", F1]),
+    ];
+    for (what, base) in allowed {
+        let plain = run(base);
+        let mut checked = base.clone();
+        checked.push("--seed-check");
+        let out = run(&checked);
+        assert_eq!(
+            out.code,
+            plain.code,
+            "{what}: --seed-check changed the outcome of a reproducible invocation; stderr: {}",
+            out.stderr.trim()
+        );
+        assert!(
+            !out.stderr.contains("--seed-check"),
+            "{what}: a reproducible invocation must not be lectured: {}",
+            out.stderr.trim()
+        );
+    }
+
+    // Not reproducible: refused before anything runs.
+    let refused: &[(&str, Vec<&str>)] = &[
+        (
+            "find --engine semantic",
+            vec!["find", "--engine", "semantic", "pool", F1],
+        ),
+        (
+            "find --engine hybrid",
+            vec!["find", "--engine", "hybrid", "pool", F1],
+        ),
+        (
+            "pack --query --engine semantic",
+            vec![
+                "pack", "--budget", "2000", "--query", "pool", "--engine", "semantic", F1,
+            ],
+        ),
+        ("ingest", vec!["ingest", "--offline", "-"]),
+        ("attest", vec!["attest", "--offline", F1]),
+    ];
+    for (what, base) in refused {
+        let mut checked = base.clone();
+        checked.push("--seed-check");
+        let out = run(&checked);
+        assert_eq!(
+            out.code,
+            2,
+            "{what}: --seed-check must refuse an invocation that is not reproducible; \
+             stderr: {}",
+            out.stderr.trim()
+        );
+        assert!(
+            out.stderr.contains("rule D"),
+            "{what}: the refusal must name the rule it is asserting: {}",
+            out.stderr.trim()
+        );
+        assert!(
+            out.stdout.trim().is_empty(),
+            "{what}: a refused invocation must not also produce output"
+        );
+    }
+}
+
+/// The refusal says which invocations are the impure ones, not just that some are.
+///
+/// `mixed` alone sends a reader to the source. The `impure_when` text H-20 added to the help
+/// line is the same text, so the two cannot drift.
+#[test]
+fn seed_check_names_the_flag_that_broke_reproducibility() {
+    let out = run(&["--seed-check", "find", "--engine", "semantic", "pool", F1]);
+    assert!(
+        out.stderr.contains("--engine semantic|hybrid"),
+        "the refusal must name the impure invocations: {}",
+        out.stderr.trim()
+    );
+    let model = run(&["--seed-check", "ingest", "--offline", "-"]);
+    assert!(
+        model.stderr.contains("model-dependent"),
+        "a model-dependent command has no exception to name: {}",
+        model.stderr.trim()
+    );
+}
+
+/// `thread --derive dossier` is refused before anything runs, and says which command makes one
+/// (SMYSL-2.5 §3.13; TX-P8 step 2). The two schemas step 2 made derivable derive.
+#[test]
+fn a_dossier_cannot_be_derived_and_exposition_and_dialogue_can() {
+    let out = Command::new(env!("CARGO_BIN_EXE_smysl"))
+        .args(["thread", "--derive", "dossier", F1])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("`ask`"), "{err}");
+    assert!(out.stdout.is_empty(), "nothing was derived");
+    for schema in ["exposition", "dialogue"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_smysl"))
+            .args(["thread", "--derive", schema, F1])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the binary runs");
+        assert!(
+            out.status.success(),
+            "{schema}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}

@@ -1,0 +1,40 @@
+# fr — tokens after which a sentence boundary is suppressed. Format: see `en.txt`.
+#
+# `M.` is covered by the initials rule as well, and listed anyway: it is the single most
+# common hold in French prose, and a reader of this file should not have to know the rule
+# exists to believe that "M. Dupont" stays one sentence.
+#
+# Elision (`aujourd'hui`, `l'homme`) touches no boundary and is `analyze.rs`'s business.
+
+# Titles
+M.
+MM.
+Dr.
+Pr.
+Me.
+Mgr.
+Cap.
+Cne.
+St.
+Ste.
+Sts.
+
+# Places
+av.
+bd.
+boul.
+rte.
+
+# Reference
+chap.
+fig.
+tab.
+vol.
+art.
+réf.
+éd.
+p.
+pp.
+cf.
+c.-à-d.
+env.

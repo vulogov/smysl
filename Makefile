@@ -51,8 +51,9 @@ MATRIX := \
 
 .DEFAULT_GOAL := help
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix crate-features gates purity update seed-fuzz fuzz-build \
-        determinism conformance eval live-ollama live-hosted doc fuzz clean sweep \
-        commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions seed-fuzz fuzz-long
+        determinism check-native conformance eval live-ollama live-hosted doc fuzz clean sweep \
+        commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions msrv seed-fuzz fuzz-long \
+        proposition-classes
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -111,12 +112,38 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # not fail loudly either — it turns all twelve crates into "version not found in registry", a
 # red job saying nothing about the API. 0.10.0 and 0.12.0 were never published and never will
 # be; everything in them shipped in the release after.
-BASELINE  := 1.8.0
+BASELINE  := 1.10.0
+# The baseline is taken from **this repository's tag**, not from the registry index, and that
+# is a reproducibility fix rather than a preference. `--baseline-version` resolves the version
+# through `index.crates.io` on every run even when the rustdoc for it is already cached, so a
+# slow or unreachable index makes the gate **panic** — `Operation timed out (os error 60)`,
+# exit 101, inside `rustdoc_gen`, which reads like a broken API rather than a broken network
+# and cost two full sweeps to attribute. `git` objects are local, so `--baseline-rev` cannot
+# fail that way.
+#
+# The two are the same API as long as the tag is what was published, which is what the release
+# procedure makes true, and it was checked crate by crate when this changed: `smysl-core`
+# against 1.9.0 reports 221 pass, 0 fail, 2 warn, 31 skip from either baseline. If a tag were
+# ever moved after a publish the two would diverge, and the tag is the one a reader of this
+# repository can verify.
+BASELINE_REV := v$(BASELINE)
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
-             smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl
+             smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl \
+             smysl-text smysl-query smysl-measure smysl-lib smysl-embed-candle
 
-# The library crates behind the facade: everything published except the facade itself.
-LIBRARIES := $(filter-out smysl,$(PUBLISHED))
+# Crates that exist here but are not on crates.io yet, so `semver` has no baseline to fetch
+# for them and would report "version not found in registry" — a red job saying nothing. They
+# join PUBLISHED at the release that first publishes them.
+#
+# Empty since 1.10.0, which first published `smysl-text`, `smysl-query`, `smysl-measure`,
+# `smysl-lib` and `smysl-embed-candle`.
+UNPUBLISHED :=
+
+# The library crates behind the facade: everything published except the facade itself, plus
+# the ones not published yet. Their *surface* is watched from the first commit — `api-check`
+# needs no registry — because a crate whose public API is unrecorded until its first release
+# is a crate whose API nobody chose.
+LIBRARIES := $(filter-out smysl,$(PUBLISHED)) $(UNPUBLISHED)
 
 # The twenty-six subcommands, for `cli-surface`. Written out rather than read from `--help`,
 # for the same reason `tests/dispatch.rs` writes them out: a list derived from the binary
@@ -124,7 +151,7 @@ LIBRARIES := $(filter-out smysl,$(PUBLISHED))
 # absence as if it were the intent.
 COMMAND_NAMES := fmt check pack merge diff trace view bundle thread salience find retract \
                  withdraw resolve review commit render import relink compact ingest attest providers \
-                 usage reindex ui
+                 usage reindex ui text date same-as link summarise q ask measure assess lib schema migrate
 
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 
@@ -153,15 +180,19 @@ docs: ## Rebuild the PDFs in Documentation/ from their typst sources
 # `#[non_exhaustive]` to a struct shows up only in the second.
 cli-surface: ## Regenerate tests/cli-surface.txt, the recorded CLI argument surface
 	@$(CARGO) build --quiet
+	@# `[possible values: …]` is recorded too, since TX-P2 step 3. Without it the surface was
+	@# blind to an argument's *choices*, and a choice is a capability: `text append` arrived as
+	@# a new value of `<ACTION>` and this file did not move by one line. A removed action would
+	@# have been just as invisible, which is the direction that matters.
 	@{ sed -n '1,/^# Regenerate with/p' tests/cli-surface.txt; \
 	   for c in $(COMMAND_NAMES); do \
 	     ./target/debug/smysl $$c --help 2>&1 \
-	       | grep -oE "^ +(-[a-zA-Z], )?--[a-z0-9-]+|^ +[<[][A-Z.]+[]>]" \
+	       | grep -oE "^ +(-[a-zA-Z], )?--[a-z0-9-]+|^ +[<[][A-Z.]+[]>]|\[possible values: [^]]+\]" \
 	       | sed -E 's/^ +//; s/^-[a-zA-Z], //' \
 	       | while read -r a; do printf '%-10s %s\n' "$$c" "$$a"; done; \
 	   done; } > tests/cli-surface.txt.new
 	@mv tests/cli-surface.txt.new tests/cli-surface.txt
-	@echo "cli-surface: recorded $$(grep -vc '^#' tests/cli-surface.txt) argument(s) across $(words $(COMMAND_NAMES)) commands"
+	@echo "cli-surface: recorded $$(grep -vc '^#' tests/cli-surface.txt) line(s) across $(words $(COMMAND_NAMES)) commands"
 
 api: ## Regenerate the recorded public surfaces, both ends
 	@command -v cargo-public-api >/dev/null || { echo "cargo install cargo-public-api"; exit 1; }
@@ -255,7 +286,7 @@ semver: ## Report API breakage against the last published version
 		case " $(SEMVER_BREAKING) " in \
 			*" $$c "*) continue;; \
 		esac; \
-		$(CARGO) semver-checks check-release --baseline-version $(BASELINE) \
+		$(CARGO) semver-checks check-release --baseline-rev $(BASELINE_REV) \
 			--release-type patch -p $$c; \
 	done
 	@# Reported, not gated. Until 0.13 these were `continue`d with a one-line SKIP, which
@@ -268,7 +299,7 @@ semver: ## Report API breakage against the last published version
 		echo "=== deliberate breaks this cycle: reported, not gated on ==="; \
 		for c in $(SEMVER_BREAKING); do \
 			echo; echo "--- $$c"; \
-			$(CARGO) semver-checks check-release --baseline-version $(BASELINE) \
+			$(CARGO) semver-checks check-release --baseline-rev $(BASELINE_REV) \
 				--release-type patch -p $$c 2>&1 \
 				| grep -E '^--- failure|Summary semver' || true; \
 		done; \
@@ -291,7 +322,7 @@ test-matrix: ## Every feature combination CI builds
 		RUSTFLAGS="-D warnings" $(CARGO) test --workspace $$args; \
 	done
 
-FEATURED := smysl-provider smysl-ingest smysl-render smysl-pack
+FEATURED := smysl-graph smysl-provider smysl-ingest smysl-render smysl-pack smysl-text
 
 crate-features: ## Each crate with features, alone, at its defaults and with none
 	@set -e; for c in $(FEATURED); do \
@@ -300,12 +331,69 @@ crate-features: ## Each crate with features, alone, at its defaults and with non
 			RUSTFLAGS="-D warnings" $(CARGO) test -p $$c $$args; \
 		done; \
 	done
+	@# One reader at a time. `--all-features` cannot catch a module whose `cfg` list is
+	@# missing a feature that uses it: `reader-md` and `reader-json` alone failed to compile
+	@# because the shared row builder's list named three of the five readers that use it.
+	@#
+	@# It happened again in TX-P2 step 2, which is the argument for this loop existing. The
+	@# three chat readers share `readers/chat.rs`, and every reader alone failed: `md` on a
+	@# builder method only a chat reader calls, `slack` on the calendar arithmetic only the two
+	@# timestamp-parsing readers use, `whatsapp` on the CBOR helper only the two JSON readers
+	@# use. Nine builds, nine chances for a `cfg` list to be one feature short.
+	@set -e; for r in txt md usfm osis zefania json telegram slack whatsapp; do \
+		echo "==> cargo test -p smysl-text --no-default-features --features reader-$$r"; \
+		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-text --no-default-features --features reader-$$r; \
+	done
+	@# And the features of `smysl-text` that are not readers, for the same reason: each arrived
+	@# because of what it drags in (`lingua`'s 57 crates behind `detect`, `serde` behind `stem`,
+	@# `redb` behind `substrate-redb`), so each is a combination a developer will rarely build
+	@# by hand and a `cfg` list will happily get wrong. `substrate-redb` alone is the sharpest of
+	@# the three: its module is the only one here that is entirely behind a feature, so a `use`
+	@# it needs from a sibling module would compile at `--all-features` and nowhere else.
+	@set -e; for f in detect stem substrate-redb; do \
+		echo "==> cargo test -p smysl-text --no-default-features --features $$f"; \
+		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-text --no-default-features --features $$f; \
+	done
+	@# `smysl-graph`'s `store-redb` alone (SMYSL-2.8 §4.5): the unit store is the only module of
+	@# that crate behind a feature, which is the shape the `substrate-redb` note above is about.
+	@echo "==> cargo test -p smysl-graph --features store-redb"
+	@RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-graph --features store-redb
+	@# `smysl-ingest`'s `text`, without `model`. The same argument as `substrate-redb` above,
+	@# and the same shape: `src/text/` is entirely behind a feature, so a `use` it needs from a
+	@# sibling module compiles at `--all-features` and nowhere else. Without `model` as well as
+	@# with it, because windowing and span attachment call no provider — a build that gained a
+	@# dependency on `Ingestor` would be a design change, and this is where it would be caught.
+	@set -e; for f in "text" "text,model"; do \
+		echo "==> cargo test -p smysl-ingest --no-default-features --features $$f"; \
+		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-ingest --no-default-features --features $$f; \
+	done
 	@# One mapper at a time: `--features gemini` alone warned on an unused `bearer`, and
 	@# `ingest` alone on an unused `Emitter`, while every multi-mapper row was clean.
 	@set -e; for m in ollama anthropic openai gemini deepseek; do \
 		echo "==> cargo test -p smysl-provider --features $$m"; \
 		RUSTFLAGS="-D warnings" $(CARGO) test -p smysl-provider --features $$m; \
 	done
+	@# No C toolchain in the CLI's tree (SMYSL-2.4 §4.5, TX-P1's exit). Draft 3 §18 *cited*
+	@# research builds finding no `cc` for the readers and the substrate; a citation is not a
+	@# check, and the day a reader dependency grows a build script is the day a `cargo install`
+	@# starts needing a compiler on machines that have never had one.
+	@#
+	@# The exit code cannot carry this. `cargo tree -i` on a package that is not in the tree
+	@# prints "nothing to print" and exits **0** — so a test on the status alone reports a C
+	@# toolchain that is not there, which is how this was first written. The output is what
+	@# says, and the run has to have succeeded, or a `cargo tree` that failed for some other
+	@# reason would print no `cc` line and pass. The pattern was checked in the direction that
+	@# matters by running it against a package that *is* in the tree (`-i memchr` prints
+	@# `memchr v2.8.3` as its first line and matches), because a grep that never matches
+	@# anything is indistinguishable from a clean tree.
+	@set -e; out=$$($(CARGO) tree -e normal -i cc --no-default-features --features cli 2>&1) || { \
+		echo "crate-features: cargo tree failed:"; echo "$$out"; exit 1; }; \
+	if echo "$$out" | grep -qE '^cc v'; then \
+		echo "crate-features: a C toolchain is in the cli tree:"; \
+		echo "$$out"; \
+		exit 1; \
+	fi; \
+	echo "crate-features: no cc in the cli tree"
 
 purity: ## Rules A and B: the library stays synchronous and offline
 	$(CARGO) xtask check-purity
@@ -313,8 +401,11 @@ purity: ## Rules A and B: the library stays synchronous and offline
 determinism: ## Rule D: pure operations are bit-reproducible
 	$(CARGO) xtask determinism
 
-gates: purity determinism ## Both xtask gates
-	@echo "gates: purity and determinism clean"
+check-native: ## No -sys crate and no cc but blake3's, in each offered feature set
+	$(CARGO) xtask check-native
+
+gates: purity determinism check-native ## The three xtask gates
+	@echo "gates: purity, determinism and check-native clean"
 
 doc-cargo: ## Replay the manual's `cargo` transcripts and check its feature table
 	@# The blocks `doc-output` cannot reach. It replays `smysl` commands; these are a
@@ -329,6 +420,20 @@ doc-cargo: ## Replay the manual's `cargo` transcripts and check its feature tabl
 
 dep-versions: ## Fail if an internal crate requirement is behind the workspace version
 	python3 scripts/verify-dep-versions.py
+
+msrv: ## Fail if a crate's declared rust-version is not the one its dependencies require
+	@# `rust-version = "1.79"` stood for eleven releases, was false in every selection, and
+	@# nothing tested it. The pure core could not be built at 1.79 at all: `blake3` pulls
+	@# `constant_time_eq` 0.4.2, whose manifest is edition 2024, so a 1.79 Cargo cannot parse
+	@# it. An untested MSRV is a decoration, not a promise.
+	python3 scripts/verify-msrv.py
+
+proposition-classes: ## Check fixtures/proposition/classes.json against the Python reference
+	@# TX-P2 step 5's exit, and the half a Rust test cannot have: A-12.4 is normative, so what
+	@# has to be true is that **two** implementations count the same classes. The Rust side
+	@# writes the store and reads this file; the Python reference writes this file and reads the
+	@# store. Either alone would be one implementation agreeing with itself.
+	python3 scripts/gen-proposition-classes.py
 
 spec-tables: ## Fail if the format's constants and the document that defines them disagree
 	@# The gate 1.2.0 needed and did not have. Four facts a C-Produce implementer cannot
@@ -397,11 +502,24 @@ live-hosted: ## Live ingest gate against whichever hosted providers have keys se
 	SMYSL_INGEST_LIVE=1 $(CARGO) test -p smysl-ingest --features gemini,deepseek,openai,anthropic \
 		--test providers_live -- --nocapture --test-threads=1
 
-# The two parser targets, plus three that fuzz the *algebra*: rule U's join-semilattice
-# laws, pack's constraints C1-C7, and rule L with guarantee A1 across the pipeline. The
+# The parser targets, plus the ones that fuzz the *algebra*: rule U's join-semilattice laws,
+# pack's constraints C1-C7, rule L with guarantee A1 across the pipeline, and rule Z's
+# redaction set, rule E's effective time, and EDTF's one-spelling-per-value property. The
 # properties are the ones the seeded tests already assert; what changes is that coverage
 # feedback drives the search instead of a fixed seed and 200 blind rounds.
-FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact
+#
+# **`readers` was missing from this list until TX-P2 step 4**, which is why it is worth a line:
+# the target has existed since TX-P1 step 3, `make fuzz-build` compiled it, `make seed-fuzz`
+# seeds it, and `make fuzz` never ran it. A target nothing runs is the same defect as a gate
+# nothing runs, found the same way — by reading the list rather than by a failure.
+#
+# `sq_parse` was added with the list in front of me, for the same reason. It is the one target
+# whose corpus the repo can seed exactly: `fixtures/sq` holds the accept and reject cases as
+# the text a person would type, so the fuzzer starts from every form the grammar has rather
+# than from the minutes a cold run spends discovering that `find` is a word.
+FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact readers \
+                redaction_merge edtf time_engine sq_parse lib_roundtrip lib_import lens_laws \
+                store_union
 
 # Seeds, not a corpus. The repo already holds inputs worth starting from — the corpus
 # fixtures are real `.smy` documents, and `fuzz/artifacts/` holds every input that has ever
@@ -434,7 +552,26 @@ seed-fuzz: ## Copy the repo's own inputs into each fuzz corpus
 		cp -f fuzz/artifacts/$$t/* fuzz/corpus/$$t/ 2>/dev/null || true; \
 	done; \
 	mkdir -p fuzz/corpus/surface; cp -f fixtures/corpus/*.smy fuzz/corpus/surface/ 2>/dev/null || true
-	@echo "seeded from fixtures/corpus and fuzz/artifacts"
+	@# The readers target's first byte picks the reader, so a fixture cannot be copied in as
+	@# it stands: it would always be read by whichever reader byte zero happens to name. Each
+	@# one goes in once per choice byte instead. Without this the `slack/1` arm is effectively
+	@# unreachable — random bytes are not a zip, so the target would be refused at the magic
+	@# on every execution and the archive path would never run.
+	@set -e; mkdir -p fuzz/corpus/readers; 	for f in fixtures/library/readers/*; do 		case "$$f" in *.expected|*README*) continue;; esac; 		for i in 0 1 2 3 4 5 6 7; do 			printf "$$(printf '\\%03o' $$i)" > fuzz/corpus/readers/$$i-$$(basename $$f); 			cat "$$f" >> fuzz/corpus/readers/$$i-$$(basename $$f); 		done; 	done
+	@# The query fixtures go in as they stand: `sq_parse` takes the whole input as query text,
+	@# so an accept case is a valid seed and a reject case is a seed one mutation away from
+	@# valid, which is where the interesting inputs are.
+	@set -e; mkdir -p fuzz/corpus/sq_parse; \
+		for f in fixtures/sq/accept/*.sq fixtures/sq/reject/*.sq; do \
+			cp -f "$$f" fuzz/corpus/sq_parse/ 2>/dev/null || true; \
+		done
+	@# `lib_import` takes a file as `lib import` does, so the corpus fixtures and the wire
+	@# fixtures are its seeds, surface and CBOR both (TX-P11 step 11).
+	@mkdir -p fuzz/corpus/lib_import; cp -f fixtures/corpus/*.smy fixtures/wire/*.cbor fuzz/corpus/lib_import/ 2>/dev/null || true
+	@# `lens_laws` reads an input that decodes as records as records, so the FC-9 fixtures
+	@# are seeds as they stand: every op tag, a widening, an unknown op and an opaque key 5.
+	@mkdir -p fuzz/corpus/lens_laws; cp -f fixtures/schema/fc9/*.cbor fuzz/corpus/lens_laws/ 2>/dev/null || true
+	@echo "seeded from fixtures/corpus, fixtures/library/readers, fixtures/sq, fixtures/schema/fc9 and fuzz/artifacts"
 
 fuzz: seed-fuzz ## Fuzz every target for 60s each, as CI does (nightly)
 	@echo "The parser targets existed from the start and nothing ran them, which is how two"
@@ -471,7 +608,7 @@ commit: ## Commit with aic and push
 # Everything
 # ---------------------------------------------------------------------------
 
-ci: lint doc-gate api-check test-matrix crate-features gates conformance fuzz-build doc-cargo spec-tables dep-versions ## Everything CI runs, bar the jobs needing a server
+ci: lint doc-gate api-check test-matrix crate-features gates conformance fuzz-build doc-cargo spec-tables dep-versions msrv proposition-classes ## Everything CI runs, bar the jobs needing a server
 	@echo
 	@echo "ci: green."
 	@echo "Not covered here: the ollama job (needs a running server - see make live-ollama)"

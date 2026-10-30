@@ -12,12 +12,24 @@
 //! bypass before it reached a store.
 
 use smysl_core::diag::{Code, Diagnostic, Report};
-use smysl_core::{tokens, GranularityProfile, Uid, UnitCore};
-use smysl_graph::Store;
+use smysl_core::{GranularityProfile, ProfileEstimator, Uid, UnitCore};
+use smysl_graph::StoreRead;
 
-pub fn run(store: &Store, granularity: &GranularityProfile, report: &mut Report) {
+pub fn run(
+    store: &(impl StoreRead + ?Sized),
+    granularity: &GranularityProfile,
+    report: &mut Report,
+) {
     for (uid, unit) in store.units() {
         check_unit(uid, &unit.core, granularity, report);
+    }
+}
+
+/// The id a profile named that this build cannot parse.
+fn unknown_id(g: &GranularityProfile) -> &str {
+    match &g.estimator {
+        ProfileEstimator::Unknown(s) => s.as_str(),
+        _ => "?",
     }
 }
 
@@ -27,17 +39,37 @@ pub fn check_unit(
     granularity: &GranularityProfile,
     report: &mut Report,
 ) {
-    // `SMY-E022` - the gist bound is per-profile, so only this pass can see it.
-    let gist_tokens = tokens(&core.gist);
-    if !granularity.gist_within_bound(gist_tokens) {
-        report.push(
-            Diagnostic::on(Code::E022, *uid)
+    // `SMY-E022` - the gist bound is per-profile, so only this pass can see it. The count is
+    // the profile's own (F-2): a bound and the number it is compared against have to come from
+    // one estimator, or the comparison means nothing.
+    match granularity.tokens(&core.gist) {
+        Some(gist_tokens) if !granularity.gist_within_bound(gist_tokens) => {
+            report.push(
+                Diagnostic::on(Code::E022, *uid)
+                    .with_message(format!(
+                        "gist is {gist_tokens} tokens under {}, {} allows {}",
+                        granularity
+                            .estimator
+                            .estimator()
+                            .map(|e| e.id())
+                            .unwrap_or("an unknown estimator"),
+                        granularity.profile,
+                        granularity.l0_max
+                    ))
+                    .with_suggestion("move the detail into `body` and shorten the gist"),
+            );
+        }
+        Some(_) => {}
+        // `SMY-W025` - unevaluable, not passed and not breached.
+        None => report.push(
+            Diagnostic::on(Code::W025, *uid)
                 .with_message(format!(
-                    "gist is {gist_tokens} tokens, {} allows {}",
-                    granularity.profile, granularity.l0_max
+                    "{} counts with `{}`, which this build does not have, so l0_max is unevaluable",
+                    granularity.profile,
+                    unknown_id(granularity)
                 ))
-                .with_suggestion("move the detail into `body` and shorten the gist"),
-        );
+                .with_suggestion("check with a build that has it, or `check --estimator <id>`"),
+        ),
     }
 
     // Defence in depth: the constructor guarantees each of these, so a hit here means a
@@ -72,6 +104,7 @@ pub fn check_unit(
 mod tests {
     use super::*;
     use smysl_core::{KernelType, Record, SourceKind, SourceRef, Status, UnitCoreBuilder};
+    use smysl_graph::Store;
 
     fn check(core: UnitCore, g: &GranularityProfile) -> Report {
         let store = Store::from_records(vec![Record::Unit(core)]);
@@ -124,14 +157,14 @@ mod tests {
     fn the_gist_bound_is_measured_in_estimator_tokens() {
         // 120 bytes -> 30 tokens, exactly at the bound.
         let at_bound = "x".repeat(120);
-        assert_eq!(tokens(&at_bound), 30);
+        assert_eq!(smysl_core::tokens(&at_bound), 30);
         let core = UnitCoreBuilder::new(KernelType::Claim, at_bound, Status::Speculative)
             .build()
             .unwrap();
         assert!(check(core, &GranularityProfile::standard()).is_empty());
 
         let over = "x".repeat(124);
-        assert_eq!(tokens(&over), 31);
+        assert_eq!(smysl_core::tokens(&over), 31);
         let core = UnitCoreBuilder::new(KernelType::Claim, over, Status::Speculative)
             .build()
             .unwrap();

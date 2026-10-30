@@ -15,6 +15,18 @@ repository.workspace   = true
 [package.metadata.docs.rs]
 all-features = true
 
+[features]
+# The unit store on disk (SMYSL-2.8 §3.5, TX-P13b). Off by default, for the reason
+# `smysl-text`'s `substrate-redb` is: a default build of the pure tier links no database, and
+# what it buys — cores paged rather than resident — shows up only on a store large enough for
+# a kilobyte a unit to matter.
+#
+# The same pin as `substrate-redb`, through the workspace entry, so one redb version writes
+# both files. It does not move the floor: redb 2.6.4 declares 1.85, this crate's own. SMYSL-2.8
+# §4.5 named redb 4, whose 1.90 would have raised every crate that depends on this one.
+store-redb = ["dep:redb"]
+
 [dependencies]
 smysl-core = { workspace = true }
+redb       = { workspace = true, optional = true }
 

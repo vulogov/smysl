@@ -258,7 +258,13 @@ being true.
   machine. There are exactly three: `ingest`, `attest`, and `thread --refine`
   (the one flag on `thread` that touches a model — plain `thread` does not).
   Every other command in `smysl` is a pure function of its inputs: same
-  bytes in, same bytes out, on any machine, forever.
+  bytes in, same bytes out, on any machine, forever — with one exception that
+  is about determinism rather than egress. `find --engine semantic` and
+  `pack --query --engine semantic` read an embedding model from disk, which
+  sends nothing anywhere and is still not bit-reproducible: the model is a file
+  outside the store, and float kernels are not promised identical across
+  platforms. Both are classified *mixed* for that reason, and `--seed-check`
+  refuses those invocations while allowing the lexical default.
 
   This is a statement about *permission*, and the distinction matters when you
   audit a build. `--refine` is not wired in this version, so only two commands
@@ -608,7 +614,7 @@ the provider it named is actually *there*. Dropping `--dry-run` does:
 #screen(caption: "$ smysl ingest --rung document note.txt")[
 ```
 smysl ingest: warning: SMY-W304: span degraded to opaque prose after provider unreachable (at b3:olmqbgjpyhetxghtootiil6nmr)
-smysl ingest: 1 chunk(s), 0 call(s), 1 unit(s), 1 degraded, 0 token(s)
+smysl ingest: 1 chunk(s), 0 call(s), 1 unit(s), 0 weakened, 1 degraded, 0 repaired, 0 token(s)
 1 unit(s) staged in ./.smysl/staged.smy; review, then `smysl merge --staged`
 ```
 ]
@@ -803,6 +809,123 @@ in the same answer grounded on it — and the rest are staged as the model wrote
 them. A model cannot count tokens the way the estimator does, so a gist a few
 tokens over can survive every repair turn; before 1.3 it took its whole chunk
 with it.
+
+#section("--text: ingesting a library expression instead of a document")
+
+A document is a file you hand to `ingest`. An **expression** is something a
+library already holds — a Bible, a chat export, an incident log — read into
+parts, with a *reading* that says where its verses, messages or lines are.
+`ingest --text <alias>` takes the second kind, and the difference is not the
+input: it is that the reading gives the tool somewhere to put a span.
+
+#screen(caption: "$ smysl ingest --text incident --store ./lib --dry-run --single-pass")[
+```
+provider     ollama
+egress       no - local
+expression   incident
+window-level line
+passes       1 per window
+digest       512 token(s) per window
+rung         document (ceiling cited)
+max output   2048 token(s) per call
+```
+]
+
+Five things in that block are the whole of what `--text` adds.
+
+A **window** is a whole number of nodes, filled to what the provider's context
+window leaves for input, never splitting one — a node is what a locator names
+and what a span is attached inside, so half a verse would be a passage with
+nowhere to anchor what was said about it. `--window-level` picks the level;
+left alone it takes the reading's *leaves*, which is the finest division the
+reading offers, and says so.
+
+Each window after the first opens with the last node the one before it owned,
+so a claim that straddles a boundary is visible whole to one call. The window
+*before* it still owns that node: the owned ranges, concatenated, are every
+node exactly once, which is what keeps a boundary claim from being attached
+twice.
+
+The model is asked for a **quote**, never for a span. A quote can be checked
+against the text that was shown — that is what `SMY-E307` and `SMY-W308` have
+always done — and the span is computed from it afterwards, by searching the
+node the answer named, then that node's part, then the window's other parts,
+then the overlap. The hint only narrows: an answer naming a node it did not
+read loses nothing an answer naming none would have had. Where the same quote
+occurs twice inside the node named, the earliest is taken and `SMY-W419` says
+the choice was arbitrary — Psalm 136 ends twenty-six verses the same way, and
+that is the case the code is for. A quote the window does not support after
+repair gets *no span*, its status capped at `inferred` where it has grounds
+and `speculative` where it has none, and `SMY-W441` reports it. The quote
+itself stays on that unit, because then it is the only evidence of what was
+claimed; a unit that *did* get a span loses the quote, since the span is
+better and both sit inside the uid.
+
+The **ledger digest** is what stops each window being extracted as though the
+expression began there. Records already extracted from this expression are
+listed `label: gist` inside a second fence, and those labels are the only
+names from outside the batch an answer may use: anything else that happens to
+resolve in the store is `SMY-E442`. `--digest-budget 0` sends no digest, which
+leaves no outside name usable: the check is then at its strictest, not off.
+
+**Dates, speakers, languages, spans and sources are the tool's.** A text
+answer that supplies one has it dropped with `SMY-W444` — the reading knows
+when a message was sent and which bytes a claim came from, so a model's
+version of either is not a second opinion but noise inside an identity. The
+same rule writes `text:mode` and `text:holder` from the structure rather than
+asking for them: S0 measured reported speech extracted *as asserted* in 11.1
+to 24.5% of attribution-bearing units, and the arm that added a paragraph
+about it to the prompt did no better.
+
+Finally, `--text` **commits as it goes**, which is why it needs `--yes`. Each
+window's batch is committed and then journalled, in that order, under a key
+naming the expression, the part, the window's own byte range and the recipe. A
+second run makes no call at all; a run killed in the middle re-sends at most
+the window it was in — and never records a window as done that no store holds,
+which is the failure the ordering rules out. `--reextract` ignores the journal
+for one expression, and because the same answers produce the same uids, a
+re-extraction that changed nothing grows the corpus by nothing.
+
+#section("--cost: what the extraction actually cost")
+
+The journal records more than which windows are done. Each entry carries the
+window's own token counts, the calls it took, how many of those were repair
+turns, and the language of the expression — so what a corpus cost is a
+*measurement* you can read back, rather than a planning figure somebody chose.
+
+#screen(caption: "$ smysl ingest --text kjv --store ./lib --cost")[
+```
+expression   kjv
+en           1189 window(s), 2502 call(s), 124 repair turn(s)
+             retry rate 0.052 (repairs per first attempt)
+             tokens 1874300 in, 503100 out; per window 1576.4 in, 423.1 out
+             quotes 3421 present, 112 loose, 54 absent (95.4% supported)
+*            1189 window(s), 2502 call(s), 124 repair turn(s)
+             ...
+```
+]
+
+It needs no provider, no network and no `--yes`: it reads a file and prints
+arithmetic. The figures are grouped **per language** and never averaged into
+one, and that is not tidiness. The same material in Russian cost 3.38 times
+the English in the measurements this design was re-planned against, and
+almost all of the gap was the repair loop rather than tokenization — so a
+corpus sized on a single blended rate under-prices every window in the
+language that needed the repairs.
+
+The retry rate is repairs per *first attempt*, not per call, because that is
+the shape the cost model uses: the cost of a window is its base cost times
+`(1 + r)`. One caution comes with it. The token figures above already contain
+the repair turns that happened, so multiplying them by `(1 + r)` as well
+charges the repairs twice. Project from the measured tokens, or from an
+estimate with `(1 + r)` applied — never both.
+
+#callout(label: "Note")[
+  A window extracted by a build older than 1.10.0's text ingest recorded the
+  *run's* running token total rather than its own. Those entries still open,
+  and the report counts them and leaves them out of the sums rather than
+  adding two different measurements together; it says how many it set aside.
+]
 
 #whatsnext[
   A staged batch is just a store that happens to live at

@@ -151,6 +151,10 @@ pub struct Profile {
     pub lod: LodPlan,
     pub show: Show,
     pub connectives: Connectives,
+    /// A section heading per role (TX-P8 step 3). A role with none is headed by its own name,
+    /// which is what every role was headed by before, so a profile written before the roles
+    /// it does not mention existed renders exactly as it did.
+    pub headings: BTreeMap<Role, String>,
     /// The resolved rendering of each status. Rule V1: total over [`Status::ALL`], and
     /// pairwise distinct.
     markers: BTreeMap<Status, String>,
@@ -257,6 +261,18 @@ impl Profile {
             }
         }
 
+        if let Some(o) = obj.get("headings").and_then(|v| v.value.as_object()) {
+            for (k, v) in o.iter() {
+                let role =
+                    Role::parse(&k.value).ok_or_else(|| unknown("headings", &k.value, &p.name))?;
+                let text = v.value.as_str().unwrap_or_default().trim();
+                if text.is_empty() {
+                    return Err(unknown("headings", &k.value, &p.name));
+                }
+                p.headings.insert(role, text.to_string());
+            }
+        }
+
         p.markers = default_markers(p.show.status);
         if let Some(o) = obj.get("markers").and_then(|v| v.value.as_object()) {
             override_markers(&mut p.markers, o, &p.name)?;
@@ -300,6 +316,14 @@ impl Profile {
             .unwrap_or_default()
     }
 
+    /// The heading a section of `role` is given: the profile's, else the role's own name.
+    pub fn heading(&self, role: Role) -> String {
+        self.headings
+            .get(&role)
+            .cloned()
+            .unwrap_or_else(|| role.to_string())
+    }
+
     /// A built-in profile by name.
     pub fn builtin(name: &str) -> Option<Profile> {
         let src = BUILTIN.iter().find(|(n, _)| *n == name)?.1;
@@ -326,6 +350,7 @@ impl Profile {
             },
             show: Show::default(),
             connectives: Connectives::FromRelations,
+            headings: default_headings(),
             markers: default_markers(StatusDisplay::InlineMarker),
         }
     }
@@ -413,6 +438,45 @@ fn override_markers(
 
 /// The built-in profiles. Two of them are the RFC's own worked example (Appendix G): the
 /// same graph read as an executive brief and as an analyst's trace.
+/// Headings for the roles TX-P8 gave the three new schemas, codes 24 to 48 (SMYSL-2.3 A-8.2).
+///
+/// Only those. A role that existed before them is headed by its name in every artifact rendered
+/// so far, and a default that renamed `question` to "Question" would change every `qa` render
+/// to say something it did not say yesterday. A profile that wants the older roles headed
+/// differently says so in `headings`.
+fn default_headings() -> BTreeMap<Role, String> {
+    [
+        (Role::Introduces, "Introduction"),
+        (Role::Develops, "Development"),
+        (Role::Exemplifies, "Examples"),
+        (Role::Concedes, "Concessions"),
+        (Role::Concludes, "Conclusion"),
+        (Role::Utterance, "Said"),
+        (Role::Reply, "Replies"),
+        (Role::Uptake, "Taken up"),
+        (Role::Reversal, "Reversals"),
+        (Role::Definition, "Definition"),
+        (Role::Introduction, "First appearance"),
+        (Role::Characteristic, "Characteristics"),
+        (Role::Counter, "Counter-evidence"),
+        (Role::Reported, "Reported"),
+        (Role::Contrast, "Contrasts"),
+        (Role::OpenQuestion, "Open questions"),
+        (Role::Related, "Related"),
+        (Role::Cause, "Causes"),
+        (Role::Hypothesis, "Hypotheses"),
+        (Role::Holder, "Who holds it"),
+        (Role::Stance, "Stances"),
+        (Role::Revision, "Revisions"),
+        (Role::Location, "Where it appears"),
+        (Role::Dependent, "What depends on it"),
+        (Role::Gap, "Gaps"),
+    ]
+    .into_iter()
+    .map(|(r, h)| (r, h.to_string()))
+    .collect()
+}
+
 static BUILTIN: &[(&str, &str)] = &[
     (
         "plain",

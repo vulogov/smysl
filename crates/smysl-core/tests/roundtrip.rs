@@ -8,12 +8,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::cbor::envelope::unit_core_bytes;
 use smysl_core::{
-    canonical_uid, from_cbor, from_cbor_seq, to_cbor, to_cbor_seq, AgentId, Attestation,
+    canonical_uid, from_cbor, from_cbor_seq, to_cbor, to_cbor_seq, Admission, AgentId, Attestation,
     Contention, ContentionId, ContentionStatus, Date, Detected, DetectionKind, DropReason,
-    GranularityProfile, Hlc, KernelType, LangTag, Lod, Op, Optimality, PackInfo, PackMode, Record,
-    RelKind, Relation, Resolution, ResolutionTarget, Role, Rung, SchemaDecl, SchemaId, SourceKind,
-    SourceRef, Status, Step, Thread, ThreadId, ThreadSchema, Uid, UnitCore, UnitCoreBuilder, View,
-    ViewId, Withdrawal,
+    GranularityProfile, Hlc, KernelType, LangTag, Lod, Op, Optimality, PackInfo, PackMode,
+    ProfileEstimator, Record, RelKind, Relation, Resolution, ResolutionTarget, Role, Rung,
+    SchemaDecl, SchemaId, SourceKind, SourceRef, Status, Step, Thread, ThreadId, ThreadSchema,
+    TokenEstimator, Uid, UnitCore, UnitCoreBuilder, View, ViewId, Withdrawal,
 };
 
 fn uid(n: u8) -> Uid {
@@ -704,4 +704,302 @@ fn an_unknown_key_survives_in_relation_withdrawal_and_resolution_bodies() {
             record.type_name()
         );
     }
+}
+
+/// A granularity key this build does not know survives a round trip.
+///
+/// §8.1 permits a new key in any record body above that record's highest, and obliges an older
+/// reader to round-trip it byte for byte. The `granularity` sub-map was the one place that was
+/// not true: `dec_granularity` collected unknown keys into a local and dropped it, so a view
+/// carrying one re-encoded shorter. Not an identity hazard — a view is not inside a uid — but a
+/// plain C-Read failure, and two peers disagreeing about whether to keep a key compute different
+/// record-set digests for the same store.
+#[test]
+fn an_unknown_granularity_key_survives_the_round_trip() {
+    let mut v = View::new(ViewId::new("v/g").unwrap(), "test");
+    v.granularity.extra.insert(9, vec![0x18, 0x2a]); // key 9: the CBOR uint 42
+
+    let before = to_cbor(&Record::View(v.clone()));
+    let back = match from_cbor_seq(&before).unwrap().0.pop().unwrap() {
+        Record::View(v) => v,
+        other => panic!("expected a view, got {other:?}"),
+    };
+
+    assert_eq!(
+        back.granularity.extra.get(&9),
+        Some(&vec![0x18, 0x2a]),
+        "the unknown key must be kept"
+    );
+    assert_eq!(
+        to_cbor(&Record::View(back)),
+        before,
+        "and re-encode to the same bytes"
+    );
+}
+
+/// An unknown source kind keeps its code, and therefore keeps the unit's uid.
+///
+/// `SourceKind` is the only enumeration opened in 1.9 that sits inside the uid preimage, so it
+/// is the only one where normalising an unrecognised code to 255 would be an identity change
+/// rather than a cosmetic one. A-8.1 permits an implementation to "use 255 internally to
+/// represent unknown"; for `source.kind` that permission is a silent uid change, which is why
+/// the raw code is carried on `SourceRef` and written back verbatim.
+#[test]
+fn an_unknown_source_kind_keeps_its_code_and_the_uid() {
+    // A unit whose source kind is 9: legal CBOR, a kind this build cannot name.
+    let known = UnitCoreBuilder::new(
+        KernelType::Claim,
+        "a claim from somewhere new",
+        Status::Cited,
+    )
+    .source(SourceRef::new(SourceKind::Doc, "x://y"))
+    .build()
+    .unwrap();
+    let mut bytes = unit_core_bytes(&known);
+    // Rewrite the source kind byte from 4 (doc) to 9 (unknown to this build).
+    let at = bytes
+        .windows(2)
+        .position(|w| w == [0x00, 0x04])
+        .expect("the source kind is encoded as key 0, value 4");
+    bytes[at + 1] = 0x09;
+
+    // Frame it as §3.1 frames a record: [type_code, body].
+    let mut framed = vec![0x82, 0x01];
+    framed.extend_from_slice(&bytes);
+    let (rec, _) = from_cbor(&framed).expect("an unknown kind must decode");
+    let u = match rec {
+        Record::Unit(u) => u,
+        other => panic!("expected a unit, got {other:?}"),
+    };
+    let s = u.source.as_ref().expect("the unit has a source");
+    assert_eq!(s.kind, SourceKind::Unknown, "the kind is unknown");
+    assert_eq!(s.kind_code(), 9, "and the raw code is kept");
+
+    assert_eq!(
+        unit_core_bytes(&u),
+        bytes,
+        "re-encoding must reproduce the bytes exactly, or the uid moves"
+    );
+    // And the code is load-bearing: a build that normalised it to 255 — which A-8.1 permits
+    // for the other four enumerations — would produce a different unit.
+    let mut normalised = bytes.clone();
+    normalised[at + 1] = 0xff;
+    assert_ne!(
+        normalised, bytes,
+        "normalising the code to 255 changes the core bytes, and so the uid"
+    );
+}
+
+/// An unknown thread schema, role and detection kind all survive a round trip.
+///
+/// None of these three is inside a uid, so an unrecognised code here is not an identity hazard
+/// the way `source.kind` is. It is still a §8.1 failure — a record carrying an addition must
+/// round-trip byte for byte — and under the record-set digest a changed byte is a changed store,
+/// so two peers disagreeing about whether to keep a code would never converge.
+#[test]
+fn unknown_schema_role_and_detection_codes_survive() {
+    // A thread whose schema is 9: unknown to this build. It was 7 until TX-P8 step 2 assigned
+    // 7 to `dialogue` (SMYSL-2.3 A-8.2); 9 is beyond A-8.2's table.
+    let th = Thread::new(
+        ThreadId::new("t/x").unwrap(),
+        ThreadSchema::Analysis,
+        AgentId::new("human:vu").unwrap(),
+        "a thread with a schema from a later release",
+        Hlc::new(1, 0, AgentId::new("human:vu").unwrap()),
+    );
+    let before = to_cbor(&Record::Thread(th));
+    // schema key 1, value 0 (analysis) -> 9
+    let at = before
+        .windows(2)
+        .position(|w| w == [0x01, 0x00])
+        .expect("schema is key 1");
+    let mut bytes = before.clone();
+    bytes[at + 1] = 0x09;
+
+    let (rec, _) = from_cbor(&bytes).expect("an unknown schema must decode, not fail");
+    let back = match rec {
+        Record::Thread(t) => t,
+        other => panic!("expected a thread, got {other:?}"),
+    };
+    assert_eq!(back.schema, ThreadSchema::Unknown, "the schema is unknown");
+    assert_eq!(back.schema_code(), 9, "and its code is kept");
+    assert!(
+        back.schema.roles().is_empty(),
+        "an unknown schema defines no roles, rather than borrowing Analysis's"
+    );
+    assert_eq!(
+        to_cbor(&Record::Thread(back)),
+        bytes,
+        "and the record re-encodes to the bytes it arrived in"
+    );
+}
+
+/// 255 is reserved, and never assigned to a code a producer may write.
+#[test]
+fn code_255_is_refused_as_an_unknown_code() {
+    let s = SourceRef::new(SourceKind::Doc, "x://y");
+    assert!(
+        s.clone().with_unknown_kind(255).is_none(),
+        "255 is reserved in all five enumerations and must never be recorded as a kind"
+    );
+    assert!(
+        s.with_unknown_kind(4).is_none(),
+        "a code this build does know belongs in `kind`, not in the unknown slot"
+    );
+}
+
+/// 255 is reserved in all five enumerations, and never assigned.
+///
+/// Four opened in 1.9 and the fifth, `Admission`, in 1.10 (SMYSL-2.3 A-8.1) — and it cost
+/// exactly what reserving the code in 1.9 promised it would: no registry change, no
+/// renumbering, and no new diagnostic. All five now read 255 as `Unknown`, and the half of
+/// this test that bites is the other one: no *named* variant of any of them may take 255,
+/// because every store written in between would read it as unknown.
+#[test]
+fn code_255_is_reserved_in_all_five_enumerations() {
+    assert_eq!(
+        SourceKind::from_u8(255),
+        Some(SourceKind::Unknown),
+        "an opened enumeration reads 255 as Unknown"
+    );
+    assert_eq!(ThreadSchema::from_u8(255), Some(ThreadSchema::Unknown));
+    assert_eq!(Role::from_u8(255), Some(Role::Unknown));
+    assert_eq!(DetectionKind::from_u8(255), Some(DetectionKind::Unknown));
+
+    assert_eq!(
+        Admission::from_u8(255),
+        Some(Admission::Unknown),
+        "admission opened in 1.10 and reads 255 as Unknown, as the other four do"
+    );
+    assert!(
+        Admission::ALL
+            .iter()
+            .all(|a: &Admission| a.as_u8() != 255 || *a == Admission::Unknown),
+        "and no named admission variant may ever take it"
+    );
+    assert!(
+        !Admission::ALL.contains(&Admission::Unknown),
+        "`ALL` names what an author may write, and nobody writes `unknown` deliberately"
+    );
+
+    // Nor may any other variant of the four, which is the half that bites: if a later release
+    // assigns 255 to a real kind, every store written in between reads it as Unknown.
+    assert!(SourceKind::ALL
+        .iter()
+        .all(|k| k.as_u8() != 255 || *k == SourceKind::Unknown));
+    assert!(ThreadSchema::ALL
+        .iter()
+        .all(|s| s.as_u8() != 255 || *s == ThreadSchema::Unknown));
+    assert!(Role::ALL
+        .iter()
+        .all(|r| r.as_u8() != 255 || *r == Role::Unknown));
+    assert!(DetectionKind::ALL
+        .iter()
+        .all(|d| d.as_u8() != 255 || *d == DetectionKind::Unknown));
+}
+
+/// Granularity key 5, the estimator id (SMYSL-2.3 A-9, F-2).
+///
+/// Three things have to hold at once. A profile naming a known estimator carries the id. A
+/// profile naming one this build does not have carries it anyway, byte for byte, because §8.1
+/// obliges an older reader to round-trip a key it cannot interpret — and dropping it would also
+/// turn an unevaluable bound into an evaluable one, which is worse than losing a field. And the
+/// pre-F-2 default writes **no key at all**, so every view written before F-2 encodes to exactly
+/// the bytes it had.
+#[test]
+fn the_granularity_estimator_round_trips_known_and_unknown_ids() {
+    let view = |g: GranularityProfile| {
+        let v = View::new(ViewId::new("v/e").unwrap(), "i").with_granularity(g);
+        let (back, _) = from_cbor(&to_cbor(&Record::View(v))).unwrap();
+        match back {
+            Record::View(v) => v,
+            other => panic!("expected a view, got {}", other.type_name()),
+        }
+    };
+
+    let mut known = GranularityProfile::standard();
+    known.estimator = ProfileEstimator::Known(TokenEstimator::Content1);
+    let back = view(known.clone());
+    assert_eq!(back.granularity.estimator, known.estimator);
+    assert_eq!(back.granularity, known);
+    assert_eq!(
+        back.granularity.tokens("Да будет свет"),
+        Some(TokenEstimator::Content1.count("Да будет свет"))
+    );
+
+    let mut unknown = GranularityProfile::standard();
+    unknown.estimator = ProfileEstimator::Unknown("smysl/from-the-future/9".into());
+    let back = view(unknown.clone());
+    assert_eq!(
+        back.granularity.estimator, unknown.estimator,
+        "an id this build cannot parse still has to come back"
+    );
+    assert_eq!(
+        back.granularity.tokens("anything"),
+        None,
+        "an unknown estimator leaves the bounds unevaluable"
+    );
+
+    // The default is absent on the wire: these bytes are what 1.9.0 wrote.
+    let plain = GranularityProfile::standard();
+    let with_default = {
+        let mut g = GranularityProfile::standard();
+        g.estimator = ProfileEstimator::Known(TokenEstimator::Utf8Div4);
+        g
+    };
+    let bytes = |g: GranularityProfile| {
+        to_cbor(&Record::View(
+            View::new(ViewId::new("v/e").unwrap(), "i").with_granularity(g),
+        ))
+    };
+    assert_eq!(
+        bytes(plain.clone()),
+        bytes(with_default),
+        "naming the default estimator must not change the bytes"
+    );
+    assert!(
+        !bytes(plain).windows(6).any(|w| w == b"smysl/"),
+        "no estimator id is written for the default"
+    );
+}
+
+/// An admission code this build does not know survives the round trip (1.10, A-8.1).
+///
+/// The fifth and last enumeration to open. 1.9 reserved 255 and kept it closed, arguing that
+/// the granularity passes read admission and a reader that guessed would report the wrong
+/// verdict. The argument was right about guessing and wrong about the remedy: failing the
+/// decode does not avoid a wrong verdict, it refuses to open the store (F-12). So the code is
+/// kept, the value is treated as unknown — the single-assertion check does not run, which is
+/// not a verdict either way — and `SMY-W409` says so.
+///
+/// A view is not inside a uid, so this is not an identity hazard. It is a plain C-Read
+/// obligation: two peers disagreeing about whether to keep the code compute different
+/// record-set digests for one store, and rule U is stated on that digest.
+#[test]
+fn an_unknown_admission_code_survives_the_round_trip() {
+    let mut v = View::new(ViewId::new("v/a").unwrap(), "test");
+    v.granularity = v.granularity.clone().with_unknown_admission(7).unwrap();
+    assert_eq!(v.granularity.admission, Admission::Unknown);
+    assert_eq!(v.granularity.admission_code(), 7);
+
+    let bytes = to_cbor(&Record::View(v.clone()));
+    let (back, n) = from_cbor(&bytes).unwrap();
+    assert_eq!(n, bytes.len());
+    let Record::View(v2) = &back else {
+        panic!("not a view")
+    };
+    assert_eq!(v2.granularity.admission, Admission::Unknown);
+    assert_eq!(
+        v2.granularity.admission_code(),
+        7,
+        "the code has to come back out as it went in"
+    );
+    assert_eq!(to_cbor(&back), bytes, "and the bytes with it");
+
+    // 255 itself is reserved and never assigned, and a code this build *does* know belongs in
+    // the named field. Both are refused, as `SourceRef::with_unknown_kind` refuses them.
+    let g = GranularityProfile::standard();
+    assert!(g.clone().with_unknown_admission(255).is_none());
+    assert!(g.clone().with_unknown_admission(0).is_none());
+    assert!(g.with_unknown_admission(1).is_none());
 }

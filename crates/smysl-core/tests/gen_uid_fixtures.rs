@@ -129,6 +129,89 @@ fn cases() -> Vec<(&'static str, UnitCore)> {
     .build()
     .unwrap();
 
+    // `observed` (1.8, source key 3) and `published` (1.10, source key 4). Two cases rather
+    // than one, so a port that confused the two keys fails rather than hashing the same bytes
+    // by accident — they are adjacent integers carrying different types, which is exactly the
+    // confusion a single case cannot catch.
+    //
+    // Neither key was in this fixture until TX-P3 step 1, and `observed` had been in the format
+    // since 1.8: the Python and Node producers could not write it at all, and nothing said so,
+    // because the fixture's `source` shape named three fields and the spec-table gate compared
+    // the same three.
+    let with_observed = UnitCoreBuilder::new(
+        KernelType::Evidence,
+        "a measurement with an instant",
+        Status::Measured,
+    )
+    .source(SourceRef::new(SourceKind::Metric, "pool.wait_ms").observed_at(1726500000123))
+    .build()
+    .unwrap();
+
+    // `1920~` rather than `1920`: a qualifier is the half of EDTF a producer is likeliest to
+    // drop, and dropping it here changes the uid.
+    let with_published =
+        UnitCoreBuilder::new(
+            KernelType::Evidence,
+            "a passage from a dated manifestation",
+            Status::Cited,
+        )
+        .source(SourceRef::new(SourceKind::Doc, "a-book").published_at(
+            &smysl_core::edtf::parse("1920~").expect("the fixture's own value is EDTF"),
+        ))
+        .build()
+        .unwrap();
+
+    // `lang` (core key 9) and the passage pair `span`/`manifest` (source keys 5 and 6), new in
+    // TX-P5 step 1. Three cases rather than one, for the reason `observed` and `published` are
+    // two: a port that wrote key 9 where key 8 goes, or swapped the span's two integers, or
+    // wrote the mid as text rather than as 32 bytes, fails on a case that isolates it.
+    //
+    // `lang` is also the one addition in the format's history that *moves* existing data —
+    // an unquoted `lang:` was a payload key before this release and is the core key now — so the
+    // pair of cases below is the fixture half of that: the same tag in the core and in the
+    // payload are different units, and a reader that put either in the wrong place computes the
+    // other's uid.
+    let with_lang = UnitCoreBuilder::new(
+        KernelType::Claim,
+        "\u{41f}\u{441}\u{430}\u{43b}\u{43e}\u{43c} 13 \u{432} \u{441}\u{438}\u{43d}\u{43e}\u{434}\u{430}\u{43b}\u{44c}\u{43d}\u{43e}\u{43c} \u{43f}\u{435}\u{440}\u{435}\u{432}\u{43e}\u{434}\u{435}",
+        Status::Speculative,
+    )
+    .lang(smysl_core::ids::LangTag::new("ru").expect("a tag"))
+    .build()
+    .unwrap();
+
+    let lang_in_the_payload = {
+        let mut b = UnitCoreBuilder::new(
+            KernelType::Claim,
+            "\u{41f}\u{441}\u{430}\u{43b}\u{43e}\u{43c} 13 \u{432} \u{441}\u{438}\u{43d}\u{43e}\u{434}\u{430}\u{43b}\u{44c}\u{43d}\u{43e}\u{43c} \u{43f}\u{435}\u{440}\u{435}\u{432}\u{43e}\u{434}\u{435}",
+            Status::Speculative,
+        );
+        // {"lang": "ru"} as deterministic CBOR: the same two characters in the other hashed
+        // place.
+        b.payload = Some(vec![0xA1, 0x64, b'l', b'a', b'n', b'g', 0x62, b'r', b'u']);
+        b.build().unwrap()
+    };
+
+    let passage = UnitCoreBuilder::new(
+        KernelType::Claim,
+        "a claim about bytes 198 to 252 of a part",
+        Status::Cited,
+    )
+    .lang(smysl_core::ids::LangTag::new("en").expect("a tag"))
+    .source(
+        SourceRef::new(
+            SourceKind::Doc,
+            format!(
+                "{}#Gen.1.3",
+                smysl_core::ids::Tid::from_bytes([0x22; 32]).canonical()
+            ),
+        )
+        .in_part(198, 252, smysl_core::ids::Mid::from_bytes([0x11; 32]))
+        .expect("a forward range"),
+    )
+    .build()
+    .unwrap();
+
     // Text that is not ASCII, and text that is not NFC on the way in. The second must produce
     // the same uid as its composed twin — normalisation is part of identity, not presentation.
     let unicode = UnitCoreBuilder::new(
@@ -209,9 +292,14 @@ fn cases() -> Vec<(&'static str, UnitCore)> {
         ("with-refs", with_refs),
         ("with-source", with_source),
         ("with-captured", with_captured),
+        ("with-observed", with_observed),
+        ("with-published", with_published),
         ("unicode-composed", unicode),
         ("unicode-decomposed", decomposed),
         ("with-payload", with_payload),
+        ("with-lang", with_lang),
+        ("lang-in-the-payload", lang_in_the_payload),
+        ("passage", passage),
     ];
     v.extend(every_status);
     v
@@ -290,19 +378,48 @@ fn emit() {
                 out.push_str(&format!("\"kind\": {}, ", s.kind.as_u8()));
                 out.push_str(&format!("\"reference\": {}, ", json_string(&s.reference)));
                 match &s.captured {
-                    None => out.push_str("\"captured\": null "),
+                    None => out.push_str("\"captured\": null, "),
                     Some(d) => {
-                        out.push_str(&format!("\"captured\": {} ", json_string(&d.to_string())))
+                        out.push_str(&format!("\"captured\": {}, ", json_string(&d.to_string())))
                     }
+                }
+                match &s.observed {
+                    None => out.push_str("\"observed\": null, "),
+                    Some(ms) => out.push_str(&format!("\"observed\": {ms}, ")),
+                }
+                match &s.published {
+                    None => out.push_str("\"published\": null, "),
+                    Some(p) => out.push_str(&format!("\"published\": {}, ", json_string(p))),
+                }
+                match s.span() {
+                    None => out.push_str("\"span\": null, "),
+                    Some((start, end)) => out.push_str(&format!("\"span\": [{start}, {end}], ")),
+                }
+                match s.manifest() {
+                    None => out.push_str("\"manifest\": null "),
+                    Some(m) => out.push_str(&format!(
+                        "\"manifest\": {} ",
+                        json_string(&hex(m.as_bytes()))
+                    )),
                 }
                 out.push_str("},\n");
             }
         }
         out.push_str(&format!(
-            "        \"payload_hex\": {}\n",
+            "        \"payload_hex\": {},\n",
             core.payload
                 .as_deref()
                 .map(|p| json_string(&hex(p)))
+                .unwrap_or("null".into())
+        ));
+        // Core key 9. Last in the JSON as it is last on the wire, so a reader following the file
+        // writes the keys in the order the encoder does — which for a deterministic map is not a
+        // style question.
+        out.push_str(&format!(
+            "        \"lang\": {}\n",
+            core.lang
+                .as_ref()
+                .map(|t| json_string(t.as_str()))
                 .unwrap_or("null".into())
         ));
         out.push_str("      },\n");

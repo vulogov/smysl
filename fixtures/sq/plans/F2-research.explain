@@ -1,0 +1,8 @@
+plan sq/1
+  purity: pure
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: store:F2-research via F2-research -> 1 store(s) F2-research, 11 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 11 unit(s)
+  - supersession: superseded units give way to their newest head

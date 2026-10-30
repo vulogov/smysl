@@ -1,0 +1,4 @@
+about entity($subject)
+where kind in [observation, prose, data]
+order by salience descending
+limit 12

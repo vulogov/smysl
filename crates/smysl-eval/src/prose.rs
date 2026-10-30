@@ -18,7 +18,7 @@
 use std::collections::BTreeSet;
 
 use smysl_core::{tokens, SourceRef, Status, Uid};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
 /// Anything that can go wrong in an arm that talks to a model.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,7 +173,7 @@ fn joined(hedge: &str, text: &str) -> String {
 /// words by `hedge`. Deliberately plain otherwise: dressing it up would be writing the
 /// baseline's summary for it, and the comparison is about what summarisation costs rather
 /// than about prose style.
-pub fn to_prose(store: &Store) -> String {
+pub fn to_prose(store: &(impl StoreRead + ?Sized)) -> String {
     let mut out = String::new();
     for (_, unit) in store.units() {
         if !out.is_empty() {
@@ -192,7 +192,7 @@ pub fn to_prose(store: &Store) -> String {
 }
 
 /// Every claim the original graph made, for the judge to look for afterwards.
-pub fn claims_of(store: &Store) -> Vec<Claim> {
+pub fn claims_of(store: &(impl StoreRead + ?Sized)) -> Vec<Claim> {
     store
         .units()
         .map(|(uid, unit)| Claim {
@@ -208,7 +208,7 @@ pub fn claims_of(store: &Store) -> Vec<Claim> {
 ///
 /// The budget is the same one the smysl arm was given, so E1 compares like with like.
 pub fn run_prose_arm(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     hops: usize,
     budget: u64,
     model: &dyn Summariser,
@@ -333,6 +333,7 @@ fn names_the_same_source(original: &str, stated: &str) -> bool {
 mod tests {
     use super::*;
     use smysl_core::{KernelType, Record, UnitCoreBuilder};
+    use smysl_graph::Store;
 
     /// A summariser that drops the last paragraph each hop and never rewrites anything.
     /// Deterministic, so the arm's own logic can be tested without a model - it is not a

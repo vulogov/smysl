@@ -1,0 +1,14 @@
+{
+  "purpose": "The records a chat `text add` emits, for the three C-Read implementations to recompute tid, rdid and mid from (GE-T1). Unlike `fixtures/library/wire/`, these come from real readers over real exports: the segment tables carry speakers, timestamps and platform ids, the manifests are `mul`, and two of the three carry `raw` metadata inside the mid. The readers are not part of what is checked — a port decodes these records and hashes them, and implements no reader.",
+  "expressions": [
+    { "file": "telegram.json", "reader": "telegram/1", "alias": "chat-0", "mid_hex": "398eec1aa6f1e6fcb881819c66a13e62c0b473634681aa334ecd8ff0c283381b", "parts": [
+      { "tid_hex": "d5d0813147b24a37804f253903adb32bc6e915b6f200f5280e3d4335a0653994", "length": 349, "structure_hex": "416bbf69e0f8c8ad5ec169c3fe1c44f59dc487bd9547ff03e36744bbdd5c88f6", "rdid_hex": "24e0c148986ff75be9645497a348e857185969080f8f0c4ad4042d90ea85aead", "segments": 7 }
+    ] },
+    { "file": "whatsapp.txt", "reader": "whatsapp/1 date-format=dmy", "alias": "chat-1", "mid_hex": "676210933bdebf01832b51b2661cbc72dffe04bcd1d929234cdb8e35ae06ae28", "parts": [
+      { "tid_hex": "bbf0078e35b7cf4c42897ac8615a293918cc7a21f0ae9190486976af7a495a8a", "length": 270, "structure_hex": "d31a53f04995b6294fc615b6a9d79cd2c25f1bfa00093df1ea8160548d775474", "rdid_hex": "febca572a8982376002c8b16f838b9a7d28cab1f0246ac3a5156570cb2a30392", "segments": 8 }
+    ] },
+    { "file": "slack.zip", "reader": "slack/1", "alias": "chat-2", "mid_hex": "3036283c3da27ab6a301ee7fb594c9cba64d8996f2ef543a6129996dea4ce6d2", "parts": [
+      { "tid_hex": "49e0c8b80779d5f1b8eef9b4c6e66c50fb8172701772bcb15b663fa031a865b0", "length": 375, "structure_hex": "7768b81dabd011fbe6f7acde502e8c42eb810d36d70d4c1b7dd09b077b7dc6d9", "rdid_hex": "99a783427dc370bb4d15ffdecc9740501c780dc0014335d0df39d05866ef9375", "segments": 12 }
+    ] }
+  ]
+}

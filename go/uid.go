@@ -49,6 +49,10 @@ const (
 	keyStatus  = 6
 	keySource  = 7
 	keyPayload = 8
+	// keyLang is core key 9 (SMYSL-2.3 A-1, 1.10): the language the text fields are written in.
+	// Absent means "the language of the view", which is what every unit meant before — so a unit
+	// without one encodes to the bytes it always did.
+	keyLang = 9
 )
 
 // The source sub-map, §2.2 key 7. Undocumented until 1.2.0: this layout was recovered from the
@@ -60,6 +64,12 @@ const (
 	keySourceReference = 1
 	keySourceCaptured  = 2
 	keySourceObserved  = 3
+	keySourcePublished = 4
+	// Keys 5 and 6 (A-2.1, 1.10): the byte range of the part a unit was drawn from, half-open,
+	// and the manifestation the range is an offset into. A-2.4 rule 1 requires the second
+	// whenever the first is present.
+	keySourceSpan     = 5
+	keySourceManifest = 6
 )
 
 // UidLen is the digest width of §2.1: the full 32 bytes, never an abbreviation.
@@ -114,6 +124,13 @@ type Source struct {
 	Reference string
 	Captured  string // "YYYY-MM-DD", empty when absent
 	Observed  uint64 // epoch milliseconds the observation was taken (1.8), 0 when absent
+	Published string // EDTF, as the source states it (1.10, §2.2), empty when absent
+	// Span is [start, end) byte offsets into the part (1.10, key 5). Nil when absent; a
+	// two-element slice otherwise, and `Validate` refuses anything else.
+	Span []uint64
+	// Manifest is the 32-byte mid the span is an offset into (1.10, key 6). Required beside a
+	// span, which is A-2.4 rule 1 and not this package's preference.
+	Manifest []byte
 }
 
 // UnitCore is the hashed content of a unit — not the envelope. The record type code is
@@ -128,6 +145,8 @@ type UnitCore struct {
 	Grounds [][]byte
 	Source  *Source
 	Payload []byte // nil means absent
+	// Lang is core key 9: a BCP-47 tag, empty when absent (1.10).
+	Lang string
 	// Extra carries unknown keys (≥ 9) verbatim, so a unit that round-tripped through an
 	// older implementation still hashes to the value it had (rule X). The value is the
 	// already-encoded CBOR item, because this package cannot know its shape.
@@ -229,6 +248,18 @@ func (s *Source) encode() ([]byte, error) {
 	if s.Captured != "" {
 		entries = append(entries, entry{keySourceCaptured, encodeText(s.Captured)})
 	}
+	if s.Published != "" {
+		entries = append(entries, entry{keySourcePublished, encodeText(s.Published)})
+	}
+	if len(s.Span) == 2 {
+		enc := head(4, 2)
+		enc = append(enc, encodeUint(s.Span[0])...)
+		enc = append(enc, encodeUint(s.Span[1])...)
+		entries = append(entries, entry{keySourceSpan, enc})
+	}
+	if len(s.Manifest) == UidLen {
+		entries = append(entries, entry{keySourceManifest, encodeBytes(s.Manifest)})
+	}
 	return encodeMap(entries)
 }
 
@@ -264,8 +295,25 @@ func (u *UnitCore) Validate() error {
 	if u.Status.RequiresGrounds() && len(u.Grounds) == 0 {
 		problems = append(problems, fmt.Sprintf("%s with no grounds (§7)", u.Status))
 	}
+	// A-2.1 and A-2.4 rule 1, checked here for the reason every other clause in this function
+	// is: a producer that emits one of these has produced a record the format says does not
+	// exist, and `Uid` calls this, so no uid can be had for one.
+	if s := u.Source; s != nil {
+		if s.Span != nil {
+			if len(s.Span) != 2 || s.Span[0] >= s.Span[1] {
+				problems = append(problems, "a span is [start, end) with start < end (A-2.1 key 5)")
+			}
+			if len(s.Manifest) != UidLen {
+				problems = append(problems,
+					"a span needs the manifest it is an offset into (A-2.4 rule 1)")
+			}
+		}
+		if s.Manifest != nil && len(s.Manifest) != UidLen {
+			problems = append(problems, fmt.Sprintf("a mid is %d bytes", UidLen))
+		}
+	}
 	for k := range u.Extra {
-		if k <= keyPayload {
+		if k <= keyLang {
 			problems = append(problems, fmt.Sprintf("key %d is a kernel key, not an extension", k))
 		}
 	}
@@ -320,8 +368,11 @@ func (u *UnitCore) CanonicalBytes() ([]byte, error) {
 	if u.Payload != nil {
 		entries = append(entries, entry{keyPayload, encodeBytes(u.Payload)})
 	}
+	if u.Lang != "" {
+		entries = append(entries, entry{keyLang, encodeText(u.Lang)})
+	}
 	for k, raw := range u.Extra {
-		if k <= keyPayload {
+		if k <= keyLang {
 			return nil, fmt.Errorf("key %d is a kernel key, not an extension", k)
 		}
 		entries = append(entries, entry{k, raw})

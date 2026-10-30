@@ -1,0 +1,8 @@
+plan sq/1
+  purity: pure
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: store:F8b-agent-beta via F8b-agent-beta -> 1 store(s) F8b-agent-beta, 5 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 5 unit(s)
+  - supersession: superseded units give way to their newest head

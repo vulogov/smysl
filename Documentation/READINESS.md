@@ -130,9 +130,10 @@ releases that had been tested by nothing except the implementation that wrote th
 "Another team can implement this" was a claim rather than a fact, and for an interchange format
 that is the difference between a product and a file layout.
 
-`SMYSL_FORMAT_SPEC.md` is short so that it could be read in an afternoon — under four hundred
-lines, having grown from 250 as implementers found it silent in places. That growth is the
-point rather than a regression: every added clause is somewhere a reader had to guess.
+`SMYSL_FORMAT_SPEC.md` is short so that it could be read in an afternoon — some 845 lines,
+having grown from 250 as implementers found it silent in places, and as the SMYSL-2.3 amendments
+folded in. That growth is the point rather than a regression: every added clause is somewhere a
+reader had to guess, or somewhere the wire had got ahead of the document.
 
 **Done for C-Read, in 0.9.0 — twice.** `python/` and `nodejs/` each hold an independent
 implementation written from the spec alone, with no dependencies, and each decodes and

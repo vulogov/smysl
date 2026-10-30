@@ -680,6 +680,318 @@ impl fmt::Display for ProviderError {
 impl std::error::Error for ProviderError {}
 
 // ---------------------------------------------------------------------------
+// Library (RFC SMYSL-2.4)
+// ---------------------------------------------------------------------------
+
+/// What can go wrong in a library: reading text into it, naming it, locking it, or getting a
+/// part back out of its object store.
+///
+/// The variants that have a diagnostic code carry exactly what the code's message promises to
+/// name, because a refusal an operator cannot act on is a refusal they will work around. A
+/// resource cap says which cap, what the limit was, what the input asked for and which flag
+/// raises it; a lock says who holds it.
+///
+/// Three variants have no code. Malformed input text, a bad alias and an I/O failure are not
+/// diagnostics about a *corpus* — they are refusals to begin, and `check` cannot be asked to
+/// report them later, because without them there is nothing to report on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LibError {
+    /// `SMY-E401` - the text still hashes to its tid, but the reading over it changed. What
+    /// this catches is a reader upgraded under a corpus: same bytes, different segmentation.
+    StructureChanged {
+        /// The part, in text form.
+        tid: String,
+        /// Which of the two identities moved, `structure` or `rdid`.
+        which: &'static str,
+    },
+    /// `SMY-E402` - `carry: text` under a licence that does not permit redistribution. There
+    /// is no override flag, by decision (SMYSL-2.4 §3.1): the one thing a flag would buy is
+    /// the ability to ship someone else's text by accident.
+    CarryRefused { licence: String },
+    /// `SMY-E440` - a resource cap. `saw` is what the input asked for, which is not always
+    /// one more than the limit: a declared length can ask for a gigabyte at the first byte.
+    Limit {
+        cap: &'static str,
+        limit: u64,
+        saw: u64,
+        /// The flag that raises this cap, where one exists. `nesting` has none on purpose: it
+        /// is `cbor::MAX_NESTING`, and a reader that nested deeper than the format's own
+        /// encoder could not round-trip what it read.
+        flag: Option<&'static str>,
+    },
+    /// `SMY-E445` - another writer holds the lock, named rather than guessed at. The holder
+    /// is read from the lock file; `held_by` is empty when the file could not be read, which
+    /// is still a refusal, because a lock whose contents are unreadable is a lock.
+    Locked {
+        /// The lock's own name, `library` or a shard name - never a path.
+        what: String,
+        held_by: String,
+    },
+    /// `SMY-E446` - the object store handed back bytes that do not hash to the name they were
+    /// stored under.
+    ObjectCorrupt {
+        /// The identity asked for, in text form.
+        id: String,
+    },
+    /// `SMY-E450` - an append to a pseudonymised expression with no pseudonym key.
+    ///
+    /// The one failure a pseudonym exists to prevent: the same person's new messages would get a
+    /// different speaker from their old ones, the link between them would be gone, and nothing
+    /// downstream could tell — a pseudonym is opaque, so two pseudonyms for one person look
+    /// exactly like two people. Refused at the door rather than repaired afterwards, because
+    /// there is no repair: re-deriving the old speakers needs the key that is missing.
+    ///
+    /// Whether an expression is pseudonymised is read out of its own readings and not out of a
+    /// manifest key (SMYSL-2.4 §3.2): a speaker that is `spk:` plus 26 base32 characters says so
+    /// by its shape, so there is no flag for a corpus to disagree with.
+    PseudonymKeyMissing {
+        /// The expression's alias, which is what a caller named it by.
+        alias: String,
+    },
+    /// `SMY-E452` - a record 15 or 18 was offered to a log (OQ-39).
+    ///
+    /// Text lives in the object store. A log that held it would one day have to be rewritten
+    /// to honour a redaction, and rewriting an append-only log resets the hash chain that
+    /// would have shown the rewrite — so the refusal is at the door rather than a repair
+    /// afterwards.
+    TextInLog {
+        /// The record code offered, 15 or 18, so a message names what was refused.
+        record: u8,
+    },
+    /// A record 6 carrying a detection kind rule E derives (SMYSL-2.3 A-8.2).
+    ///
+    /// No diagnostic code, and that is the point: a time contention is derived and reported,
+    /// never written, so a store that refuses the record makes the violation unrepresentable
+    /// rather than reportable. The same shape as the redaction decision in TX-P2 step 4 — the
+    /// cheapest place to enforce a MUST NOT is the door.
+    DerivedContention {
+        /// The detection kind offered, 4 or 5, so a message names what was refused.
+        kind: u8,
+    },
+    /// Input that is not text at all: invalid UTF-8 at a byte offset. No code, because
+    /// nothing was ingested and there is nothing to diagnose later.
+    NotText { at: usize },
+    /// An expression alias that does not satisfy A-3's grammar.
+    BadAlias { alias: String },
+    /// A reader could not read its input: the bytes are not the format the reader was asked
+    /// to read, at a byte offset into them.
+    ///
+    /// No code, and deliberately not one of `SMY-E440`-`W459`'s unallocated numbers. Every
+    /// code in that range is about a *corpus* — what a store holds, what a check can report
+    /// later. This is a refusal to begin: nothing was ingested, no record was written, and
+    /// there is no artefact for `check` to be asked about afterwards. `NotText` above is the
+    /// same shape for the same reason.
+    Unreadable {
+        /// The reader id, so a message names which reader refused.
+        reader: String,
+        /// Byte offset into the input, as the reader counted it.
+        at: usize,
+        /// What the reader expected, in its own words.
+        what: String,
+    },
+    /// The part policy's boundary level names no node in the reading, so the text would be cut
+    /// into no parts at all.
+    ///
+    /// No code, for the reason [`LibError::Unreadable`] gives: nothing was written, so there is
+    /// no corpus for a later `check` to be asked about. A refusal rather than an empty
+    /// manifest, because a text that silently becomes nothing is the worse of the two — the
+    /// manifest would be valid, the licence recorded, the alias taken, and not one byte of the
+    /// text reachable. The default boundary level is `chapter` and `txt/1` has no chapters,
+    /// which is how this case comes up without anybody doing anything unusual.
+    NoParts {
+        /// The level the policy asked to cut on.
+        level: String,
+        /// The level the reader said its own top is, which is usually the right answer.
+        top: String,
+        /// The reader id, so the message says whose nodes were looked at.
+        reader: String,
+    },
+    /// A reader parameter this reader does not have, or a value it cannot use.
+    ///
+    /// Refused rather than ignored: a parameter is recorded in the manifest beside the reader
+    /// id, so a typo that was silently dropped would be a corpus built under settings nobody
+    /// chose, and no later read could tell.
+    BadParam {
+        reader: String,
+        key: String,
+        reason: String,
+    },
+    /// The part asked for has been redacted (rule Z).
+    ///
+    /// **No code**, and the reason is the one `NotText` and `NoParts` give in the other
+    /// direction: nothing is wrong. A redacted part is absent *by design*, the catalog says so,
+    /// and a command asking for its bytes is asking for something the store is forbidden to
+    /// hold. There is no defect for a later `check` to be asked about — a corpus in exactly
+    /// this state is a correct one.
+    ///
+    /// It exists so that the refusal is a sentence rather than `No such file or directory` and
+    /// an object path, which is what a caller saw before TX-P2 step 4 wired it in.
+    Redacted {
+        /// The part, in text form.
+        tid: String,
+    },
+    /// The filesystem refused. The message is the operating system's; the path is named
+    /// relative to the library root, never absolutely, so a diagnostic can be pasted into a
+    /// bug report.
+    Io { at: String, message: String },
+    /// `SMY-E503` - a unit store (SMYSL-2.8 §3.5.3) written by a later build, in a layout this
+    /// one cannot read.
+    ///
+    /// Refused rather than rebuilt, even in index mode where rebuilding loses nothing: the
+    /// store may be shared with the newer build that wrote it, and quietly rewriting it in an
+    /// older layout would make *that* build rebuild in turn, each undoing the other. The
+    /// message says how to rebuild deliberately.
+    StoreLayout { found: u16, supported: u16 },
+    /// `SMY-E505` - a primary shard (SMYSL-2.8 §3.5.5) and its export disagree on the record-set
+    /// digest: what the store's tables say it holds and what its records give when read into an
+    /// empty store, or what the shard held before it became primary.
+    PrimaryDisagrees {
+        shard: String,
+        /// The record-set digest the shard should have, in hex.
+        expected: String,
+        /// The one its export gives, in hex.
+        export: String,
+    },
+}
+
+impl LibError {
+    pub const fn code(&self) -> Option<Code> {
+        match self {
+            LibError::StructureChanged { .. } => Some(Code::E401),
+            LibError::CarryRefused { .. } => Some(Code::E402),
+            LibError::Limit { .. } => Some(Code::E440),
+            LibError::Locked { .. } => Some(Code::E445),
+            LibError::ObjectCorrupt { .. } => Some(Code::E446),
+            LibError::PseudonymKeyMissing { .. } => Some(Code::E450),
+            LibError::TextInLog { .. } => Some(Code::E452),
+            LibError::DerivedContention { .. }
+            | LibError::NotText { .. }
+            | LibError::BadAlias { .. }
+            | LibError::Unreadable { .. }
+            | LibError::NoParts { .. }
+            | LibError::BadParam { .. }
+            | LibError::Redacted { .. }
+            | LibError::Io { .. } => None,
+            LibError::StoreLayout { .. } => Some(Code::E503),
+            LibError::PrimaryDisagrees { .. } => Some(Code::E505),
+        }
+    }
+
+    /// The exit code the CLI reports. A corrupt object is a hash verification failure, which
+    /// the CLI already has a number for and which scripts already watch for.
+    pub const fn code_exit(&self) -> ExitCode {
+        match self {
+            LibError::ObjectCorrupt { .. }
+            | LibError::StructureChanged { .. }
+            | LibError::PrimaryDisagrees { .. } => ExitCode::HashVerification,
+            LibError::StoreLayout { .. } => ExitCode::UnsupportedVersion,
+            _ => ExitCode::Failure,
+        }
+    }
+}
+
+impl fmt::Display for LibError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LibError::StructureChanged { tid, which } => {
+                write!(f, "{}: {tid} re-read with a different {which}", Code::E401)
+            }
+            LibError::CarryRefused { licence } => write!(
+                f,
+                "{}: licence `{licence}` does not permit carrying the text",
+                Code::E402
+            ),
+            LibError::Limit {
+                cap,
+                limit,
+                saw,
+                flag,
+            } => match flag {
+                Some(flag) => write!(
+                    f,
+                    "{}: {cap} limit {limit} exceeded by {saw} (raise it with {flag})",
+                    Code::E440
+                ),
+                None => write!(f, "{}: {cap} limit {limit} exceeded by {saw}", Code::E440),
+            },
+            LibError::Locked { what, held_by } if held_by.is_empty() => {
+                write!(
+                    f,
+                    "{}: {what} is locked, by an unreadable holder",
+                    Code::E445
+                )
+            }
+            LibError::Locked { what, held_by } => {
+                write!(f, "{}: {what} is locked by {held_by}", Code::E445)
+            }
+            LibError::ObjectCorrupt { id } => {
+                write!(f, "{}: {id} does not hash to its name", Code::E446)
+            }
+            LibError::NotText { at } => write!(f, "input is not valid UTF-8 at byte {at}"),
+            LibError::PseudonymKeyMissing { alias } => write!(
+                f,
+                "{}: `{alias}` names its speakers by pseudonym, and this library has no \
+                 pseudonym key; appending without it would give the same person a second \
+                 speaker",
+                Code::E450
+            ),
+            LibError::TextInLog { record } => write!(
+                f,
+                "{}: record {record} does not belong in a log; text lives in the object store",
+                Code::E452
+            ),
+            LibError::DerivedContention { kind } => write!(
+                f,
+                "a contention of detection kind {kind} is derived by rule E, never written; \
+                 a resolution names its derived id and needs no record 6"
+            ),
+            LibError::Redacted { tid } => write!(
+                f,
+                "{tid} has been redacted; this library no longer holds its text"
+            ),
+            LibError::BadAlias { alias } => write!(f, "`{alias}` is not a valid alias"),
+            LibError::Unreadable { reader, at, what } => {
+                write!(f, "{reader}: byte {at}: expected {what}")
+            }
+            LibError::NoParts { level, top, reader } => {
+                write!(
+                    f,
+                    "the part policy cuts on `{level}` and {reader} produced no node at that \
+                     level; its own top level is `{top}`"
+                )
+            }
+            LibError::BadParam {
+                reader,
+                key,
+                reason,
+            } => {
+                write!(f, "{reader}: parameter `{key}`: {reason}")
+            }
+            LibError::Io { at, message } => write!(f, "{at}: {message}"),
+            LibError::StoreLayout { found, supported } => write!(
+                f,
+                "{}: the unit store has layout {found} and this build reads up to {supported}; \
+                 it is derived from the log, so deleting it and opening again rebuilds it",
+                Code::E503
+            ),
+            LibError::PrimaryDisagrees {
+                shard,
+                expected,
+                export,
+            } => write!(
+                f,
+                "{}: primary shard `{shard}` should have record-set digest {expected}, and its \
+                 export gives {export}",
+                Code::E505
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LibError {}
+
+// ---------------------------------------------------------------------------
 // The unified error
 // ---------------------------------------------------------------------------
 
@@ -696,6 +1008,7 @@ pub enum Error {
     Merge(MergeError),
     Render(RenderError),
     Provider(ProviderError),
+    Lib(LibError),
     Io(std::io::Error),
 }
 
@@ -714,6 +1027,7 @@ impl Error {
             Error::Merge(MergeError::ContentionsPresent { .. }) => ExitCode::Contentions,
             Error::Provider(ProviderError::OfflineViolation) => ExitCode::Offline,
             Error::Provider(_) => ExitCode::Provider,
+            Error::Lib(e) => e.code_exit(),
             _ => ExitCode::Failure,
         }
     }
@@ -737,6 +1051,7 @@ impl fmt::Display for Error {
             Error::Merge(e) => write!(f, "{e}"),
             Error::Render(e) => write!(f, "{e}"),
             Error::Provider(e) => write!(f, "{e}"),
+            Error::Lib(e) => write!(f, "{e}"),
             Error::Io(e) => write!(f, "{e}"),
         }
     }
@@ -754,6 +1069,7 @@ impl std::error::Error for Error {
             Error::Merge(e) => Some(e),
             Error::Render(e) => Some(e),
             Error::Provider(e) => Some(e),
+            Error::Lib(e) => Some(e),
             Error::Io(e) => Some(e),
             Error::Check(_) => None,
         }
@@ -778,6 +1094,7 @@ from_impl! {
     MergeError => Merge,
     RenderError => Render,
     ProviderError => Provider,
+    LibError => Lib,
 }
 
 impl From<std::io::Error> for Error {

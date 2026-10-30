@@ -1,0 +1,4 @@
+about entity("scurvy")
+expand ->rebuts depth 1 only
+expand <-supersedes only
+expand grounds depth $d only

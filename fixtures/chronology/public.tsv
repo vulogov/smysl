@@ -1,0 +1,80 @@
+# A public chronology, for GE-T13's fourth clause (SMYSL-2.4 §5.5).
+#
+# Columns, tab-separated: earlier, later, relation, note.
+#   relation  `before`   the earlier value's extent may not start after the later one's ends.
+#             `disjoint` the stronger claim: the earlier thing had finished before the later
+#                        one began, so the two extents may not overlap at all.
+#   A line with two columns means `before`. A line with three may omit the note.
+#
+# Every order below is a matter of public record and checkable without this repository: the
+# note names the events so a reader can disagree with the pair rather than with the engine.
+# What is authored here is the *selection*, and it is chosen to be awkward — approximate and
+# uncertain values, unspecified digits, seasons, intervals, open ends, a negative year and a
+# `Y`-year (whose year this build bounds to 32 bits, so the universe's own age is refused) — rather than to pass.
+
+# --- the year-precision spine, antiquity to now ---------------------------------------------
+-0044	0476	disjoint	Caesar assassinated; the Western Roman Empire ends
+0476	1066	disjoint	…; the battle of Hastings
+1066	1215	disjoint	…; Magna Carta
+1215	1453	disjoint	…; Constantinople falls
+1453	1492	disjoint	…; Columbus's first crossing
+1492	1517	disjoint	…; Luther's theses
+1517	1588	disjoint	…; the Spanish Armada
+1588	1611	disjoint	…; the King James Bible is printed
+1611	1776-07-04	disjoint	…; the US Declaration of Independence
+1776-07-04	1789-07-14	disjoint	…; the storming of the Bastille
+1789-07-14	1815-06-18	disjoint	…; Waterloo
+1815-06-18	1859-11-24	disjoint	…; On the Origin of Species is published
+1859-11-24	1869-11-17	disjoint	…; the Suez Canal opens
+1869-11-17	1903-12-17	disjoint	…; the Wright brothers fly
+1903-12-17	1912-04-15	disjoint	…; the Titanic sinks
+1912-04-15	1945-08-06	disjoint	…; Hiroshima
+1945-10-24	1948-12-10	disjoint	the UN Charter enters into force; the UDHR is adopted
+1948-12-10	1957-10-04	disjoint	…; Sputnik 1
+1957-10-04	1961-04-12	disjoint	…; Gagarin's flight
+1961-04-12	1969-07-20	disjoint	…; Apollo 11 lands
+1969-07-20	1989-11-09	disjoint	…; the Berlin Wall is opened
+1989-11-09	1991-12-26	disjoint	…; the Soviet Union is dissolved
+1991-12-26	2001-09-11	disjoint	…; the attacks of 11 September
+2016-06-23	2020-01-31	disjoint	the UK's EU referendum; the UK leaves the EU
+
+# --- instants, hours apart ------------------------------------------------------------------
+1969-07-20T20:17:00Z	1969-07-21T02:56:00Z	disjoint	Eagle touches down; Armstrong steps off it
+1945-05-08	1945-08-15	disjoint	VE Day; the surrender of Japan is announced
+
+# --- intervals ------------------------------------------------------------------------------
+1914/1918	1939/1945	disjoint	the two world wars, at year precision
+1914-07-28/1918-11-11	1939-09-01/1945-09-02	disjoint	the same two, at day precision
+1066/1087	1189/1199	disjoint	William I reigns; Richard I reigns
+1337/1453	1618/1648	disjoint	the Hundred Years' War; the Thirty Years' War
+
+# --- unspecified digits ---------------------------------------------------------------------
+18XX	19XX	disjoint	the nineteenth and twentieth centuries
+19XX	20XX	disjoint	the twentieth and twenty-first
+185X	186X	disjoint	the 1850s and the 1860s
+1066	11XX	disjoint	a year inside a century, and the century after it
+
+# --- seasons --------------------------------------------------------------------------------
+# Only `before` within one year, and that is this build's answer to OQ-71(b) rather than a
+# weakness of the pair: EDTF fixes no hemisphere, so a season is its whole year here and spring
+# and autumn of 1918 have the same extent. Across a year boundary the order is recoverable.
+1918-21	1918-23	before	spring and autumn of 1918
+1944-22	1945-21	disjoint	the summer of 1944 and the spring of 1945
+
+# --- year and month -------------------------------------------------------------------------
+1861-04	1865-04	disjoint	the American Civil War opens; it ends
+1929-10	1933-03	disjoint	the Wall Street crash; Roosevelt's first inauguration
+
+# --- approximate and uncertain ---------------------------------------------------------------
+# `before` only, deliberately. This build gives `1920~` the extent of `1920` (OQ-71(a): a
+# qualifier is not a width), under which these would be disjoint — but claiming so would make
+# the chronology fail the day a width is introduced, for a reason that is not about order.
+1800~	1900~	before	two approximate years a century apart
+1492?	1969?	before	two uncertain years, the order not in doubt
+-0750~	-0500~	before	the archaic and the classical, both approximate
+1564	1616	disjoint	Shakespeare is born; Shakespeare dies
+
+# --- ends nobody recorded: not decidable, and that is reported rather than passed -----------
+../1800	1900	before	everything up to 1800, then a year after it
+1800	1900/..	before	a year, then everything from 1900 onwards
+Y-3300000	-0044	disjoint	the oldest known stone tools precede the ides of March

@@ -1,0 +1,2 @@
+from library
+where not (kind = claim or kind = finding) and status >= attested and lang in [en, ru, de]

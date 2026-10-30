@@ -13,9 +13,9 @@
 #   added by accident is not a break, so nothing says a word about it. It also needs a
 #   published baseline, and it does not run at all on a crate listed in SEMVER_BREAKING.
 #
-# So: a count. Not the items — the eleven crates expand to about 11 600 lines of simplified
+# So: a count. Not the items — the thirteen crates expand to about 23 100 lines of simplified
 # surface, and the reasoning in `public-api.txt` still holds, that a diff nobody reads is
-# decoration rather than a gate. A count is eleven lines, a human reads it in five seconds,
+# decoration rather than a gate. A count is thirteen lines, a human reads it in five seconds,
 # and a number that moves without anybody meaning it to is exactly the signal that was
 # missing. What it cannot see is an addition and a removal that cancel; `make semver` sees
 # the removal.
@@ -23,14 +23,19 @@
 # A change here is not a failure. It is a question: did you mean to?
 #
 # Regenerate with `make api`. Check with `make api-check`.
-smysl-core       6892
-smysl-graph      2377
-smysl-check      245
+smysl-core       10230
+smysl-graph      5359
+smysl-check      256
 smysl-pack       544
-smysl-thread     259
-smysl-render     907
-smysl-retrieve   148
-smysl-embed      62
-smysl-provider   722
-smysl-ingest     579
-smysl-tui        216
+smysl-thread     267
+smysl-render     915
+smysl-retrieve   379
+smysl-embed      64
+smysl-provider   726
+smysl-ingest     1841
+smysl-tui        218
+smysl-text       3853
+smysl-query      3622
+smysl-measure    3360
+smysl-lib        1537
+smysl-embed-candle 128

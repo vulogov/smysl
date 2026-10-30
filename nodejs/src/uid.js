@@ -165,7 +165,11 @@ function putSet(map, key, uids) {
  * integers, so the only statement of this anywhere is the hex in `core_bytes_hex` — which is
  * to say a C-Produce implementer must decode a fixture to learn a part of the format.
  *
- * `captured` follows the same omit-when-absent rule as every other optional (constraint 5).
+ * `captured`, `observed` (1.8) and `published` (1.10, EDTF as the source states it) follow the
+ * same omit-when-absent rule as every other optional (constraint 5). All three were missing from
+ * this producer until TX-P3 step 1 added the last of them and found the other two absent: the
+ * spec-table gate compared a named subset of the sub-map's keys, so a key no port could write
+ * was a key no gate asked about.
  */
 function putSource(map, source) {
   if (!source) return;
@@ -177,6 +181,29 @@ function putSource(map, source) {
   inner.set(0, kind);
   inner.set(1, source.reference);
   if (source.captured != null) inner.set(2, source.captured);
+  if (source.observed != null) inner.set(3, source.observed);
+  if (source.published != null) inner.set(4, source.published);
+  // Keys 5 and 6 (1.10, FC-3): the byte range of the part and the manifestation it is an offset
+  // into. The pair is checked here because A-2.4 rule 1 is a rule about records, not about this
+  // producer's convenience — a span with no manifest names offsets into bytes nobody can say
+  // they obtained the same way, and writing one would put a record no rule allows on a wire.
+  if (source.span != null) {
+    const [start, end] = source.span;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start >= end) {
+      throw new ShapeError("SMY-E036", "a span is [start, end) with start < end");
+    }
+    if (source.manifest == null) {
+      throw new ShapeError(
+        "SMY-E036",
+        "a span needs the manifest it is an offset into (SMYSL-2.3 A-2.4 rule 1)",
+      );
+    }
+    inner.set(5, [start, end]);
+  }
+  if (source.manifest != null) {
+    const mid = asUidBytes(source.manifest);
+    inner.set(6, mid);
+  }
   map.set(7, inner);
 }
 
@@ -220,9 +247,13 @@ export function canonicalCore(core) {
   m.set(6, core.status);
   putSource(m, core.source);
   if (core.payload != null) m.set(8, core.payload);
+  // Key 9 (1.10, FC-1): the language the text fields are written in. Absent means "the language
+  // of the view", which is what every unit meant before — so omitting it leaves an old unit's
+  // bytes exactly as they were.
+  if (core.lang != null) m.set(9, core.lang);
   for (const [k, v] of core.unknown ?? []) {
-    if (!Number.isInteger(k) || k < 9) {
-      throw new ShapeError("SMY-E037", `unknown kernel keys are 9 and above, not ${k}`);
+    if (!Number.isInteger(k) || k < 10) {
+      throw new ShapeError("SMY-E037", `unknown kernel keys are 10 and above, not ${k}`);
     }
     m.set(k, v);
   }

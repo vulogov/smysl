@@ -4,7 +4,10 @@
 //!
 //! 1. **Dependency graph.** `cargo tree --no-default-features` for the facade must not
 //!    contain an async runtime, an HTTP client, an argument parser, or a TUI library.
-//!    This is rule B stated as a fact about the build, not an intention.
+//!    This is rule B stated as a fact about the build, not an intention. Each pure crate is
+//!    checked on its own as well, and for the runtime and socket crates at `--all-features`
+//!    too — see `NEVER` and `NOT_IN_THE_CORE`, which 1.10 split apart because one list was
+//!    carrying two different claims and only the weaker of the two was being enforced.
 //! 2. **Source grep.** The pure crates must not name a runtime or a socket, even
 //!    transitively through a dependency they could add later. A dependency check alone
 //!    would pass a crate that spawned threads and opened sockets by hand.
@@ -18,8 +21,16 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Crates that MUST NOT appear in `--no-default-features` builds (rule B).
-const FORBIDDEN_DEPS: &[&str] = &[
+/// Crates a pure crate must not link **under any feature combination**.
+///
+/// Rule B is "the library stays synchronous and offline", and a claim of that shape is not
+/// true at default features and false behind a flag: an offline library is offline however it
+/// is configured. So this set is checked at `--all-features` as well, which is what the single
+/// list below did not do — a pure crate could have put `tokio` behind a non-default feature and
+/// the gate would have passed it. `clap`, `ratatui` and `crossterm` are here for the adjacent
+/// claim that the library is not a front end; a library that grew an argument parser behind a
+/// feature would have the same problem.
+const NEVER: &[&str] = &[
     "tokio",
     "ureq",
     "clap",
@@ -30,7 +41,94 @@ const FORBIDDEN_DEPS: &[&str] = &[
     "async-std",
     "smol",
     "rustls",
-    "serde_json",
+];
+
+/// Crates that must not be in a pure crate's **default** tree, but may be reached through a
+/// named non-default feature — with the reason, and the feature that is allowed to pull them.
+///
+/// `serde_json` sat in the single list beside `tokio` for releases, and the two are not the
+/// same claim. It links no runtime, opens no socket, reads no clock and is deterministic; its
+/// `rust-version` is 1.71, below this workspace's base. What keeping it out buys is a pure core
+/// with no serde stack in it, which is worth having and is not rule B.
+///
+/// SMYSL-2.4 OQ-37 is what forced the distinction. The alternative was a strict-JSON mode of
+/// `smysl-core`'s HJSON parser, so that `json/1` and `telegram/1` could stay inside the gate;
+/// measured against the inputs a JSON reader meets, that is new code rather than a narrowing,
+/// and it is new code in the place where untrusted bytes arrive. The answer is `serde_json`
+/// behind `reader-json`, and this list is where that answer is written down.
+/// The three that arrived with TX-P1 step 3 are the readers' parsers, and each was measured
+/// before it was adopted rather than after: `quick-xml` 0.41.0 is MIT and declares 1.79,
+/// `pulldown-cmark` 0.13.4 is MIT and declares 1.71.1, `serde` and `serde_json` declare 1.71 —
+/// all below this workspace's 1.85 base, so none of them raises a floor. (0.42 of `quick-xml`
+/// declares 1.86 and is therefore **not** the pinned version: an XML parser is not a reason to
+/// move the pure tier.) All four are pinned with `=` in the workspace manifest, because a
+/// reader's output is a corpus's identity and a parser that changed its mind between patch
+/// releases would change every tid taken with it.
+const NOT_IN_THE_CORE: &[(&str, &str)] = &[
+    (
+        "serde_json",
+        "only through a `reader-*` feature of `smysl-text` (SMYSL-2.4 OQ-37)",
+    ),
+    (
+        "serde",
+        "only through `reader-json` of `smysl-text`: `serde_json`'s own seam",
+    ),
+    (
+        "quick-xml",
+        "only through `reader-osis` and `reader-zefania` of `smysl-text`",
+    ),
+    ("pulldown-cmark", "only through `reader-md` of `smysl-text`"),
+    // A Slack export is an archive, and TX-P2 step 2 is where that stopped being a plan. Both
+    // are here for the reason the parsers are: a reader's dependency is recorded against the
+    // reader, and a later edit that made `reader-slack` a default feature would put a zip
+    // parser and an inflater in the pure core's default tree — which is a decision about every
+    // pure crate, and this is where it would have to be argued.
+    //
+    // Measured before adoption, like the others: `zip` 4.3.0 (not 9.0.0, which declares rustc
+    // 1.88 against this tier's 1.85), eleven crates, no `cc`, and the highest floor in the tree
+    // is `hashbrown` 0.17's 1.85 — exactly the base.
+    ("zip", "only through `reader-slack` of `smysl-text`"),
+    (
+        "flate2",
+        "only through `reader-slack` of `smysl-text`: the deflate backend `zip` does not name",
+    ),
+    // The four that `lingua` brings, each naming a different thing a pure crate's default
+    // tree should not contain. None of them is on `NEVER`: threads and randomness are not a
+    // runtime or a socket, and rule B is about the network. What they are is a claim — "the
+    // library layer is a function of its arguments" — and a crate that linked them in every
+    // build would have stopped making it. Permitted through `detect`, which exists for this.
+    (
+        "rayon",
+        "only through `detect` of `smysl-text`: `lingua`'s parallel path",
+    ),
+    (
+        "getrandom",
+        "only through `detect` of `smysl-text` (under `lingua`) and the facade's own `text` \
+         feature, which mints a pseudonym key — the library layer cannot invent a secret",
+    ),
+    (
+        "wasm-bindgen",
+        "only through `detect` of `smysl-text`: `lingua`'s browser target",
+    ),
+    (
+        "futures-util",
+        "only through `detect` of `smysl-text`, transitively under `lingua`",
+    ),
+    // The substrate index's backing store (SMYSL-2.4 §3.8). Here rather than on `NEVER`
+    // because an embedded key-value file is neither a runtime nor a network: redb is
+    // synchronous, offline, and its only normal dependency on Linux and macOS is `libc`. What
+    // it is, is a *database* in a tier whose claim is that every operation is a function of its
+    // arguments — so it is permitted where the index needs it and nowhere by default, and a
+    // later edit that made `substrate-redb` a default feature would have to be argued here.
+    //
+    // Measured before adoption, like the others: redb 2.6.4 (not 4.3.0, which declares rustc
+    // 1.90, nor 3.0/4.0 at 1.89) declares **1.85** — exactly this tier's base — and brings one
+    // crate. The workspace manifest's pin records why the version is the one it is.
+    (
+        "redb",
+        "only through `substrate-redb` of `smysl-text` (SMYSL-2.4 §3.8) and `store-redb` of \
+         `smysl-graph` (SMYSL-2.8 §3.5)",
+    ),
 ];
 
 /// The pure crates. Every operation they expose is a bit-reproducible function of its
@@ -47,7 +145,62 @@ const PURE_CRATES: &[&str] = &[
     // than asserting — a semantic backend added later would break it the moment it landed,
     // which is exactly when someone should have to think about it.
     "smysl-retrieve",
+    // The library layer (SMYSL-2.4 §4.5, OQ-37). `default = []`, so its default tree has no
+    // serde stack, and the readers that need one arrive each behind its own `reader-*`
+    // feature — outside the default tree and inside the `--all-features` one, which is why
+    // this list is now checked against both. Registered in TX-P1 step 2 rather than step 6,
+    // where the plan put it: the readers land in step 3, and a gate that arrives after the
+    // code it is meant to constrain is a gate that has to be argued with instead of obeyed.
+    "smysl-text",
+    // The query language (SMYSL-2.9, TX-P6 step 1). `default = []`, and at step 1 one
+    // dependency — `smysl-core`, for spans and diagnostics — on the reasoning that a grammar
+    // which reads a store would not be a grammar. Registered with the crate rather than at the
+    // end of the phase, because the list is cheapest to obey before anything has been added
+    // that breaks it.
+    //
+    // **Step 2 added `smysl-graph`**, and the sentence above is why that is worth a line rather
+    // than a silent edit: the crate is no longer only a grammar. SMYSL-2.5 §4.1 always had it
+    // holding `plan.rs` and `ports.rs` too, and phase 3 of the planner resolves `from` against
+    // a store. `smysl-graph` is itself on this list, so the pure tree gains no runtime — what
+    // changed is the crate's job, not its purity.
+    "smysl-query",
+    // Measures (SMYSL-2.6, TX-P8 M1). A measure's result is a unit whose uid is computed from
+    // floats, so this crate's purity is a stronger claim than the others': not only no runtime
+    // and no socket, but nothing that could make two runs of one recipe differ — no clock, no
+    // environment, no unseeded randomness (§4.5). Its three external dependencies, `libm`,
+    // `rand_chacha` and `rand_core` with default features off, bring none of `NEVER`, and
+    // `CRATE_SYMBOLS` below adds the crate's own list to the source scan. M3 adds `brotli`
+    // without `std`, which brings `alloc-no-stdlib` and `brotli-decompressor` and neither a
+    // runtime nor `cc`, and `unicode-normalization`, already here through `smysl-text`.
+    "smysl-measure",
+    // Import and export (SMYSL-2.7 §4.5, TX-P11 step 2). An export is a function of a store
+    // and its options, byte for byte, which is P3. Registered with the crate, as the others
+    // were: at step 2 it holds the exporter and depends on `smysl-core`, `smysl-graph` and
+    // `blake3`, all already pure. Step 4's import adds `smysl-check` and `smysl-text`, pure as
+    // well, and step 8's `--scope` adds `smysl-query`, already below `smysl-text`. The
+    // `std::fs` that `write_collection` and `import` use is the store's own precedent, not a
+    // runtime.
+    "smysl-lib",
 ];
+
+/// Symbols forbidden in one pure crate's source beyond [`FORBIDDEN_SYMBOLS`], each list with
+/// the reason it is that crate's.
+///
+/// `smysl-measure`: SMYSL-2.6 §4.5. A measure is a pure function of its store, scope and
+/// recipe, and a result's identity is its value, so a clock, the environment or an unseeded
+/// generator anywhere in the crate would let one recipe write two units. `rand_core` without
+/// `os_rng` already cannot draw an unseeded number; the scan is for whoever adds the feature.
+const CRATE_SYMBOLS: &[(&str, &[&str])] = &[(
+    "smysl-measure",
+    &[
+        "thread_rng",
+        "OsRng",
+        "from_entropy",
+        "SystemTime",
+        "Instant",
+        "std::env",
+    ],
+)];
 
 /// Rule A, as `src/lib.rs` states it: *"no CLI capability may be unreachable from here, and
 /// no code path may be CLI-only."*
@@ -87,14 +240,24 @@ pub fn run(root: &Path) -> Result<(), String> {
     let mut failures = Vec::new();
 
     // --- 1. dependency graph -----------------------------------------------
+    // The facade with nothing enabled is the library a consumer gets by default, so both
+    // claims apply to it.
     let tree = cargo_tree(
         root,
         &["-p", "smysl", "--no-default-features", "-e", "normal"],
     )?;
-    for dep in FORBIDDEN_DEPS {
+    for dep in NEVER {
         if tree.iter().any(|c| c == dep) {
             failures.push(format!(
                 "rule B: `{dep}` is in the --no-default-features dependency tree of `smysl`"
+            ));
+        }
+    }
+    for (dep, allowance) in NOT_IN_THE_CORE {
+        if tree.iter().any(|c| c == dep) {
+            failures.push(format!(
+                "`{dep}` is in the --no-default-features dependency tree of `smysl`; it is \
+                 permitted {allowance}, which is not a default"
             ));
         }
     }
@@ -105,17 +268,40 @@ pub fn run(root: &Path) -> Result<(), String> {
 
     // Each pure crate must also be clean on its own, so a future edit cannot hide a
     // runtime behind a facade feature.
+    //
+    // Twice over, because the two lists are checked against different trees. The default tree
+    // is the pure core, and `NOT_IN_THE_CORE` is a statement about it. `NEVER` is a statement
+    // about the crate, so it is checked at `--all-features` too: this is the hole the single
+    // list left, and TX-P1 is about to widen it — `smysl-text` joins this list with
+    // `default = []` and a feature per reader, so "clean at default features" would stop being
+    // much of a claim about it.
     for krate in PURE_CRATES {
-        let tree = cargo_tree(root, &["-p", krate, "-e", "normal"])?;
-        for dep in FORBIDDEN_DEPS {
-            if tree.iter().any(|c| c == dep) {
+        let default_tree = cargo_tree(root, &["-p", krate, "-e", "normal"])?;
+        for (dep, allowance) in NOT_IN_THE_CORE {
+            if default_tree.iter().any(|c| c == dep) {
                 failures.push(format!(
-                    "rule B: `{dep}` is in the dependency tree of `{krate}`"
+                    "`{dep}` is in the default dependency tree of `{krate}`; it is permitted \
+                     {allowance}, which is not a default"
                 ));
             }
         }
+        let all_tree = cargo_tree(root, &["-p", krate, "-e", "normal", "--all-features"])?;
+        for dep in NEVER {
+            // Reported against whichever tree holds it, so the message says where to look.
+            let where_ = if default_tree.iter().any(|c| c == dep) {
+                "dependency tree"
+            } else if all_tree.iter().any(|c| c == dep) {
+                "--all-features dependency tree"
+            } else {
+                continue;
+            };
+            failures.push(format!("rule B: `{dep}` is in the {where_} of `{krate}`"));
+        }
     }
-    println!("  pure crates: {} checked", PURE_CRATES.len());
+    println!(
+        "  pure crates: {} checked, at default features and at --all-features",
+        PURE_CRATES.len()
+    );
 
     // --- 2. source grep -----------------------------------------------------
     let mut scanned = 0usize;
@@ -133,12 +319,29 @@ pub fn run(root: &Path) -> Result<(), String> {
                         failures.push(format!("rule B: `{sym}` in {}:{}", file.display(), n + 1));
                     }
                 }
+                for (c, syms) in CRATE_SYMBOLS {
+                    for sym in syms.iter().filter(|_| c == krate) {
+                        if code.contains(sym) {
+                            failures.push(format!(
+                                "{krate}: `{sym}` in {}:{}",
+                                file.display(),
+                                n + 1
+                            ));
+                        }
+                    }
+                }
             }
         }
     }
     println!(
-        "  source scan: {scanned} files, {} symbols",
-        FORBIDDEN_SYMBOLS.len()
+        "  source scan: {scanned} files, {} symbols, and {} more in {}",
+        FORBIDDEN_SYMBOLS.len(),
+        CRATE_SYMBOLS.iter().map(|(_, s)| s.len()).sum::<usize>(),
+        CRATE_SYMBOLS
+            .iter()
+            .map(|(c, _)| *c)
+            .collect::<Vec<_>>()
+            .join(", ")
     );
 
     // --- 3. rule A: the CLI goes through the facade -------------------------

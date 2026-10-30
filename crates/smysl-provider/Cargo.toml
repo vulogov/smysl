@@ -3,7 +3,8 @@ name        = "smysl-provider"
 description = "smysl provider layer: the only crate that links a runtime or an HTTP client"
 version.workspace      = true
 edition.workspace      = true
-rust-version.workspace = true
+# Above the workspace base, via `ureq` -> `url` -> `idna` -> `idna_adapter` -> `icu_*` 2.2.
+rust-version           = "1.86"
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true

@@ -1,0 +1,8 @@
+plan sq/1
+  purity: pure
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: store:F4-qa via F4-qa -> 1 store(s) F4-qa, 9 unit(s)
+  4 partitions: 1, idf over collection
+      (no manifest): 9 unit(s)
+  - supersession: superseded units give way to their newest head

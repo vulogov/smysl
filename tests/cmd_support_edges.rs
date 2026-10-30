@@ -29,9 +29,12 @@ fn store() -> PathBuf {
     path
 }
 
+/// `--format surface` belongs to the one case that emits a document, not to the harness.
+///
+/// `trace` prints a report and ignored the flag; H-17 made it refuse what it cannot honour.
+/// `pack` asks for the form where it needs it.
 fn run(args: &[&str]) -> Output {
     Command::new(BIN)
-        .args(["--format", "surface"])
         .args(args)
         .output()
         .expect("the binary under test must run")
@@ -49,7 +52,17 @@ fn out(o: &Output) -> String {
 fn pack_carries_what_a_unit_rests_on_only_when_asked() {
     let path = store();
     let p = path.to_str().unwrap();
-    let without = run(&["pack", "--budget", "24", "--focus", "d/pin", "--explain", p]);
+    let without = run(&[
+        "pack",
+        "--format",
+        "surface",
+        "--budget",
+        "24",
+        "--focus",
+        "d/pin",
+        "--explain",
+        p,
+    ]);
     assert!(without.status.success(), "{}", out(&without));
     assert!(
         !out(&without).contains("lockfile"),

@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use smysl_check::{check, CheckOptions};
 use smysl_core::{Code, Severity, Uid};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
 use crate::chain::Run;
 use crate::Metric;
@@ -99,7 +99,7 @@ fn claim_survival(run: &Run) -> Measurement {
 ///
 /// Expected to be zero, and measured anyway: §28 is explicit that a guarantee which never
 /// binds indicates an unrepresentative corpus rather than a strong guarantee.
-fn epistemic_corruption(store: &Store, run: &Run) -> Measurement {
+fn epistemic_corruption(store: &(impl StoreRead + ?Sized), run: &Run) -> Measurement {
     let report = check(
         store,
         CheckOptions::default().only([smysl_check::Pass::Epistemics, smysl_check::Pass::Trust]),
@@ -139,7 +139,7 @@ fn rebuttal_survival(run: &Run) -> Measurement {
 }
 
 /// **E5** - gist coverage: input gist tokens still reachable at the end.
-fn gist_coverage(store: &Store, run: &Run) -> Measurement {
+fn gist_coverage(store: &(impl StoreRead + ?Sized), run: &Run) -> Measurement {
     let gist_tokens = |set: &BTreeSet<Uid>| -> u32 {
         set.iter()
             .filter_map(|u| store.get(u))
@@ -154,24 +154,12 @@ fn gist_coverage(store: &Store, run: &Run) -> Measurement {
 }
 
 /// **E6** - warrant density: warranted survivors per survivor carrying grounds. Gates D-10.
-fn warrant_density(store: &Store, run: &Run) -> Measurement {
-    let survivors = run.survivors();
-    let mut grounded = 0usize;
-    let mut warranted = 0usize;
-    for uid in survivors {
-        let Some(unit) = store.get(uid) else { continue };
-        if unit.core.grounds.is_empty() {
-            continue;
-        }
-        grounded += 1;
-        if store
-            .relations_of_kind(&smysl_core::RelKind::Warrant)
-            .iter()
-            .any(|r| &r.to == uid)
-        {
-            warranted += 1;
-        }
-    }
+///
+/// The count is A5's (`smysl_measure::graph::grounding`, TX-P9 N1); the ratio, and its 1.0
+/// over nothing, stay this harness's, since its reports depend on them (SMYSL-2.6 §2.1).
+fn warrant_density(store: &smysl_graph::Store, run: &Run) -> Measurement {
+    let (warranted, grounded) =
+        smysl_measure::graph::grounding::warrant_counts(store, run.survivors());
     Measurement::observed(
         Metric::WarrantDensity,
         ratio(warranted, grounded),
@@ -181,7 +169,7 @@ fn warrant_density(store: &Store, run: &Run) -> Measurement {
 
 /// **E7** - round-trip fidelity over the surviving set: 1.0 when records survive
 /// surface -> records and CBOR -> records unchanged.
-fn round_trip_fidelity(store: &Store, run: &Run) -> Measurement {
+fn round_trip_fidelity(store: &(impl StoreRead + ?Sized), run: &Run) -> Measurement {
     let survivors = run.survivors();
     let mut checked = 0usize;
     let mut intact = 0usize;
@@ -207,7 +195,7 @@ fn round_trip_fidelity(store: &Store, run: &Run) -> Measurement {
 /// E8 and E9 are reported as [`Outcome::NotRun`] rather than omitted: the list of metrics
 /// is the list of claims, and a claim that quietly disappears from a report is the failure
 /// mode this whole crate exists to measure in someone else's pipeline.
-pub fn measure(store: &Store, run: &Run) -> Vec<Measurement> {
+pub fn measure(store: &smysl_graph::Store, run: &Run) -> Vec<Measurement> {
     vec![
         token_cost(run),
         claim_survival(run),

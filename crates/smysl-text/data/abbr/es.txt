@@ -1,0 +1,47 @@
+# es — tokens after which a sentence boundary is suppressed. Format: see `en.txt`.
+#
+# `¿` and `¡` are not here and need nothing: UAX #29 ends a sentence at `?` and `!`, and the
+# opening marks sit at the *start* of the next one, where no rule has to put them.
+
+# Titles
+Sr.
+Sra.
+Srta.
+Sres.
+Dr.
+Dra.
+D.
+Dña.
+Ud.
+Uds.
+Vd.
+Vds.
+Lic.
+Ing.
+Arq.
+Prof.
+Gral.
+
+Sta.
+Sto.
+
+# Places
+Av.
+Avda.
+C.
+Ctra.
+Pza.
+Pl.
+
+# Reference
+núm.
+pág.
+págs.
+cap.
+art.
+fig.
+tab.
+vol.
+ed.
+p.ej.
+aprox.

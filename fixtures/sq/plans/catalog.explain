@@ -1,0 +1,10 @@
+plan sq/1
+  purity: pure
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: store:catalog via catalog -> 1 store(s) catalog, 3 unit(s)
+  4 partitions: 3, idf over collection
+      (no manifest): 1 unit(s)
+      m3:2v53cmcjs5kldvkadfsojminnjjeyqxeatpallrlh2s5dwg3htfq [en]: 1 unit(s)
+      m3:2v53cmcjs5kldvkadfsojminnjjeyqxeatpallrlh2s5dwg3htfq [ru]: 1 unit(s)
+  - supersession: superseded units give way to their newest head

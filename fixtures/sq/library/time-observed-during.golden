@@ -1,0 +1,27 @@
+query time-observed-during
+  | from channels
+  | observed during 2024-01-15
+  | units
+plan sq/1
+  purity: pure
+  1 header: sq/1, no schema pins
+  2 resolution: no relation kinds named
+  3 scope: channels via library -> 1 store(s) library, 18 unit(s)
+  4 partitions: 3, idf over collection
+      m3:2exgoq4oefdluyuspom2ciyk6ybvn35c5hyslwikuoppasl5h4oq [mul]: 7 unit(s), smysl/an/1
+      m3:6omgiawbhqtaw3e6bzxialyuzlkyanb5x24fnc7zmvqtflzd7k4q [mul]: 6 unit(s), smysl/an/1
+      m3:n66m44qbb7ebkxbig4x3igebnpavm7jtain52wu3lm62hifit7pa [mul]: 5 unit(s), smysl/an/1
+  6 time: observed during 2024-01-15; undated units excluded and counted (W415)
+  - supersession: superseded units give way to their newest head
+  9 shape: -> units
+units 10
+  b3:azq3qjuxa6tsknir4tyasd2mw4 I finished the first chapter last night. It is shorter than I expected.
+  b3:bds2heixiquypccomosersck43 Mostly that the narrator is unreliable.
+  b3:dfig7izekvahalctyknxabl2cn I finished the first chapter last night. It is shorter than I expected.
+  b3:k2bfzj5ashfvtgqrnjimvr5mey <Media omitted>
+  b3:ngvlbciirsiy2l43w5dc2olcps Mostly that the narrator is unreliable. There is a note about it here: https://example.org/notes — worth reading before chapter two.
+  b3:pjpkxllt6xfsce6dg2riclzohp And what did you make of it?
+  b3:pnx4cbnghynoziygn46tgatkdm And what did you make of it?
+  b3:ruly4d25mmdqd75t2e3jtafpb4 I finished the first chapter last night. It is shorter than I expected.
+  b3:svbwkiqf3m5lriu5fn35ia2xla Mostly that the narrator is unreliable. See the notes first.
+  b3:5ezs7digqtx6n7rgquicezrakx And what did you make of it?

@@ -6,8 +6,8 @@
 
 Chapter 8 used `check` the way you actually use it while drafting — a quick,
 cheap loop, run after every change, read for whatever it turns up. This
-chapter takes the same command apart. Ten passes are named in
-the format's own specification (§17), each with its own diagnostic codes, its
+chapter takes the same command apart. Twelve passes are named in
+the format's own specification (§17) and its amendments, each with its own diagnostic codes, its
 own reasoning, and its own idea of what "wrong" means. Knowing which pass
 caught something — and, just as often, which pass *cannot* catch
 something — is what turns a diagnostic from a red line you clear into
@@ -28,9 +28,9 @@ evidence you can reason about.
   the world the document describes.
 ]
 
-#section("Ten passes, and where each one actually runs")
+#section("Twelve passes, and where each one actually runs")
 
-`Pass` is a ten-member enum in `smysl-check`, numbered in the order the
+`Pass` is a twelve-member enum in `smysl-check`, numbered in the order the
 pipeline runs them, and every diagnostic code in this manual traces back to
 exactly one of them:
 
@@ -48,12 +48,19 @@ exactly one of them:
     ([8], [`retraction`], [Retraction authority and orphaning.], [No — enforced by `merge`, not by `check`.]),
     ([9], [`extension`], [An extension never redefines a kernel rule; unknown schemas degrade, never silently.], [Yes.]),
     ([10], [`hashes`], [Recomputed uids match a stored index, entry for entry.], [No — belongs to `Store::verify_against`, surfaced by `reindex --verify` (Chapter 23).]),
+    ([11], [`commitment`], [A unit is no more *settled* than the weakest thing it rests on — rule M's shape on a second axis (1.7).], [Yes.]),
+    ([12], [`library`], [A reference that claims a library identity is one; an alias has one head; a log holds no text; an object hashes to the identity it is stored under (1.10.0).], [Yes, and its object half only when `check` is given a library to resolve parts against.]),
   ),
 )
 
+Passes 11 and 12 are appended rather than inserted, which is why `commitment`
+follows `hashes` instead of sitting beside the other rule-M pass. `Pass` is
+matched in declaration order by everything that lists it, so a variant added
+in the middle would renumber nothing and reorder every report.
+
 That "runs inside `check`?" column is not a simplification — it is
 `smysl-check`'s own test suite, asserted directly:
-`Pass::IMPLEMENTED` names exactly seven of the ten, and a build that is asked
+`Pass::IMPLEMENTED` names exactly nine of the twelve, and a build that is asked
 for one of the other three (`check --pass codec`, `--pass retraction`, or
 `--pass hashes`) runs nothing and reports nothing, rather than pretending to
 have checked it. The reasons the other three sit outside the pipeline are
@@ -508,7 +515,7 @@ question worth asking, and it belongs to that chapter, not this one.
 
 #subsection("`--pass` — run only the passes you name")
 
-Ten passes over a large store is real work, and while debugging you often
+Twelve passes over a large store is real work, and while debugging you often
 know which one you care about. `--pass` restricts the run to exactly the
 names you give it — pass in a store with two independent defects and narrow
 to just one:
@@ -624,14 +631,18 @@ call for.
 #recap((
   [`check` verifies consistency, never truth — a mechanical pass reasons
    about relationships already in the document, not about the world.],
-  [Ten passes are named in the registry; seven run inside `check` itself.
+  [Thirteen passes are named in the registry; ten run inside `check` itself.
    `codec` runs at read time and aborts before the pipeline starts;
    `retraction` is enforced by `merge`; `hashes` belongs to
-   `Store::verify_against`, reachable today through `reindex --verify`.],
+   `Store::verify_against`, reachable today through `reindex --verify`. The
+   tenth is `time`, and it is there only in a build with the library layer
+   compiled in — rule E's engine lives in `smysl-text` — which a report says
+   rather than leaves to be inferred.],
   [Every implemented pass has a real, isolable failure mode: `SMY-E060`
    (integrity), `SMY-E022` (shape), `SMY-E020` (closure), `SMY-E040`
    (granularity), `SMY-E030` (epistemics, rule M), `SMY-E033` (trust, rule
-   T), `SMY-W013`/`SMY-E012` (extension).],
+   T), `SMY-W013`/`SMY-E012` (extension), `SMY-W057` (commitment),
+   `SMY-E403`/`SMY-W418` (library), `SMY-W411`/`SMY-W413` (time).],
   [Rule T's violations have no surface syntax to author by hand —
    attestations are stamped on by tooling, never typed — so seeing one for
    real means building the store through the library, exactly as `ingest`
@@ -680,7 +691,7 @@ both are ways of reading it — neither adds a new pass of its own.
   specifically, implement.
 ]
 
-#section("The five conformance classes, demonstrated")
+#section("The six conformance classes, demonstrated")
 
 #dtable(
   (auto, 1fr),
@@ -690,11 +701,17 @@ both are ways of reading it — neither adds a new pass of its own.
     ([`C-Consume`], [Reading it and acting on it as a decision input — adds rules M and R.]),
     ([`C-Produce`], [Authoring new units into it — adds the shape rules.]),
     ([`C-Merge`], [Merging it with another store — adds the lifecycle rules (retraction, orphaning).]),
+    ([`C-Library`], [Reading its texts: resolving a reference to a part, checking a span against one, verifying an object against the identity it is stored under. Adds the library rules (1.10.0).]),
     ([`C-Full`], [All of the above at once.]),
   ),
 )
 
-`--conformance` takes exactly these five spellings, case-insensitive — the
+The classes are not a ladder, and `C-Library` is the second place that shows:
+a store with a shape error is perfectly readable as a library, and a store
+with a malformed part identity is perfectly producible from. Only `C-Full`
+is above all of them.
+
+`--conformance` takes exactly these six spellings, case-insensitive — the
 bare words `read` or `full` are not accepted, only the hyphenated `C-`
 form:
 
@@ -1029,18 +1046,53 @@ asserts byte-identical output across all sixteen runs per operation:
 ```
 xtask determinism (rule D)
   matrix: 8 permutations
-  5 of 5 operations registered
+  13 operations registered: rule D's five, and 8 since
   pack: identical across 16 runs
   salience: identical across 16 runs
   merge: identical across 16 runs
   derive_thread: identical across 16 runs
+  text_add: identical across 16 runs
+  text_show: identical across 16 runs
+  text_redact: identical across 16 runs
+  text_append: identical across 16 runs
+  date_show: identical across 16 runs
+  same_as_propose: identical across 16 runs
+  same_as_classes: identical across 16 runs
+  link_candidates: identical across 16 runs
   render: identical across 16 runs
 ok
 ```
 ]
 
 All five of rule D's named operations are registered and passing in this
-build. The permutation matrix targets the four things that quietly break
+build, and `text add`, `text show`, `text append`, `text redact` and
+`date show` have joined them (1.10.0). Three of those five
+are the first registered operations that *write*, which the harness could not
+compare at all until it gained a scratch directory: running one fixed command
+twice over the same library makes the second run see what the first did, and
+`text add` reports how many objects it wrote — two into an empty library, none
+into one that already holds the text, both correct and different output. Each
+of the sixteen captures now gets a directory made fresh and removed
+afterwards, so the question is the one it should always have been: the same
+input *and the same starting state* give the same bytes. `text show` needs a
+library to exist at all, so it declares `text add` as its setup, whose output
+is discarded and whose failure is not — and `text append` needs one for the
+same reason, with a fixture pair of a growing chat export: it compares the new
+manifest, the one it supersedes and the objects it wrote, so an unreproducible
+reader or part cut would show up as a different expression history rather than
+as a different byte; `text append` and `text redact` both pin their one
+input that is a wall clock with `--at`, because rule D is about everything
+else in the operation — a setup that silently did nothing
+would leave the real command printing the same refusal sixteen times and
+passing. `date show` is the one of the five that writes nothing, and it earns
+its place for a different reason: it is rule E end to end — the seed from a
+record's own instant, the stratified solve, and the chain printed for each
+bound — and what the comparison pins is the *attribution*. A bound credited to
+a different cause on a second run is a determinism failure that no interval
+comparison would catch, and the shortest-path attribution is exactly where this
+engine's first version went wrong.
+
+The permutation matrix targets the four things that quietly break
 determinism in practice and nowhere else: locale-dependent collation and
 case folding, timezone-dependent date formatting, and hash-seed-dependent
 iteration order over an unordered collection — the class of bug that passes
@@ -1063,9 +1115,9 @@ cannot promise anything about.
 #screen(caption: "$ cargo xtask check-purity")[
 ```
 xtask check-purity (rules A, B)
-  dependency tree (--no-default-features): 31 crates, none forbidden
-  pure crates: 7 checked
-  source scan: 76 files, 7 symbols
+  dependency tree (--no-default-features): 37 crates, none forbidden
+  pure crates: 11 checked, at default features and at --all-features
+  source scan: 244 files, 7 symbols, and 6 more in smysl-measure
   rule A: 2 CLI files reach only the facade
 ok
 ```
@@ -1080,6 +1132,26 @@ betray a socket or a runtime even if no crate dependency ever named one — a
 thread spawned and a raw `TcpStream` opened by hand would pass the first
 check and fail the second. Either alone is escapable; both together are the
 actual guarantee.
+
+The dependency walk is done twice over each pure crate, at its default
+features and again at `--all-features`, and the two passes do not check the
+same list. "Synchronous and network-free" is not a property that can hold by
+default and fail behind a flag, so the runtime and socket crates are forbidden
+under every feature combination. A second, narrower list — `serde_json` is its
+only entry — is forbidden only from the default tree, where the claim is that
+the pure core carries no serde stack; a reader feature outside the core is
+allowed to pull it, and the gate records which one. Until 1.10 there was one
+list checked one way, which meant a runtime hidden behind a non-default
+feature would have passed.
+
+One crate carries a list of its own. `smysl-measure` writes the result of a
+computation as a unit, and that unit's id is computed from the result, so the
+same recipe over the same store must give the same bytes on every machine. Its
+source is also scanned for a clock, the environment and an unseeded random
+generator, any of which would let one recipe write two different units. That
+is the "6 more" in the transcript. The same crate forbids the platform's `ln`
+and `exp` through a clippy rule, because those differ in the last bit between
+operating systems and its own `libm` does not.
 
 #whatsnext[
   Verification is complete at this point, in the sense this Part set out to

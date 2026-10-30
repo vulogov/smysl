@@ -144,6 +144,19 @@ impl HObject {
         self.get(key).is_some()
     }
 
+    /// The span of a key as it was written, quotes included (1.10).
+    ///
+    /// For the one place in the format where quoting changes meaning: SMYSL-2.3 A-10 item 2
+    /// makes a bare `lang:` on a unit core key 9 and a quoted `"lang":` a payload key. The
+    /// parsed key string is the same either way — `quoted` strips the quotes — so the
+    /// distinction has to come from the source, and a caller holding this span can look.
+    pub fn key_span(&self, key: &str) -> Option<Span> {
+        self.entries
+            .iter()
+            .find(|(k, _)| k.value == key)
+            .map(|(k, _)| k.span)
+    }
+
     /// Remove and return a key. Header parsing takes the keys it knows this way, so
     /// whatever remains is by definition unrecognised and belongs in `payload`.
     /// Remove **every** entry under `key`, returning the first.

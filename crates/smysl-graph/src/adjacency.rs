@@ -244,16 +244,50 @@ pub struct Adjacency {
     extensions: Vec<String>,
 }
 
+/// What [`Adjacency::from_parts`] reads of a unit: its two edge lists, nothing else.
+///
+/// A unit in memory has them in its core. A store on disk keeps them in a table of their own,
+/// so that building the adjacency does not read a core — which for a paged store would be
+/// reading the whole store to answer the one question that never needed the text.
+pub(crate) trait UnitEdges {
+    fn deps(&self) -> impl Iterator<Item = &Uid>;
+    fn grounds(&self) -> impl Iterator<Item = &Uid>;
+}
+
+impl<U: std::ops::Deref<Target = Unit>> UnitEdges for U {
+    fn deps(&self) -> impl Iterator<Item = &Uid> {
+        self.core.deps.iter()
+    }
+    fn grounds(&self) -> impl Iterator<Item = &Uid> {
+        self.core.grounds.iter()
+    }
+}
+
 impl Adjacency {
     /// Build from the units and relations of a store.
     ///
     /// Every uid mentioned anywhere becomes a node, present or not, so the dense id space
     /// covers the whole reference graph and dangling edges stay observable.
     pub fn build(units: &BTreeMap<Uid, Unit>, relations: &[Relation]) -> Adjacency {
+        let units: Vec<(Uid, &Unit)> = units.iter().map(|(u, x)| (*u, x)).collect();
+        Adjacency::from_parts(&units, relations)
+    }
+
+    /// [`Adjacency::build`] from units in **ascending uid order**, however they are held.
+    ///
+    /// The one constructor every store implementation uses (SMYSL-2.8 §3.2), so dense ids are
+    /// assigned and edge lists sorted the same way whether the units sit in a map, behind an
+    /// overlay or on disk. A unit is present when it is in `units`.
+    pub(crate) fn from_parts<U: UnitEdges>(
+        units: &[(Uid, U)],
+        relations: &[Relation],
+    ) -> Adjacency {
+        debug_assert!(units.windows(2).all(|w| w[0].0 < w[1].0));
         let mut all: BTreeSet<Uid> = BTreeSet::new();
         for (uid, u) in units {
             all.insert(*uid);
-            all.extend(u.core.references().copied());
+            all.extend(u.deps().copied());
+            all.extend(u.grounds().copied());
         }
         for r in relations {
             all.insert(r.from);
@@ -270,7 +304,10 @@ impl Adjacency {
             .map(|(i, u)| (*u, i as NodeId))
             .collect();
         let n = order.len();
-        let present: Vec<bool> = order.iter().map(|u| units.contains_key(u)).collect();
+        let present: Vec<bool> = order
+            .iter()
+            .map(|u| units.binary_search_by(|(x, _)| x.cmp(u)).is_ok())
+            .collect();
 
         let mut extensions: Vec<String> = relations
             .iter()
@@ -289,10 +326,10 @@ impl Adjacency {
 
         for (uid, u) in units {
             let from = index[uid];
-            for d in &u.core.deps {
+            for d in u.deps() {
                 link(from, index[d], EdgeKind::Deps);
             }
-            for g in &u.core.grounds {
+            for g in u.grounds() {
                 link(from, index[g], EdgeKind::Grounds);
             }
         }

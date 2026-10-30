@@ -6,8 +6,57 @@
 // reading is worth more than a second one, and for what this still does not reach.
 
 export { CborError, MAX_NESTING, decodeOne, encodeOne } from "./cbor.js";
-export { RECORD_NAMES, Record, UNIT_KEYS, decodeStore, encodeStore } from "./records.js";
+export {
+  RECORD_NAMES,
+  Record,
+  UNDERSTOOD_RECORDS,
+  UNIT_KEYS,
+  decodeStore,
+  encodeStore,
+} from "./records.js";
+export {
+  CARRY,
+  DID_DOMAIN,
+  DID_PREFIX,
+  LibraryError,
+  MANIFEST_KEYS,
+  MANIFEST_REQUIRED,
+  MID_DOMAIN,
+  MID_PREFIX,
+  Manifest,
+  PART_ENTRY_KEYS,
+  PART_READING_KEYS,
+  PART_TEXT_KEYS,
+  PartEntry,
+  PartReading,
+  PartText,
+  RDID_DOMAIN,
+  RDID_PREFIX,
+  ALLEN,
+  AXES,
+  DATING_KEYS,
+  DATING_VALUE_KEYS,
+  Dating,
+  DatingTarget,
+  REDACTION_KEYS,
+  TARGET_KINDS,
+  Redaction,
+  SEGMENT_KEYS,
+  TID_DOMAIN,
+  TID_PREFIX,
+  bodyBytes,
+  canonicalBodyMatches,
+  decodeLibraryRecord,
+  did,
+  identityText,
+  isNormalised,
+  mid,
+  rdid,
+  structureHash,
+  tid,
+} from "./library.js";
 export { Blake3, blake3 } from "./blake3.js";
+export { OP_KEYS, chainHash, decodeSchemaDecl, encodeLenses } from "./schema.js";
 export {
   SOURCE_KIND,
   STATUS,
@@ -20,4 +69,4 @@ export {
   uidText,
   validate,
 } from "./uid.js";
-export const VERSION = "1.9.0";
+export const VERSION = "1.11.0";

@@ -1,0 +1,33 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: None,
+            filters: [],
+            times: [],
+            traversals: [],
+            closures: [
+                Closure {
+                    items: [
+                        Rebuttals,
+                        Grounds,
+                        Holders,
+                        Speakers,
+                        Spans,
+                        Datings,
+                    ],
+                },
+            ],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: None,
+}

@@ -1,0 +1,2 @@
+The eu-west shard slowed on Thursday afternoon. Connection pool wait time rose
+alongside request latency, and the on-call engineer restarted the pooler at 16:40.

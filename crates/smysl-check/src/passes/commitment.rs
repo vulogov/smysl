@@ -17,9 +17,9 @@
 
 use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::Commitment;
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
-pub fn run(store: &Store, report: &mut Report) {
+pub fn run(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     for (uid, unit) in store.units() {
         let Some(level) = store.commitment_of(uid) else {
             continue;

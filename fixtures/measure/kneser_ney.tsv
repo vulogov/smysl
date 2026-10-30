@@ -1,0 +1,34 @@
+# TX-P8 M5: T5 over the KJV's Ruth and Jude at verse level, order 3, min:n 2
+# key	value
+recipe.hash	d4837d9eba0d406bfe255721bd73f220ebf941e62f73e6dce3e988f07a79d5e3
+n.ngrams	2795
+n.segments	110
+n.tokens	3191
+n.top:kjv/65-jud#Jude.1.10	25
+n.top:kjv/65-jud#Jude.1.12	39
+n.top:kjv/65-jud#Jude.1.13	22
+n.top:kjv/65-jud#Jude.1.16	24
+n.top:kjv/65-jud#Jude.1.19	11
+n.top:kjv/65-jud#Jude.1.20	16
+n.top:kjv/65-jud#Jude.1.25	19
+n.top:kjv/65-jud#Jude.1.7	35
+n.top:kjv/65-jud#Jude.1.8	15
+n.top:kjv/65-jud#Jude.1.9	30
+n.types	703
+value.D:1	0.6589
+value.D:2	0.8354
+value.D:3	0.8974
+value.H	7.0742
+value.top:kjv/65-jud#Jude.1.10	9.0478
+value.top:kjv/65-jud#Jude.1.12	9.5636
+value.top:kjv/65-jud#Jude.1.13	9.1379
+value.top:kjv/65-jud#Jude.1.16	9.3472
+value.top:kjv/65-jud#Jude.1.19	9.1735
+value.top:kjv/65-jud#Jude.1.20	9.6802
+value.top:kjv/65-jud#Jude.1.25	9.1626
+value.top:kjv/65-jud#Jude.1.7	9.3964
+value.top:kjv/65-jud#Jude.1.8	9.0713
+value.top:kjv/65-jud#Jude.1.9	9.0491
+series.top	104 16 9.6802 96 39 9.5636 91 35 9.3964 100 24 9.3472 103 11 9.1735 109 19 9.1626 97 22 9.1379 92 15 9.0713 93 30 9.0491 94 25 9.0478
+gist	T5 n-gram surprisal, leave-one-segment-out 7.0742 bits/token, over from collection:kjv
+unit.uid	b3:goe2osnhfwonrsgazly2tcxpkckbjwg3aiu47i7zmm4gxvbvxuna

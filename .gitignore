@@ -38,3 +38,8 @@ python/*.egg-info/
 __pycache__/
 .pytest_cache/
 nodejs/node_modules/
+
+# Finder's per-directory metadata. Written by macOS into any directory the Finder has
+# opened, including fixture trees, so it arrives with no edit of anyone's and is never
+# part of a change.
+.DS_Store

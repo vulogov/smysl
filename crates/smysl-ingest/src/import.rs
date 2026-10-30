@@ -179,22 +179,21 @@ pub fn from_csv(text: &str, opts: &ImportOptions) -> Imported {
 
 /// A row's summary, within the gist bound `check` enforces.
 ///
-/// Key columns first, then the values, cut at `l0_max` as the estimator counts it — four bytes a
-/// token — on a word boundary, with an ellipsis. Until R12 (1.4) the whole row went into the gist,
+/// Key columns first, then the values, cut at `l0_max` as the profile's own estimator counts it,
+/// on a word boundary, with an ellipsis. Until R12 (1.4) the whole row went into the gist,
 /// so a row of seven columns, or three with a long test name, imported as a `measured` unit that
 /// `smysl check` then refused with `SMY-E022`. Nothing is lost to the cut: every cell is in the
 /// payload. A gist that already fits is unchanged, so an import of an ordinary file keeps its uids.
 fn fit_gist(full: &str) -> String {
-    let budget = GranularityProfile::default().l0_max as usize * 4;
-    if full.len() <= budget {
+    // Not `l0_max * 4`. That is the inverse of one estimator, and under a script-weighted
+    // count it is wrong in both directions (F-2); the profile does its own arithmetic.
+    let g = GranularityProfile::default();
+    if g.tokens(full).is_some_and(|n| g.gist_within_bound(n)) {
         return full.to_string();
     }
-    let ellipsis = '\u{2026}'.len_utf8();
+    let end = g.fit_gist_with(full, "\u{2026}").unwrap_or(0);
     let mut out = String::new();
-    for c in full.chars() {
-        if out.len() + c.len_utf8() + ellipsis > budget {
-            break;
-        }
+    for c in full[..end].chars() {
         out.push(c);
     }
     // At a cell boundary if the cut leaves one, so the gist does not end on a column name whose

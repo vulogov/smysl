@@ -10,7 +10,23 @@
 //!
 //! SM-P0 ships the harness with no operations registered. Each later phase registers its
 //! operation as it lands: `pack` (SM-P9), `merge` (SM-P6), `derive_thread` (SM-P11),
-//! `salience` (SM-P8), `render` (SM-P12).
+//! `salience` (SM-P8), `render` (SM-P12), `text add` / `text show` (TX-P1), `date show`
+//! (TX-P3) and `same-as propose` / `same-as classes` (TX-P7).
+//!
+//! # Operations that write
+//!
+//! Rule D's five all read a store and print. TX-P1's `text add` writes one, and a harness that
+//! ran one fixed argv twice could not compare it: the second run sees what the first did, and
+//! `text add` prints how many objects it wrote — 2 into an empty library, 0 into one that
+//! already holds the text, both correct and different bytes. That is why `text add` was left
+//! unregistered when it landed, with the exemption stated rather than argued.
+//!
+//! [`SCRATCH`] is the fix, and it is small: a token in `argv` that becomes a directory made
+//! fresh for each one of the sixteen captures and removed afterwards. Rule D's question for a
+//! writing operation is then the one it should have been all along — the same input *and the
+//! same starting state* give the same output — and [`Op::setup`] builds that state for an
+//! operation which needs one, like `text show`, that cannot run against a library nobody made.
+//! TX-P3's `date set` has the same shape and needs nothing further here.
 
 use std::path::Path;
 use std::process::Command;
@@ -44,11 +60,42 @@ pub fn matrix() -> Vec<Env> {
     out
 }
 
+/// The token an operation's argv uses to name a scratch directory of its own.
+///
+/// An operation that **writes** cannot be run twice over the same directory and compared: the
+/// second run sees what the first one did. `text add` prints how many objects it wrote, which
+/// is 2 into an empty library and 0 into one that already holds the text — both correct, and
+/// different bytes. So rule D's question for a writing operation is "the same input and the
+/// same *starting state* give the same output", and the starting state has to be made.
+///
+/// Every occurrence of this token in `argv` or `setup` is replaced by a directory created fresh
+/// for that one capture and removed afterwards. It is outside the repository, because a harness
+/// that dirtied the tree would be one step from a harness that depended on it.
+pub const SCRATCH: &str = "%SCRATCH%";
+
 /// An operation whose output must be identical under every permutation.
 pub struct Op {
     pub name: &'static str,
     /// Program and arguments, run from the workspace root.
     pub argv: &'static [&'static str],
+    /// A command run before `argv`, in the same scratch directory, whose output is discarded.
+    ///
+    /// For an operation that reads what another one wrote: `text show` needs a library, and the
+    /// only honest way to get one is to run `text add`. Its output is not compared — the
+    /// operation under test is the second command — but its *failure* is, because a setup that
+    /// silently did nothing would leave the real command reporting "no such alias" identically
+    /// across all sixteen runs and passing.
+    pub setup: Option<&'static [&'static str]>,
+}
+
+impl Op {
+    /// Whether this operation needs a directory of its own.
+    fn needs_scratch(&self) -> bool {
+        self.argv
+            .iter()
+            .chain(self.setup.unwrap_or(&[]).iter())
+            .any(|a| a.contains(SCRATCH))
+    }
 }
 
 /// Operations registered so far. Rule D names five; each is added by the phase that
@@ -73,6 +120,7 @@ const OPS: &[Op] = &[
             "120",
             "fixtures/corpus/F1-incident.smy",
         ],
+        setup: None,
     },
     Op {
         name: "salience",
@@ -90,6 +138,7 @@ const OPS: &[Op] = &[
             "salience",
             "fixtures/corpus/F1-incident.smy",
         ],
+        setup: None,
     },
     Op {
         name: "merge",
@@ -108,6 +157,7 @@ const OPS: &[Op] = &[
             "fixtures/corpus/F1-incident.smy",
             "fixtures/corpus/F6-adversarial.smy",
         ],
+        setup: None,
     },
     Op {
         name: "derive_thread",
@@ -127,6 +177,304 @@ const OPS: &[Op] = &[
             "narrative",
             "fixtures/corpus/F3-narrative.smy",
         ],
+        setup: None,
+    },
+    Op {
+        name: "text_add",
+        // The reader, the normalisation, the part cut, and the four identities over it. The
+        // locale permutation is the one that would betray a reader that case-folded or
+        // collated anything: `ru_RU.UTF-8` is in the matrix for exactly this.
+        //
+        // What is compared is stdout, which carries the mid, every part's tid, the byte count
+        // and the number of objects written. Into a directory made fresh for each capture that
+        // last number is the same every time, which is what makes a *writing* operation
+        // comparable at all.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "text",
+            "add",
+            "fixtures/library/readers/gen1.usfm",
+            "-s",
+            SCRATCH,
+            "--reader",
+            "usfm/1",
+            "--alias",
+            "kjv/gen",
+            "--licence",
+            "public-domain",
+            "--carry",
+            "text",
+            "--lang",
+            "en",
+        ],
+        setup: None,
+    },
+    Op {
+        name: "text_show",
+        // Resolving a locator and printing the passage: the reading's segment table read back
+        // as a tree, the range it names, and the bytes sliced out of the part.
+        //
+        // The setup is `text add` into the same fresh directory, because there is no honest way
+        // to have a library without building one. Its output is discarded; its failure is not.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "text",
+            "show",
+            "kjv/gen#Gen.1.3",
+            "-s",
+            SCRATCH,
+            "--segments",
+        ],
+        setup: Some(&[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "text",
+            "add",
+            "fixtures/library/readers/gen1.usfm",
+            "-s",
+            SCRATCH,
+            "--reader",
+            "usfm/1",
+            "--alias",
+            "kjv/gen",
+            "--licence",
+            "public-domain",
+            "--carry",
+            "text",
+            "--lang",
+            "en",
+        ]),
+    },
+    Op {
+        name: "text_redact",
+        // Rule Z (TX-P2 step 4): record 19 into the catalog, then the objects unlinked. What is
+        // compared is stdout — the tid, the agent, how many objects went and how many manifests
+        // still name the part — so an unlink that found a different number of objects, or a
+        // record that encoded differently, shows up here.
+        //
+        // `--at` is given, because without it this reads a clock and a clock is not a function
+        // of its arguments. That is not a weakening: what rule D is about is everything *else*
+        // in the operation, and pinning the one input that is a wall clock is how the other
+        // registered writing operations are compared too.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "text",
+            "redact",
+            // The tid of `fixtures/library/readers/gen1.usfm`'s only part, which the setup
+            // below adds. Written out rather than read back from the setup's output, because an
+            // operation whose argument came from the previous command's stdout would be
+            // comparing the pair rather than this one.
+            "t3:rzmgkk46zz6hvqsysq2fuayq4lbqkwqc2c7t4c2ee5yoa5heh67q",
+            "-s",
+            SCRATCH,
+            "--as",
+            "human:vu",
+            "--at",
+            "1726500000000",
+        ],
+        setup: Some(&[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "text",
+            "add",
+            "fixtures/library/readers/gen1.usfm",
+            "-s",
+            SCRATCH,
+            "--reader",
+            "usfm/1",
+            "--alias",
+            "kjv/gen",
+            "--licence",
+            "public-domain",
+            "--carry",
+            "text",
+            "--lang",
+            "en",
+        ]),
+    },
+    Op {
+        name: "text_append",
+        // A second version of an expression (TX-P2 step 3): the head manifest read back, the
+        // reader and the policy taken from it, the new text cut, and the `supersedes` chain.
+        //
+        // What is compared is stdout, which carries the new mid, the mid it supersedes, every
+        // part's tid and the number of objects written — so a reader or a part cut that was not
+        // reproducible would move the chain, and a `supersedes` that came out differently would
+        // show up as a different expression history rather than as a different byte.
+        //
+        // The fixture pair is one day of a chat export and two days of it. Under the default
+        // part policy both are **one** part, so what this pins is the chain and the identities
+        // rather than tid reuse; reuse needs a policy that cuts per day, and the growth test in
+        // `tests/cmd_text_append.rs` is where that is measured.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "text",
+            "append",
+            "fixtures/library/readers/telegram.json",
+            "-s",
+            SCRATCH,
+            "--alias",
+            "rg",
+        ],
+        setup: Some(&[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "text",
+            "add",
+            "fixtures/library/readers/telegram-first-day.json",
+            "-s",
+            SCRATCH,
+            "--reader",
+            "telegram/1",
+            "--alias",
+            "rg",
+            "--licence",
+            "CC0-1.0",
+            "--carry",
+            "text",
+            "--lang",
+            "mul",
+        ]),
+    },
+    Op {
+        name: "date_show",
+        // Rule E end to end (TX-P3 step 4): the seed from `observed`, a dating that cannot be
+        // applied, the stratified solve, and the why-chain printed for both bounds.
+        //
+        // What is compared is stdout — the interval, the two statuses, the contested mark and
+        // the chain — so a solve whose answer depended on record order, or a bound attributed to
+        // a different cause on a second run, shows up here. That is not hypothetical: the
+        // shortest-path attribution was where step 2's SPFA tie-break went wrong.
+        //
+        // No setup, and a conformance fixture rather than the scratch library: a document that
+        // already carries a `@date` is the cheapest honest store, and `date show` writes nothing.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "date",
+            "show",
+            "c/sent",
+            "-s",
+            "fixtures/conformance/check/time/impossible-dating.smy",
+            "--why",
+        ],
+        setup: None,
+    },
+    Op {
+        name: "same_as_propose",
+        // TX-P7 step 2, and §4.4 names this operation outright. What is compared is stdout:
+        // which pairs the engine proposed, in which order, and the sentence saying why. An
+        // engine whose grouping depended on record order, or whose proposals came back in
+        // whatever order a hash map iterated, differs here — and the `ru_RU.UTF-8` row of the
+        // matrix is the one a case-folding comparison would betray.
+        //
+        // `--dry-run`, because a staging command writes a sidecar and an operation that is run
+        // four times to prove it is a function of its input must not be.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli,ingest",
+            "--",
+            "same-as",
+            "propose",
+            "--engine",
+            "identical-span",
+            "--dry-run",
+            "-s",
+            "fixtures/library/same-as/anthology.smy",
+        ],
+        setup: None,
+    },
+    Op {
+        name: "same_as_classes",
+        // A-12.4's greedy clique partition, which is the normative one: two implementations
+        // that disagree about the classes of one store disagree about how many propositions it
+        // holds. The fixture holds no edge, so what this pins is the *report* — the counts and
+        // the singleton line — and the operation is registered against the day it holds one.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli,text",
+            "--",
+            "same-as",
+            "classes",
+            "-s",
+            "fixtures/library/same-as/anthology.smy",
+        ],
+        setup: None,
+    },
+    Op {
+        name: "link_candidates",
+        // The pure half of the linker: which pairs the generator chose, at a stated budget.
+        // Registered because the budget is the thing a reader has to be able to reproduce —
+        // GE-T11's figure is a recall *at a budget*, and a generator whose output drifted
+        // between runs would make that figure unrepeatable while every test still passed.
+        // `--candidates` calls no model and writes nothing, which is what lets it run here at
+        // all; every other invocation of `link` is a model turn and is out of rule D's reach.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli,text",
+            "--",
+            "link",
+            "--candidates",
+            "-s",
+            "fixtures/library/same-as/anthology.smy",
+        ],
+        setup: None,
     },
 ];
 
@@ -145,6 +493,7 @@ const PIPELINES: &[Op] = &[Op {
          | cargo run --quiet --no-default-features --features cli -- \
              render --thread t/derived-brief --profile exec --target markdown -",
     ],
+    setup: None,
 }];
 
 pub fn run(root: &Path) -> Result<(), String> {
@@ -155,9 +504,14 @@ pub fn run(root: &Path) -> Result<(), String> {
         println!("  no operations registered yet");
         return Ok(());
     }
+    // Rule D names five. `text add`, `text show`, `date show`, the two `same-as` operations
+    // and `link --candidates` are SMYSL-2.4's and are not in §25's list because they did not
+    // exist when it was written; they are here because they are pure operations whose output must be a
+    // function of their input, which is all rule D says.
+    let registered = OPS.len() + PIPELINES.len();
     println!(
-        "  {} of 5 operations registered",
-        OPS.len() + PIPELINES.len()
+        "  {registered} operations registered: rule D's five, and {} since",
+        registered - 5
     );
 
     let mut failures = Vec::new();
@@ -189,10 +543,54 @@ pub fn run(root: &Path) -> Result<(), String> {
 }
 
 fn capture(root: &Path, op: &Op, env: &Env) -> Result<Vec<u8>, String> {
-    let (prog, args) = op
-        .argv
-        .split_first()
-        .ok_or_else(|| "empty argv".to_string())?;
+    // A scratch directory per capture, never reused, outside the repository.
+    //
+    // The counter is what makes it per *capture* rather than per operation: the whole point is
+    // that each of the sixteen runs starts from nothing, and a directory shared between two of
+    // them would make the second run's output a function of the first.
+    let scratch = if op.needs_scratch() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "smysl-determinism-{}-{}-{}",
+            op.name,
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        Some(dir)
+    } else {
+        None
+    };
+    let substitute = |argv: &[&str]| -> Vec<String> {
+        argv.iter()
+            .map(|a| match &scratch {
+                Some(dir) => a.replace(SCRATCH, &dir.to_string_lossy()),
+                None => (*a).to_string(),
+            })
+            .collect()
+    };
+
+    let result = (|| {
+        if let Some(setup) = op.setup {
+            let argv = substitute(setup);
+            // A setup failure is an error, not a silent precondition. One that did nothing
+            // would leave the real command reporting the same "no such alias" across all
+            // sixteen runs — identical bytes, and a pass.
+            run_argv(root, &argv, env).map_err(|e| format!("setup: {e}"))?;
+        }
+        let argv = substitute(op.argv);
+        run_argv(root, &argv, env)
+    })();
+
+    if let Some(dir) = scratch {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    result
+}
+
+fn run_argv(root: &Path, argv: &[String], env: &Env) -> Result<Vec<u8>, String> {
+    let (prog, args) = argv.split_first().ok_or_else(|| "empty argv".to_string())?;
     let out = Command::new(prog)
         .current_dir(root)
         .args(args)
@@ -244,6 +642,7 @@ mod tests {
         let stable = Op {
             name: "echo",
             argv: &["echo", "same"],
+            setup: None,
         };
         let envs = matrix();
         let first = capture(root, &stable, &envs[0]).unwrap();
@@ -254,6 +653,7 @@ mod tests {
         let varying = Op {
             name: "printenv",
             argv: &["printenv", "TZ"],
+            setup: None,
         };
         let a = capture(root, &varying, &envs[0]).unwrap();
         let differing = envs.iter().find(|e| e.tz != envs[0].tz).unwrap();
@@ -262,5 +662,62 @@ mod tests {
             capture(root, &varying, differing).unwrap(),
             "the harness must be able to observe an environment difference"
         );
+    }
+
+    /// The scratch directory is fresh for each capture, which is the whole of what makes a
+    /// writing operation comparable.
+    ///
+    /// Asserted by writing a file into it and counting: an operation that saw the previous
+    /// capture's directory would count 2 on the second run. That is exactly `text add`'s
+    /// `objects N written`, in a form that needs no library.
+    #[test]
+    fn each_capture_gets_a_directory_of_its_own() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let counting = Op {
+            name: "counting",
+            argv: &[
+                "sh",
+                "-c",
+                "touch %SCRATCH%/$(ls %SCRATCH% | wc -l | tr -d ' '); ls %SCRATCH% | wc -l",
+            ],
+            setup: Some(&["sh", "-c", "mkdir -p %SCRATCH%"]),
+        };
+        assert!(counting.needs_scratch());
+        let first = capture(root, &counting, &matrix()[0]).unwrap();
+        let second = capture(root, &counting, &matrix()[0]).unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&first).trim(),
+            "1",
+            "the directory must start empty"
+        );
+        assert_eq!(first, second, "a reused directory would make this 2");
+    }
+
+    /// An operation with no token gets no directory, so nothing changes for rule D's five.
+    #[test]
+    fn an_operation_without_the_token_needs_no_scratch() {
+        let plain = Op {
+            name: "echo",
+            argv: &["echo", "same"],
+            setup: None,
+        };
+        assert!(!plain.needs_scratch());
+    }
+
+    /// A setup that fails is an error, not a silent precondition.
+    ///
+    /// The failure mode this guards: a setup that quietly did nothing would leave the operation
+    /// under test printing the same refusal across all sixteen runs — identical bytes, and a
+    /// pass that checked nothing.
+    #[test]
+    fn a_failing_setup_is_reported() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let op = Op {
+            name: "bad-setup",
+            argv: &["sh", "-c", "echo %SCRATCH% >/dev/null; echo fine"],
+            setup: Some(&["sh", "-c", "exit 3"]),
+        };
+        let err = capture(root, &op, &matrix()[0]).expect_err("the setup exits 3");
+        assert!(err.starts_with("setup: "), "{err}");
     }
 }

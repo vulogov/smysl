@@ -14,7 +14,7 @@ pub mod derive;
 pub mod schema;
 
 pub use derive::{derive_thread, satisfies_rule_l, DeriveOptions, DeriveReport, GIST_TOKENS};
-pub use schema::{all, definition, Matcher, Position, SchemaDef};
+pub use schema::{all, definition, derivable, Matcher, Position, SchemaDef};
 pub use smysl_core::{Role, Step, Thread, ThreadSchema};
 
 /// What a role contributes to the `w_t` term of salience (§1.5).
@@ -70,8 +70,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn schema_set_is_closed_at_five() {
-        assert_eq!(ThreadSchema::ALL.len(), 5);
+    fn schema_set_is_closed_at_eight() {
+        assert_eq!(ThreadSchema::ALL.len(), 8);
     }
 
     #[test]

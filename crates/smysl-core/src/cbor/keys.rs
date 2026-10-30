@@ -16,7 +16,14 @@ pub mod unit {
     pub const STATUS: u16 = 6;
     pub const SOURCE: u16 = 7;
     pub const PAYLOAD: u16 = 8;
-    pub const HIGHEST: u16 = PAYLOAD;
+    /// The language the unit's text fields are written in, BCP-47 (SMYSL-2.3 A-1, FC-1).
+    ///
+    /// Written only when present, so a unit without one encodes to the bytes it always did —
+    /// which is the whole of the compatibility claim §8.1 permits an addition under. Absent
+    /// means "the language of the view that presents the unit", which is what every unit meant
+    /// before 1.10, so an old store re-encodes unchanged.
+    pub const LANG: u16 = 9;
+    pub const HIGHEST: u16 = LANG;
 }
 
 /// Attestation (type code 2) - not hashed.
@@ -119,7 +126,9 @@ pub mod schema_decl {
     pub const TYPES: u16 = 2;
     pub const RELATIONS: u16 = 3;
     pub const PAYLOAD_SHAPE: u16 = 4;
-    pub const HIGHEST: u16 = PAYLOAD_SHAPE;
+    /// SMYSL-2.3 A-7 (FC-9), TX-P12: the lens steps, kept as received.
+    pub const LENSES: u16 = 5;
+    pub const HIGHEST: u16 = LENSES;
 }
 
 /// Withdrawal (type code 11, 1.4).
@@ -141,6 +150,107 @@ pub mod resolution {
     pub const HIGHEST: u16 = NOTE;
 }
 
+/// Manifest (type code 14, SMYSL-2.3 A-5).
+///
+/// Nineteen keys, and the widest table in the format. They are the metadata a library catalog
+/// needs to answer "what is this text, and may I pass it on" without opening the text.
+pub mod manifest {
+    pub const ALIAS: u16 = 0;
+    pub const PARTS: u16 = 1;
+    pub const LANG: u16 = 2;
+    pub const READER: u16 = 3;
+    pub const LICENCE: u16 = 4;
+    pub const CARRY: u16 = 5;
+    pub const TITLE: u16 = 6;
+    pub const CREATORS: u16 = 7;
+    pub const PUBLISHED: u16 = 8;
+    pub const IDENTIFIERS: u16 = 9;
+    pub const ORIGIN: u16 = 10;
+    pub const PARENT: u16 = 11;
+    /// Required whenever [`PARENT`] is present.
+    pub const PARENT_KIND: u16 = 12;
+    pub const SUPERSEDES: u16 = 13;
+    pub const VERSIFICATION: u16 = 14;
+    /// Written only when true, so a lossless manifest encodes to no key at all.
+    pub const LOSSY: u16 = 15;
+    pub const RAW: u16 = 16;
+    pub const PART_POLICY: u16 = 17;
+    pub const CALENDAR: u16 = 18;
+    pub const HIGHEST: u16 = CALENDAR;
+}
+
+/// A part entry, nested inside a manifest under [`manifest::PARTS`].
+pub mod part_entry {
+    pub const TID: u16 = 0;
+    pub const LENGTH: u16 = 1;
+    /// BLAKE3-256 of the canonical CBOR of the reading's segment table.
+    pub const STRUCTURE: u16 = 2;
+    pub const RDID: u16 = 3;
+    /// Written only when this part's language differs from the manifest's.
+    pub const LANG: u16 = 4;
+    pub const HIGHEST: u16 = LANG;
+}
+
+/// Part text (type code 15, SMYSL-2.3 A-5).
+///
+/// Two keys, both required, and no surface form. The tid is carried rather than derived so
+/// that a record which does **not** hash to its tid can be decoded, reported (`SMY-E446`) and
+/// re-encoded unchanged — one bad record must not stop a store from opening.
+pub mod part_text {
+    pub const TID: u16 = 0;
+    pub const TEXT: u16 = 1;
+    pub const HIGHEST: u16 = TEXT;
+}
+
+/// Part reading (type code 18, SMYSL-2.3 A-5).
+pub mod part_reading {
+    pub const TID: u16 = 0;
+    pub const READER: u16 = 1;
+    /// The canonical CBOR of the segment table, carried opaquely at this layer.
+    pub const SEGMENTS: u16 = 2;
+    pub const RAW: u16 = 3;
+    pub const HIGHEST: u16 = RAW;
+}
+
+/// Dating (type code 17, SMYSL-2.3 A-5).
+///
+/// The did's preimage is this body, so the key numbers are permanent in a stronger sense than
+/// usual: renumbering one would change the identity of every dating ever written.
+pub mod dating {
+    /// `[kind, id]`, where `kind` is `0` unit, `1` part, `2` manifest, `3` window and a
+    /// window's `id` is itself `[tid, from_ms, to_ms]`.
+    pub const TARGET: u16 = 0;
+    /// `0` said, `1` composed, `2` about.
+    pub const AXIS: u16 = 1;
+    /// A one-entry map: `{0: EDTF text}`, `{1: offset in ms}` or `{2: [allen, target]}`.
+    pub const VALUE: u16 = 2;
+    pub const BASIS: u16 = 3;
+    pub const AGENT: u16 = 4;
+    pub const TS: u16 = 5;
+    pub const HIGHEST: u16 = TS;
+}
+
+/// The three entries of a dating's value map (`dating::VALUE`), which holds exactly one.
+pub mod dating_value {
+    pub const ABSOLUTE: u16 = 0;
+    pub const OFFSET: u16 = 1;
+    pub const RELATIVE: u16 = 2;
+    pub const HIGHEST: u16 = RELATIVE;
+}
+
+/// Redaction (type code 19, rule Z, SMYSL-2.4 §4.3.2).
+///
+/// The same four keys a withdrawal has, in the same order, and deliberately so: both say "this
+/// thing is no longer to be acted on", by whom, when, and optionally why. A reader who knows
+/// one knows the other.
+pub mod redaction {
+    pub const TID: u16 = 0;
+    pub const AGENT: u16 = 1;
+    pub const TS: u16 = 2;
+    pub const REASON: u16 = 3;
+    pub const HIGHEST: u16 = REASON;
+}
+
 /// SourceRef, nested inside a unit under [`unit::SOURCE`].
 pub mod source {
     pub const KIND: u16 = 0;
@@ -149,7 +259,22 @@ pub mod source {
     /// The observation instant in epoch milliseconds (1.8). Written only when present, so a
     /// source without one encodes to the bytes it always did.
     pub const OBSERVED: u16 = 3;
-    pub const HIGHEST: u16 = OBSERVED;
+    /// The publication date of the manifestation, EDTF text (SMYSL-2.3 A-2.3, FC-2). Written
+    /// only when present, so a source without one encodes to the bytes it always did.
+    pub const PUBLISHED: u16 = 4;
+    /// Byte offsets into the part's normalised bytes, half-open `[start, end)` (A-2.1, FC-3).
+    ///
+    /// An array of two unsigned integers with `start < end`. Written only when present. The span
+    /// is **authoritative** and the locator in `reference` is informative: when they disagree the
+    /// span wins and `SMY-W405` is reported; a span past the part's length is `SMY-E404`.
+    pub const SPAN: u16 = 5;
+    /// The manifestation the unit was extracted under: 32 bytes, a mid (A-2.1, FC-3).
+    ///
+    /// Required whenever [`SPAN`] is present (A-2.4 rule 1): a span is a pair of offsets into a
+    /// part, and a part belongs to a reading of a manifest — without the mid the offsets name a
+    /// place in bytes nobody can say they obtained the same way.
+    pub const MANIFEST: u16 = 6;
+    pub const HIGHEST: u16 = MANIFEST;
 }
 
 /// GranularityProfile, nested inside a view under [`view::GRANULARITY`].
@@ -159,7 +284,10 @@ pub mod granularity {
     pub const L1_MIN: u16 = 2;
     pub const L1_MAX: u16 = 3;
     pub const ADMISSION: u16 = 4;
-    pub const HIGHEST: u16 = ADMISSION;
+    /// SMYSL-2.3 A-9: the estimator the bounds are counted with. Written only when it is not
+    /// the pre-F-2 default, so every view written before F-2 encodes to the bytes it had.
+    pub const ESTIMATOR: u16 = 5;
+    pub const HIGHEST: u16 = ESTIMATOR;
 }
 
 #[cfg(test)]
@@ -184,6 +312,7 @@ mod tests {
                     unit::STATUS,
                     unit::SOURCE,
                     unit::PAYLOAD,
+                    unit::LANG,
                 ],
             ),
             (
@@ -272,6 +401,7 @@ mod tests {
                     schema_decl::TYPES,
                     schema_decl::RELATIONS,
                     schema_decl::PAYLOAD_SHAPE,
+                    schema_decl::LENSES,
                 ],
             ),
             (
@@ -307,6 +437,78 @@ mod tests {
                 ],
             ),
             (
+                "manifest",
+                manifest::HIGHEST,
+                &[
+                    manifest::ALIAS,
+                    manifest::PARTS,
+                    manifest::LANG,
+                    manifest::READER,
+                    manifest::LICENCE,
+                    manifest::CARRY,
+                    manifest::TITLE,
+                    manifest::CREATORS,
+                    manifest::PUBLISHED,
+                    manifest::IDENTIFIERS,
+                    manifest::ORIGIN,
+                    manifest::PARENT,
+                    manifest::PARENT_KIND,
+                    manifest::SUPERSEDES,
+                    manifest::VERSIFICATION,
+                    manifest::LOSSY,
+                    manifest::RAW,
+                    manifest::PART_POLICY,
+                    manifest::CALENDAR,
+                ],
+            ),
+            (
+                "part_entry",
+                part_entry::HIGHEST,
+                &[
+                    part_entry::TID,
+                    part_entry::LENGTH,
+                    part_entry::STRUCTURE,
+                    part_entry::RDID,
+                    part_entry::LANG,
+                ],
+            ),
+            (
+                "part_text",
+                part_text::HIGHEST,
+                &[part_text::TID, part_text::TEXT],
+            ),
+            (
+                "part_reading",
+                part_reading::HIGHEST,
+                &[
+                    part_reading::TID,
+                    part_reading::READER,
+                    part_reading::SEGMENTS,
+                    part_reading::RAW,
+                ],
+            ),
+            (
+                "dating",
+                dating::HIGHEST,
+                &[
+                    dating::TARGET,
+                    dating::AXIS,
+                    dating::VALUE,
+                    dating::BASIS,
+                    dating::AGENT,
+                    dating::TS,
+                ],
+            ),
+            (
+                "dating value",
+                dating_value::HIGHEST,
+                &[
+                    dating_value::ABSOLUTE,
+                    dating_value::OFFSET,
+                    dating_value::RELATIVE,
+                ],
+            ),
+            (
                 "source",
                 source::HIGHEST,
                 &[
@@ -314,6 +516,9 @@ mod tests {
                     source::REFERENCE,
                     source::CAPTURED,
                     source::OBSERVED,
+                    source::PUBLISHED,
+                    source::SPAN,
+                    source::MANIFEST,
                 ],
             ),
             (
@@ -325,6 +530,7 @@ mod tests {
                     granularity::L1_MIN,
                     granularity::L1_MAX,
                     granularity::ADMISSION,
+                    granularity::ESTIMATOR,
                 ],
             ),
         ];

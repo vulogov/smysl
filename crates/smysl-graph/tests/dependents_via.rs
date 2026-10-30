@@ -282,3 +282,128 @@ fn trace_via_walks_chosen_edges_by_depth() {
     let narrow = trace_via(&store, uid("c/downstream"), &EdgeSet::support(), None);
     assert!(!narrow.nodes.iter().any(|n| n.uid == uid("p/condition")));
 }
+
+/// `dependents_trace` (TX-P6 step 4) is `dependents_via` with a depth and a stable order.
+///
+/// The equality is the claim: at unbounded depth the two must agree about *which* units
+/// depend on a unit, or a query stage and a blast radius would disagree about the same word.
+/// The trace adds the root at depth 0, as `trace_via` does, because a traversal stage adds to
+/// the set it was given.
+#[test]
+fn an_unbounded_trace_reaches_what_dependents_via_reaches() {
+    let (store, uid) = setup();
+    for l in ["p/grounding", "p/condition", "d/choice", "c/downstream"] {
+        let root = uid(l);
+        let mut want: Vec<Uid> = dependents_via(&store, root, &with_conditions());
+        want.push(root);
+        want.sort();
+        want.dedup();
+
+        let got = smysl_graph::dependents_trace(&store, root, &with_conditions(), None);
+        let mut reached: Vec<Uid> = got.nodes.iter().map(|n| n.uid).collect();
+        reached.sort();
+        assert_eq!(want, reached, "{l}");
+        assert_eq!(got.root, root);
+    }
+}
+
+/// The depth bound, which is the thing `dependents_via` cannot express.
+///
+/// `p/grounding` has one dependent one step out (`d/choice`, grounded on it) and one two steps
+/// out (`c/downstream`, grounded on that). A depth of 1 must stop at the first.
+#[test]
+fn a_depth_bound_stops_the_walk() {
+    let (store, uid) = setup();
+    let root = uid("p/grounding");
+
+    let one = smysl_graph::dependents_trace(&store, root, &with_conditions(), Some(1));
+    let reached: Vec<Uid> = one.nodes.iter().map(|n| n.uid).collect();
+    assert_eq!(reached.len(), 2, "the root and its one-step dependent");
+    assert!(reached.contains(&uid("d/choice")));
+    assert!(!reached.contains(&uid("c/downstream")), "two steps out");
+    assert_eq!(one.max_depth(), 1);
+
+    let zero = smysl_graph::dependents_trace(&store, root, &with_conditions(), Some(0));
+    assert_eq!(zero.len(), 1, "depth 0 is the root alone");
+}
+
+/// The output is sorted by `(depth, uid)`, as the forward walk is — so the order is a function
+/// of the graph and not of the walk (rule D).
+#[test]
+fn the_order_is_depth_then_uid() {
+    let (store, uid) = setup();
+    let trace = smysl_graph::dependents_trace(&store, uid("p/grounding"), &with_conditions(), None);
+    let keys: Vec<(u32, Uid)> = trace.nodes.iter().map(|n| (n.depth, n.uid)).collect();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    assert_eq!(keys, sorted);
+}
+
+/// A uid the store does not hold is an empty walk, not a panic — the same answer
+/// `dependents_via` gives.
+#[test]
+fn an_unknown_root_traces_nothing() {
+    let (store, _) = setup();
+    let nowhere = Uid::from_bytes([3; 32]);
+    let trace = smysl_graph::dependents_trace(&store, nowhere, &EdgeSet::support(), None);
+    assert_eq!(trace.len(), 1, "the root is reported, nothing is reached");
+    assert!(dependents_via(&store, nowhere, &EdgeSet::support()).is_empty());
+}
+
+/// `trace_both` follows an edge either way, which is strictly more than unioning the one-way
+/// walks — the point of the function.
+///
+/// `p/condition --conditions--> d/choice`, and `d/choice` is grounded on `p/grounding`. From
+/// `p/condition`, going forward reaches `d/choice`; from there the *grounds* edge runs onward
+/// to `p/grounding`, so a two-step both-direction walk reaches it. Neither one-way walk from
+/// `p/condition` does, because each keeps its direction the whole way.
+#[test]
+fn a_both_direction_walk_reaches_what_a_change_of_direction_reaches() {
+    let (store, uid) = setup();
+    let root = uid("p/condition");
+    let edges = with_conditions();
+
+    let both = smysl_graph::trace_both(&store, root, &edges, Some(2));
+    let reached: Vec<Uid> = both.nodes.iter().map(|n| n.uid).collect();
+    assert!(
+        reached.contains(&uid("d/choice")),
+        "one step along conditions"
+    );
+    assert!(
+        reached.contains(&uid("p/grounding")),
+        "two steps, after a change of direction"
+    );
+
+    let forward = smysl_graph::trace_via(&store, root, &edges, Some(2));
+    let backward = smysl_graph::dependents_trace(&store, root, &edges, Some(2));
+    let one_way: std::collections::BTreeSet<Uid> = forward
+        .nodes
+        .iter()
+        .chain(backward.nodes.iter())
+        .map(|n| n.uid)
+        .collect();
+    assert!(
+        !one_way.contains(&uid("p/grounding")),
+        "the union of the one-way walks must not reach it, or this function is redundant"
+    );
+}
+
+/// Depth and order, as the one-way walks have them.
+#[test]
+fn a_both_direction_walk_is_bounded_and_ordered() {
+    let (store, uid) = setup();
+    let edges = with_conditions();
+    let root = uid("p/condition");
+
+    assert_eq!(
+        smysl_graph::trace_both(&store, root, &edges, Some(0)).len(),
+        1,
+        "depth 0 is the root alone"
+    );
+    let trace = smysl_graph::trace_both(&store, root, &edges, None);
+    let keys: Vec<(u32, Uid)> = trace.nodes.iter().map(|n| (n.depth, n.uid)).collect();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    assert_eq!(keys, sorted, "(depth, uid) order");
+    assert_eq!(trace.len(), 4, "the whole fixture is connected either way");
+}

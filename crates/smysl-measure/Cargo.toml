@@ -1,0 +1,158 @@
+[package]
+name        = "smysl-measure"
+description = "smysl measures (RFC SMYSL-2.6): recipes, exact payload numbers and derived data units"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+# Snowball stems for the stem stream (`<chain>:stem`). Without it every chain is `smysl/an/1`
+# and its stem stream is its surface stream, which the analyzer id in the recipe records — so
+# a result computed without the stemmer can never be mistaken for one computed with it.
+stem = ["smysl-text/stem"]
+
+[dependencies]
+# Units, payload CBOR, hashing and the diagnostic registry.
+smysl-core = { workspace = true }
+# `Store`, which a measure reads and a result is appended to.
+smysl-graph = { workspace = true }
+# A measure's scope is an sq scope (SMYSL-2.6 §3.4), resolved by the planner, and its basis is
+# that scope saved as an `x.query/saved` unit (OQ-55, decided in TX-P8 M1). Both crates are on
+# the purity gate's list, so the pure tree gains no runtime.
+smysl-query = { workspace = true }
+# The text a text-level measure reads (TX-P8 M2): manifests and parts through `Library`, and
+# the analyzer chains whose surface and stem streams are what T1 and T4 count. Default
+# features only, which is the pure tier's own tree; stems are `stem` above.
+smysl-text = { workspace = true }
+# A8 packs a scope at twenty budgets (TX-P9 N2), and `full_tokens` and `floor_tokens` moved here
+# from `smysl-eval` with it. Already in the pure tree through `smysl-query`; greedy only, so the
+# `branch-and-bound` feature a build may unify in cannot move a point.
+smysl-pack = { workspace = true }
+# Every transcendental a result depends on goes through `libm`, never the platform's: glibc's
+# `ln` and this crate disagree in the last bit for 2% of inputs (SMYSL-2.6 §2.9), and a last bit
+# is enough to move a fixed-point payload number. Pinned exactly, with `arch` intrinsics off,
+# because an upgrade that changes one result is a new measure version, never a silent one.
+libm = { version = "=0.2.16", default-features = false }
+# The bootstrap generator (§3.5). `rand_core` without `os_rng` brings no `getrandom`, so this
+# crate has no way to draw an unseeded number — which is the property, not a side effect.
+rand_chacha = { version = "0.9", default-features = false }
+rand_core   = { version = "0.9", default-features = false }
+# T2's and T6's compressor (TX-P8 M3), the pure-Rust port, pinned exactly: an upgrade can change
+# a compressed length, so it is a new measure version and a new `codec`, never a silent one.
+# **Without `std`**, and that is a property of the codec rather than a size saving: with `std`
+# the encoder's cost model takes `f32::log2` from the platform for every count past 255, and
+# a cost that differs in the last bit can choose a different block split, so one text could
+# compress to two lengths on two machines. Without it the same function is a table and integer
+# shifts. The allocator `std` would have brought is twenty lines in `text::compress`, safe.
+brotli = { version = "=8.0.4", default-features = false }
+# T2 compresses each text's characters in NFC (§3.7). A library's parts are NFC already, and
+# NFC is not closed under slicing, so a verse cut out of one is normalised again; the crate is
+# already in the pure tree through `smysl-text`.
+unicode-normalization = { workspace = true }
+
+[dev-dependencies]
+# Rule M over a written result: the tests append a measure unit and its basis and check the
+# store, which is the only way to show that `SMY-E030` is never raised on one (SMYSL-2.6 §8).
+smysl-check = { workspace = true }
+# A library built from the committed Bible slices, for the measures over a real text.
+smysl-text = { workspace = true, features = ["reader-usfm"] }
+
+# The M1 exit: golden payload bytes for a hand-built value, and the determinism rules the RFC
+# makes checkable without a measure — libm outputs pinned by bit pattern, a generator stream
+# pinned by value, and a source scan for what §3.5 and §4.5 forbid.
+[[test]]
+name = "payload"
+
+# The M2 exit: T1 and T4 against the §5.1 rows on synthetic texts generated in-test from the
+# crate's own generator, the bootstrap seed rules of §5.3, and both measures over a library.
+[[test]]
+name = "text"
+
+# §5.1's coverage row for T4, 100 seeds: `--ignored`, as the RFC says, and run in release.
+[[test]]
+name = "coverage"
+
+# The M3 exit: T2 against §5.1's i.i.d. and Markov rows, T6's three rows and the window guard,
+# the stream T2 counts decoded back to its input, and both measures over a library.
+[[test]]
+name = "compress"
+
+# The M4 exit: T3's Λ against its definition on 10⁴ random inputs, the calibration goldens
+# (the rows past 10⁵ symbols `--ignored`, in release), and T3 over a library.
+[[test]]
+name = "lz_match"
+
+# The M5 exit: T5's probabilities against a 30-token corpus worked by hand, leave-one-out
+# against retraining from scratch on random corpora, and T5 over a library.
+[[test]]
+name = "kneser_ney"
+
+# The M6 exit: T7's JSD at its two exact ends, G² by hand and against the Python harness's own
+# computation (`fixtures/measure/g2.tsv`), PMI and the pairs it counts, and T7 over a library.
+[[test]]
+name = "divergence"
+
+# GE-T6's pure arm (SMYSL-2.6 §5.4): T2 and T3 across the Bible's genres, over a corpus this
+# repository does not hold. `--ignored`, with `SMYSL_GE_T6=<dir>`, in release.
+[[test]]
+name = "ge_t6"
+
+# GE-T6's A8 arm (SMYSL-2.6 §5.4, TX-P9 N7): books found by the text a unit was read from, A8
+# per book, and the kill criterion reading extraction variance, scripted; the measurement over
+# extraction runs this repository does not hold is `--ignored`, with `SMYSL_GE_T6_A8=<dir>`.
+[[test]]
+name = "ge_t6_a8"
+
+# TX-P9 N1's exit, the graph half: A1–A7 and A10 on synthetic stores with planted structure
+# (SMYSL-2.6 §5.2), and A1 and the per-text figures over a library of the committed slices.
+[[test]]
+name = "graph"
+
+# TX-P9 N1's scale exit: 10⁶ units in time within 2× of 10× the 10⁵ run. `--ignored`, in
+# release; its timings feed GE-T7.
+[[test]]
+name = "graph_scale"
+
+# TX-P9 N2's exit: A8's distortion non-increasing in budget over random stores drawn from
+# `fixtures/corpus`, its curve over every fixture pinned for the matrix, and `SMY-E407` on a
+# scope in two languages under a byte estimator.
+[[test]]
+name = "rd"
+
+# TX-P9 N3's exit: A9's planted communities recovered exactly on two cliques, with and without
+# a bridge, and its centrality, betweenness and event chains against planted graphs.
+[[test]]
+name = "entity"
+
+# TX-P9 N4's exit: C1–C4 on a source and a target with planted drops, additions, one
+# inflation per status step and holder rewrites, exact; C5 over Ruth in two translations; and
+# C1–C4 on the KJV and Synodal Psalms fixture, reported.
+[[test]]
+name = "channel"
+
+# TX-P9 N5's exit: D1–D6 on synthetic chats with planted answers, take-ups, returns,
+# introductions, drift and reversals, and clocks that disagree with the reply graph.
+[[test]]
+name = "dialogue"
+
+# GE-T8's instrument: D1's precision on the answers edges it counts, against a labelled
+# sheet. Scripted unless SMYSL_GE_T8_STORE and SMYSL_GE_T8_SHEET are set; the clause is owed.
+[[test]]
+name = "ge_t8"
+
+# TX-P9 N6's exit: keys from a view and a dossier, a reader scored against planted answers,
+# a class id that moves between two states and is kept, and alpha on Krippendorff's example.
+[[test]]
+name = "assess"
+
+# GE-T3's instrument: language against run variance of per-verse unit and class counts.
+# Scripted unless SMYSL_GE_T3 names a table of extraction runs; the measurement is owed.
+[[test]]
+name = "ge_t3"

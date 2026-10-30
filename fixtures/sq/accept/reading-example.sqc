@@ -1,0 +1,6 @@
+from library
+find "faith" ~lex
+where lang = en and mode = reported
+expand grounds depth 2
+order by salience descending
+limit 10

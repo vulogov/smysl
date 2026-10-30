@@ -1,0 +1,34 @@
+file      notes.txt
+reader    txt/1
+alias     notes-txt
+licence   CC0-1.0
+reader-field txt/1
+policy    smysl/parts/1 level=line min=1024 max=4194304
+top-level line
+lossy     false
+title     -
+lang      -
+text      471 bytes
+nodes     10
+parts     1
+
+part 0
+  range     0..471
+  tid       t3:epf7m2nqtymxk5yn7c7glsaps57b36qetkyk74ngaxe3me4ggv2a
+  structure d417d494788a8693d862847b95e80f32c76c9f571aa404cf164ecf22cf811a76
+  rdid      r3:apfxei2trsqmihbwxzhjf6issljoke7ntpnpsukayeglkdck6e7a
+  segments  10
+
+mid       m3:lq2h6mnnel45wrts5ld4k4tpkhapawetz42ohdk5gqkzvlx72maa
+
+locators
+  line      L1 0..29
+  line      L3 31..124
+  line      L4 125..189
+  line      L6 191..205
+  line      L8 207..299
+  line      L9 300..389
+  line      L10 390..412
+  line      L12 414..431
+  line      L13 432..453
+  line      L14 454..470

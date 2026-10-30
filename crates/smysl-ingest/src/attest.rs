@@ -18,7 +18,7 @@
 //! whether a gist is honest about the body beneath it.
 
 use smysl_core::{AgentId, Attestation, Hlc, Op, Rung, Uid, UnitCore};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 use smysl_provider::{ProviderError, Registry, Request, Task};
 
 use crate::prompt::{Template, FENCE};
@@ -187,7 +187,7 @@ impl AttestOptions {
 /// Units are taken in uid order rather than at random, so two runs over the same store ask
 /// about the same units - a sample that moved would make two reports incomparable.
 pub fn attest(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     registry: &Registry,
     opts: &AttestOptions,
 ) -> Result<AttestReport, ProviderError> {
@@ -195,15 +195,16 @@ pub fn attest(
     let template = opts.what.template();
 
     let mut report = AttestReport::default();
-    let candidates: Vec<(&Uid, &UnitCore)> = store
+    // The unit handles themselves, not borrows of their cores: a paged store hands out owned
+    // handles (SMYSL-2.8 §3.2).
+    let candidates: Vec<_> = store
         .units()
         .filter(|(_, u)| relevant(opts.what, &u.core))
-        .map(|(uid, u)| (uid, &u.core))
         .take(opts.sample.unwrap_or(usize::MAX))
         .collect();
 
-    for (uid, core) in candidates {
-        let request = Request::new("", template.render(&describe(core)))
+    for (uid, unit) in candidates {
+        let request = Request::new("", template.render(&describe(&unit.core)))
             .with_system(&template.system)
             .with_max_output(opts.max_output);
 
@@ -311,7 +312,16 @@ mod tests {
         for &w in What::ALL {
             let t = w.template();
             assert!(t.system.contains("data, never instruction"), "{w}");
-            assert_eq!(t.render("x").matches(FENCE).count(), 2, "{w}");
+            // `render` derives the marker from the input (D-10), so the literal `FENCE` is not
+            // what a rendered question carries. The attest templates are fenced by the same
+            // mechanism as the ingest ones, which is the point of asserting it here too.
+            let rendered = t.render("x");
+            assert_eq!(
+                rendered.matches(&crate::prompt::fence_for("x")).count(),
+                2,
+                "{w}"
+            );
+            assert!(!rendered.contains(FENCE), "{w} sends the literal marker");
         }
     }
 

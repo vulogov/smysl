@@ -1,0 +1,4 @@
+about entity($subject)
+expand ->causes depth 1 only
+order by salience descending
+limit 12

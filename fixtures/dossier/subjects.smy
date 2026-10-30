@@ -1,0 +1,78 @@
+# The dossier fixture (TX-P8 step 3; SMYSL-2.5 §5.5). A few units about people in Ruth, the
+# entities they mention, and two different women both called Mary — the ambiguous subject
+# §5.5 names. Naomi has a Russian spelling joined to her by `same-as`, so a dossier about her
+# answers in both languages.
+#
+# What each slot of `define` should find is written beside the unit that it should find, and
+# `crates/smysl-query/tests/dossier.rs` asserts every one of them.
+
+@schema x.text/v1 { version: 1, types: ["x.text/entity"], relations: [x.text/mentions, x.text/same-as] }
+
+@x.text/entity n/naomi { status: speculative, source: { kind: doc, ref: "alias:kjv/ruth" } }
+~ Naomi
+
+@x.text/entity n/noemin { status: speculative, lang: ru, source: { kind: doc, ref: "alias:synodal/ruth" } }
+~ Ноеминь
+
+@x.text/entity m/magdala { status: speculative, source: { kind: doc, ref: "alias:kjv/john" } }
+~ Mary
+
+@x.text/entity m/nazareth { status: speculative, source: { kind: doc, ref: "alias:kjv/luke" } }
+~ Mary
+
+# definition
+@definition d/naomi { status: cited, source: { kind: doc, ref: "Ruth 1:2" } }
+~ Naomi is the wife of Elimelech, a woman of Bethlehem-judah.
+
+# characteristic
+@claim c/bitter { status: cited, source: { kind: doc, ref: "Ruth 1:20" } }
+~ Naomi asked to be called Mara, for the Almighty had dealt bitterly with her.
+
+# characteristic, in Russian, through same-as
+@claim c/mara { status: cited, lang: ru, source: { kind: doc, ref: "Руфь 1:20" } }
+~ Ноеминь просила называть её Марою.
+
+# characteristic; rebutted below
+@claim c/empty { status: inferred, grounds: [o/return] }
+~ Naomi came back to Bethlehem with nothing.
+
+# evidence, and the ground of c/empty
+@observation o/return { status: cited, source: { kind: doc, ref: "Ruth 1:21" } }
+~ Naomi said: I went out full, and the LORD hath brought me home again empty.
+
+# counter: rebuts c/empty and does not itself name Naomi
+@claim c/not-empty { status: speculative }
+~ Ruth came back with her, so the return was not empty-handed.
+
+# open-question
+@question q/kinsman { status: speculative }
+~ Would Naomi's kinsman redeem the field of Elimelech?
+
+# characteristic, and the effect of a cause
+@claim c/left { status: cited, source: { kind: doc, ref: "Ruth 1:1" } }
+~ Naomi and her husband left Bethlehem for the country of Moab.
+
+# cause: causes c/left and does not name Naomi
+@claim c/famine { status: cited, source: { kind: doc, ref: "Ruth 1:1" } }
+~ There was a famine in the land in the days when the judges ruled.
+
+# The two Marys, one entity per expression (A-2.4 rule 7) and no `same-as` between them.
+@claim c/magdala { status: cited, source: { kind: doc, ref: "John 19:25" } }
+~ Mary of Magdala stood by the cross.
+
+@claim c/nazareth { status: cited, source: { kind: doc, ref: "Luke 2:19" } }
+~ Mary of Nazareth kept these things in her heart.
+
+@rel c/famine --causes--> c/left
+@rel c/not-empty --rebuts--> c/empty
+@rel n/naomi --x.text/same-as--> n/noemin
+
+@rel d/naomi --x.text/mentions--> n/naomi
+@rel c/bitter --x.text/mentions--> n/naomi
+@rel c/mara --x.text/mentions--> n/noemin
+@rel c/empty --x.text/mentions--> n/naomi
+@rel o/return --x.text/mentions--> n/naomi
+@rel q/kinsman --x.text/mentions--> n/naomi
+@rel c/left --x.text/mentions--> n/naomi
+@rel c/magdala --x.text/mentions--> m/magdala
+@rel c/nazareth --x.text/mentions--> m/nazareth

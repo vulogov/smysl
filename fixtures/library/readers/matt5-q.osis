@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osis><osisText osisIDWork="KJV" xml:lang="en">
+  <header><work osisWork="KJV"><title>King James Version</title></work></header>
+  <div type="book" osisID="Matt">
+    <chapter sID="Matt.5" osisID="Matt.5"/>
+    <verse sID="Matt.5.1" osisID="Matt.5.1"/>And seeing the multitudes, he went up into a mountain: and when he was set, his disciples came unto him.<verse eID="Matt.5.1"/>
+    <verse sID="Matt.5.2" osisID="Matt.5.2"/>And he opened his mouth, and taught them, saying,<verse eID="Matt.5.2"/>
+    <q sID="sermon" who="#Jesus"/>
+    <verse sID="Matt.5.3" osisID="Matt.5.3"/>Blessed are the poor in spirit: for theirs is the kingdom of heaven.<verse eID="Matt.5.3"/>
+    <verse sID="Matt.5.4" osisID="Matt.5.4"/>Blessed are they that mourn: for they shall be comforted.<verse eID="Matt.5.4"/>
+    <q eID="sermon"/>
+    <chapter eID="Matt.5"/>
+  </div>
+</osisText></osis>

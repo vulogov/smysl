@@ -1,0 +1,6 @@
+@doc smysl/0.1 { id: v/impossible-dating }
+
+@claim c/sent { status: cited, source: { kind: doc, ref: "a chat export", observed: 1726500000000 } }
+~ A message whose send time the export recorded, dated to 1066 by somebody.
+
+@date c/sent { axis: said, when: 1066, agent: human:vu, ts: [1726500000000, 0] }

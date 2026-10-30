@@ -1,0 +1,26 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Texts,
+                    ],
+                },
+            ),
+            source: None,
+            filters: [],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [
+        TimeOrder {
+            as_recorded: true,
+        },
+    ],
+    shaping: [],
+    output: None,
+}

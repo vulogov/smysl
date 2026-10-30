@@ -1,0 +1,30 @@
+file      matt5-q.osis
+reader    osis/1
+alias     kjv1769-matthew-osis
+licence   public-domain
+reader-field osis/1
+policy    smysl/parts/1 level=chapter min=1024 max=4194304
+top-level chapter
+lossy     false
+title     King James Version
+lang      en
+text      281 bytes
+nodes     6
+parts     1
+
+part 0
+  range     0..281
+  tid       t3:zrzzrsxajimvunl5pd76rbb4g3ger3zbsmoe2i67vzpjnvlitclq
+  structure e279ba30f3f4d7cbbfe25a840c6bfcffbce334d1d5b16b90b3ab472989f5c6bf
+  rdid      r3:3rgc2lklcbslc3sunfvlk5fsehb2nprry7g6zbfzfei73ek3r46q
+  segments  6
+
+mid       m3:c3f7jsagagxwep3mtoa3papp2zp455tjilvxqht5wmovr6j43gmq
+
+locators
+  book      Matt 0..281
+  chapter   Matt.5 0..281
+  verse     Matt.5.1 0..104
+  verse     Matt.5.2 105..154
+  verse     Matt.5.3 155..223 speech=155-223@#Jesus
+  verse     Matt.5.4 224..281 speech=224-281@#Jesus

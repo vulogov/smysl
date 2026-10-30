@@ -1,0 +1,5 @@
+@doc smysl/0.1 { id: v/dating-selects-nothing }
+
+@manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain, carry: none, part-policy: "top/1Ki-4Mi", published: 1769, parts: [{ tid: t3:w75spjohk7y23jgohkujj56vefvcxaxsox5c6lh6odeomuecjhta, length: 97, structure: b3:ykckqkokjagsnl3gtadwjztt2yjvf62ltfr7eywo7ukpj343dmgq, rdid: r3:ybhjojx4h7s4kkhcyipwpwrtabssofgjyfbck24ooobwqa3b5fya }] }
+
+@date t3:w75spjohk7y23jgohkujj56vefvcxaxsox5c6lh6odeomuecjhta { axis: said, when: 1769, agent: human:vu, ts: [1726500000000, 0] }

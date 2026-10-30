@@ -182,6 +182,13 @@ impl fmt::Display for StructuredMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Capabilities {
+    /// The model this provider will ask for when a request does not name one.
+    ///
+    /// Every mapper already fell back to its configured model when `Request.model` was empty
+    /// (`map/ollama.rs` `body`), so the name that ran was knowable only inside the mapper. A
+    /// caller that left `--model` unset therefore recorded an empty string in the recipe for a
+    /// run that used a specific model — the one thing a recipe exists to pin.
+    pub model: String,
     pub context_window: usize,
     pub max_output: usize,
     pub structured: StructuredMode,
@@ -195,6 +202,7 @@ pub struct Capabilities {
 impl Default for Capabilities {
     fn default() -> Capabilities {
         Capabilities {
+            model: String::new(),
             context_window: 4096,
             max_output: 1024,
             structured: StructuredMode::None,

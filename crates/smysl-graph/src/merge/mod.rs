@@ -22,12 +22,13 @@ pub mod policy;
 pub mod retraction;
 pub mod review;
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use smysl_core::diag::Report;
 use smysl_core::{Contention, Error, Hlc, Label, MergeError, Record, Uid};
 
-use crate::store::Store;
+use crate::store::{Store, StoreRead};
 
 pub use contention::DetectionContext;
 pub use policy::{RetractionAuthority, RetractionPolicy, SupersessionPolicy};
@@ -96,8 +97,12 @@ impl MergeReport {
 /// set union keyed by content. What is added here is detection (step 5) and the retraction
 /// fixpoint (step 6) - both pure functions of the merged set, which is why they inherit the
 /// union's commutativity rather than threatening it.
-pub fn merge(store: &mut Store, other: &Store, opts: MergeOptions) -> Result<MergeReport, Error> {
-    let incoming: Vec<Record> = other.iter().cloned().collect();
+pub fn merge(
+    store: &mut Store,
+    other: &(impl StoreRead + ?Sized),
+    opts: MergeOptions,
+) -> Result<MergeReport, Error> {
+    let incoming: Vec<Record> = other.records().map(Cow::into_owned).collect();
     let before: Vec<Contention> = store.contentions().to_vec();
 
     let appended = store.append(&incoming)?;

@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use smysl_core::{Label, Lod, Uid};
-use smysl_graph::{salience, SalienceReport, SalienceRequest, Store};
+use smysl_graph::{salience, AnyStore, SalienceReport, SalienceRequest, Store};
 use smysl_pack::{pack, Estimator, PackRequest, Reason};
 
 use crate::Pane;
@@ -178,6 +178,15 @@ impl App {
         };
         app.resimulate();
         app
+    }
+
+    /// Build from a store of whichever backend (SMYSL-2.8 §4.3 #13).
+    ///
+    /// The app holds an in-memory [`Store`], which is what [`App::store`] has returned since
+    /// 1.0; a store of another backend is read into one. For the in-memory backend that is the
+    /// store itself, moved.
+    pub fn with_store(store: AnyStore, labels: BTreeMap<Label, Uid>) -> App {
+        App::new(store.into_memory(), labels)
     }
 
     // -- reads ------------------------------------------------------------

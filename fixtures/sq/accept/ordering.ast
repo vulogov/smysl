@@ -1,0 +1,54 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: None,
+            filters: [],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [
+        OrderBy {
+            keys: [
+                SortKey {
+                    target: Salience,
+                    dir: Some(
+                        Descending,
+                    ),
+                },
+                SortKey {
+                    target: Field(
+                        FieldRef {
+                            pin: None,
+                            name: "published",
+                        },
+                    ),
+                    dir: Some(
+                        Ascending,
+                    ),
+                },
+                SortKey {
+                    target: Field(
+                        FieldRef {
+                            pin: None,
+                            name: "payload.code.kind",
+                        },
+                    ),
+                    dir: None,
+                },
+            ],
+            lens_none: false,
+        },
+    ],
+    shaping: [],
+    output: None,
+}

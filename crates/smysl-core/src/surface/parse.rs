@@ -18,12 +18,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::diag::{Code, Diagnostic, Span, Subject};
 use crate::error::ParseError;
 use crate::hash::canonical_uid;
-use crate::ids::{AgentId, ContentionId, Label, LangTag, SchemaId, ThreadId, Uid, ViewId};
+use crate::ids::{
+    is_alias, AgentId, ContentionId, Label, LangTag, Mid, Rdid, SchemaId, ThreadId, Tid, Uid,
+    ViewId,
+};
 use crate::surface::hjson::{parse_object_prefix, HObject, HValue, Spanned};
 use crate::surface::lex::{arrow_len, find_arrow, lex, Line, LineClass};
 use crate::surface::payload::object_to_payload;
 use crate::types::annex::SchemaDecl;
 use crate::types::epistemics::{Date, SourceKind, SourcePolicy, SourceRef, Status};
+use crate::types::library::{
+    Allen, Axis, Calendar, Carry, Dating, DatingTarget, DatingValue, Manifest, ParentKind,
+    PartEntry, Redaction,
+};
 use crate::types::lifecycle::{Commit, Commitment, Resolution, ResolutionTarget, Withdrawal};
 use crate::types::provenance::Hlc;
 use crate::types::relation::{RelKind, Relation};
@@ -151,6 +158,9 @@ struct RawUnit {
     source: Option<SourceRef>,
     payload: Option<Vec<u8>>,
     salience: Option<f32>,
+    /// Core key 9 (A-1). `None` when the header did not write one *unquoted* — a quoted
+    /// `"lang":` stays in the payload, which is A-10 item 2's whole content.
+    lang: Option<crate::ids::LangTag>,
     span: Span,
 }
 
@@ -195,6 +205,53 @@ struct RawCommit {
     ts: Hlc,
     note: Option<Spanned<Ref>>,
     span: Span,
+}
+
+/// `@redact <tid> { agent: …, ts: […] }` (1.10, rule Z).
+///
+/// Raw for one reason only: `reason` names a unit, and a unit the document declares is not
+/// known by uid until the labels are resolved. The *target* needs no resolution — it is a tid,
+/// which is a hash of bytes and spelled in full.
+struct RawRedaction {
+    tid: Tid,
+    agent: AgentId,
+    ts: Hlc,
+    reason: Option<Spanned<Ref>>,
+    span: Span,
+}
+
+/// A dating before its references are resolved (record 17).
+///
+/// Raw for the same reason a redaction is: `target` may be a unit the document declares and
+/// `basis` always is, and neither is known by uid until the labels resolve. A tid, a mid and a
+/// window need no resolution — each is spelled in full.
+struct RawDating {
+    target: DateTarget,
+    axis: Axis,
+    value: RawValue,
+    basis: Option<Spanned<Ref>>,
+    agent: AgentId,
+    ts: Hlc,
+    span: Span,
+}
+
+/// A dating's target, with a unit still spelled as the document spelled it.
+///
+/// Not `RawTarget`, which is what `@withdraw` and `@resolve` name — an edge, a rid or a
+/// contention id. The two have no case in common, and one enum covering both would offer every
+/// reader of either eight variants of which four are impossible.
+enum DateTarget {
+    Part(Tid),
+    Manifest(Mid),
+    Window { tid: Tid, from_ms: u64, to_ms: u64 },
+    Unit(Spanned<Ref>),
+}
+
+/// A dating's value, with a relative target still unresolved.
+enum RawValue {
+    Absolute(String),
+    Offset(i64),
+    Relative { allen: Allen, target: DateTarget },
 }
 
 struct RawThread {
@@ -252,6 +309,9 @@ pub fn parse_surface_with(src: &str, opts: &ParseOptions) -> Result<ParseOutcome
         schemas: Vec::new(),
         lifecycle: Vec::new(),
         commits: Vec::new(),
+        redactions: Vec::new(),
+        datings: Vec::new(),
+        manifests: Vec::new(),
         view: None,
     };
     p.run()?;
@@ -270,6 +330,9 @@ struct Parser<'a> {
     schemas: Vec<SchemaDecl>,
     lifecycle: Vec<RawLifecycle>,
     commits: Vec<RawCommit>,
+    redactions: Vec<RawRedaction>,
+    datings: Vec<RawDating>,
+    manifests: Vec<Manifest>,
     view: Option<RawView>,
 }
 
@@ -341,6 +404,21 @@ impl<'a> Parser<'a> {
                         self.commits.push(c);
                     }
                 }
+                LineClass::ManifestStart => {
+                    if let Some(m) = self.manifest_record() {
+                        self.manifests.push(m);
+                    }
+                }
+                LineClass::RedactStart => {
+                    if let Some(r) = self.redact_record() {
+                        self.redactions.push(r);
+                    }
+                }
+                LineClass::DateStart => {
+                    if let Some(d) = self.date_record() {
+                        self.datings.push(d);
+                    }
+                }
                 _ => {
                     self.err(
                         Code::E001,
@@ -358,7 +436,8 @@ impl<'a> Parser<'a> {
     // @schema
     // -----------------------------------------------------------------------
 
-    /// `@schema <id> { version: N, types: [...], relations: [...] }`, a `SchemaDecl`.
+    /// `@schema <id> { version: N, types: [...], relations: [...], fields: {...}, lenses: [...] }`,
+    /// a `SchemaDecl` (`fields` and `lenses` since A-10 item 4, TX-P12 step 7).
     ///
     /// The declaration `check` has always consulted for `SMY-W013` and had no surface spelling,
     /// so an extension relation written in a `.smy` file warned on every check forever — the
@@ -409,16 +488,39 @@ impl<'a> Parser<'a> {
         if let Some(v) = header.take("relations") {
             decl.relations = self.strict_list(&v, "relations", |s: &str| RelKind::parse(s).ok())?;
         }
-        // Any other key is an error rather than something to carry or skip. A declaration is
-        // three keys long, and the likeliest stray one is a misspelling — `relation:` for
-        // `relations:` — which, passed over quietly, would leave the kind warning SMY-W013
-        // under a file that visibly declares it: the problem this record exists to solve.
+        // A-7's field table and Appendix B's lens steps, spelled with their keys as names (A-10
+        // item 4), encoded here to the canonical bytes keys 4 and 5 hold.
+        for (key, parse) in [
+            ("fields", super::schema::parse_fields as fn(&_) -> _),
+            ("lenses", super::schema::parse_lenses as fn(&_) -> _),
+        ] {
+            if let Some(v) = header.take(key) {
+                match parse(&v) {
+                    Ok(bytes) => {
+                        if key == "fields" {
+                            decl.payload_shape = Some(bytes);
+                        } else {
+                            decl.lenses = Some(bytes);
+                        }
+                    }
+                    Err(super::schema::Bad(span, message)) => {
+                        self.err(Code::E001, span, message);
+                        return None;
+                    }
+                }
+            }
+        }
+        // Any other key is an error rather than something to carry or skip. The likeliest
+        // stray one is a misspelling — `relation:` for `relations:` — which, passed over
+        // quietly, would leave the kind warning SMY-W013 under a file that visibly declares
+        // it: the problem this record exists to solve.
         if let Some((k, _)) = header.iter().next() {
             self.err(
                 Code::E001,
                 k.span,
                 format!(
-                    "`@schema` has no key `{}`; it takes `version`, `types` and `relations`",
+                    "`@schema` has no key `{}`; it takes `version`, `types`, `relations`, \
+                     `fields` and `lenses`",
                     k.value
                 ),
             );
@@ -871,7 +973,50 @@ impl<'a> Parser<'a> {
 
         let deps = self.ref_list(&mut header, "deps");
         let grounds = self.ref_list(&mut header, "grounds");
-        let source = header.take("source").and_then(|v| self.source(&v));
+        // A `source` that fails to parse refuses the unit, rather than producing one without
+        // it. `source` is inside the uid, so a unit built from a source the author did not
+        // write is a different unit from the one the document describes — and it would carry a
+        // uid nothing else refers to. The diagnostic was already emitted; what changes is that
+        // it is now fatal to the unit rather than advisory.
+        let source = match header.take("source") {
+            None => None,
+            Some(v) => match self.source(&v) {
+                Some(s) => Some(s),
+                // `recover` before returning, as every other refusal in this function does.
+                // The record loop does not advance the cursor for a `RecordStart` — `unit` owns
+                // that, and does it inside `gist_body_detail` — so bailing out before the body
+                // is consumed leaves the parser on the same line forever. A malformed source
+                // would hang the parser rather than reject the document.
+                None => {
+                    self.recover();
+                    return None;
+                }
+            },
+        };
+        // Core key 9 (A-1), and the one place in the format where **quoting changes meaning**
+        // (A-10 item 2): a bare `lang:` is the core key, a quoted `"lang":` is a payload key.
+        // `SMY-W432` shipped a release early to say this move was coming, because a key moving
+        // between two hashed places changes a unit's uid with nothing to report it.
+        let lang = match header.key_span("lang") {
+            Some(k) if self.src.as_bytes().get(k.start) == Some(&b'"') => None,
+            Some(_) => {
+                let v = header.take("lang").expect("the key is there");
+                match v.value.as_str().map(crate::ids::LangTag::new) {
+                    Some(Ok(tag)) => Some(tag),
+                    _ => {
+                        self.err(
+                            Code::E001,
+                            v.span,
+                            "`lang` is a BCP-47 tag; write `\"lang\":` for a payload key of that \
+                             name",
+                        );
+                        self.recover();
+                        return None;
+                    }
+                }
+            }
+            None => None,
+        };
         let salience = header
             .take("salience")
             .and_then(|v| v.value.as_f64())
@@ -901,6 +1046,7 @@ impl<'a> Parser<'a> {
             source,
             payload,
             salience,
+            lang,
             span,
         })
     }
@@ -1327,6 +1473,24 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// The keys a `source { }` may carry. Anything else is `SMY-E001`.
+    ///
+    /// Closed rather than open, and deliberately: `source` is inside `UnitCore` and therefore
+    /// inside the uid. A key this parser ignored was a key that did not reach the encoder, so
+    /// the unit written back differed from the one the author described — silently, and with a
+    /// different identity. Forward compatibility inside `source` is the wire's business, where
+    /// `SourceRef::extra` preserves what it does not know; surface text has an author to tell.
+    const SOURCE_KEYS: &'static [&'static str] = &[
+        "kind",
+        "ref",
+        "reference",
+        "captured",
+        "observed",
+        "published",
+        "span",
+        "manifest",
+    ];
+
     fn source(&mut self, v: &Spanned<HValue>) -> Option<SourceRef> {
         let o = match v.value.as_object() {
             Some(o) => o,
@@ -1335,6 +1499,22 @@ impl<'a> Parser<'a> {
                 return None;
             }
         };
+        // `SMY-E001` for a key this build does not define. The in-code comment here used to
+        // claim exactly this was happening; nothing iterated the object, so it was not.
+        for (k, _) in o.iter() {
+            if !Self::SOURCE_KEYS.contains(&k.value.as_str()) {
+                self.err(
+                    Code::E001,
+                    k.span,
+                    format!(
+                        "`{}` is not a source key; source accepts {}",
+                        k.value,
+                        Self::SOURCE_KEYS.join(", ")
+                    ),
+                );
+                return None;
+            }
+        }
         let kind = o
             .get("kind")
             .and_then(|k| k.value.as_str())
@@ -1347,27 +1527,865 @@ impl<'a> Parser<'a> {
             self.err(Code::E001, v.span, "source needs `kind` and `ref`");
             return None;
         };
-        let captured = o
-            .get("captured")
-            .and_then(|c| c.value.as_str())
-            .and_then(|s| Date::parse(s).ok());
+        // A malformed value is refused, not dropped. Dropping it produced a unit whose source
+        // the author did not write, with a uid to match.
+        let captured = match o.get("captured") {
+            None => None,
+            Some(c) => match c.value.as_str().and_then(|s| Date::parse(s).ok()) {
+                Some(d) => Some(d),
+                None => {
+                    self.err(Code::E001, c.span, "`captured` is not a date");
+                    return None;
+                }
+            },
+        };
         // Milliseconds as an integer, the same idiom `ts: [wall_ms, counter]` already uses for
         // an HLC. An ISO-8601 string would read better and would need a calendar to convert;
         // the format deliberately owns no calendar beyond `Date`'s validation.
-        let observed = o
-            .get("observed")
-            .and_then(|c| c.value.as_int())
-            .and_then(|i| u64::try_from(i).ok());
-        Some(SourceRef {
-            kind,
-            reference: reference.to_string(),
-            captured,
-            observed,
-            // Surface text has no way to write an unknown source key: the parser knows the three
-            // it defines and an author writing a fourth gets a parse error, not a preserved key.
-            // Forward compatibility here is the wire's business (1.7).
-            extra: Default::default(),
+        let observed = match o.get("observed") {
+            None => None,
+            Some(c) => match c.value.as_int().and_then(|i| u64::try_from(i).ok()) {
+                Some(ms) => Some(ms),
+                None => {
+                    self.err(
+                        Code::E001,
+                        c.span,
+                        "`observed` is not a non-negative integer of milliseconds",
+                    );
+                    return None;
+                }
+            },
+        };
+        // EDTF text, and refused rather than dropped for the same reason `captured` is: the
+        // value is inside the uid, so a unit written with a value the parser silently dropped
+        // would be a different unit from the one the author wrote. A decoder keeps a malformed
+        // value — it has to, byte for byte — but a document can still be told.
+        let published = match o.get("published") {
+            None => None,
+            Some(c) => {
+                let txt = match (c.value.as_str(), c.value.as_int()) {
+                    (Some(t), _) => t.to_string(),
+                    (None, Some(i)) => i.to_string(),
+                    _ => {
+                        self.err(Code::E001, c.span, "`published` is an EDTF value");
+                        return None;
+                    }
+                };
+                if let Err(e) = crate::edtf::parse(&txt) {
+                    self.err(Code::E410, c.span, e.to_string());
+                    return None;
+                }
+                Some(txt)
+            }
+        };
+        // `[start, end]`, half-open, with `start < end` (A-2.1 key 5). Refused rather than
+        // dropped, like every other value in here: it is inside the uid.
+        let span = match o.get("span") {
+            None => None,
+            Some(c) => {
+                let pair = c.value.as_array().and_then(|a| match a {
+                    [a, b] => {
+                        let lo = a.value.as_int().and_then(|i| u64::try_from(i).ok())?;
+                        let hi = b.value.as_int().and_then(|i| u64::try_from(i).ok())?;
+                        (lo < hi).then_some((lo, hi))
+                    }
+                    _ => None,
+                });
+                match pair {
+                    Some(p) => Some(p),
+                    None => {
+                        self.err(
+                            Code::E001,
+                            c.span,
+                            "`span` is [start, end] with start < end, in bytes of the part",
+                        );
+                        return None;
+                    }
+                }
+            }
+        };
+        let manifest = match o.get("manifest") {
+            None => None,
+            Some(c) => match c.value.as_str().and_then(|t| Mid::parse(t).ok()) {
+                Some(m) => Some(m),
+                None => {
+                    self.err(Code::E001, c.span, "`manifest` is an `m3:` manifest id");
+                    return None;
+                }
+            },
+        };
+        // A-2.4 rule 1, at the one place a document can state the pair. The surface refuses what
+        // the decoder refuses and `SourceRef::in_part` makes unreachable — three doors, one rule.
+        let (span, manifest) = match (span, manifest) {
+            (Some(_), None) => {
+                self.err(
+                    Code::E001,
+                    v.span,
+                    "a `span` needs the `manifest` it is an offset into (SMYSL-2.3 A-2.4 rule 1)",
+                );
+                return None;
+            }
+            pair => pair,
+        };
+
+        // Surface text cannot spell an unknown source kind: `kind:` parses against the named
+        // set, so an open enumeration is the wire's business, not this parser's. A source that
+        // arrived as CBOR with an unknown code keeps it; one written by hand cannot have one.
+        let mut s = SourceRef::new(kind, reference.to_string());
+        s.captured = captured;
+        s.observed = observed;
+        s.published = published;
+        if let (Some((start, end)), Some(mid)) = (span, manifest) {
+            s = s.in_part(start, end, mid)?;
+        } else if let Some(mid) = manifest {
+            // A manifest with no span is legal: a unit may name the manifestation it came from
+            // without quoting a range of it (A-2.1 makes key 6 optional on its own).
+            s.manifest = Some(mid);
+        }
+        Some(s)
+    }
+
+    // -----------------------------------------------------------------------
+    // @manifest
+    // -----------------------------------------------------------------------
+
+    /// The keys a `@manifest` may carry, besides the alias in its header.
+    ///
+    /// Closed, as `source { }` is, and for a plainer reason than identity: a manifest is a
+    /// catalog entry, and the likeliest stray key is a misspelling of `part-policy` or
+    /// `licence` — both required. Passed over quietly, that writes a manifest claiming a
+    /// policy and a licence the author did not state.
+    ///
+    /// `raw` (key 16) is **not** here and has no surface spelling. It is whatever a reader
+    /// found and could not place in a named key, carried as opaque CBOR; spelling it would
+    /// mean this parser deciding what the bytes mean. A manifest carrying one is written as
+    /// CBOR only, which [`write::manifest_has_surface_form`] is what reports.
+    const MANIFEST_KEYS: &'static [&'static str] = &[
+        "parts",
+        "lang",
+        "reader",
+        "licence",
+        "carry",
+        "title",
+        "creators",
+        "published",
+        "identifiers",
+        "origin",
+        "parent",
+        "parent-kind",
+        "supersedes",
+        "versification",
+        "lossy",
+        "part-policy",
+        "calendar",
+    ];
+
+    /// `@manifest <alias> { lang: en, reader: osis/1, licence: public-domain, carry: text,
+    /// part-policy: "top/64Ki-4Mi", parts: [ … ] }` (1.10).
+    ///
+    /// Six things are required, because A-5 requires them: the alias, `lang`, `reader`,
+    /// `licence`, `carry` and `part-policy`. None has a defensible default. A missing `lang`
+    /// is not `und` — `und` is a claim that nobody knows, which is different from nobody
+    /// having said. A missing `carry` is not `none`, because `none` is a decision about
+    /// whether text may travel. A missing `part-policy` is the one that matters most: the
+    /// default changes when GE-T14 measures it at the end of TX-P2, and a manifest that
+    /// recorded no policy would silently mean a different cut of the same text afterwards.
+    ///
+    /// `parts` is the exception. It is required on the wire and may be empty, and writing
+    /// `parts: []` by hand to say "this is an import manifest" is noise, so an omitted
+    /// `parts` is an empty one. The writer omits an empty `parts` for the same reason, which
+    /// is what keeps the round trip a fixed point.
+    /// `@redact <tid> { agent: …, ts: […][, reason: <unit>] }` (1.10, rule Z).
+    ///
+    /// A part text has no surface form and a redaction does, which looks inconsistent and is
+    /// not: the record says *that* a part is to be held no longer, by whom and when, and that
+    /// is exactly the half a person reads, writes and audits. The bytes it is about are the
+    /// half that never had a surface form.
+    ///
+    /// The tid is spelled in full. `Tid::parse` refuses the 26-character short form for the
+    /// reason `Uid::parse` does — an abbreviated identity weakens identity silently — and here
+    /// the cost of an abbreviation would be a redaction that names a part nobody can find, or
+    /// worse, the wrong one.
+    /// `@date <target> { axis: said, when: <edtf>, agent: …, ts: […] }` — a `Dating` (17).
+    ///
+    /// The target is positional, as a redaction's tid and a commitment's unit are: a tid, a
+    /// mid, a uid or a label. A **window** is that part's tid with a `window: [from, to]` key,
+    /// which is how the one target kind that is not a single identity gets written down
+    /// without a second grammar.
+    ///
+    /// Exactly one value key: `when` for an absolute EDTF value, `offset` for a correction in
+    /// milliseconds, or one of the seven Allen words for a relative dating. Using the relation
+    /// itself as the key is what makes the common case read as what it says — `during:
+    /// m3:…` — and the set is closed, so a misspelling is a key error rather than a silent
+    /// relation nobody meant.
+    fn date_record(&mut self) -> Option<RawDating> {
+        let l = self.lines[self.i];
+        let rest = l.text.strip_prefix("@date").unwrap_or("").trim_start();
+        let target_txt = match rest.find('{') {
+            Some(p) => rest[..p].trim(),
+            None => {
+                self.err(
+                    Code::E001,
+                    l.span,
+                    "`@date` needs a target and a header with `axis`, a value, `agent` and `ts`",
+                );
+                self.recover();
+                return None;
+            }
+        };
+        let target = self.target_of(target_txt, l.span)?;
+
+        let Ok((mut header, header_span)) = self.header_object(l) else {
+            self.recover();
+            return None;
+        };
+        self.advance_past(header_span.end.max(l.span.end));
+
+        let Some(axis) = header
+            .take("axis")
+            .and_then(|v| v.value.as_str().and_then(Axis::parse))
+        else {
+            self.err(
+                Code::E001,
+                l.span,
+                "`@date` needs `axis: said`, `composed` or `about`",
+            );
+            return None;
+        };
+        // A window narrows a part, so it is read before the value: a `window` on anything but
+        // a part is a target the writer could not have meant.
+        let target = match header.take("window") {
+            None => target,
+            Some(v) => {
+                let (DateTarget::Part(tid), Some([from, to])) = (
+                    &target,
+                    v.value.as_array().and_then(|a| <&[_; 2]>::try_from(a).ok()),
+                ) else {
+                    self.err(
+                        Code::E001,
+                        v.span,
+                        "`window: [from_ms, to_ms]` narrows a part, so the target must be a tid",
+                    );
+                    return None;
+                };
+                let (Some(from_ms), Some(to_ms)) = (
+                    from.value.as_int().and_then(|i| u64::try_from(i).ok()),
+                    to.value.as_int().and_then(|i| u64::try_from(i).ok()),
+                ) else {
+                    self.err(
+                        Code::E001,
+                        v.span,
+                        "a window is two epoch-millisecond instants",
+                    );
+                    return None;
+                };
+                DateTarget::Window {
+                    tid: *tid,
+                    from_ms,
+                    to_ms,
+                }
+            }
+        };
+        let value = self.date_value(&mut header, l.span)?;
+        let Some(agent) = header
+            .take("agent")
+            .and_then(|v| v.value.as_str().and_then(|s| AgentId::new(s).ok()))
+        else {
+            self.err(Code::E001, l.span, "`@date` needs a valid `agent`");
+            return None;
+        };
+        let Some(ts) = header.take("ts").and_then(|v| self.hlc(&v, &agent)) else {
+            self.err(Code::E001, l.span, "`@date` needs `ts: [wall_ms, counter]`");
+            return None;
+        };
+        let basis = match header.take("basis") {
+            None => None,
+            Some(v) => match v.value.as_str().and_then(parse_ref) {
+                Some(r) => Some(Spanned::new(r, v.span)),
+                None => {
+                    self.err(Code::E001, v.span, "`basis` names a unit");
+                    return None;
+                }
+            },
+        };
+        if let Some((k, _)) = header.iter().next() {
+            self.err(
+                Code::E001,
+                k.span,
+                format!(
+                    "`@date` has no key `{}`; it takes `axis`, `window`, `when`, `offset`, \
+                     an Allen relation, `agent`, `ts` and `basis`",
+                    k.value
+                ),
+            );
+            return None;
+        }
+        Some(RawDating {
+            target,
+            axis,
+            value,
+            basis,
+            agent,
+            ts,
+            span: l.span,
         })
+    }
+
+    /// A dating's one value key.
+    fn date_value(&mut self, header: &mut HObject, span: Span) -> Option<RawValue> {
+        let mut found: Option<RawValue> = None;
+        if let Some(v) = header.take("when") {
+            // An unquoted `1920` lexes as an integer and is a perfectly good EDTF year, so
+            // both spellings are read — and rendered with no padding, so `920` stays the
+            // three-digit value the document wrote and is refused as one. Repairing it to
+            // `0920` would be this parser deciding what a source said.
+            let txt = match (v.value.as_str(), v.value.as_int()) {
+                (Some(s), _) => s.to_string(),
+                (None, Some(i)) => i.to_string(),
+                _ => {
+                    self.err(Code::E001, v.span, "`when` is an EDTF value");
+                    return None;
+                }
+            };
+            if let Err(e) = crate::edtf::parse(&txt) {
+                self.err(Code::E410, v.span, e.to_string());
+                return None;
+            }
+            found = Some(RawValue::Absolute(txt));
+        }
+        if let Some(v) = header.take("offset") {
+            if found.is_some() {
+                self.err(Code::E001, v.span, "a dating says one thing, not two");
+                return None;
+            }
+            let Some(ms) = v.value.as_int() else {
+                self.err(Code::E001, v.span, "`offset` is a number of milliseconds");
+                return None;
+            };
+            found = Some(RawValue::Offset(ms));
+        }
+        for allen in Allen::ALL {
+            let Some(v) = header.take(allen.as_str()) else {
+                continue;
+            };
+            if found.is_some() {
+                self.err(Code::E001, v.span, "a dating says one thing, not two");
+                return None;
+            }
+            let Some(txt) = v.value.as_str() else {
+                self.err(
+                    Code::E001,
+                    v.span,
+                    format!("`{allen}` names a unit, a part or a manifest"),
+                );
+                return None;
+            };
+            let target = self.target_of(txt, v.span)?;
+            found = Some(RawValue::Relative {
+                allen: *allen,
+                target,
+            });
+        }
+        if found.is_none() {
+            self.err(
+                Code::E001,
+                span,
+                "`@date` needs a value: `when`, `offset` or an Allen relation",
+            );
+        }
+        found
+    }
+
+    /// A target as a document spells it: a tid, a mid, or a reference to a unit.
+    fn target_of(&mut self, txt: &str, span: Span) -> Option<DateTarget> {
+        if txt.starts_with(Tid::PREFIX) {
+            return match Tid::parse(txt) {
+                Ok(t) => Some(DateTarget::Part(t)),
+                Err(_) => {
+                    self.err(Code::E403, span, format!("`{txt}` is not a tid"));
+                    self.recover();
+                    None
+                }
+            };
+        }
+        if txt.starts_with(Mid::PREFIX) {
+            return match Mid::parse(txt) {
+                Ok(m) => Some(DateTarget::Manifest(m)),
+                Err(_) => {
+                    self.err(Code::E403, span, format!("`{txt}` is not a mid"));
+                    self.recover();
+                    None
+                }
+            };
+        }
+        match parse_ref(txt) {
+            Some(r) => Some(DateTarget::Unit(Spanned::new(r, span))),
+            None => {
+                self.err(
+                    Code::E001,
+                    span,
+                    format!("`{txt}` is not a unit, a part or a manifest"),
+                );
+                self.recover();
+                None
+            }
+        }
+    }
+
+    fn redact_record(&mut self) -> Option<RawRedaction> {
+        let l = self.lines[self.i];
+        let rest = l.text.strip_prefix("@redact").unwrap_or("").trim_start();
+        let target_txt = match rest.find('{') {
+            Some(p) => rest[..p].trim(),
+            None => {
+                self.err(
+                    Code::E001,
+                    l.span,
+                    "`@redact` needs a tid and a header with `agent` and `ts`",
+                );
+                self.recover();
+                return None;
+            }
+        };
+        let tid = match Tid::parse(target_txt) {
+            Ok(t) => t,
+            Err(_) => {
+                self.err(
+                    Code::E403,
+                    l.span,
+                    format!("`@redact` names a part by its full tid, not `{target_txt}`"),
+                );
+                self.recover();
+                return None;
+            }
+        };
+
+        let Ok((mut header, header_span)) = self.header_object(l) else {
+            self.recover();
+            return None;
+        };
+        self.advance_past(header_span.end.max(l.span.end));
+
+        let Some(agent) = header
+            .take("agent")
+            .and_then(|v| v.value.as_str().and_then(|s| AgentId::new(s).ok()))
+        else {
+            self.err(Code::E001, l.span, "`@redact` needs a valid `agent`");
+            return None;
+        };
+        let Some(ts) = header.take("ts").and_then(|v| self.hlc(&v, &agent)) else {
+            self.err(
+                Code::E001,
+                l.span,
+                "`@redact` needs `ts: [wall_ms, counter]`",
+            );
+            return None;
+        };
+        let reason = match header.take("reason") {
+            None => None,
+            Some(v) => match v.value.as_str().and_then(parse_ref) {
+                Some(r) => Some(Spanned::new(r, v.span)),
+                None => {
+                    self.err(Code::E001, v.span, "`reason` names a unit");
+                    return None;
+                }
+            },
+        };
+        // Any other key is an error, as it is for every record with a brace header: the
+        // likeliest stray one is `note:` for `reason:`, and passed over quietly it would drop
+        // the only account of why a part was redacted.
+        if let Some((k, _)) = header.iter().next() {
+            self.err(
+                Code::E001,
+                k.span,
+                format!(
+                    "`@redact` has no key `{}`; it takes `agent`, `ts` and `reason`",
+                    k.value
+                ),
+            );
+            return None;
+        }
+        Some(RawRedaction {
+            tid,
+            agent,
+            ts,
+            reason,
+            span: l.span,
+        })
+    }
+
+    fn manifest_record(&mut self) -> Option<Manifest> {
+        let l = self.lines[self.i];
+        let rest = l.text.strip_prefix("@manifest").unwrap_or("").trim_start();
+        let alias = match rest.find('{') {
+            Some(p) => rest[..p].trim(),
+            None => {
+                self.err(
+                    Code::E001,
+                    l.span,
+                    "`@manifest` needs an alias and a header with `lang`, `reader`, \
+                     `licence`, `carry` and `part-policy`",
+                );
+                self.recover();
+                return None;
+            }
+        };
+        if !is_alias(alias) {
+            self.err(
+                Code::E001,
+                l.span,
+                format!(
+                    "`{alias}` is not an alias; an alias is lowercase ASCII segments joined \
+                     by `/` or `:`, at most 128 bytes, such as `kjv/1769`"
+                ),
+            );
+            self.recover();
+            return None;
+        }
+
+        let Ok((mut header, header_span)) = self.header_object(l) else {
+            self.recover();
+            return None;
+        };
+        self.advance_past(header_span.end.max(l.span.end));
+
+        for (k, _) in header.iter() {
+            if !Self::MANIFEST_KEYS.contains(&k.value.as_str()) {
+                self.err(
+                    Code::E001,
+                    k.span,
+                    format!(
+                        "`{}` is not a manifest key; `@manifest` accepts {}",
+                        k.value,
+                        Self::MANIFEST_KEYS.join(", ")
+                    ),
+                );
+                return None;
+            }
+        }
+
+        let lang = self.required_str(&mut header, l.span, "lang", "`lang` is a BCP-47 tag")?;
+        let Ok(lang) = LangTag::new(&lang) else {
+            self.err(
+                Code::E001,
+                l.span,
+                format!("`{lang}` is not a language tag"),
+            );
+            return None;
+        };
+        let reader = self.required_str(&mut header, l.span, "reader", "`reader` is a reader id")?;
+        let licence = self.required_str(
+            &mut header,
+            l.span,
+            "licence",
+            "`licence` is an SPDX id, `public-domain` or `unknown`",
+        )?;
+        let carry_txt = self.required_str(
+            &mut header,
+            l.span,
+            "carry",
+            "`carry` is `none`, `ref` or `text`",
+        )?;
+        let Some(carry) = Carry::parse(&carry_txt) else {
+            self.err(
+                Code::E001,
+                l.span,
+                format!("`{carry_txt}` is not a carry mode; it is `none`, `ref` or `text`"),
+            );
+            return None;
+        };
+        let part_policy = self.required_str(
+            &mut header,
+            l.span,
+            "part-policy",
+            "`part-policy` records the boundary rule and size targets the parts were cut by",
+        )?;
+
+        let mut m = Manifest::new(alias, lang, reader, licence, part_policy).with_carry(carry);
+
+        if let Some(v) = header.take("parts") {
+            let Some(items) = v.value.as_array() else {
+                self.err(Code::E001, v.span, "`parts` must be an array");
+                return None;
+            };
+            let mut parts = Vec::with_capacity(items.len());
+            for item in items {
+                parts.push(self.part_entry(item)?);
+            }
+            m.parts = parts;
+        }
+        if let Some(v) = header.take("title") {
+            m.title = Some(self.str_value(&v, "title")?.to_string());
+        }
+        if let Some(v) = header.take("creators") {
+            m.creators = self.strict_list(&v, "creators", |s: &str| Some(s.to_string()))?;
+        }
+        if let Some(v) = header.take("published") {
+            // Carried as written, not parsed: EDTF arrives in TX-P3, and "as recorded" means
+            // what the title page says even when this build cannot yet read it. An integer
+            // year is admitted because `published: 1769` is how anybody writes one, and HJSON
+            // reads it as an integer rather than as text.
+            m.published = Some(match v.value.as_str() {
+                Some(s) => s.to_string(),
+                None => match v.value.as_int() {
+                    Some(n) => n.to_string(),
+                    None => {
+                        self.err(
+                            Code::E001,
+                            v.span,
+                            "`published` is an EDTF date, as recorded",
+                        );
+                        return None;
+                    }
+                },
+            });
+        }
+        if let Some(v) = header.take("identifiers") {
+            let Some(o) = v.value.as_object() else {
+                self.err(
+                    Code::E001,
+                    v.span,
+                    "`identifiers` maps a name to a value, such as `{ url: \"…\" }`",
+                );
+                return None;
+            };
+            for (k, val) in o.iter() {
+                let Some(text) = val.value.as_str() else {
+                    self.err(
+                        Code::E001,
+                        val.span,
+                        format!("identifier `{}` must be text", k.value),
+                    );
+                    return None;
+                };
+                m.identifiers.insert(k.value.clone(), text.to_string());
+            }
+        }
+        if let Some(v) = header.take("origin") {
+            m.origin = Some(self.source(&v)?);
+        }
+        // Keys 11 and 12 are one field, because A-5 requires the second with the first and
+        // neither says anything alone. The surface spells them separately, so the pairing is
+        // checked here rather than left to the encoder.
+        let parent = match header.take("parent") {
+            None => None,
+            Some(v) => Some((self.mid_value(&v, "parent")?, v.span)),
+        };
+        let parent_kind = match header.take("parent-kind") {
+            None => None,
+            Some(v) => {
+                let txt = self.str_value(&v, "parent-kind")?.to_string();
+                match ParentKind::parse(&txt) {
+                    Some(k) => Some((k, v.span)),
+                    None => {
+                        self.err(
+                            Code::E001,
+                            v.span,
+                            format!(
+                                "`{txt}` is not a parent kind; it is `translation`, `edition`, \
+                                 `excerpt` or `transcription`"
+                            ),
+                        );
+                        return None;
+                    }
+                }
+            }
+        };
+        match (parent, parent_kind) {
+            (Some((mid, _)), Some((kind, _))) => m.parent = Some((mid, kind)),
+            (None, None) => {}
+            (Some((_, span)), None) => {
+                self.err(
+                    Code::E001,
+                    span,
+                    "`parent` needs `parent-kind`: `translation`, `edition`, `excerpt` or \
+                     `transcription`",
+                );
+                return None;
+            }
+            (None, Some((_, span))) => {
+                self.err(
+                    Code::E001,
+                    span,
+                    "`parent-kind` says how a manifest derives from its `parent`, and there \
+                     is no `parent` here",
+                );
+                return None;
+            }
+        }
+        if let Some(v) = header.take("supersedes") {
+            m.supersedes = Some(self.mid_value(&v, "supersedes")?);
+        }
+        if let Some(v) = header.take("versification") {
+            m.versification = Some(self.str_value(&v, "versification")?.to_string());
+        }
+        if let Some(v) = header.take("lossy") {
+            // Only `true`. `lossy: false` is the absence of the key on the wire, and admitting
+            // the word would give one manifest two spellings and two mids.
+            match v.value.as_bool() {
+                Some(true) => m.lossy = true,
+                _ => {
+                    self.err(
+                        Code::E001,
+                        v.span,
+                        "`lossy` is written only as `true`; a lossless manifest omits it",
+                    );
+                    return None;
+                }
+            }
+        }
+        if let Some(v) = header.take("calendar") {
+            let txt = self.str_value(&v, "calendar")?.to_string();
+            match Calendar::parse(&txt) {
+                Some(c) => m.calendar = Some(c),
+                None => {
+                    self.err(
+                        Code::E001,
+                        v.span,
+                        format!(
+                            "`{txt}` is not a calendar; only `julian` is named, and an absent \
+                             `calendar` means Gregorian"
+                        ),
+                    );
+                    return None;
+                }
+            }
+        }
+        Some(m)
+    }
+
+    /// `{ tid: t3:…, length: 4096, structure: b3:…, rdid: r3:…, lang: ru }`.
+    fn part_entry(&mut self, v: &Spanned<HValue>) -> Option<PartEntry> {
+        let Some(o) = v.value.as_object() else {
+            self.err(Code::E001, v.span, "a part entry is an object");
+            return None;
+        };
+        const PART_KEYS: &[&str] = &["tid", "length", "structure", "rdid", "lang"];
+        for (k, _) in o.iter() {
+            if !PART_KEYS.contains(&k.value.as_str()) {
+                self.err(
+                    Code::E001,
+                    k.span,
+                    format!(
+                        "`{}` is not a part key; a part entry takes {}",
+                        k.value,
+                        PART_KEYS.join(", ")
+                    ),
+                );
+                return None;
+            }
+        }
+        let field = |o: &HObject, k: &str| o.get(k).cloned();
+        let Some(tid) = field(o, "tid") else {
+            self.err(Code::E001, v.span, "a part entry needs `tid`");
+            return None;
+        };
+        let tid = self.id_value(&tid, "tid", Tid::parse)?;
+        let Some(length) = field(o, "length")
+            .and_then(|l| l.value.as_int())
+            .and_then(|n| u64::try_from(n).ok())
+        else {
+            self.err(
+                Code::E001,
+                v.span,
+                "a part entry needs `length`, the part's byte length",
+            );
+            return None;
+        };
+        let Some(structure) = field(o, "structure") else {
+            self.err(Code::E001, v.span, "a part entry needs `structure`");
+            return None;
+        };
+        // `b3:` rather than a prefix of its own, because the structure hash is not an
+        // identity: it is BLAKE3 over a table, with no domain byte, naming nothing that can
+        // be fetched. A prefix of its own would promise a lookup that does not exist.
+        let structure = self
+            .id_value(&structure, "structure", Uid::parse)?
+            .to_bytes();
+        let Some(rdid) = field(o, "rdid") else {
+            self.err(Code::E001, v.span, "a part entry needs `rdid`");
+            return None;
+        };
+        let rdid = self.id_value(&rdid, "rdid", Rdid::parse)?;
+        let mut e = PartEntry::new(tid, length, structure, rdid);
+        if let Some(lv) = field(o, "lang") {
+            let txt = self.str_value(&lv, "lang")?.to_string();
+            match LangTag::new(&txt) {
+                Ok(t) => e.lang = Some(t),
+                Err(_) => {
+                    self.err(
+                        Code::E001,
+                        lv.span,
+                        format!("`{txt}` is not a language tag"),
+                    );
+                    return None;
+                }
+            }
+        }
+        Some(e)
+    }
+
+    fn required_str(
+        &mut self,
+        header: &mut HObject,
+        span: Span,
+        key: &str,
+        why: &str,
+    ) -> Option<String> {
+        match header.take(key) {
+            Some(v) => match v.value.as_str() {
+                Some(s) => Some(s.to_string()),
+                None => {
+                    self.err(Code::E001, v.span, why.to_string());
+                    None
+                }
+            },
+            None => {
+                self.err(
+                    Code::E001,
+                    span,
+                    format!("`@manifest` needs `{key}`: {why}"),
+                );
+                None
+            }
+        }
+    }
+
+    fn str_value<'v>(&mut self, v: &'v Spanned<HValue>, key: &str) -> Option<&'v str> {
+        match v.value.as_str() {
+            Some(s) => Some(s),
+            None => {
+                self.err(Code::E001, v.span, format!("`{key}` must be text"));
+                None
+            }
+        }
+    }
+
+    fn id_value<T, E>(
+        &mut self,
+        v: &Spanned<HValue>,
+        key: &str,
+        f: impl Fn(&str) -> Result<T, E>,
+    ) -> Option<T> {
+        let Some(s) = v.value.as_str() else {
+            self.err(Code::E001, v.span, format!("`{key}` must be an identity"));
+            return None;
+        };
+        match f(s) {
+            Ok(t) => Some(t),
+            Err(_) => {
+                self.err(
+                    Code::E001,
+                    v.span,
+                    format!("`{s}` is not a well-formed `{key}`"),
+                );
+                None
+            }
+        }
+    }
+
+    fn mid_value(&mut self, v: &Spanned<HValue>, key: &str) -> Option<Mid> {
+        self.id_value(v, key, Mid::parse)
     }
 
     // -----------------------------------------------------------------------
@@ -1522,6 +2540,15 @@ impl<'a> Parser<'a> {
             self.out.records.push(Record::SchemaDecl(d));
         }
 
+        // Manifests next, before the units. A manifest names nothing by label — its parts are
+        // tids and its parent a mid — so it needs no resolution pass, and from TX-P5 a unit's
+        // `source.manifest` names one. A reader of the record stream should meet the text
+        // before the claims drawn from it, and the writer emits them in the same place, which
+        // is what keeps `parse -> write -> parse` a fixed point.
+        for m in std::mem::take(&mut self.manifests) {
+            self.out.records.push(Record::Manifest(m));
+        }
+
         for (i, core) in cores.into_iter().enumerate() {
             if let Some(c) = core {
                 if let (Some(s), Some(uid)) = (self.units[i].salience, resolved[i]) {
@@ -1644,6 +2671,70 @@ impl<'a> Parser<'a> {
             self.out.records.push(Record::Commit(commit));
         }
 
+        // Redactions after the commitments, which is after everything that can be named: a
+        // `reason` is a unit the document may declare, and the resolution order here is the
+        // emission order the writer has to reproduce for the round trip to be a fixed point.
+        for r in std::mem::take(&mut self.redactions) {
+            let reason = match &r.reason {
+                None => None,
+                Some(u) => match lookup(&u.value, &mut self.out, u.span) {
+                    Some(uid) => Some(uid),
+                    None => continue,
+                },
+            };
+            let mut redaction = Redaction::new(r.tid, r.agent.clone(), r.ts);
+            redaction.reason = reason;
+            let _ = r.span;
+            self.out.records.push(Record::Redaction(redaction));
+        }
+
+        // Datings after the redactions, last of all: a dating's `target` and its `basis` may
+        // both be units the document declares, so nothing can resolve until every label is
+        // known. The writer emits them here too, which is what keeps the round trip a fixed
+        // point.
+        for d in std::mem::take(&mut self.datings) {
+            let resolve = |t: DateTarget, out: &mut ParseOutcome| -> Option<DatingTarget> {
+                Some(match t {
+                    DateTarget::Part(tid) => DatingTarget::Part(tid),
+                    DateTarget::Manifest(mid) => DatingTarget::Manifest(mid),
+                    DateTarget::Window {
+                        tid,
+                        from_ms,
+                        to_ms,
+                    } => DatingTarget::Window {
+                        tid,
+                        from_ms,
+                        to_ms,
+                    },
+                    DateTarget::Unit(r) => DatingTarget::Unit(lookup(&r.value, out, r.span)?),
+                })
+            };
+            let Some(target) = resolve(d.target, &mut self.out) else {
+                continue;
+            };
+            let value = match d.value {
+                RawValue::Absolute(t) => DatingValue::Absolute(t),
+                RawValue::Offset(ms) => DatingValue::Offset(ms),
+                RawValue::Relative { allen, target: t } => {
+                    let Some(target) = resolve(t, &mut self.out) else {
+                        continue;
+                    };
+                    DatingValue::Relative { allen, target }
+                }
+            };
+            let basis = match &d.basis {
+                None => None,
+                Some(u) => match lookup(&u.value, &mut self.out, u.span) {
+                    Some(uid) => Some(uid),
+                    None => continue,
+                },
+            };
+            let mut dating = Dating::new(target, d.axis, value, d.agent.clone(), d.ts);
+            dating.basis = basis;
+            let _ = d.span;
+            self.out.records.push(Record::Dating(dating));
+        }
+
         if let Some(v) = &self.view {
             let roots: BTreeSet<Uid> = v
                 .roots
@@ -1740,6 +2831,7 @@ fn resolve(
     b.grounds = grounds;
     b.source = u.source.clone();
     b.payload = u.payload.clone();
+    b.lang = u.lang.clone();
 
     match UnitCore::new(b) {
         Ok(core) => {

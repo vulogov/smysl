@@ -1,0 +1,6 @@
+@doc smysl/0.1 { id: v/dating-names-nothing }
+
+@claim c/any { status: speculative }
+~ A claim that has nothing to do with the dating below it at all.
+
+@date t3:w75spjohk7y23jgohkujj56vefvcxaxsox5c6lh6odeomuecjhta { axis: said, when: 1984, agent: human:vu, ts: [1726500000000, 0] }

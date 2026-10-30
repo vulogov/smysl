@@ -383,3 +383,48 @@ fn the_fork_is_found_whatever_order_the_records_arrive_in() {
         "the same union gives the same contention, id included"
     );
 }
+
+/// Two stores differing only in a commitment have not converged.
+///
+/// Shipped 1.8.0 said they had. `state_hash` folds units, attestations, salience, labels,
+/// relations, threads, views, withdrawals, resolutions and contentions — and never mentions
+/// commitments, so `converged_with` returned `true` for two stores that disagreed about how
+/// settled a unit was. Rule U's instrument was blind to the axis 1.7 had just added.
+#[test]
+fn a_commitment_is_not_invisible_to_convergence() {
+    let u = claim("the villain's motive is grief");
+    let uid = canonical_uid(&u);
+    let a = agent("human:vu");
+
+    let bare = Store::from_records(vec![Record::Unit(u.clone())]);
+    let same = Store::from_records(vec![Record::Unit(u.clone())]);
+    assert!(
+        bare.converged_with(&same),
+        "two identically built stores must converge"
+    );
+
+    let settled = Store::from_records(vec![
+        Record::Unit(u),
+        Record::Commit(Commit::new(
+            uid,
+            Commitment::Canonical,
+            a.clone(),
+            hlc(1, &a),
+        )),
+    ]);
+
+    assert!(
+        !settled.converged_with(&bare),
+        "a store that settled a unit has not converged with one that did not"
+    );
+    assert_ne!(
+        settled.record_set_digest(),
+        bare.record_set_digest(),
+        "the record-set digest must see the commitment"
+    );
+    assert_eq!(
+        settled.state_hash(),
+        bare.state_hash(),
+        "and state_hash still cannot: that is why the digest is the answer"
+    );
+}

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<XMLBIBLE biblename="Luther 1912" type="x-bible">
+  <INFORMATION>
+    <title>Lutherbibel 1912</title>
+    <language>GER</language>
+  </INFORMATION>
+  <BIBLEBOOK bnumber="1" bname="1. Mose">
+    <CHAPTER cnumber="1">
+      <VERS vnumber="1">Am Anfang schuf Gott Himmel und Erde.</VERS>
+      <VERS vnumber="2">Und die Erde war w&#252;st und leer, und es war finster auf der Tiefe; und der Geist Gottes schwebte auf dem Wasser.</VERS>
+      <VERS vnumber="3">Und Gott sprach: Es werde Licht! und es ward Licht.</VERS>
+    </CHAPTER>
+  </BIBLEBOOK>
+</XMLBIBLE>

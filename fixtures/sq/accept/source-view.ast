@@ -1,0 +1,26 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: None,
+            source: Some(
+                SourceStage {
+                    source: View(
+                        "v/incidents.q3",
+                    ),
+                },
+            ),
+            filters: [],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [],
+    output: Some(
+        OutputStage {
+            output: Spans,
+        },
+    ),
+}

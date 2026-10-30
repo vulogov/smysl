@@ -1,0 +1,52 @@
+Query {
+    header: [],
+    expr: Pipeline(
+        Pipeline {
+            scope: Some(
+                Scope {
+                    items: [
+                        Library,
+                    ],
+                },
+            ),
+            source: Some(
+                SourceStage {
+                    source: Find {
+                        text: Param(
+                            "topic",
+                        ),
+                        engine: None,
+                        lang: None,
+                    },
+                },
+            ),
+            filters: [
+                Filter {
+                    pred: Cmp {
+                        field: FieldRef {
+                            pin: None,
+                            name: "lang",
+                        },
+                        op: Eq,
+                        value: Param(
+                            "language",
+                        ),
+                    },
+                    lens_none: false,
+                },
+            ],
+            times: [],
+            traversals: [],
+            closures: [],
+        },
+    ),
+    ordering: [],
+    shaping: [
+        Limit {
+            count: Param(
+                "n",
+            ),
+        },
+    ],
+    output: None,
+}

@@ -1,0 +1,78 @@
+# en — tokens after which a sentence boundary is suppressed (SMYSL-2.4 §3.2).
+#
+# One token per line, `#` starts a comment, blank lines are ignored. A token is matched
+# **case-sensitively** and must end in `.`, which is the whole reason the list is data: a
+# case-insensitive match would fold `No.` into `no.` and join "the answer was no. Then he
+# left." into one sentence. The list says `No.`; the word is left alone.
+#
+# What is deliberately absent: `etc.`, `al.`, `usw.` and their kin. They end sentences often
+# enough that holding on them loses more boundaries than it saves, and UAX #29 already
+# suppresses the break when a lowercase word follows — which is the case these would be
+# listed for.
+#
+# Single uppercase initials (`J.`, `M.`) are a rule in `segment.rs`, not rows here: the
+# alternative is 26 lines per language that say the same thing.
+
+# Titles and ranks
+Mr.
+Mrs.
+Ms.
+Mx.
+Dr.
+Prof.
+Rev.
+Fr.
+Sr.
+Jr.
+Hon.
+Gen.
+Col.
+Capt.
+Sgt.
+Lt.
+Maj.
+Adm.
+Gov.
+Pres.
+
+# Places
+St.
+Mt.
+Ave.
+Blvd.
+Rd.
+
+# Reference
+No.
+Nos.
+Fig.
+Figs.
+Tab.
+Vol.
+Ch.
+Chap.
+Sec.
+Art.
+Ed.
+Eds.
+Pt.
+p.
+pp.
+cf.
+e.g.
+i.e.
+viz.
+vs.
+ibid.
+op.
+cit.
+
+# Measure and trade
+approx.
+est.
+Inc.
+Ltd.
+Co.
+Corp.
+Dept.
+Univ.

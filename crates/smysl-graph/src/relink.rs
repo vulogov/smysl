@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{canonical_uid, Record, RelKind, Relation, Uid, UnitCore};
 
-use crate::store::Store;
+use crate::store::StoreRead;
 
 /// Batch units ordered so a unit's grounds inside the batch come before it.
 ///
@@ -150,7 +150,19 @@ impl Relinked {
 /// A chain `C supersedes B supersedes A` resolves `A` to `C`. A *fork* — two units
 /// superseding the same target with nothing ordering them — resolves to nothing: that is a
 /// contention, and picking one would be adjudicating it.
-fn successors(store: &Store) -> (BTreeMap<Uid, Uid>, Vec<Uid>) {
+///
+/// Returns `(superseded -> newest, forked)`. A unit absent from the map has no replacement,
+/// which includes every forked unit: there is no single answer to return for one.
+///
+/// # Why this is public
+///
+/// It was `fn successors` until TX-P6 step 5, called only by [`relink`]. SMYSL-2.5 §4.2 asks
+/// for it by this name and gives the reason in six words — *"so query and relink cannot
+/// disagree"*. The supersession pass of §3.2 asks the same question a retraction asks, and two
+/// implementations of "which unit is the newest head" would answer a forked history
+/// differently in a query and in a repair, which is the kind of disagreement nobody finds
+/// until it matters.
+pub fn supersession_heads(store: &(impl StoreRead + ?Sized)) -> (BTreeMap<Uid, Uid>, Vec<Uid>) {
     let mut direct: BTreeMap<Uid, BTreeSet<Uid>> = BTreeMap::new();
     for r in store.relations_of_kind(&RelKind::Supersedes) {
         direct.entry(r.to).or_default().insert(r.from);
@@ -208,9 +220,9 @@ fn successors(store: &Store) -> (BTreeMap<Uid, Uid>, Vec<Uid>) {
 /// Emits new records rather than editing: the store is append-only, and the units this
 /// rewrites are themselves replaced, so each carries a `supersedes` edge back to the version
 /// it corrects. Nothing is lost and the old reading stays available.
-pub fn relink(store: &Store) -> Relinked {
+pub fn relink(store: &(impl StoreRead + ?Sized)) -> Relinked {
     let mut out = Relinked::default();
-    let (newest, forked) = successors(store);
+    let (newest, forked) = supersession_heads(store);
     out.forked = forked;
 
     // **Every** unit is a candidate, not only those directly holding a replaced reference.
@@ -282,6 +294,7 @@ pub fn relink(store: &Store) -> Relinked {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::Store;
     use smysl_core::{KernelType, Status, UnitCoreBuilder};
 
     fn unit(gist: &str, grounds: Vec<Uid>) -> UnitCore {

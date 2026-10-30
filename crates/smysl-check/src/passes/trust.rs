@@ -18,9 +18,9 @@
 
 use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{Op, Rung, Status};
-use smysl_graph::Store;
+use smysl_graph::StoreRead;
 
-pub fn run(store: &Store, report: &mut Report) {
+pub fn run(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     for (uid, unit) in store.units() {
         let status = unit.core.status;
         if unit.attestations.is_empty() {
@@ -87,6 +87,7 @@ mod tests {
         canonical_uid, AgentId, Attestation, Hlc, KernelType, Record, SourceKind, SourceRef,
         UnitCore, UnitCoreBuilder,
     };
+    use smysl_graph::Store;
 
     fn agent(s: &str) -> AgentId {
         AgentId::new(s).unwrap()

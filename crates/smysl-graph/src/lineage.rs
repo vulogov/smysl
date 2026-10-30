@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::{AgentId, RelKind, Uid};
 
 use crate::adjacency::{EdgeKind, EdgeSet, NodeId};
-use crate::store::Store;
+use crate::store::StoreRead;
 use crate::traverse;
 
 // ---------------------------------------------------------------------------
@@ -146,7 +146,12 @@ impl Lineage {
 ///
 /// `depth` bounds how far back to go; `None` walks to the roots. The result is sorted by
 /// `(depth, uid)`, so two runs over the same store agree exactly.
-pub fn trace(store: &Store, root: Uid, kind: TraceKind, depth: Option<u32>) -> Lineage {
+pub fn trace(
+    store: &(impl StoreRead + ?Sized),
+    root: Uid,
+    kind: TraceKind,
+    depth: Option<u32>,
+) -> Lineage {
     let mut nodes: Vec<LineageNode> = Vec::new();
     let mut seen: BTreeSet<Uid> = BTreeSet::new();
     let mut frontier: Vec<(Uid, Via)> = vec![(root, Via::Root)];
@@ -220,7 +225,12 @@ pub fn trace(store: &Store, root: Uid, kind: TraceKind, depth: Option<u32>) -> L
 /// producer that links a prerequisite by `conditions` keeps it outside identity on purpose, and
 /// this is how such a graph is walked: the same breadth-first shape, the same attribution, over
 /// [`EdgeSet::premises`] or whatever set the caller means. See [`rests_on`] for the flat answer.
-pub fn trace_via(store: &Store, root: Uid, edges: &EdgeSet, depth: Option<u32>) -> Lineage {
+pub fn trace_via(
+    store: &(impl StoreRead + ?Sized),
+    root: Uid,
+    edges: &EdgeSet,
+    depth: Option<u32>,
+) -> Lineage {
     let mut nodes: Vec<LineageNode> = Vec::new();
     let mut seen: BTreeSet<Uid> = BTreeSet::new();
     let mut frontier: Vec<(Uid, Via)> = vec![(root, Via::Root)];
@@ -270,7 +280,7 @@ pub fn trace_via(store: &Store, root: Uid, edges: &EdgeSet, depth: Option<u32>) 
 }
 
 /// Who attested a unit, and at what hop it first appeared.
-fn attribution(store: &Store, uid: &Uid) -> (BTreeSet<AgentId>, Option<u32>) {
+fn attribution(store: &(impl StoreRead + ?Sized), uid: &Uid) -> (BTreeSet<AgentId>, Option<u32>) {
     match store.get(uid) {
         Some(u) => (
             u.attestations.iter().map(|a| a.agent.clone()).collect(),
@@ -283,7 +293,7 @@ fn attribution(store: &Store, uid: &Uid) -> (BTreeSet<AgentId>, Option<u32>) {
 /// Everything that depends on a unit - the direction `trace` does not go.
 ///
 /// Used for a retraction's blast radius and for "what breaks if this is wrong".
-pub fn dependents(store: &Store, uid: Uid) -> Vec<Uid> {
+pub fn dependents(store: &(impl StoreRead + ?Sized), uid: Uid) -> Vec<Uid> {
     let g = store.adjacency();
     let Some(id) = g.id(&uid) else {
         return Vec::new();
@@ -319,7 +329,7 @@ pub fn dependents(store: &Store, uid: Uid) -> Vec<Uid> {
 /// use unless you mean something narrower; with [`EdgeSet::support`] this is [`dependents`].
 ///
 /// Transitive, in the order first reached, without the unit itself.
-pub fn dependents_via(store: &Store, uid: Uid, edges: &EdgeSet) -> Vec<Uid> {
+pub fn dependents_via(store: &(impl StoreRead + ?Sized), uid: Uid, edges: &EdgeSet) -> Vec<Uid> {
     let g = store.adjacency();
     let Some(start) = g.id(&uid) else {
         return Vec::new();
@@ -354,6 +364,187 @@ pub fn dependents_via(store: &Store, uid: Uid, edges: &EdgeSet) -> Vec<Uid> {
     out
 }
 
+/// [`dependents_via`] with a depth bound and a stable order (SMYSL-2.5 §3.3, TX-P6 step 4).
+///
+/// # Why this exists beside `dependents_via`
+///
+/// `expand <-kind` is a traversal a person writes with a depth: *"what depends on this, two
+/// steps out"*. `dependents_via` answers the unbounded question with a stack, so it can say
+/// *which* units depend on a unit but not *how far* each one is, and it returns them in the
+/// order the walk happened to reach them. Neither is a defect there — a blast radius is a set —
+/// but both are fatal to a query stage: a depth cannot be applied after the fact, and an order
+/// that depends on the walk is an order that is not a function of the graph, which is rule D.
+///
+/// So this is the mirror of [`trace_via`]: breadth-first, one `depth` per level, output sorted
+/// by `(depth, uid)`. SMYSL-2.5 §3.3 asks for exactly that, and for the same output order as
+/// the forward walk, so that `expand ->k` and `expand <-k` differ in direction and in nothing
+/// else.
+///
+/// The root is included at depth 0, as `trace_via` includes it — a traversal stage adds to the
+/// set it was given rather than replacing it, and dropping the root here would make every
+/// caller add it back.
+///
+/// `depth` of `None` walks to the leaves, and then the result holds what `dependents_via`
+/// holds, plus the root. That equality is asserted in this module's tests.
+pub fn dependents_trace(
+    store: &(impl StoreRead + ?Sized),
+    root: Uid,
+    edges: &EdgeSet,
+    depth: Option<u32>,
+) -> Lineage {
+    let mut nodes: Vec<LineageNode> = Vec::new();
+    let mut seen: BTreeSet<Uid> = BTreeSet::new();
+    let mut frontier: Vec<(Uid, Via)> = vec![(root, Via::Root)];
+    seen.insert(root);
+
+    let mut d = 0u32;
+    while !frontier.is_empty() {
+        if let Some(limit) = depth {
+            if d > limit {
+                break;
+            }
+        }
+        frontier.sort();
+        let mut next: Vec<(Uid, Via)> = Vec::new();
+        for (uid, via) in frontier {
+            let (agents, hop) = attribution(store, &uid);
+            nodes.push(LineageNode {
+                uid,
+                depth: d,
+                via,
+                agents,
+                hop,
+            });
+            for u in dependents_step(store, &uid, edges) {
+                if seen.insert(u) {
+                    // Seen from the dependent, the edge back to `uid` is the one that made it a
+                    // dependent: `grounds` and `deps` keep their names, and a nominated
+                    // relation is `rests-on`, which is how `trace_via` names the same thing.
+                    let via = match store.get(&u) {
+                        Some(unit) if unit.core.grounds.contains(&uid) => Via::Grounds,
+                        Some(unit) if unit.core.deps.contains(&uid) => Via::Deps,
+                        _ => Via::Rests,
+                    };
+                    next.push((u, via));
+                }
+            }
+        }
+        frontier = next;
+        d += 1;
+    }
+
+    nodes.sort_by_key(|n| (n.depth, n.uid));
+    Lineage {
+        root,
+        kind: TraceKind::Rests,
+        nodes,
+    }
+}
+
+/// `expand -[kind]-`: a walk that follows an edge either way (SMYSL-2.5 §3.3, TX-P6 step 4).
+///
+/// # Why this is not the union of the other two
+///
+/// Running [`trace_via`] and [`dependents_trace`] and unioning the results answers a different
+/// question. Those each walk in one direction the whole way, so a unit reachable by going
+/// *out* one step and then *back* one step is in neither — and "connected to this by edges of
+/// kind k, two steps out, whichever way they point" is exactly what `-[k]-` asks. A path that
+/// changes direction is the common case for a relation like `contrasts`, where two units both
+/// point at a third.
+///
+/// So this is one BFS whose step is the union of both steps, with the same `(depth, uid)`
+/// output order as its two one-way siblings — §3.3 asks for the same output order, so that the
+/// three traversal directions differ in direction and nothing else.
+pub fn trace_both(
+    store: &(impl StoreRead + ?Sized),
+    root: Uid,
+    edges: &EdgeSet,
+    depth: Option<u32>,
+) -> Lineage {
+    let mut nodes: Vec<LineageNode> = Vec::new();
+    let mut seen: BTreeSet<Uid> = BTreeSet::new();
+    let mut frontier: Vec<(Uid, Via)> = vec![(root, Via::Root)];
+    seen.insert(root);
+
+    let mut d = 0u32;
+    while !frontier.is_empty() {
+        if let Some(limit) = depth {
+            if d > limit {
+                break;
+            }
+        }
+        frontier.sort();
+        let mut next: Vec<(Uid, Via)> = Vec::new();
+        for (uid, via) in frontier {
+            let (agents, hop) = attribution(store, &uid);
+            nodes.push(LineageNode {
+                uid,
+                depth: d,
+                via,
+                agents,
+                hop,
+            });
+            let mut step: Vec<Uid> = store.supports_of(&uid, edges);
+            step.extend(dependents_step(store, &uid, edges));
+            step.sort();
+            step.dedup();
+            for u in step {
+                if seen.insert(u) {
+                    // Named from whichever side the support edge runs, so a both-direction walk
+                    // reports the same `via` for a unit as the one-way walk that reaches it.
+                    let via = match (store.get(&uid), store.get(&u)) {
+                        (Some(a), _) if a.core.grounds.contains(&u) => Via::Grounds,
+                        (Some(a), _) if a.core.deps.contains(&u) => Via::Deps,
+                        (_, Some(b)) if b.core.grounds.contains(&uid) => Via::Grounds,
+                        (_, Some(b)) if b.core.deps.contains(&uid) => Via::Deps,
+                        _ => Via::Rests,
+                    };
+                    next.push((u, via));
+                }
+            }
+        }
+        frontier = next;
+        d += 1;
+    }
+
+    nodes.sort_by_key(|n| (n.depth, n.uid));
+    Lineage {
+        root,
+        kind: TraceKind::Rests,
+        nodes,
+    }
+}
+
+/// One level of dependents: the direction problem of [`dependents_via`], for a single node.
+///
+/// Support edges are stored from the dependent to what it rests on, so a dependent of `uid` is
+/// *incoming* along `deps`/`grounds`; a nominated relation such as `conditions` is stored from
+/// the premise, so a dependent is *outgoing* along it. Same rule as `dependents_via`, which is
+/// the point — the two must not disagree about what a dependent is.
+fn dependents_step(store: &(impl StoreRead + ?Sized), uid: &Uid, edges: &EdgeSet) -> Vec<Uid> {
+    let g = store.adjacency();
+    let Some(n) = g.id(uid) else {
+        return Vec::new();
+    };
+    let along_support = g
+        .in_edges(n)
+        .iter()
+        .filter(|e| matches!(e.kind, EdgeKind::Deps | EdgeKind::Grounds));
+    let along_relations = g
+        .out_edges(n)
+        .iter()
+        .filter(|e| !matches!(e.kind, EdgeKind::Deps | EdgeKind::Grounds));
+    let mut out: Vec<Uid> = along_support
+        .chain(along_relations)
+        .filter(|e| edges.contains(e.kind))
+        .filter_map(|e| g.uid(e.target))
+        .copied()
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Everything a unit rests on, over the edges the caller chooses: [`dependents_via`] the other
 /// way round.
 ///
@@ -368,7 +559,7 @@ pub fn dependents_via(store: &Store, uid: Uid, edges: &EdgeSet) -> Vec<Uid> {
 /// relation carries the dependency, and nothing that reads `grounds` alone can see it.
 ///
 /// Transitive, in the order first reached, without the unit itself.
-pub fn rests_on(store: &Store, uid: Uid, edges: &EdgeSet) -> Vec<Uid> {
+pub fn rests_on(store: &(impl StoreRead + ?Sized), uid: Uid, edges: &EdgeSet) -> Vec<Uid> {
     let g = store.adjacency();
     let Some(start) = g.id(&uid) else {
         return Vec::new();
@@ -429,7 +620,7 @@ impl StoreDiff {
 }
 
 /// Compare two stores by unit membership.
-pub fn diff(a: &Store, b: &Store) -> StoreDiff {
+pub fn diff(a: &(impl StoreRead + ?Sized), b: &(impl StoreRead + ?Sized)) -> StoreDiff {
     let ua: BTreeSet<Uid> = a.units().map(|(u, _)| *u).collect();
     let ub: BTreeSet<Uid> = b.units().map(|(u, _)| *u).collect();
     StoreDiff {
@@ -528,7 +719,7 @@ impl HopDiff {
 /// A unit's hop is the earliest any agent attested it. Units with no attestation cannot be
 /// placed in time and are excluded - a store that never recorded provenance cannot be asked
 /// what changed when.
-pub fn hop_diff(store: &Store, from: u32, to: u32, recipes: bool) -> HopDiff {
+pub fn hop_diff(store: &(impl StoreRead + ?Sized), from: u32, to: u32, recipes: bool) -> HopDiff {
     let mut out = HopDiff {
         from,
         to,
@@ -629,7 +820,7 @@ pub fn hop_diff(store: &Store, from: u32, to: u32, recipes: bool) -> HopDiff {
     out
 }
 
-fn agents_at(store: &Store, uid: &Uid) -> Vec<AgentId> {
+fn agents_at(store: &(impl StoreRead + ?Sized), uid: &Uid) -> Vec<AgentId> {
     store
         .get(uid)
         .map(|u| u.attestations.iter().map(|a| a.agent.clone()).collect())
@@ -643,7 +834,7 @@ fn agents_at(store: &Store, uid: &Uid) -> Vec<AgentId> {
 /// different prompt. Both look identical in the output; only the attestation tells them
 /// apart.
 fn recipe_changes(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     before: &BTreeSet<Uid>,
     after: &BTreeSet<Uid>,
 ) -> Vec<RecipeChange> {
@@ -684,7 +875,7 @@ fn recipe_changes(
 }
 
 /// Units reachable from a set of roots, in dense-id order - the membership of a view.
-pub fn membership(store: &Store, roots: &BTreeSet<Uid>) -> Vec<Uid> {
+pub fn membership(store: &(impl StoreRead + ?Sized), roots: &BTreeSet<Uid>) -> Vec<Uid> {
     let g = store.adjacency();
     let ids: Vec<_> = roots.iter().filter_map(|u| g.id(u)).collect();
     traverse::closure(g, &ids, &EdgeSet::all())
@@ -705,6 +896,7 @@ pub fn is_lineage_edge(k: EdgeKind) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::Store;
     use smysl_core::{
         canonical_uid, Attestation, Hlc, KernelType, Op, Record, Relation, Rung, SourceKind,
         SourceRef, Status, UnitCore, UnitCoreBuilder,

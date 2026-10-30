@@ -1,0 +1,11 @@
+{
+  "files": [
+    {"file": "widening-paired.cbor", "codes": []},
+    {"file": "widening-unpaired.cbor", "codes": ["SMY-E426", "SMY-E471"]},
+    {"file": "reintroduced-key.cbor", "codes": ["SMY-E426"]},
+    {"file": "reintroduced-value.cbor", "codes": ["SMY-E426"]},
+    {"file": "new-meaning.cbor", "codes": ["SMY-E426"]},
+    {"file": "type-change.cbor", "codes": ["SMY-E426"]},
+    {"file": "fork.cbor", "codes": ["SMY-W429"]}
+  ]
+}

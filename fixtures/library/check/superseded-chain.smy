@@ -1,0 +1,8 @@
+@doc smysl/0.1 { id: v/library-chain }
+
+# The control for `expression-fork`: the same two manifests, and the second
+# names the first. One head, no warning. Without this, a `heads` that returned
+# every manifest under an alias would still pass the fork fixture.
+@manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain, carry: text, part-policy: "smysl/parts/1 level=chapter min=65536 max=4194304", title: "The Holy Bible, Authorised Version" }
+
+@manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain, carry: text, part-policy: "smysl/parts/1 level=chapter min=65536 max=4194304", title: "King James Version (1769 Blayney)", supersedes: "m3:tay2jdfjki3wolz56rzdfehc6j2mtg5x3robo2pir2wj7l6j6c3a" }

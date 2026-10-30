@@ -9,9 +9,10 @@
 
 use std::collections::BTreeMap;
 
-use crate::ids::{Label, Uid};
+use crate::ids::{Label, Uid, ViewId};
 use crate::surface::hjson::{HObject, HValue};
 use crate::surface::payload::payload_to_object;
+use crate::types::library::{Dating, DatingTarget, DatingValue};
 use crate::types::lifecycle::{Resolution, ResolutionTarget, Withdrawal};
 use crate::types::relation::Relation;
 use crate::types::thread::Thread;
@@ -111,6 +112,15 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
             }
         }
     }
+    // Manifests after the declarations and before the units, where the parser emits them: a
+    // reader meets the text before the claims drawn from it.
+    for r in records {
+        if let Record::Manifest(m) = r {
+            if manifest_has_surface_form(m) {
+                write_manifest(&mut out, m);
+            }
+        }
+    }
     let mut known = ctx.relations.clone();
     for r in records {
         if let Record::Relation(rel) = r {
@@ -119,9 +129,9 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
     }
     for r in records {
         match r {
-            Record::Unit(u) => write_unit(&mut out, u, ctx),
+            Record::Unit(u) if unit_has_surface_form(u) => write_unit(&mut out, u, ctx),
             Record::Relation(rel) => write_relation(&mut out, rel, ctx),
-            Record::Thread(t) => write_thread(&mut out, t, ctx),
+            Record::Thread(t) if thread_has_surface_form(t) => write_thread(&mut out, t, ctx),
             _ => {}
         }
     }
@@ -134,7 +144,14 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
             Record::Resolution(res) if resolution_has_surface_form(res) => {
                 write_resolution(&mut out, res, &known, ctx)
             }
-            Record::Commit(c) => write_commit(&mut out, c, ctx),
+            Record::Commit(c) if commit_has_surface_form(c) => write_commit(&mut out, c, ctx),
+            // Last of all, where the parser resolves them: a redaction's `reason` names a unit
+            // the reader has met, and the writer's order has to be the parser's or the round
+            // trip is not a fixed point.
+            Record::Redaction(r) => write_redaction(&mut out, r, ctx),
+            // And a dating after a redaction, which is where the parser resolves it: its
+            // target and its basis may both be units the document declares.
+            Record::Dating(d) if dating_has_surface_form(d) => write_dating(&mut out, d, ctx),
             // Records with no surface form travel as CBOR only.
             _ => {}
         }
@@ -145,14 +162,45 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
     out
 }
 
+/// Whether `write_surface` writes `r`, given the context it writes under and the one view it
+/// makes the `@doc` header: the single predicate it honours (SMYSL-2.7 §4.3).
+///
+/// Everything a surface rendering omits is counted by this and nothing else — `merge`'s and
+/// `bundle`'s warning, and export's `SMY-W428`. Two lists drifted three times: a commitment
+/// counted omitted while it was written (H-16), a manifest the same way, and a redaction and a
+/// dating still, which the writer writes and the count called omitted.
+///
+/// A label binding is written when the context spells that unit with that label, since a label
+/// lives in its unit's header and has no line of its own; a view only as the header.
+pub fn has_surface_form(r: &Record, ctx: &WriteContext, view: Option<&ViewId>) -> bool {
+    match r {
+        Record::Unit(u) => unit_has_surface_form(u),
+        Record::Relation(_) | Record::Redaction(_) => true,
+        Record::Thread(t) => thread_has_surface_form(t),
+        Record::SchemaDecl(d) => schema_decl_has_surface_form(d),
+        Record::Manifest(m) => manifest_has_surface_form(m),
+        Record::Withdrawal(w) => withdrawal_has_surface_form(w),
+        Record::Resolution(res) => resolution_has_surface_form(res),
+        Record::Commit(c) => commit_has_surface_form(c),
+        Record::Dating(d) => dating_has_surface_form(d),
+        Record::View(v) => Some(&v.id) == view,
+        Record::LabelBinding(b) => ctx.labels.get(&b.uid) == Some(&b.label),
+        // Attestations, contentions, pack infos, part texts, readings and records this build
+        // does not know travel as CBOR only.
+        _ => false,
+    }
+}
+
 /// Whether a declaration can be spelled `@schema` without losing anything.
 ///
-/// `payload_shape` is opaque CBOR and `extra` holds keys a later version added; surface text
-/// has no place for either, so a declaration carrying them stays CBOR-only and is counted with
-/// the other records a surface rendering cannot hold, rather than written back smaller than it
-/// was read.
+/// `payload_shape` and `lenses` (FC-9) are spelled `fields:` and `lenses:` (A-10 item 4, TX-P12
+/// step 7) when what they decode to re-encodes to the bytes they hold — not when key 4 or 5 is
+/// opaque, carries an op this build does not know, or arrived in another encoding. `extra`
+/// holds keys a later version added, which surface text has no place for. A declaration
+/// failing either stays CBOR-only and is counted with the other records a surface rendering
+/// cannot hold, rather than written back smaller than it was read.
 pub fn schema_decl_has_surface_form(d: &crate::types::annex::SchemaDecl) -> bool {
-    d.payload_shape.is_none() && d.extra.is_empty()
+    d.extra.is_empty() && super::schema::spellable(d)
 }
 
 /// Whether a withdrawal can be spelled `@withdraw` without losing anything: no keys a later version
@@ -164,6 +212,196 @@ pub fn withdrawal_has_surface_form(w: &Withdrawal) -> bool {
 /// Whether a resolution can be spelled `@resolve`, on the same terms as a withdrawal.
 pub fn resolution_has_surface_form(r: &Resolution) -> bool {
     r.extra.is_empty() && r.ts.agent == r.agent
+}
+
+/// The words a unit header spells, which a payload key must not collide with.
+///
+/// `HObject` drops quoting from a key, so a payload key named `status` is indistinguishable from
+/// the header field on re-reading: the unit would come back with a different status and a
+/// different uid. Surface text cannot express that unit, so it travels as CBOR.
+const UNIT_HEADER_WORDS: &[&str] = &["status", "deps", "grounds", "source", "salience"];
+
+/// The payload keys that must be written **quoted**, because the bare spelling is a core key.
+///
+/// `lang` only, and it is not in [`UNIT_HEADER_WORDS`] on purpose. The other five collisions have
+/// no surface form at all: a payload key named `status` cannot be spelled, because quoting it
+/// changes nothing the parser can see. `lang` can, because SMYSL-2.3 A-10 item 2 makes the
+/// quoting load-bearing — a bare `lang:` is core key 9 and a quoted `"lang":` is a payload key,
+/// and the parser reads the source to tell them apart.
+///
+/// Which matters most for documents written *before* 1.10: a `lang` payload key was ordinary
+/// then, and refusing it a surface form would take the spelling away from every one of them.
+/// Quoting keeps it, which is what `SMY-W432` spent a release telling authors to do.
+const QUOTED_PAYLOAD_WORDS: &[&str] = &["lang"];
+
+/// Whether a unit can be written as surface text without becoming a different unit.
+///
+/// Everything here is inside `UnitCore` and therefore inside the uid, so each case is the same
+/// failure: the writer emits text that parses back to something else, and the uid moves silently.
+/// The writer used to emit all four regardless.
+pub fn unit_has_surface_form(u: &UnitCore) -> bool {
+    // Keys a later version added. The writer has nowhere to put them.
+    if !u.extra.is_empty() {
+        return false;
+    }
+    if let Some(s) = &u.source {
+        // Same, one level down — and an unknown source kind has no spelling at all, because
+        // `kind:` parses against the named set (1.9 opened the enumeration on the wire only).
+        if !s.extra.is_empty() || s.kind == crate::SourceKind::Unknown {
+            return false;
+        }
+    }
+    // The payload is opaque CBOR, so the collision can only be seen by decoding it. A payload
+    // that will not decode has no surface form either.
+    match &u.payload {
+        None => true,
+        Some(bytes) => match crate::surface::payload::payload_to_object(bytes) {
+            Err(_) => false,
+            Ok(o) => !o
+                .iter()
+                .any(|(k, _)| UNIT_HEADER_WORDS.contains(&k.value.as_str())),
+        },
+    }
+}
+
+/// Whether a thread can be written as `@thread` without losing anything.
+///
+/// An unknown schema or role has no surface spelling: both parse against their named sets, so a
+/// code 1.9 preserved on the wire would be written as something else or not at all.
+pub fn thread_has_surface_form(t: &Thread) -> bool {
+    t.extra.is_empty()
+        && t.schema != crate::ThreadSchema::Unknown
+        && t.steps.iter().all(|s| s.role != crate::Role::Unknown)
+}
+
+/// Whether a commitment can be spelled `@commit` without losing anything.
+pub fn commit_has_surface_form(c: &crate::types::lifecycle::Commit) -> bool {
+    c.extra.is_empty()
+}
+
+/// Whether a manifest can be spelled `@manifest` without losing anything.
+///
+/// `raw` (key 16) is the reader's own metadata as opaque CBOR — writing it would mean this
+/// module deciding what the bytes mean — and `extra`, here and on each part entry, holds keys a
+/// later version added. A manifest carrying either travels as CBOR only and is counted with the
+/// other records a surface rendering cannot hold, rather than written back smaller than it was
+/// read.
+///
+/// An unknown source kind on `origin` is the next case, and it is not this function's to decide
+/// twice: `source { }` parses `kind:` against the named set, so a kind the wire preserved has no
+/// spelling here either.
+///
+/// **The alias is the one that is easy to miss.** A decoder does not apply the alias grammar —
+/// a later version may widen it, and refusing a store over an alias is refusing to open it — so
+/// a manifest in hand may carry an alias this parser will not accept. The header writes it
+/// unquoted, because every conforming alias is safe unquoted, and there is nowhere else to put
+/// it: the alias is the header word, not a key. Without this check the writer would emit a
+/// `@manifest` line that its own parser rejects, and `fmt` would drop the record while
+/// reporting nothing — the same defect as writing a unit whose payload key collides with a
+/// header word, which `unit_has_surface_form` already guards.
+pub fn manifest_has_surface_form(m: &crate::types::library::Manifest) -> bool {
+    if m.raw.is_some() || !m.extra.is_empty() || !m.alias_is_valid() {
+        return false;
+    }
+    if let Some(o) = &m.origin {
+        if !o.extra.is_empty() || o.kind == crate::SourceKind::Unknown {
+            return false;
+        }
+    }
+    m.parts.iter().all(|p| p.extra.is_empty())
+}
+
+fn write_manifest(out: &mut String, m: &crate::types::library::Manifest) {
+    // The five required keys in A-5's key order, then the optional ones in the same order, so
+    // a reader comparing a file against the amendment reads them down the page together.
+    out.push_str(&format!(
+        "@manifest {} {{ lang: {}, reader: {}, licence: {}, carry: {}, part-policy: {}",
+        m.alias,
+        quoteless_or_quoted(m.lang.as_str()),
+        quoteless_or_quoted(&m.reader),
+        quoteless_or_quoted(&m.licence),
+        m.carry,
+        quoteless_or_quoted(&m.part_policy),
+    ));
+    if let Some(t) = &m.title {
+        out.push_str(&format!(", title: {}", quoteless_or_quoted(t)));
+    }
+    if !m.creators.is_empty() {
+        let cs: Vec<String> = m.creators.iter().map(|c| quoteless_or_quoted(c)).collect();
+        out.push_str(&format!(", creators: [{}]", cs.join(", ")));
+    }
+    if let Some(p) = &m.published {
+        out.push_str(&format!(", published: {}", quoteless_or_quoted(p)));
+    }
+    if !m.identifiers.is_empty() {
+        let ids: Vec<String> = m
+            .identifiers
+            .iter()
+            .map(|(k, v)| format!("{}: {}", quoted_key(k), quoteless_or_quoted(v)))
+            .collect();
+        out.push_str(&format!(", identifiers: {{ {} }}", ids.join(", ")));
+    }
+    if let Some(o) = &m.origin {
+        out.push_str(&format!(
+            ", origin: {{ kind: {}, ref: {}",
+            o.kind,
+            quoteless_or_quoted(&o.reference)
+        ));
+        if let Some(c) = &o.captured {
+            out.push_str(&format!(", captured: {c}"));
+        }
+        if let Some(ms) = o.observed {
+            out.push_str(&format!(", observed: {ms}"));
+        }
+        out.push_str(" }");
+    }
+    if let Some((mid, kind)) = &m.parent {
+        out.push_str(&format!(
+            ", parent: {}, parent-kind: {kind}",
+            mid.canonical()
+        ));
+    }
+    if let Some(s) = &m.supersedes {
+        out.push_str(&format!(", supersedes: {}", s.canonical()));
+    }
+    if let Some(v) = &m.versification {
+        out.push_str(&format!(", versification: {}", quoteless_or_quoted(v)));
+    }
+    // Only when true, as the wire writes it. `lossy: false` has no encoding, so writing the
+    // word would produce a document whose re-parse is a different manifest.
+    if m.lossy {
+        out.push_str(", lossy: true");
+    }
+    if let Some(c) = &m.calendar {
+        out.push_str(&format!(", calendar: {c}"));
+    }
+    // Omitted when empty, which is what the parser reads an absent `parts` as — an import
+    // manifest. Writing `parts: []` instead would be equally correct and is not what the
+    // parser's default says, and the two have to agree for the round trip to be a fixed point.
+    if !m.parts.is_empty() {
+        let ps: Vec<String> = m
+            .parts
+            .iter()
+            .map(|p| {
+                let mut row = format!(
+                    "{{ tid: {}, length: {}, structure: {}, rdid: {}",
+                    p.tid.canonical(),
+                    p.length,
+                    // `b3:`, because the structure hash is a digest over a table and not an
+                    // identity that names a record. `Uid`'s spelling is the generic one.
+                    crate::Uid::from_bytes(p.structure).canonical(),
+                    p.rdid.canonical()
+                );
+                if let Some(l) = &p.lang {
+                    row.push_str(&format!(", lang: {}", quoteless_or_quoted(l.as_str())));
+                }
+                row.push_str(" }");
+                row
+            })
+            .collect();
+        out.push_str(&format!(", parts: [{}]", ps.join(", ")));
+    }
+    out.push_str(" }\n\n");
 }
 
 /// An edge by its endpoints when the writer knows it, else by its rid.
@@ -241,21 +479,114 @@ fn write_commit(out: &mut String, c: &crate::types::lifecycle::Commit, ctx: &Wri
     out.push_str(" }\n\n");
 }
 
-fn write_schema_decl(out: &mut String, d: &crate::types::annex::SchemaDecl) {
+/// `@redact <tid> { agent: …, ts: […] }` (1.10, rule Z).
+///
+/// Always has a surface form. A part text has none and a redaction does, which is the
+/// asymmetry rule Z is made of: the bytes never travel as text, and the statement that they
+/// are to be held no longer always can — including into a store that never had them.
+fn write_redaction(out: &mut String, r: &crate::types::library::Redaction, ctx: &WriteContext) {
     out.push_str(&format!(
-        "@schema {} {{ version: {}",
+        "@redact {} {{ agent: {}, ts: [{}, {}]",
+        r.tid.canonical(),
+        quoteless_or_quoted(r.agent.as_str()),
+        r.ts.wall_ms,
+        r.ts.counter
+    ));
+    if let Some(u) = &r.reason {
+        out.push_str(&format!(", reason: {}", ctx.reference(u)));
+    }
+    out.push_str(" }\n\n");
+}
+
+/// Whether a dating can be spelled `@date` without losing anything.
+///
+/// Two things cost it its surface form. Keys a later version added, as everywhere else — and a
+/// **relative value whose own target is a window**, which the grammar cannot spell: a window is
+/// written as a `window:` key beside the positional target, and there is one positional slot.
+/// Representable in CBOR, not in text, and counted among the records a surface rendering cannot
+/// hold rather than written back as something else.
+pub fn dating_has_surface_form(d: &Dating) -> bool {
+    let inner_window = matches!(
+        &d.value,
+        DatingValue::Relative {
+            target: DatingTarget::Window { .. },
+            ..
+        }
+    );
+    d.extra.is_empty() && d.ts.agent == d.agent && !inner_window
+}
+
+fn write_dating(out: &mut String, d: &Dating, ctx: &WriteContext) {
+    out.push_str("@date ");
+    out.push_str(&target_text(&d.target, ctx));
+    out.push_str(&format!(" {{ axis: {}", d.axis));
+    if let DatingTarget::Window { from_ms, to_ms, .. } = &d.target {
+        out.push_str(&format!(", window: [{from_ms}, {to_ms}]"));
+    }
+    match &d.value {
+        DatingValue::Absolute(t) => {
+            out.push_str(&format!(", when: {}", quoteless_or_quoted(t)));
+        }
+        DatingValue::Offset(ms) => out.push_str(&format!(", offset: {ms}")),
+        DatingValue::Relative { allen, target } => {
+            out.push_str(&format!(", {allen}: {}", target_text(target, ctx)));
+        }
+    }
+    out.push_str(&format!(
+        ", agent: {}, ts: [{}, {}]",
+        quoteless_or_quoted(d.agent.as_str()),
+        d.ts.wall_ms,
+        d.ts.counter
+    ));
+    if let Some(u) = &d.basis {
+        out.push_str(&format!(", basis: {}", ctx.reference(u)));
+    }
+    out.push_str(" }\n\n");
+}
+
+/// A target's positional spelling. A window is its part's tid: the range travels in `window:`.
+fn target_text(t: &DatingTarget, ctx: &WriteContext) -> String {
+    match t {
+        DatingTarget::Unit(u) => ctx.reference(u),
+        DatingTarget::Part(tid) | DatingTarget::Window { tid, .. } => tid.canonical(),
+        DatingTarget::Manifest(mid) => mid.canonical(),
+    }
+}
+
+fn write_schema_decl(out: &mut String, d: &crate::types::annex::SchemaDecl) {
+    let ts: Vec<&str> = d.types.iter().map(|t| t.as_str()).collect();
+    let rs: Vec<&str> = d.relations.iter().map(|r| r.as_str()).collect();
+    if d.payload_shape.is_none() && d.lenses.is_none() {
+        // One line, as every declaration was written before A-10 item 4.
+        out.push_str(&format!(
+            "@schema {} {{ version: {}",
+            d.id.as_str(),
+            d.version
+        ));
+        if !ts.is_empty() {
+            out.push_str(&format!(", types: [{}]", ts.join(", ")));
+        }
+        if !rs.is_empty() {
+            out.push_str(&format!(", relations: [{}]", rs.join(", ")));
+        }
+        out.push_str(" }\n\n");
+        return;
+    }
+    // A field table and lens steps do not fit a line, and Appendix C writes them one entry
+    // per line, so a declaration that carries them is written that way.
+    out.push_str(&format!(
+        "@schema {} {{\n  version: {},\n",
         d.id.as_str(),
         d.version
     ));
-    if !d.types.is_empty() {
-        let ts: Vec<&str> = d.types.iter().map(|t| t.as_str()).collect();
-        out.push_str(&format!(", types: [{}]", ts.join(", ")));
+    if !ts.is_empty() {
+        out.push_str(&format!("  types: [{}],\n", ts.join(", ")));
     }
-    if !d.relations.is_empty() {
-        let rs: Vec<&str> = d.relations.iter().map(|r| r.as_str()).collect();
-        out.push_str(&format!(", relations: [{}]", rs.join(", ")));
+    if !rs.is_empty() {
+        out.push_str(&format!("  relations: [{}],\n", rs.join(", ")));
     }
-    out.push_str(" }\n\n");
+    super::schema::write(out, d, value, quoted_key);
+    out.push_str("}\n\n");
 }
 
 fn write_doc(out: &mut String, v: &View, ctx: &WriteContext) {
@@ -312,6 +643,11 @@ fn write_unit(out: &mut String, u: &UnitCore, ctx: &WriteContext) {
 
     let mut fields: Vec<String> = Vec::new();
     fields.push(format!("status: {}", u.status));
+    // Core key 9, spelled bare — which is what makes it the core key on the way back in. A
+    // payload key of the same name is written quoted; `quoted_key` is where that happens.
+    if let Some(tag) = &u.lang {
+        fields.push(format!("lang: {}", quoteless_or_quoted(tag.as_str())));
+    }
     if !u.deps.is_empty() {
         fields.push(format!("deps: [{}]", refs(&u.deps, ctx)));
     }
@@ -329,6 +665,15 @@ fn write_unit(out: &mut String, u: &UnitCore, ctx: &WriteContext) {
         }
         if let Some(d) = s.captured {
             src.push_str(&format!(", captured: {d}"));
+        }
+        if let Some(p) = &s.published {
+            src.push_str(&format!(", published: {}", quoteless_or_quoted(p)));
+        }
+        if let Some((start, end)) = s.span() {
+            src.push_str(&format!(", span: [{start}, {end}]"));
+        }
+        if let Some(mid) = s.manifest() {
+            src.push_str(&format!(", manifest: {}", mid.canonical()));
         }
         src.push_str(" }");
         fields.push(src);
@@ -510,6 +855,7 @@ fn quoted_key(s: &str) -> String {
     let needs_quotes = s.is_empty()
         || s.starts_with('#')
         || s.starts_with("//")
+        || QUOTED_PAYLOAD_WORDS.contains(&s)
         || s.chars()
             .any(|c| c.is_whitespace() || matches!(c, ':' | ',' | '{' | '}' | '"' | '\\'));
     if !needs_quotes {

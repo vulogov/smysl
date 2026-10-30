@@ -83,12 +83,37 @@ pub fn convert_labelled(
     Vec<Diagnostic>,
     BTreeMap<smysl_core::Label, smysl_core::Uid>,
 ) {
+    convert_scoped(answer, path, rung, source, &json_ast::Scope::default())
+}
+
+/// [`convert_labelled`], under a [`json_ast::Scope`] (§4.3.4, TX-P5 step 4).
+///
+/// The scope does two things on both paths. A reference outside the batch and its ledger digest
+/// is `SMY-E442` — which `needs_repair` already treats like `SMY-E060` without being told,
+/// because every error but `SMY-E033` buys a repair turn, and `E033` is excepted for a reason
+/// that does not apply here: rule T has already fixed an `E033`, and nothing has fixed a
+/// reference to a unit the model was never shown. And the tool-owned fields of a text answer are
+/// dropped with `SMY-W444`: the JSON path drops them while reading, and the surface path after
+/// parsing, because the surface grammar has already built a `source` by the time anything can
+/// object to one (§4.3.4).
+pub fn convert_scoped(
+    answer: &str,
+    path: IngestPath,
+    rung: Rung,
+    source: Option<&(smysl_core::SourceRef, smysl_core::SourcePolicy)>,
+    scope: &json_ast::Scope,
+) -> (
+    Vec<UnitCore>,
+    Vec<Relation>,
+    Vec<Diagnostic>,
+    BTreeMap<smysl_core::Label, smysl_core::Uid>,
+) {
     let answer = crate::prompt::strip_echo(answer);
     let mut labels = BTreeMap::new();
     let mut relations = Vec::new();
     let (mut units, mut diagnostics) = match path {
         IngestPath::JsonAst => {
-            let out = json_ast::convert_with(answer, source);
+            let out = json_ast::convert_scoped(answer, source, scope);
             relations = out.relations;
             labels = out.labels;
             (out.units, out.diagnostics)
@@ -125,6 +150,19 @@ pub fn convert_labelled(
         },
     };
 
+    // The surface path's share of the scope, after parsing for the reason the doc comment
+    // gives. Both halves run here because the surface parser has no notion of either.
+    if matches!(path, IngestPath::Surface) {
+        if scope.text {
+            let (scrubbed, notes) = scrub_text(units);
+            units = scrubbed;
+            diagnostics.extend(notes);
+        }
+        if scope.enforce {
+            diagnostics.extend(out_of_scope(&units, &relations, scope));
+        }
+    }
+
     // Rule T, applied unconditionally after parse (§22.4). A model claiming `measured` is
     // downgraded and told, whatever else was wrong with the answer.
     let before: Vec<_> = units.iter().map(smysl_core::canonical_uid).collect();
@@ -145,6 +183,119 @@ pub fn convert_labelled(
         .collect();
 
     (capped, relations, diagnostics, labels)
+}
+
+/// Drop the fields a text answer may not supply, on the surface path (`SMY-W444`).
+///
+/// `source`, `lang` and the three attribution payload keys. The ingest path writes every one of
+/// them from the reading — the span from the quote, the dates from the manifest and the segment,
+/// the holder and the mode from the structure — so an answer's version is not a second opinion
+/// but noise inside a uid.
+///
+/// A unit that cannot be rebuilt after the drop is kept as it was rather than lost: `cited`
+/// requires a source, and a surface answer that wrote one and claimed `cited` would otherwise
+/// vanish for a field it was not allowed to write. Attachment overwrites the source in any case,
+/// and the `SMY-W444` beside it says the value was not used.
+fn scrub_text(units: Vec<UnitCore>) -> (Vec<UnitCore>, Vec<Diagnostic>) {
+    let mut out = Vec::with_capacity(units.len());
+    let mut notes = Vec::new();
+    for unit in units {
+        let mut dropped: Vec<&str> = Vec::new();
+        if unit.source.is_some() {
+            dropped.push("source");
+        }
+        if unit.lang.is_some() {
+            dropped.push("lang");
+        }
+        let payload = crate::payload::rewrite(
+            unit.payload.as_deref(),
+            crate::json_ast::ATTRIBUTION_OWNED,
+            &[],
+        );
+        if payload != unit.payload {
+            dropped.push("text:holder, text:mode or text:speaker");
+        }
+        if dropped.is_empty() {
+            out.push(unit);
+            continue;
+        }
+        let uid = smysl_core::canonical_uid(&unit);
+        let mut b = rebuild(unit.clone());
+        b.source = None;
+        b.lang = None;
+        b.payload = payload;
+        match b.build() {
+            Ok(core) => {
+                notes.push(
+                    Diagnostic::on(Code::W444, smysl_core::canonical_uid(&core)).with_message(
+                        format!(
+                            "{} written by the ingest path and dropped from the answer",
+                            dropped.join(", ")
+                        ),
+                    ),
+                );
+                out.push(core);
+            }
+            Err(_) => {
+                notes.push(Diagnostic::on(Code::W444, uid).with_message(format!(
+                    "{} could not be dropped without refusing the unit; the ingest path \
+                     overwrites them",
+                    dropped.join(", ")
+                )));
+                out.push(unit);
+            }
+        }
+    }
+    (out, notes)
+}
+
+/// References a surface answer made outside its batch and its digest (`SMY-E442`).
+fn out_of_scope(
+    units: &[UnitCore],
+    relations: &[Relation],
+    scope: &json_ast::Scope,
+) -> Vec<Diagnostic> {
+    let batch: std::collections::BTreeSet<smysl_core::Uid> =
+        units.iter().map(smysl_core::canonical_uid).collect();
+    let allowed = |uid: &smysl_core::Uid| scope.allowed.contains(uid) || batch.contains(uid);
+    let mut out = Vec::new();
+    for u in units {
+        let uid = smysl_core::canonical_uid(u);
+        for r in u.deps.iter().chain(u.grounds.iter()) {
+            if !allowed(r) {
+                out.push(Diagnostic::on(Code::E442, uid).with_message(format!(
+                    "`{}` is outside this batch and its ledger digest",
+                    r.canonical()
+                )));
+            }
+        }
+    }
+    for r in relations {
+        for end in [&r.from, &r.to] {
+            if !allowed(end) {
+                out.push(Diagnostic::new(Code::E442).with_message(format!(
+                    "a `{}` edge names `{}`, which is outside this batch and its ledger digest",
+                    r.kind.as_str(),
+                    end.canonical()
+                )));
+            }
+        }
+    }
+    out
+}
+
+/// A builder holding exactly what a core holds, so a core can be edited without re-parsing it.
+fn rebuild(core: UnitCore) -> UnitCoreBuilder {
+    let mut b = UnitCoreBuilder::new(core.schema, core.gist, core.status);
+    b.body = core.body;
+    b.detail = core.detail;
+    b.deps = core.deps;
+    b.grounds = core.grounds;
+    b.source = core.source;
+    b.payload = core.payload;
+    b.lang = core.lang;
+    b.extra = core.extra;
+    b
 }
 
 /// Whether a set of diagnostics is worth spending a repair attempt on.
@@ -380,19 +531,17 @@ fn synth_gist(span: &str) -> String {
         .trim();
     let first = if first.is_empty() { text } else { first };
 
-    // The bound is `l0_max` as the estimator counts it, four bytes a token. It was
-    // `GIST_MAX_CHARS`, 240 characters — twice what `SMY-E022` allows — so a span whose first
-    // sentence was long degraded to a prose unit that failed the gist check at staging.
-    let budget = GranularityProfile::default().l0_max as usize * 4;
-    if first.len() <= budget {
+    // The bound is `l0_max` as the profile's own estimator counts it — not `l0_max * 4`, which
+    // is the inverse of one estimator only (F-2). It was `GIST_MAX_CHARS`, 240 characters —
+    // twice what `SMY-E022` allows — so a span whose first sentence was long degraded to a
+    // prose unit that failed the gist check at staging.
+    let g = GranularityProfile::default();
+    if g.tokens(first).is_some_and(|n| g.gist_within_bound(n)) {
         return first.to_string();
     }
-    let ellipsis = '\u{2026}'.len_utf8();
+    let end = g.fit_gist_with(first, "\u{2026}").unwrap_or(0);
     let mut out = String::new();
-    for c in first.chars() {
-        if out.len() + c.len_utf8() + ellipsis > budget {
-            break;
-        }
+    for c in first[..end].chars() {
         out.push(c);
     }
     // Trim back to a word boundary so the gist reads as a shortened sentence rather than a

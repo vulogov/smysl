@@ -15,7 +15,13 @@ pub mod adjacency;
 pub mod compact;
 pub mod labels;
 pub mod lineage;
+pub mod lock;
 pub mod merge;
+/// Proposition classes (SMYSL-2.3 A-12.4). Here rather than in `smysl-text`, where SMYSL-2.4's
+/// tree puts the engines that propose the edges: counting the classes needs only a `Store`, and
+/// `smysl-check` has to be able to reach it — `C-Library` is obliged to derive `strict` classes
+/// and may not depend on `smysl-text`.
+pub mod proposition;
 pub mod relink;
 pub mod salience;
 pub mod store;
@@ -24,9 +30,9 @@ pub mod traverse;
 pub use adjacency::{Adjacency, Edge, EdgeKind, EdgeSet, NodeId};
 pub use labels::{label_bindings, label_index, labels_of, resolve_label, LabelError};
 pub use lineage::{
-    dependents, dependents_via, diff, hop_diff, membership, rests_on, trace, trace_via,
-    AgentActivity, HopDiff, Lineage, LineageNode, RecipeChange, RecipeChangeKind, StoreDiff,
-    TraceKind, Via,
+    dependents, dependents_trace, dependents_via, diff, hop_diff, membership, rests_on, trace,
+    trace_both, trace_via, AgentActivity, HopDiff, Lineage, LineageNode, RecipeChange,
+    RecipeChangeKind, StoreDiff, TraceKind, Via,
 };
 // The function only: `merge::review` also names the module, and re-exporting both put `review`
 // in the facade twice.
@@ -41,5 +47,14 @@ pub use salience::{
 };
 pub use smysl_core::error::MergeError;
 pub use store::index::{Cached, Entry, Index, IndexError};
-pub use store::{AppendReport, OpenReport, Store, StoreOptions};
+/// The unit store on disk (SMYSL-2.8 §3.5), behind feature `store-redb`.
+#[cfg(feature = "store-redb")]
+pub use store::redb;
+pub use store::{
+    record_set_digest, AnyRecords, AnyStore, AnyUnit, AnyUnits, AppendReport, BundleReport,
+    Commits, HotKind, HotRecords, OpenReport, Overlay, OverlayRecords, OverlayUnit, OverlayUnits,
+    Relations, Resolutions, ShardId, Store, StoreLibrary, StoreOptions, StoreRead, StoreWrite,
+    Threads, UidShards, Union, UnionRecords, UnionUnit, UnionUnits, UnknownRecords, Views,
+    Withdrawals,
+};
 pub use traverse::{closure, cycles, rebuttals_of, reverse_closure, topo, Scratch, TopoOrder};

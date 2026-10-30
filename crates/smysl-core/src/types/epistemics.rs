@@ -2,7 +2,9 @@
 
 use core::fmt;
 
+use crate::edtf::Edtf;
 use crate::error::IdError;
+use crate::ids::Mid;
 use crate::types::unit::Extra;
 
 // ---------------------------------------------------------------------------
@@ -175,6 +177,20 @@ pub enum SourceKind {
     /// kind it does not know, so a store using this is unreadable to one. A producer that needs
     /// older readers should keep the `Doc` convention.
     Node = 5,
+    /// A kind this build does not know (1.9).
+    ///
+    /// The enumeration is **open** from 1.9: a decoder meeting a code it cannot name keeps the
+    /// code, re-encodes it unchanged, reports `SMY-W409`, and treats the value as unknown
+    /// wherever it would otherwise be interpreted. Before this, `from_u8` returned `None` and
+    /// the decode failed — so one unrecognised code made a whole store unopenable, and every
+    /// code allocated after a release was a format break however small it looked. 1.7 shipped
+    /// exactly that break by adding `Node = 5`, which no 1.6 reader can open.
+    ///
+    /// **The raw code is carried on `SourceRef`, not here.** A data-carrying variant would be a
+    /// major bump — the `as u8` casts in this file would stop compiling — and `source.kind` is
+    /// inside the uid preimage, so the code has to survive re-encoding exactly or the unit
+    /// changes identity. `SourceRef::kind_code` is where it lives.
+    Unknown = 255,
 }
 
 impl SourceKind {
@@ -199,6 +215,7 @@ impl SourceKind {
             3 => Some(SourceKind::Tool),
             4 => Some(SourceKind::Doc),
             5 => Some(SourceKind::Node),
+            255 => Some(SourceKind::Unknown),
             _ => None,
         }
     }
@@ -211,6 +228,7 @@ impl SourceKind {
             SourceKind::Tool => "tool",
             SourceKind::Doc => "doc",
             SourceKind::Node => "node",
+            SourceKind::Unknown => "unknown",
         }
     }
 
@@ -329,6 +347,59 @@ pub struct SourceRef {
     /// metric at different instants are two units. That is correct for a time series, and the
     /// alternative — collapsing them — would silently lose the series.
     pub observed: Option<u64>,
+    /// When the manifestation this unit was drawn from was published, **as the source states
+    /// it**: EDTF level 1 text (SMYSL-2.3 A-2.3, source key 4).
+    ///
+    /// A title page, a byline, a dateline, an export header. `1920?` is a legitimate value and
+    /// `1920-01-01T00:00:00Z` is not the same claim — the uncertainty is in the evidence, and
+    /// a field that could not hold it would make every producer invent precision it does not
+    /// have. [`SourceRef::published_at`] takes a parsed [`Edtf`], so a value this build wrote
+    /// is always well formed and always in EDTF's one spelling of itself.
+    ///
+    /// **A `String`, and not an `Edtf`.** Decoding does not reject a malformed value: `source`
+    /// is inside `UnitCore` and therefore inside the uid, so a value that arrived has to leave
+    /// again byte for byte or the unit silently changes identity. A reader that refused it
+    /// would also make a whole store unopenable over one field — the lesson F-12 and the open
+    /// `source.kind` already record. The malformed value is reported instead (`SMY-E410`), by
+    /// the surface parser when a document writes one and by the `Time` check pass when a store
+    /// holds one.
+    ///
+    /// It is **inside identity**, as the rest of `source` is, and SMYSL-2.3 A-2.4 therefore
+    /// makes copying and omitting it normative: a unit drawn from a manifest that records a
+    /// publication date carries that date byte for byte (rule 2), and omits it when it would
+    /// merely restate `observed` (rule 3). Those rules are a producer's, and they are applied
+    /// in `smysl-text::provenance::stamp`.
+    pub published: Option<String>,
+    /// The byte range of the part this unit was drawn from, half-open (SMYSL-2.3 A-2.1 key 5,
+    /// FC-3, 1.10).
+    ///
+    /// Offsets into the part's **normalised** bytes, which is the only thing a tid identifies:
+    /// the part text is NFC, LF-terminated and BOM-free before it is hashed, so a span means the
+    /// same bytes for everyone who can resolve the tid.
+    ///
+    /// **The span is authoritative and the locator is informative.** `reference` may carry
+    /// `#<locator>` after the tid, and a locator is a reader's name for a place — a verse, a
+    /// line, a JSON pointer. When the two disagree the span wins and `SMY-W405` is reported,
+    /// because the span is what the extraction actually read; a span past the part's length is
+    /// `SMY-E404`. Both are findings about a store and need the part, so the library check pass
+    /// raises them with a resolver.
+    ///
+    /// **Inside identity**, as the rest of `source` is: two units quoting different ranges of one
+    /// part are two units, and that is what makes a span-carrying unit traceable to the bytes it
+    /// came from rather than to the document it came from.
+    ///
+    /// A-2.4 rule 1 makes the manifest mandatory beside it, and this pair is **not public** for
+    /// that reason: [`SourceRef::in_part`] is the only way to set either, so a unit with a span
+    /// and no manifestation cannot be built rather than being built and then refused by a
+    /// checker. The decoder enforces the same rule on the way in, and the surface parser does
+    /// at the header.
+    pub(crate) span: Option<(u64, u64)>,
+    /// The manifestation the unit was extracted under: a mid (A-2.1 key 6, FC-3, 1.10).
+    ///
+    /// Required whenever the span is present, and set by the same constructor. It is also what
+    /// the copy rules point at: A-2.4 rule 6 forbids copying a manifest's title, creators, page
+    /// or URL onto a unit, precisely because this field makes all of it reachable.
+    pub(crate) manifest: Option<Mid>,
     /// Unknown keys from a future minor version, preserved verbatim (1.7).
     ///
     /// Every other record body has had one since 0.2 and this sub-map did not, which made it the
@@ -338,6 +409,34 @@ pub struct SourceRef {
     /// Neither preserved nor rejected, which is the one outcome content addressing cannot
     /// survive. Found while planning a host-source variant that would have needed exactly this.
     pub extra: Extra,
+    /// The wire code behind `kind`, when `kind` is `Unknown`.
+    ///
+    /// `source.kind` is inside `UnitCore` and therefore inside the uid, so an unrecognised code
+    /// has to come back out in the bytes it arrived in. Normalising it to 255 would re-encode a
+    /// different core and give the unit a **different uid, silently** — the failure content
+    /// addressing cannot survive, and the reason this is a field rather than a payload on the
+    /// variant.
+    kind_code: Option<u8>,
+}
+
+impl SourceRef {
+    /// The wire code of `kind`: the raw byte for an unknown kind, the discriminant otherwise.
+    pub fn kind_code(&self) -> u8 {
+        self.kind_code.unwrap_or_else(|| self.kind.as_u8())
+    }
+
+    /// Record a kind this build does not know, preserving its code.
+    ///
+    /// Refuses 255 itself, which is reserved and never assigned, and refuses a code this build
+    /// *does* know — those have a named variant and belong in `kind`.
+    pub fn with_unknown_kind(mut self, code: u8) -> Option<SourceRef> {
+        if code == 255 || SourceKind::from_u8(code).is_some() {
+            return None;
+        }
+        self.kind = SourceKind::Unknown;
+        self.kind_code = Some(code);
+        Some(self)
+    }
 }
 
 /// How a caller-supplied source combines with one a unit already has.
@@ -396,9 +495,39 @@ impl SourceRef {
             // hash to one uid compare unequal in memory.
             reference: crate::types::normalise(&reference.into()),
             captured: None,
+            kind_code: None,
             observed: None,
+            published: None,
+            span: None,
+            manifest: None,
             extra: Extra::new(),
         }
+    }
+
+    /// The part range and the manifestation it was read under (A-2.1 keys 5–6, 1.10).
+    ///
+    /// Both at once, because A-2.4 rule 1 says a unit carrying a span carries a manifest — a
+    /// setter for each would make the illegal state reachable in two steps and then refused at
+    /// `build`, which is a worse place to find out. `None` for an empty or reversed range, since
+    /// `[start, end)` with `start >= end` names no bytes: a span is a claim about text that was
+    /// read, and a claim about nothing is not one.
+    pub fn in_part(mut self, start: u64, end: u64, manifest: Mid) -> Option<SourceRef> {
+        if start >= end {
+            return None;
+        }
+        self.span = Some((start, end));
+        self.manifest = Some(manifest);
+        Some(self)
+    }
+
+    /// The part range this unit was drawn from, half-open (A-2.1 key 5).
+    pub fn span(&self) -> Option<(u64, u64)> {
+        self.span
+    }
+
+    /// The manifestation the span is an offset into (A-2.1 key 6).
+    pub fn manifest(&self) -> Option<&Mid> {
+        self.manifest.as_ref()
     }
 
     /// The instant the observation was taken, in milliseconds since the Unix epoch (1.8).
@@ -409,6 +538,16 @@ impl SourceRef {
 
     pub fn captured_on(mut self, d: Date) -> SourceRef {
         self.captured = Some(d);
+        self
+    }
+
+    /// The publication date of the manifestation, as the source states it (A-2.3).
+    ///
+    /// Takes a parsed value rather than a string, which is the whole of this method's
+    /// contribution: the field is inside the uid, EDTF has exactly one spelling of each value,
+    /// and a producer handed a `&str` would be one typo away from two uids for one claim.
+    pub fn published_at(mut self, when: &Edtf) -> SourceRef {
+        self.published = Some(when.to_string());
         self
     }
 }

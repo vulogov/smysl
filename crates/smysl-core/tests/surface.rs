@@ -9,7 +9,10 @@
 //! - the parser does not panic on anything, because its input comes from other agents.
 
 use smysl_core::surface::{parse_surface, write_surface, WriteContext};
-use smysl_core::{Label, Record, Status};
+use smysl_core::{
+    KernelType, Label, Record, SourceKind, SourceRef, Status, Thread, ThreadId, ThreadSchema,
+    UnitCoreBuilder,
+};
 
 /// The worked example of §6, verbatim.
 const RFC_EXAMPLE: &str = r#"@doc smysl/0.1 {
@@ -1816,5 +1819,462 @@ fn a_timestamp_out_of_range_is_refused_not_wrapped() {
         let back = parse_surface(&write_surface(out.view.as_ref(), &out.records, &ctx))
             .expect("what was written parses");
         assert_eq!(back.records, out.records, "ts {bad} broke the round trip");
+    }
+}
+
+/// A `source { }` accepts exactly the keys it defines, and refuses the unit otherwise.
+///
+/// `source` is inside `UnitCore` and therefore inside the uid. A key this parser ignored was a
+/// key that never reached the encoder, so the unit written back was a *different unit* from the
+/// one the document described — with a uid nothing else refers to. The in-code comment used to
+/// claim an author writing a fourth key "gets a parse error"; nothing iterated the object, so
+/// they got silence. Forward compatibility inside `source` is the wire's business, where
+/// `SourceRef::extra` preserves what it does not know; surface text has an author to tell.
+#[test]
+fn a_source_key_this_build_does_not_define_refuses_the_unit() {
+    let doc = |src: &str| {
+        format!(
+            "@doc smysl/0.1 {{\n  id: v/t\n  intent: test\n  lang: en\n  roots: [c/x]\n}}\n\n\
+             @claim c/x {{ status: cited, source: {src} }}\n\
+             ~ A claim with a source, long enough to clear the body length check comfortably.\n"
+        )
+    };
+
+    // The control: every defined key, in one source. `published` joined them in 1.10 — it was
+    // the *refused* case here until TX-P3 step 1, chosen because A-2 had reserved the name for
+    // a later phase, and a key moving from one list to the other is exactly what this test is
+    // for. `span` and `manifest` are the two still reserved, and one of them takes its place
+    // below.
+    let ok = parse_surface(&doc(
+        "{ kind: doc, ref: \"x://y\", captured: 2026-07-05, observed: 1726500000000, \
+         published: \"1920~\" }",
+    ))
+    .expect("the parser recovers rather than failing");
+    assert!(
+        ok.records.iter().any(|r| matches!(r, Record::Unit(_))),
+        "every defined key together must still produce the unit"
+    );
+
+    for bad in [
+        "{ kind: doc, ref: \"x://y\", bogus: 1 }",
+        "{ kind: doc, ref: \"x://y\", span: [0, 1] }",
+    ] {
+        let out = parse_surface(&doc(bad)).expect("the parser recovers rather than failing");
+        assert!(
+            !out.records.iter().any(|r| matches!(r, Record::Unit(_))),
+            "{bad}: the unit must be refused, not emitted without its source"
+        );
+        assert!(
+            !out.diagnostics.is_empty(),
+            "{bad}: and the author must be told which key"
+        );
+    }
+}
+
+/// A malformed `captured` or `observed` refuses the unit rather than vanishing.
+///
+/// Both used to be read with `.and_then(…).ok()`, so a value the parser could not make sense of
+/// simply was not there — and the unit it produced carried a source the author did not write.
+#[test]
+fn a_malformed_source_value_refuses_the_unit() {
+    let doc = |src: &str| {
+        format!(
+            "@doc smysl/0.1 {{\n  id: v/t\n  intent: test\n  lang: en\n  roots: [c/x]\n}}\n\n\
+             @claim c/x {{ status: cited, source: {src} }}\n\
+             ~ A claim with a source, long enough to clear the body length check comfortably.\n"
+        )
+    };
+
+    for bad in [
+        "{ kind: doc, ref: \"x://y\", captured: \"not-a-date\" }",
+        "{ kind: doc, ref: \"x://y\", observed: -5 }",
+    ] {
+        let out = parse_surface(&doc(bad)).expect("the parser recovers rather than failing");
+        assert!(
+            !out.records.iter().any(|r| matches!(r, Record::Unit(_))),
+            "{bad}: a value that cannot be read is not a value to drop"
+        );
+    }
+}
+
+/// Refusing a source still advances the parser.
+///
+/// The record loop does not move the cursor for a `RecordStart` — `unit` owns that, and does it
+/// while consuming the body — so a refusal that returns before the body is consumed leaves the
+/// parser on the same line forever. Every other refusal in `unit` calls `recover` first; the
+/// strict-source path has to as well, or a malformed document *hangs* the parser instead of
+/// being rejected by it. The assertion here is simply that this returns at all.
+#[test]
+fn a_refused_source_does_not_stall_the_parser() {
+    let src = "@doc smysl/0.1 {\n  id: v/t\n  intent: test\n  lang: en\n  roots: [c/a]\n}\n\n\
+               @claim c/a { status: cited, source: { kind: doc, ref: \"x://y\", bogus: 1 } }\n\
+               ~ The first claim, refused, and the parser must carry on past it to the second.\n\n\
+               @claim c/b { status: speculative }\n\
+               ~ The second claim, which proves the parser reached the end of the document.\n";
+
+    let out = parse_surface(src).expect("the parser recovers rather than failing");
+    assert_eq!(
+        out.records
+            .iter()
+            .filter(|r| matches!(r, Record::Unit(_)))
+            .count(),
+        1,
+        "the good unit survives and the bad one does not"
+    );
+}
+
+/// A record that cannot be spelled travels as CBOR instead of being written wrong.
+///
+/// The writer used to emit a unit, a thread and a commitment regardless. Everything checked here
+/// is inside `UnitCore` and therefore inside the uid, so each case had the same ending: text that
+/// parses back to something else, and a uid that moved without anyone being told.
+#[test]
+fn a_record_with_no_surface_form_is_not_written() {
+    use smysl_core::surface::{
+        commit_has_surface_form, thread_has_surface_form, unit_has_surface_form,
+    };
+
+    // The control.
+    let plain = UnitCoreBuilder::new(
+        KernelType::Claim,
+        "an ordinary claim with nothing unusual",
+        Status::Speculative,
+    )
+    .build()
+    .unwrap();
+    assert!(
+        unit_has_surface_form(&plain),
+        "an ordinary unit is writable"
+    );
+
+    // A key a later version added: the writer has nowhere to put it.
+    let mut with_extra = plain.clone();
+    with_extra.extra.insert(31, vec![0x01]);
+    assert!(
+        !unit_has_surface_form(&with_extra),
+        "a unit carrying an unknown core key has no surface form"
+    );
+    assert_eq!(
+        write_surface(None, &[Record::Unit(with_extra)], &WriteContext::default()),
+        "",
+        "and is not written"
+    );
+
+    // An unknown source kind has no spelling: `kind:` parses against the named set.
+    let unknown_src = UnitCoreBuilder::new(
+        KernelType::Claim,
+        "a claim whose source kind is from later",
+        Status::Cited,
+    )
+    .source(
+        SourceRef::new(SourceKind::Doc, "x://y")
+            .with_unknown_kind(9)
+            .unwrap(),
+    )
+    .build()
+    .unwrap();
+    assert!(
+        !unit_has_surface_form(&unknown_src),
+        "1.9 opened the enumeration on the wire, not in the grammar"
+    );
+
+    // A thread whose schema or role this build cannot name.
+    let who = smysl_core::AgentId::new("human:vu").unwrap();
+    let th = Thread::new(
+        ThreadId::new("t/x").unwrap(),
+        ThreadSchema::Analysis,
+        who.clone(),
+        "a thread whose schema is from a later release",
+        smysl_core::Hlc::new(1, 0, who),
+    )
+    // 9, not 7: TX-P8 step 2 assigned 7 to `dialogue` (SMYSL-2.3 A-8.2).
+    .with_unknown_schema(9)
+    .unwrap();
+    assert!(
+        !thread_has_surface_form(&th),
+        "an unknown schema has no spelling"
+    );
+
+    // A commitment carrying an unknown key.
+    let a = smysl_core::AgentId::new("human:vu").unwrap();
+    let mut c = smysl_core::Commit::new(
+        smysl_core::Uid::from_bytes([1; 32]),
+        smysl_core::Commitment::Canonical,
+        a.clone(),
+        smysl_core::Hlc::new(1, 0, a),
+    );
+    assert!(
+        commit_has_surface_form(&c),
+        "an ordinary commitment is writable"
+    );
+    c.extra.insert(31, vec![0x01]);
+    assert!(
+        !commit_has_surface_form(&c),
+        "one carrying an unknown key is not"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// @manifest (1.10, SMYSL-2.3 A-10)
+// ---------------------------------------------------------------------------
+
+/// The keys a manifest requires have no defensible default, so each one is named.
+///
+/// `part-policy` is the one that matters most: the default part size changes when GE-T14
+/// measures it at the end of TX-P2, and a manifest that recorded no policy would silently
+/// mean a different cut of the same text afterwards. A missing `lang` is not `und` either —
+/// `und` is a claim that nobody knows, which differs from nobody having said.
+#[test]
+fn a_manifest_names_every_key_it_requires() {
+    for (src, missing) in [
+        (
+            "@manifest kjv { reader: osis/1, licence: unknown, carry: none, part-policy: none }",
+            "lang",
+        ),
+        (
+            "@manifest kjv { lang: en, licence: unknown, carry: none, part-policy: none }",
+            "reader",
+        ),
+        (
+            "@manifest kjv { lang: en, reader: osis/1, carry: none, part-policy: none }",
+            "licence",
+        ),
+        (
+            "@manifest kjv { lang: en, reader: osis/1, licence: unknown, part-policy: none }",
+            "carry",
+        ),
+        (
+            "@manifest kjv { lang: en, reader: osis/1, licence: unknown, carry: none }",
+            "part-policy",
+        ),
+    ] {
+        let out = parse_surface(src).unwrap();
+        assert!(
+            out.diagnostics.iter().any(|d| d.message.contains(missing)),
+            "a manifest with no `{missing}` must say so: {:?}",
+            out.diagnostics
+        );
+        assert!(
+            !out.records.iter().any(|r| matches!(r, Record::Manifest(_))),
+            "and must not produce a manifest"
+        );
+    }
+}
+
+/// A reader field with parameters survives the surface round trip.
+///
+/// TX-P2 step 2 made key 3 "a reader id **and its parameters**" — `whatsapp/1 date-format=dmy`
+/// — because `03/04/2024` is two different days and the file does not say which. The field now
+/// holds a space, which is the one character the surface form of a brace header has an opinion
+/// about: the writer has to quote it and the parser has to give it back unquoted, or a manifest
+/// that `text add` wrote could not be printed and read again. Checked both directions, because
+/// the failure mode is asymmetric — a writer that forgot the quotes produces a line that
+/// parses as something else rather than failing.
+#[test]
+fn a_reader_field_with_parameters_round_trips_through_the_surface_form() {
+    const FIELD: &str = "whatsapp/1 date-format=dmy tz=+0300";
+    let src = format!(
+        "@manifest chat {{ lang: mul, reader: \"{FIELD}\", licence: CC0-1.0, carry: text, \
+         part-policy: none }}"
+    );
+    let out = parse_surface(&src).unwrap();
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let manifest = out
+        .records
+        .iter()
+        .find_map(|r| match r {
+            Record::Manifest(m) => Some(m.clone()),
+            _ => None,
+        })
+        .expect("a manifest");
+    assert_eq!(manifest.reader, FIELD);
+
+    let written = write_surface(None, &out.records, &WriteContext::default());
+    let again = parse_surface(&written).unwrap();
+    assert!(again.diagnostics.is_empty(), "{:?}", again.diagnostics);
+    let back = again
+        .records
+        .iter()
+        .find_map(|r| match r {
+            Record::Manifest(m) => Some(m.clone()),
+            _ => None,
+        })
+        .expect("a manifest");
+    assert_eq!(back.reader, FIELD, "the written form is: {written}");
+    assert_eq!(back.mid(), manifest.mid(), "one manifest, one identity");
+}
+
+/// A key the parser does not define is an error, not something to skip.
+///
+/// The likeliest stray key is a misspelling of one of the required five, and passed over
+/// quietly that writes a manifest claiming a policy and a licence the author did not state.
+#[test]
+fn an_unknown_manifest_key_is_an_error() {
+    let out = parse_surface(
+        "@manifest kjv { lang: en, reader: osis/1, licence: unknown, carry: none, \
+         part-policy: none, part_policy: none }",
+    )
+    .unwrap();
+    assert!(
+        out.diagnostics
+            .iter()
+            .any(|d| d.message.contains("part_policy")),
+        "{:?}",
+        out.diagnostics
+    );
+}
+
+/// An alias is lowercase ASCII (A-3), and the parser is where that is enforced.
+///
+/// Not the decoder's job: a later version may widen the grammar, and refusing a store over an
+/// alias is refusing to open it. Surface text has an author to tell.
+#[test]
+fn a_malformed_alias_is_refused_at_the_surface() {
+    let out = parse_surface(
+        "@manifest KJV/1769 { lang: en, reader: osis/1, licence: unknown, carry: none, \
+         part-policy: none }",
+    )
+    .unwrap();
+    assert!(
+        out.diagnostics.iter().any(|d| d.message.contains("alias")),
+        "{:?}",
+        out.diagnostics
+    );
+}
+
+/// `lossy: false` has no spelling, because it has no encoding.
+///
+/// The wire writes key 15 only when true, so admitting the word at the surface would give one
+/// manifest two documents and two mids.
+#[test]
+fn a_false_lossy_flag_is_refused_at_the_surface() {
+    let base = "@manifest kjv { lang: en, reader: osis/1, licence: unknown, carry: none, \
+                part-policy: none";
+    let yes = parse_surface(&format!("{base}, lossy: true }}")).unwrap();
+    assert!(yes.diagnostics.is_empty(), "{:?}", yes.diagnostics);
+
+    let no = parse_surface(&format!("{base}, lossy: false }}")).unwrap();
+    assert!(
+        no.diagnostics.iter().any(|d| d.message.contains("lossy")),
+        "{:?}",
+        no.diagnostics
+    );
+}
+
+/// `parent` and `parent-kind` are required together at the surface as on the wire.
+#[test]
+fn a_parent_needs_its_kind_at_the_surface() {
+    let mid = smysl_core::Mid::of(b"p").canonical();
+    let base = "@manifest kjv { lang: en, reader: osis/1, licence: unknown, carry: none, \
+                part-policy: none";
+
+    let both = parse_surface(&format!(
+        "{base}, parent: {mid}, parent-kind: translation }}"
+    ))
+    .unwrap();
+    assert!(both.diagnostics.is_empty(), "{:?}", both.diagnostics);
+
+    for tail in [
+        format!(", parent: {mid} }}"),
+        ", parent-kind: translation }".to_string(),
+    ] {
+        let out = parse_surface(&format!("{base}{tail}")).unwrap();
+        assert!(
+            out.diagnostics.iter().any(|d| d.message.contains("parent")),
+            "{tail}: {:?}",
+            out.diagnostics
+        );
+    }
+}
+
+/// A manifest carrying the reader's own raw metadata has no surface form.
+///
+/// `raw` is opaque CBOR — whatever a reader found and could not place in a named key — so
+/// spelling it would mean the writer deciding what the bytes mean. The manifest travels as
+/// CBOR and is counted among the records a surface rendering cannot hold, rather than written
+/// back smaller than it was read.
+#[test]
+fn a_manifest_with_raw_metadata_has_no_surface_form() {
+    let mut m = smysl_core::Manifest::new(
+        "kjv",
+        smysl_core::LangTag::new("en").unwrap(),
+        "osis/1",
+        "unknown",
+        "none",
+    );
+    assert!(smysl_core::surface::manifest_has_surface_form(&m));
+    m.raw = Some(vec![0xA0]);
+    assert!(
+        !smysl_core::surface::manifest_has_surface_form(&m),
+        "opaque reader metadata has no spelling"
+    );
+
+    let mut m2 = smysl_core::Manifest::new(
+        "kjv",
+        smysl_core::LangTag::new("en").unwrap(),
+        "osis/1",
+        "unknown",
+        "none",
+    );
+    m2.extra.insert(31, vec![0x01]);
+    assert!(
+        !smysl_core::surface::manifest_has_surface_form(&m2),
+        "nor does a key from a later version"
+    );
+    assert_eq!(
+        write_surface(None, &[Record::Manifest(m2)], &WriteContext::default()),
+        "",
+        "and the writer emits nothing rather than something smaller"
+    );
+}
+
+/// Every EDTF shape a manifest's `published` can carry survives the round trip.
+///
+/// `published` is **as recorded** (A-5 key 8): a string this build does not yet parse, because
+/// EDTF arrives in TX-P3. So the surface has to carry shapes the writer's quoting rules were
+/// not designed for, and two of these would have been plausible losses — `0001` read as an
+/// integer comes back as `1`, and `[1769,1770]` unquoted is an array. Neither happens, and this
+/// is what keeps it that way when the EDTF parser lands and starts producing them.
+#[test]
+fn every_edtf_shape_of_published_is_a_fixed_point() {
+    for v in [
+        "1769",
+        "1769-01",
+        "1769-01-12",
+        "1769/1770",
+        "19XX",
+        "-0500",
+        "1769?",
+        "1769~",
+        "[1769,1770]",
+        "0001",
+    ] {
+        let src = format!(
+            "@manifest kjv {{ lang: en, reader: osis/1, licence: unknown, carry: none, \
+             part-policy: none, published: \"{v}\" }}\n"
+        );
+        let out = parse_surface(&src).unwrap();
+        assert!(out.diagnostics.is_empty(), "{v}: {:?}", out.diagnostics);
+        let Some(Record::Manifest(m)) = out.records.first() else {
+            panic!("{v}: no manifest")
+        };
+        assert_eq!(
+            m.published.as_deref(),
+            Some(v),
+            "{v} was not carried as written"
+        );
+
+        let text = write_surface(None, &out.records, &WriteContext::default());
+        let again = parse_surface(&text).unwrap();
+        assert!(again.diagnostics.is_empty(), "{v}: {:?}", again.diagnostics);
+        assert_eq!(
+            again.records, out.records,
+            "{v} changed through a round trip"
+        );
+        assert_eq!(
+            write_surface(None, &again.records, &WriteContext::default()),
+            text,
+            "{v}: the second write moved the document"
+        );
     }
 }

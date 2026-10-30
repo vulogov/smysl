@@ -6,7 +6,7 @@
 
 [![ci](https://github.com/vulogov/smysl/actions/workflows/ci.yml/badge.svg)](https://github.com/vulogov/smysl/actions/workflows/ci.yml)
 ![format](https://img.shields.io/badge/format-smysl%2F1.0-6aa84f)
-![rust](https://img.shields.io/badge/rust-1.79%2B-orange)
+![rust](https://img.shields.io/badge/rust-1.88%2B-orange)
 ![unsafe](https://img.shields.io/badge/unsafe-forbidden-success)
 [![licence](https://img.shields.io/badge/licence-MPL--2.0-blue)](LICENSE)
 

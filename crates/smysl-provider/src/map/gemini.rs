@@ -397,6 +397,7 @@ impl Provider for Gemini {
 
     fn caps(&self) -> Capabilities {
         Capabilities {
+            model: self.cfg.model.clone(),
             context_window: self.cfg.context_window,
             max_output: self.cfg.max_output,
             structured: self.cfg.structured,

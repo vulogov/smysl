@@ -32,18 +32,20 @@ These apply to every subcommand, in any position on the command line.
   (auto, 1fr),
   (
     ([Flag], [Meaning]),
-    ([`-C, --config FILE`], [Configuration file.]),
+    ([`-C, --config FILE`], [Configuration file; must exist. Without it, `.smysl/config.hjson` beside `--store`, and a missing one is the all-local default.]),
     ([`-s, --store PATH`], [Store path; `-` reads stdin (rule P).]),
     ([`-o, --output PATH`], [Output path; defaults to stdout.]),
-    ([`--format surface|cbor`], [Output form; defaults to `cbor` on a non-TTY stdout (rule P).]),
+    ([`--format surface|cbor`], [Output form; defaults to `cbor` on a non-TTY stdout (rule P), and to surface on `fmt` and `thread`. Honoured by `fmt`, `merge`, `pack`, `bundle` and `thread`; `import`, `relink` and `compact` write a store log and take `cbor` only. Every other command refuses it as a usage error.]),
     ([`--strict`], [Treat warnings as errors.]),
     ([`--offline`], [Hard-fail rather than send anything off the machine.]),
     ([`--no-color`], [Disable colour.]),
     ([`--noprogress`], [Disable progress bars, whatever the terminal is.]),
+    ([`--backend BACKEND`], [`memory` (default) or `redb`: which store a CBOR log is read and written through. `redb` needs a build with `--features store-redb`.]),
+    ([`--shard ALIAS`], [On a library: read only these shards, as one store; repeatable, `all` for every shard. A reference into a shard not named is `SMY-W500`, naming the shard it waits on, rather than `SMY-E060`. For commands that read; a write is refused.]),
     ([`--json`], [Machine-readable output.]),
     ([`-q, --quiet`], [Suppress non-error output.]),
     ([`-v, --verbose`], [Increase verbosity; repeatable (`-vv`, `-vvv`, …).]),
-    ([`--seed-check`], [Assert this invocation is bit-reproducible (rule D).]),
+    ([`--seed-check`], [Assert this invocation is bit-reproducible (rule D), and be refused with exit 2 if it is not. Decided per invocation: the command's purity, narrowed by the flags that make a mixed command impure.]),
   ),
 )
 
@@ -69,6 +71,7 @@ These apply to every subcommand, in any position on the command line.
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
+    ([`--library`], [—], [Treat the store as a library root and resolve its parts, so the library pass verifies objects (`SMY-E446`, `SMY-E401`). Without it those two are not checked and the report says so: a log holds no text, so there is nothing to check the manifests against.]),
     ([`--conformance`], [`CLASS`], [Assert the store is consumable at a conformance class.]),
     ([`--as`], [`SCHEMA` (repeatable)], [Report fidelity for a consumer implementing these schemas.]),
     ([`--granularity`], [—], [Report the granularity distribution of the store.]),
@@ -186,8 +189,8 @@ These apply to every subcommand, in any position on the command line.
 
 #section("thread")
 
-*Derive, refine, list, show, or import threads.* Mixed (pure except `--refine`, which is
-not yet wired) · SM-P11.
+*Derive, list, or show threads.* Mixed (pure except `--refine`, which is not yet wired) ·
+SM-P11.
 
 #dtable(
   (auto, auto, 1fr),
@@ -225,7 +228,7 @@ not yet wired) · SM-P11.
 
 #section("find")
 
-*Rank units against a query, lexically.* Pure · 0.5.0.
+*Rank units against a query, lexically.* Pure · 0.5.0, TX-P4.
 
 #dtable(
   (auto, auto, 1fr),
@@ -241,12 +244,33 @@ not yet wired) · SM-P11.
     ([`--schema`], [`ID` (repeatable)], [Restrict to units of this schema, kernel or extension (`x.domain/type`). Extension-typed units are retrievable at all since 1.7.]),
     ([`--payload`], [`KEY=VALUE[,VALUE]`], [Restrict to units whose payload has `KEY` equal to one of `VALUE`, nested keys written `a.b`; a unit without the key is excluded. Applied before the limit, and it does not re-score.]),
     ([`--why`], [—], [Also print, on stderr, which query terms each hit matched and what each contributed.]),
-    ([`PATH`], [positional], [Store to search.]),
+    ([`--lang`], [`TAG`], [Analyse the query and the corpus with this language's chain, so `ru` stems Russian and `de` folds `ß` to `ss`. Overridden by `--analyzer`.]),
+    ([`--analyzer`], [`ID`], [Name the analyzer outright: `smysl/plain/1`, `smysl/fold-en/1`, or one of the chains `smysl/an/1` … `smysl/an-ru/1`. An id this build cannot produce is refused, never silently replaced.]),
+    ([`--library`], [—], [Treat `PATH` as a library root and score the `postings` table its index already holds, instead of analysing the corpus again.]),
+    ([`PATH`], [positional], [Store to search, or a library root with `--library`.]),
   ),
 )
 
 The first command whose phase is a release rather than an `SM-Pnn`. The delivery phases
 ended at SM-P15, and writing `SM-P16` here would invent one to satisfy a naming pattern.
+
+*Which analyzer, and why it is a decision rather than a default.* What counts as a term is a
+decision about a language: `книгами` and `книга` are one word in Russian and two strings
+everywhere else. `--analyzer` names that decision and the id travels with any index built under
+it, because two indexes built under different ids are not comparable and the id is how that is
+noticed rather than inferred from a thin result. With neither flag given, the query is split the
+way it always was — `smysl/plain/1`, which splits identifiers and lowercases — except under
+`--library`, where the library's own texts decide: the chain of the language its head manifests
+agree on, and the plain chain when they do not.
+
+*`--library` is a different cost, not a different answer.* The table holds the terms of every unit
+of the library, so a query over it does no analysis. At 155k units that is the difference between
+34 ms and two seconds, measured in `crates/smysl-text/tests/postings_timing.rs`; what it does not
+move is the 625 ms spent parsing the catalog, so the command is four times faster rather than
+sixty. A library whose index holds no postings yet — any library opened since its catalog last
+changed — says so and analyses the corpus instead, which is the same ranking at the old price;
+`text index --rebuild` builds the table once. Nothing in this build puts a *unit* in a library, so
+until ingest arrives the flag has a corpus only where one was put there deliberately.
 
 #section("retract")
 
@@ -430,10 +454,26 @@ Exits 5 while anything is open and 0 when nothing is, so a pipeline can gate on 
     ([`--granularity`], [`P`], [Granularity preset recorded in the recipe: `coarse`, `default` (or `standard`), `fine`.]),
     ([`--path`], [`auto|surface|json-ast`], [Override the path D-9 would choose.]),
     ([`--repair`], [`N`], [Repair attempts before a span degrades to opaque prose.]),
+    ([`--lang-policy`], [`source`], [What language the model writes in. `source` writes each unit in the language of its passage, and `SMY-W436` reports a unit that is not in its passage's script. `pivot:<lang>` — on `ingest --text` only — extracts under `source` and then translates each gist into that language, writing one extra unit per unit with the original in `deps` and an `x.text/translates` edge back to it; a line the model does not return is `SMY-W453` and that unit stays in its own language. A document ingest has no reading to attach a translation to and refuses the policy rather than quietly extracting in the passage's language.]),
     ([`--yes`], [—], [Commit the staged batch instead of exiting 10.]),
     ([`--dry-run`], [—], [Report what would be sent and to whom; make no call.]),
+    ([`--text`], [`WHO`], [Ingest an expression of the library at `--store` — its alias, or a manifest id — rather than a document. Windows of whole structure nodes, a span attached to every quote the text supports, and each window committed as it is staged. Needs `--yes`, because the journal entry that makes a window resumable is written after the commit.]),
+    ([`--window-level`], [`L`], [Fill windows with whole nodes at this level. The default is the reading's *leaves*: the finest division it offers, and the unit a span is attached inside. Reported either way.]),
+    ([`--digest-budget`], [`N`], [Tokens of ledger digest sent with each window, so a window is not extracted as though the expression began there. `0` sends none; 512 by default.]),
+    ([`--reextract`], [—], [Ignore the journal for this expression and extract every window again. The same answers give the same uids, so a re-extraction that changed nothing grows the corpus by nothing.]),
+    ([`--single-pass`], [—], [One extraction per window instead of two, and recorded in the recipe. Two is the default for `--text` alone: S0 measured a model bit-identical across 145 runs at temperature 0, so a second pass at 0 is the only one that can agree with the first.]),
+    ([`--cost`], [—], [With `--text`: report what the journal says this expression cost, per language, and make no call. Needs no provider and no `--yes` — it reads a file and prints a measurement.]),
   ),
 )
+
+#callout(label: "Note")[
+  `--text` and a `FILE` are two different ingests, and the flags above divide between them.
+  `--window-level`, `--digest-budget`, `--reextract`, `--single-pass` and `--cost` mean nothing to a
+  document, which has no reading, no expression and nothing already extracted from it; and
+  `.smysl/staged.smy` means nothing to a text ingest, which commits per window. Everything else
+  — the rung, the granularity, the path, the repair budget, the language policy, the prompt
+  override, `--temperature` — applies to both.
+]
 
 #section("attest")
 
@@ -510,6 +550,563 @@ command says so rather than pretending.
     ([`PATH`], [positional], [Store to reindex.]),
   ),
 )
+
+With `--backend redb` it builds the unit store, `.smysl/store/<name>.redb`, from the log instead,
+and `--verify` compares the store already there against an in-memory rebuild — record-set digest,
+units, state and adjacency, not the file's bytes, which are not reproducible. A store that had to
+be rebuilt to open did not describe its log, and fails the verify with exit 9 as a mismatched
+sidecar does. TX-P13b step 2.
+
+#section("text")
+
+*Library: add, append, list, show, align, redact and index texts.* Pure · TX-P1, TX-P4.
+
+The store argument is a **library root** rather than a log — a directory with a `LIBRARY`
+marker file in it, which `text add` creates. There is no separate flag for it: every command
+that takes `-s/--store` accepts a library root and reads every one of its logs as one store, and
+a plain file path keeps the meaning it has always had.
+
+A library keeps one log per expression (layout `smysl/library/2`, since TX-P13c step 1): an
+expression's units, and the relations, attestations and commitments on them, go to
+`log/shards/<alias>.cbor` — `/` in an alias spelled `~`, `:` spelled `+` — and manifests,
+redactions, datings and anything about no expression's unit stay in `log/catalog.cbor`. A
+library written before shards opens unchanged, as one whose only shard is its catalogue, and
+becomes layout 2 with the first write that creates a shard. `--shard ALIAS` reads some shards
+alone; `index/shards/<alias>.uids` lists each shard's units, so a reference into a shard not
+read says which one it waits on (`SMY-W500`).
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`add`, `append`, `ls`, `show`, `align`, `redact` or `index`.]),
+    ([`TARGET`], [positional], [The file, for `add` and `append`; `<alias|mid>#<locator>` for `show`; the first expression for `align`; a tid for `redact`. `ls` and `index` take none.]),
+    ([`OTHER`], [positional], [The second expression, for `align`.]),
+    ([`--reader`], [`R`], [Reader id, such as `txt/1` or `osis/1`. Required by `add`, and recorded in the manifest: it is what `SMY-E401` compares against when a corpus is re-read. Nine in a default build: `txt/1`, `md/1`, `usfm/1`, `osis/1`, `zefania/1`, `json/1`, `telegram/1`, `slack/1`, `whatsapp/1`.]),
+    ([`--alias`], [`A`], [The alias the expression is catalogued under. Required by `add`.]),
+    ([`--licence`], [`SPDX`], [The licence the text is under. Required by `add`; a missing one is not `unknown`, it is a decision nobody made.]),
+    ([`--lang`], [`L`], [BCP-47 tag, for a source that does not say. A text whose language neither the source nor the caller names is refused rather than tagged `und`.]),
+    ([`--carry`], [`none|ref|text`], [Whether the text itself may travel inside a bundle. `text` under a licence that does not permit redistribution is `SMY-E402`, refused before a byte is written.]),
+    ([`--part-policy`], [`P`], [The boundary rule and size targets parts are cut by. Recorded in the manifest, because the default changes as the cut gets measured.]),
+    ([`--param`], [`K=V` (repeatable)], [A reader parameter. Recorded beside the reader id, because a parameter changes a reader's output: a corpus that recorded only the id would mean something else on re-read. Two readers take one: `whatsapp/1` *requires* `date-format=dmy|mdy|ymd`, because `03/04/2024` is two different days and the transcript does not say which, and both it and `telegram/1` accept `tz=±HHMM` for a timestamp written as a local wall clock.]),
+    ([`--pseudonymise`], [—], [`add`: replace every speaker in the reading with `spk:` plus 26 base32 characters of keyed BLAKE3 of the platform's user id. The key is `secrets/pseudonym.key` under the library, created with thirty-two random bytes on first use, mode 0600, and never printed. It changes **no byte of the text** — the speaker is a field of a segment row — so the parts, their tids and their objects are the same as they would have been without it; only the reading differs. Names *inside* the prose are a different instrument.]),
+    ([`--versification`], [`S`], [`add`: the numbering this expression uses, as a name — `kjv`, `synodal`, `lxx`. Manifest key 14. No reader infers one: two Bibles with identical markup can be numbered differently, and the file does not say. `append` carries it forward from the head, because an expression does not change its numbering between versions.]),
+    ([`--scheme`], [`FILE`], [`align`: a versification map to install into the library and align by. Installed rather than merely read — see the prose below.]),
+    ([`--forks`], [—], [`ls`: show only the aliases with more than one head (`SMY-W418`).]),
+    ([`--rebuild`], [—], [`index`: rebuild every table from the catalogue and the objects, and write the sidecar. A library-wide operation, so it takes the library lock and then the shard locks in name order.]),
+    ([`--raw`], [—], [`show`: print the passage's bytes with no heading.]),
+    ([`--segments`], [—], [`show`: list the segments the passage covers, with their levels and locators — and, where the reader filled them, the speaker and the timestamp. A chat reading is the first one where those are not empty.]),
+    ([`--as`], [`AGENT`], [`redact`: the agent issuing the redaction. Required — a redaction is an act by somebody, and a default would invent one.]),
+    ([`--at`], [`MS`], [`redact`: the wall clock for the record, in milliseconds. Defaults to now.]),
+    ([`--reason`], [`UID`], [`redact`: a unit saying why. Optional, because a legal demand arrives before anybody writes it down and a store that waited for the paperwork would hold the text for as long as the paperwork took.]),
+  ),
+)
+
+*`text append`.* `text append <file> --alias A` is a **new version** of an expression: the input is the whole
+updated document — a chat export is always the whole conversation — and the new manifest carries
+`supersedes`, so the alias keeps one head. Nothing else is passed, and passing it is refused
+rather than ignored: the reader, its parameters, the part policy, the language, the licence and
+the carry mode come from the head manifest, because an append that restated them could state
+them differently, and a second version cut by another policy cannot be compared with the first.
+
+What makes it cheaper than a second `add` is that parts whose bytes did not change hash to the
+tids they already have, so their objects are already in the store and nothing is written for
+them. With one qualification, which is worth knowing before you measure it: **a part that was
+the last one is rewritten exactly once.** Parts partition the text — a cut may lose no byte —
+and the separator between two parts belongs to the earlier of them, so the day that was last
+gains the space that now joins it to its successor. Every part before it is untouched. The cost
+of an append is therefore one rewritten part whatever the size of the corpus, and `objects N
+written` is where you see it.
+
+Tid reuse at all depends on the **part policy**, though less than it used to: GE-T14 moved the
+default minimum from 64 KiB to 1 KiB at the end of TX-P2, so a chat day is now a part by default.
+Under the old 64 KiB minimum a chat export
+of a few kilobytes is one part, and one part that grew is a part with a new tid. An operator who
+wants per-day parts says so in `--part-policy` at `add`, where it is recorded in the manifest
+and reused by every append afterwards.
+
+An append of a file the corpus already holds writes no version and says `unchanged`. Appending
+to an alias with two heads is refused by name (`SMY-W418`); naming one of them by mid appends to
+that side, and does not merge the fork — merging two heads is a different operation.
+
+`--pseudonymise` on an append **reads** the key and never creates one. A created key would be a
+different key from the one the expression's existing speakers were derived under, so every
+appended message would get a second pseudonym for somebody already in the corpus — which is the
+failure `SMY-E450` exists to prevent, reached by way of the flag meant to prevent it. An append
+to a pseudonymised expression without the flag is `SMY-E450`; with it, and with no key file, it
+is a refusal that says `text add --pseudonymise` is what creates one.
+
+*`text redact`.* `text redact <tid> --as AGENT` is **rule Z**: this part's text is to be held no
+longer. It writes record 19 into the catalog and then unlinks the bytes — the part's object and
+the reading of it — in that order, because a process killed between the two then leaves a catalog
+that has said what it is doing and an object store that has not caught up, and opening the library
+is where that is put right. The other order leaves bytes gone with nothing to say why, which is
+indistinguishable from loss.
+
+What it does *not* do is retract anything. The manifests that name the part stay, the units drawn
+from it stay, their spans and uids stay, and `check` is still clean afterwards. A text that may no
+longer be held does not stop having been read, and a corpus that quietly dropped the claims made
+from it would be answering a demand by falsifying its own history. Asking for the passage
+afterwards says the part has been redacted rather than naming a missing file.
+
+A redaction only ever spreads. Adding the source file again does not bring the bytes back: the
+objects are withheld and the command says so, while the manifest is still written. Merging a peer
+that never heard of the redaction does not bring them back either — the rule is enforced over the
+union of what every participant has said, which is what makes the merge of two libraries the same
+library whatever order they meet in. And a part this library never held can be redacted too: that
+is the case the record exists for, because it is what stops the part arriving later.
+
+The tid is spelled in full, as `text add` and `text show` print it. The 26-character short form is
+refused here as everywhere, and here the cost of an abbreviation would be a redaction that names
+no part or the wrong one.
+
+`ls` prints a fork as a fork rather than resolving it, and `show` refuses an alias with two
+heads instead of picking one — printing the lower-sorting identity would make the answer depend
+on a hash. Naming one of the two heads works, which is what the refusal tells you to do.
+
+*`text align`.* `text align <a> <b> --scheme FILE` records which locator of one expression is
+which of another. Psalm 14 in a Hebrew-numbered Bible is Psalm 13 in a Septuagint-numbered one,
+and the shift runs from Psalm 10 to Psalm 147; two manifests can hold the same text, cut by the
+same policy, and address it with locators that never agree. A reader cannot fix that, because the
+numbering is not in the file — so each expression *declares* its numbering with
+`--versification`, and a map between two declarations is what connects them.
+
+The map is **installed into the library**, at `versification/<name>.tsv`, and that is the one
+thing worth understanding about this command. The `align` table is derived, and the rule every
+table in the index is under is that a rebuild from the library alone reproduces it. A map passed
+on a command line and not kept would make the table reproducible only by whoever still had the
+command line; installed, the next `text index --rebuild` finds it and builds the same table. A
+shipped map, when one is licensed, is the same file copied into the same place.
+
+The format is tab-separated: a `smysl/versification/1` marker, `from` and `to` naming the two
+numberings as a manifest names them, then one row per locator pair. A **chapter row carries its
+verses** — `Ps.14 → Ps.13` maps `Ps.14.3` to `Ps.13.3` — because a whole-chapter offset is what
+most of a versification difference is, and an exact row always wins, which is what a psalm whose
+verse numbering also moves needs. One level of carry and no more: a book-level row does not
+silently renumber a Bible through two levels of guessing.
+
+Both directions go in the table, the reverse built from the same map so the two cannot disagree —
+and refused outright if the forward map is not injective, because a reverse that dropped one of
+two rows pointing at the same verse would answer with the wrong one. A locator the map does not
+cover is **not aligned and counted** (`SMY-W451`): the command prints the count, because that is
+what says whether a map covers a corpus. Nothing is guessed. An alignment is what a later engine
+grounds a `same-as` on, and a guessed one would put a claim about one verse onto another.
+
+*`text index`.* What the library's derived index holds, one line per table, and `--rebuild` to
+rebuild it and write the sidecar. The index is **never authoritative**: the catalogue and the
+objects are the truth, and this is a cache of what would otherwise be recomputed. Deleting
+`index/substrate.idx` loses nothing but the time it takes to build again.
+
+A build with `--features substrate-redb` writes **two** files: the `postings` table goes into
+`index/substrate.redb` and the sidecar is written without it, so the rows a query scores are read
+out of that file a term at a time instead of being held in memory. On the 155k-unit corpus that
+makes the sidecar 24.8 MiB instead of 176 MiB and the query very slightly faster, at the price of
+a larger file and a dearer write. `text index` says which file
+holds them and `--rebuild` names both. Deleting either loses nothing, for the same reason. A build
+*without* the feature meeting such a library says so by name — it will not tell you to
+`--rebuild` a file it cannot read, because that advice would overwrite rows that are not lost.
+
+What it buys is the question `text show` asks. Resolving a locator means finding which of a
+manifest's parts answers to it, and without the index that is one object read and one structure
+tree per part until one does. The `locators` table is that answer written down. A library that is
+being added to never pays for it twice: `text add`, `text append` and `text redact` each bring
+the index forward over what they appended and write it out, and only a library written by a
+release without an index rebuilds from scratch.
+
+Every one of the twelve tables §3.8 names is built as of TX-P4 step 4, so none of them prints
+`not built; TX-P4 step n` any more — the line that said which phase step would fill a table has
+no table left to say it about.
+
+A table this *library* has not had built says so instead, and names `--rebuild`. Opening a
+library builds the five tables that are arithmetic over a catalog it has already parsed and
+leaves the three that are not: `segments` and `locators` cost an object read and a structure tree
+per part, and `postings` analyses every unit in the corpus. A partial index answers no locator
+question and refuses to be written to the sidecar, because a half-built sidecar would load as
+current next time with the catalog's hash agreeing.
+
+The `postings` line says more than a row count, because the row count is terms: how many
+partitions the corpus is divided into and which chains analysed them. A query has to be split by
+one of those chains to match anything, which is what `find --analyzer` is for.
+
+A table is only ever as complete as the objects it was built from, and a locator table is **all
+or nothing per manifest** for a reason worth knowing: a redacted part has no bytes to read, so a
+manifest that contains one keeps no table and `text show` goes back to searching — which refuses,
+naming the redaction. A table with the redacted addresses quietly dropped would have answered
+"nothing is there" instead, and an index that changes an answer is worse than no index.
+
+#section("date")
+
+*Write datings; show effective time and why.* Pure · TX-P3.
+
+A **dating** is a record that stands beside a unit rather than inside it. That placement is the
+whole design: a unit's `published` and `observed` are fields of its core and therefore inside its
+uid, so correcting one by editing the unit would change what the unit *is*. Record 17 says
+"somebody dated this, on this evidence" without touching the thing dated, which means a clock
+fault in an export can be corrected without rewriting a corpus's identities.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`set`, `order` or `show`.]),
+    ([`TARGET`], [positional, required], [A unit, by uid or label; a part, by `t3:` tid; or a manifest, by `m3:` mid. A part or a manifest dates the *units drawn from it* — a part has no time of its own, because the bytes were not said at a moment, the messages in them were.]),
+    ([`RELATION`], [positional], [`order`: one of Allen's seven spellings — `before`, `after`, `meets`, `overlaps`, `during`, `contains`, `equals`.]),
+    ([`OTHER`], [positional], [`order`: the second subject.]),
+    ([`--axis`], [`said|composed|about`], [Which of a unit's times this is about. Defaults to `said`. Only `said` has an as-recorded value to start from: `composed` is reached through datings on a work's catalogue entity and `about` through datings alone, so both begin undated — which is not a gap. A unit nobody has dated on those axes has no composed or about time, and inventing one from `observed` would assert that a message is about the moment it was sent.]),
+    ([`--value`], [`V`], [`set`: an EDTF date (`1611`, `1920~`, `1984-01-01T12:30:00Z`), `offset:MS` for a clock correction, or `<allen>:<target>` for an ordering. The three are told apart by an exact prefix and never by "contains a colon", because an EDTF date-time carries two of them.]),
+    ([`--window`], [`FROM..TO`], [Narrow a part target to the units whose recorded instant falls in a millisecond range. The range is matched against the **as-recorded** instant and never the effective one: a window that moved as the datings it selects took effect would select a different set on every pass, and the solve would not converge. An empty range is refused here rather than written and warned about later.]),
+    ([`--basis`], [`UID`], [The unit giving the evidence. This is what decides **status**: a dating takes the status of its basis unit, and one with no basis is `speculative` however confident its author. It is the whole mechanism by which "the export header says so" outranks "it must have been about then" without anybody ranking them by hand.]),
+    ([`--as`], [`AGENT`], [`set`, `order`: the agent issuing the dating. Required — a dating is an act by somebody, and a default would invent one.]),
+    ([`--at`], [`MS`], [The wall clock for the record, in milliseconds. Defaults to now.]),
+    ([`--why`], [—], [`show`: print, for each bound, what set it and at what status. Both ends, always: a `measured` instant under a `cited` ceiling is an ordinary thing for a corpus to hold, so printing one chain would be printing the wrong one half the time.]),
+    ([`--dry-run`], [—], [Report what would be written, and write nothing.]),
+  ),
+)
+
+*What a dating cannot do.* It cannot silently override a better-evidenced value. A correction
+that is less well evidenced than the bound it would move is **not applied and not discarded**:
+it is reported as `SMY-W412`, and the value it would have changed stays as it was. This holds
+for `offset:` exactly as it does for an absolute date — an unevidenced offset shifting a
+`measured` instant, and relabelling it `speculative` on the way, would be one command erasing a
+measurement's standing.
+
+*`date order a before b`* is sugar for `date set a --value before:b`, and writes the same record.
+The seven relations are accepted rather than only `before`, because `during` is the commonest of
+the other six and restricting the sugar would have made `--value` the only way to say it.
+
+*A dating names no uid of its own in a document.* `@date` is in the surface grammar, so a dating
+round-trips through a `.smy` file byte for byte. A `canonical` commitment *on* a dating — rule E's
+liveness lock — does not: `@commit` takes a uid or a label, and a dating is named by a `d3:` did.
+`smysl commit <did>` accepts one, so the lock can be written, but it needs a CBOR store; the
+surface refusal is correct rather than a defect, and it is recorded as an open question.
+
+*Releasing a hold.* Rule E's contentions are **derived and never written**, so `review` cannot
+list them and the log does not hold them. The `SMY-W412` that reports a held dating therefore
+names the contention id outright, and `smysl resolve` accepts an id rule E derives over the
+store as well as one the log records.
+
+#section("measure")
+
+*Text, graph, channel and dialogue measures as derived data units.* Mixed · TX-P8.
+
+A **measure** is a pure function of a library, a scope and a recipe, and its result is a
+`@data` unit whose identity is that function's output: same text, same scope, same recipe, same
+uid. This build has the seven text-level measures of SMYSL-2.6 — T1 unigram entropy, T2 brotli
+rate, T3 match-length entropy rate, T4 Zipf and Heaps, T5 n-gram surprisal with each segment
+scored by a model of the others, T6 compression distance between texts, T7 Jensen–Shannon
+divergence and collocations — and ten over the units a scope answers with: A1 extraction
+density, A2 redundancy, A3 novelty, A4 the spread of statuses, A5 grounding, A6 the Gini of
+salience, A7 contention, A8 rate–distortion, A9 the entity graph and A10 dating — and five over
+a channel, a source and the target it was carried into: C1 survival, C2 support, C3
+inflation, C4 attribution and C5 the ratio of the two texts' compression rates — and six over a
+conversation: D1 answers, D2 uptake, D3 persistence, D4 initiative, D5 lexical drift and D6
+reversals. All are pure,
+which is why `--seed-check` takes every one of them.
+
+*A8* packs the scope at twenty budgets, 5% to 100% of what carrying all of it at full detail
+costs, and reports what each loses: the salience mass left out plus half the status weight
+left out (`--param steps=N`, `--param lambda=A/B`). The curve is the least loss of any of the
+packs within a budget, so it never rises; `D:packed` beside it is each budget's own pack, which
+can, since the pack is greedy, and `rises` counts where it did. A scope holding a claim without
+the unit that rebuts it ends above 0, because rule R will not ship the claim alone. Its budgets
+count bytes (`smysl/utf8-div4`), so a scope whose units are drawn from text in two languages, or
+tagged `mul`, is refused (`SMY-E407`).
+
+*A9* reads the entities the scope's units mention (`x.text/mentions`): how many units name each,
+its eigenvector centrality among the entities named together, the communities they fall into by
+label propagation, and the longest run of events joined by `sequences` and `x.text/precedes`.
+The ten entities with the highest degree and centrality are reported by name
+(`--param top:k=N`); betweenness costs a pass from every entity and is computed only with
+`--param betweenness=true`.
+
+*C1–C5* compare the scope, the **source**, with the scope `--channel` names, the **target**:
+`smysl measure C1,C2 --policy strict --scope 'from collection:kjv' --channel 'from
+collection:synodal'`. (sq's own `channel:` is a chat conversation, so the target is a second
+query rather than a scope form.) Proposition classes are formed over both together under
+`--policy`, so a `same-as` edge from a source unit to a target unit is what carries it.
+C1 is the share of source classes the target still holds; C2 the share of target units the
+source supports, its complement `addition`, and `fabrication` beside it when a model
+attested a target unit; C3 how often a target unit's status is above its strongest source
+partner's, with every step `delta:-5` … `delta:5` and the `text:mode` changes; C4 how often
+the holder changed, entities compared by class. C5 is T2 and T3 of the target over T2 and T3
+of the source, from the stored integers; T3 needs 50,000 symbols in every text and is
+flagged `t3-not-run` where it has fewer. The two scopes must not share a unit or a part
+(`SMY-E489`), and the result is grounded on both saved scopes. A channel measure counts
+classes, so it is as good as the `same-as` it is given: accepting every candidate the
+`anchored` engine proposes over the Psalms pairs Psalm 51 with the wrong verses of Psalm 50
+and leaves C1–C4 exactly as they were.
+
+*D1–D6* read a conversation: a speaker is a unit's `text:speaker`, a time its effective time
+on `--axis`, and a response counts only when both its ends are in the scope. D1 is the share
+of `question` units something in the scope `answers`, and the median and p90 seconds to the
+first answer; an answer said before its question is counted (`inverted`) and given no time.
+D2 is, per speaker, the share of their asserted units another speaker elaborates, rebuts,
+answers or restates by `same-as`. D3 is how long each proposition class lasts, from its first
+utterance to the last unit that is a member or points into one, as a median over classes. D4
+is, per speaker, the share of classes they introduced, in reading order, less their share of
+the messages the units were drawn from. D5 is the Jensen–Shannon divergence between
+consecutive full windows of the text and needs `--level window:<n>`. D6 counts each speaker's
+switches between `asserted` and `negated` within a class, in time. D1, D3 and D6 leave undated
+units out (`SMY-W415`) and refuse a scope too little of which is dated (`SMY-E482`); D3, D4 and
+D6 need `--policy`.
+
+`Mixed` is for the measures the registry is meant to hold later, a neural
+surprisal and an embedding distance, which call a model.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`IDS`], [positional, required], [The measures, comma-separated, run and reported in the order given. An id this build does not have is a result too — not run, `SMY-E489` — so a typo stands beside the measures that ran.]),
+    ([`--scope`], [`SQ`, required], [An `sq/1` query. A text measure reads its `from`: `from texts`, `from collection:kjv`, `from collection:"kjv/08-rut"`. Anything after the `from` is refused (`SMY-E461`) when a text measure is asked for, because a `where` selects units and a text has none until something is extracted from it; name a narrower text by its alias. A unit measure counts the units the whole query answers with, so `from collection:kjv where text:mode = asserted` is a scope for one; the text is read only when some id reads text.]),
+    ([`--channel`], [`SQ`], [The target of a channel measure (C1–C5), an `sq/1` query read as `--scope` is; the scope is the source. Refused when no id asked for compares two scopes.]),
+    ([`--policy`], [`POLICY`], [How proposition classes are formed for A2, A3, C1–C4, D3, D4 and D6: `strict`, `component` or `attested:<n>`. There is no default, since the three give three numbers; without one, those measures are not run (`SMY-E481`).]),
+    ([`--profile`], [`NAME`], [The granularity profile A1's density is under. Required by A1 (`SMY-E489` without it): a density of units depends on how finely the text was cut into them.]),
+    ([`--axis`], [`AXIS`], [The time axis A3's time order, A10, D1, D3 and D6 read: `said` (the default), `composed` or `about`.]),
+    ([`--level`], [`LEVEL`], [The segment a measure counts in: `part` (the default), `chapter`, `verse`, `message` or `window:<n>`. The text is read once, at this level, for every id.]),
+    ([`--analyzer`], [`CHAIN:STREAM`], [The analyzer chain and stream, `smysl/an-en/1:surface`. Defaults to the chain the texts' language chooses, surface stream. A scope whose texts choose two chains is refused unless this names one (`SMY-E489`), since a statistic over a stemmed and an unstemmed vocabulary at once describes neither.]),
+    ([`--param`], [`[ID.]K=V`], [A measure parameter. Unscoped, it goes to every id asked for that takes the key; `T5.order=2` goes to one. A key no id asked for takes is refused before anything runs, so a parameter cannot land in a recipe it does not belong to and move that recipe's hash.]),
+    ([`--min-n`], [`[ID=]N`], [The smallest sample a measure accepts, in **its own unit**: tokens for T1, T4, T5 and T7, characters for T2, symbols in every text for T3, texts for T6, units for the A-measures, C1–C4, D1–D4 and D6 (1 by default), full windows for D5 (2). `T3=2` sets one. Below it the measure is not run (`SMY-W485`) rather than reported off a sample its estimator is biased on.]),
+    ([`--seed`], [`N`], [The bootstrap seed, 0 by default. It is in the recipe, so two seeds are two units.]),
+    ([`--allow-lossy`], [—], [Measure a lossy text too; the result is flagged `lossy-admitted` (`SMY-W408`). Without it a lossy text is refused (`SMY-E480`).]),
+    ([`--dry-run`], [—], [Print the values and refusals, and write nothing.]),
+    ([`--at`], [`MS`], [The wall clock for the attestations, in milliseconds. Defaults to now.]),
+  ),
+)
+
+*What is written.* The scope, saved as an `x.query/saved` unit — the results' one ground, so a
+measure over a million units carries one uid of grounds and not a million — then each result's
+unit and an attestation of this run (`Op::Transformed`, rung `computed`, the recipe's hash). The
+report prints each id with its uid, its gist and every number under it, each number rendered
+from the integer the payload stores; `--json` gives the same as one object.
+
+*A second run adds no unit.* A result's uid is its recipe, its scope's digest and its value, so
+rerunning `measure` over an unchanged library finds every unit already there and says so — `0
+new, 4 already in the store` — and appends only the run's attestations. A changed text, a
+changed parameter or a new seed is a new unit beside the old one; nothing is overwritten.
+
+#section("assess")
+
+*Assessment keys, reader scores and knowledge states.* Mixed · TX-P9.
+
+An **assessment** asks what a reader got out of a set of texts. `assess key VIEW --policy
+strict` reads a view in the store — one `view` printed, or the one `ask` wrote for a dossier —
+and keys every `question` among its members that something `answers`, and every dossier slot
+that found units; each item records its answers by uid, never by class, and two difficulty
+priors: `d_path`, the shortest walk along `grounds` from an answer to a unit drawn from a span,
+and `d_spans`, the places in the text that walk reaches. The key is a `@data` unit grounded on
+its questions, beside a view of them.
+
+A reader's **responses** are the units the reader attested — `human:<id>` or `model:<id>` —
+with an `answers` edge to an item's question. `assess score KEY --reader human:ada` matches
+each response to the keyed answers by class under the key's policy, and with `--judge
+lexical` also by the nearest answer by BM25 over the whole key (a match, never a `same-as`
+written). It reports accuracy, unanswered items apart from wrong ones, **inflation** (a
+response at a higher status than the answer it matched), **holder change**, and, when the key
+was made with `--scope`, **fabrication**: responses whose class has no member in those texts.
+A reader's unit that answers no item is counted and skipped (`SMY-W487`); an item whose
+question or answer has since been retracted, superseded or become unfounded is left out
+(`SMY-W488`). `assess state` writes the classes the reader reproduced, every member listed,
+and `assess diff A B` compares two states by membership, so a class whose id moved because a
+smaller member joined is **kept**, not lost and gained.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`key`, `score`, `state` or `diff`.]),
+    ([`TARGET`], [positional, required], [The view id for `key`; the key unit for `score` and `state`; the first state for `diff`. A unit is a uid, a prefix or a label.]),
+    ([`OTHER`], [positional], [The second state, for `diff`, and only for it.]),
+    ([`--reader`], [`AGENT`], [Whose attested units are the responses. Required by `score` and `state`.]),
+    ([`--policy`], [`POLICY`], [`strict`, `component` or `attested:<n>`. Required by `key` (`SMY-E481`), which records it; `score`, `state` and `diff` use the recorded one unless this names another.]),
+    ([`--scope`], [`SQ`], [The texts fabrication is judged against (`key`), an `sq/1` query resolved when the key is scored.]),
+    ([`--mode`], [`any|all`], [An item is right when any of its answers is matched (the default), or only when all are (`key`).]),
+    ([`--judge`], [`accepted|lexical|anchored`], [What matches beyond the store's own `same-as`: nothing (the default), the nearest answer by BM25, or the library's alignment table.]),
+    ([`--neighbours`], [`K`], [The lexical judge's nearest units per response, 1 by default.]),
+    ([`--dry-run`], [—], [Print the result and write nothing.]),
+    ([`--at`], [`MS`], [The wall clock for the attestations, in milliseconds. Defaults to now.]),
+  ),
+)
+
+The store is `-s`/`--store`, since `diff` takes two positionals. Every unit written carries
+an attestation by `tool:smysl-assess` at rung `computed`. `Mixed` is for `key --generate` and
+`score --judge model`, which SMYSL-2.6 gives a model and this build does not have yet.
+
+#section("lib")
+
+*Import smysl files into the library; export it as files.* Pure · TX-P11.
+
+`lib` moves records between a library and files, both ways (RFC SMYSL-2.7). **Export** writes
+a store as a *collection*: one file per layout key, each closed under the rules that keep a
+unit's grounds, edges, attestations, bindings, datings and text with it, and an
+`export-index.cbor` written last that lists every file with its BLAKE3, its record count and
+its record-set digest. **Import** reads files, directories or collections into a library. Each
+file gets one manifest, `import:<name>`, and each of its records is accepted, staged, held
+waiting for an id the library does not hold yet (`SMY-W496`), or quarantined because it fails
+a check (`SMY-W423`), a span past its part's end (`SMY-E404`) among them. A waiting record is
+promoted by the import that brings what it names, so the order files arrive in does not change
+what the library ends up holding. Text goes to the object store and the rest to the log, and a
+part the library has redacted is dropped at the door (`SMY-W414`).
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`import`, `status`, `accept`, `discard`, `export`, `verify` or `migrate`.]),
+    ([`TARGET…`], [positional], [The files, directories and export indexes to `import` (`-` reads stdin; a directory with an index is a collection, checked against it first); the import's name for `accept` and `discard` (`join:<name>` for its joins); the index, or its directory, for `verify`.]),
+    ([`--name`], [`N`], [The import's name (`import`). The first input's stem by default.]),
+    ([`--accept`], [—], [Append what passes rather than stage it (`import`). Staging is the default for every source.]),
+    ([`--licence`], [`SPDX`], [The licence the manifests record (`import`); `unknown` by default.]),
+    ([`--origin`], [`URL`], [Where the files came from (`import`). Otherwise each manifest records its file's name, never its path.]),
+    ([`--keep-original`], [—], [Keep each file's bytes at `objects/o3/`, under the BLAKE3 its manifest records (`import`).]),
+    ([`--no-join`], [—], [Propose no `same-as` edges to what the library holds (`import`).]),
+    ([`--import`], [`NAME`], [Report one import (`status`).]),
+    ([`--fail-on-contention`], [—], [Merge nothing if the import would give rise to a new contention (`accept`).]),
+    ([`--scope`], [`SQ`], [What to export, required: an `sq/1` query, such as `from library` or `from import:<name>`; `all`; or a unit by uid or label, repeated (`export`).]),
+    ([`--layout`], [`single|by-view|by-expression|by-collection|by-time|by-query`], [One file; or one per corpus view, expression, collection (an alias's namespace up to its first `/`), window of effective time, or value of `--group-by` (`export`).]),
+    ([`--window`], [`D`], [The width of a `by-time` window: `30m`, `6h`, `1d`, `2w`; a day by default.]),
+    ([`--group-by`], [`FIELD`], [The `group by` field `by-query` files by, such as `kind` or `lang`.]),
+    ([`--closure`], [`full|ref`], [Every file closed on its own, or every record written once and the index saying which files a file needs (`export`).]),
+    ([`--with-views`], [—], [Export the corpus views too (`export`).]),
+    ([`--with-packs`], [—], [Export the pack infos too (`export`).]),
+    ([`--with-text`], [—], [Export the text of the parts the units are drawn from, where the manifest's carry is `text`, its licence permits it, and the part is not redacted (`export`, a library).]),
+    ([`--with-provenance`], [—], [Export the import manifests the records arrived under (`export`, a library). Outside P3.]),
+    ([`--with-staged`], [—], [Export staged imports too (`export`, a library).]),
+    ([`--with-quarantine`], [—], [Export quarantined records too (`export`, a library).]),
+    ([`--as-of`], [`EDTF`], [Export only what was known before the end of this date: a record's own clock, a unit's earliest attestation (`SMY-W415` for one with none), and nothing resting on what was not yet known (`SMY-W498`) (`export`).]),
+    ([`--target-revision`], [`ID@N`], [Export the selection as revision `N` of schema `ID` writes it, through the schema's lenses (`export`).]),
+    ([`--agent`], [`ID`], [The agent of the attestations `--target-revision` adds (`export`); `tool:smysl-lib` by default.]),
+    ([`--clock`], [`MS[.N]`], [The clock of those attestations (`export`); by default just after every attestation of what is rewritten.]),
+    ([`--budget`], [`N`], [The token budget each file is packed to, for `--format pack` (`export`).]),
+    ([`--edges`], [`LIST`], [Edges the closure follows beside `deps` and `grounds`, as `trace --edges` takes them (`export`). Every edge by default.]),
+    ([`--unknown`], [`include|drop`], [Records this build cannot interpret: kept in `unattributed.cbor`, or left out and counted (`export`, `SMY-W425`).]),
+    ([`--no-verify`], [—], [Write without checking P1 and P3 first (`export`).]),
+    ([`--force`], [—], [Write into an output directory that is not empty (`export`). Files the new index does not name are left alone.]),
+    ([`--p2`], [`FILE`], [Check P2 for a file, repeated: import it into a scratch library and export it again (`verify`).]),
+    ([`--keep-scratch`], [—], [Keep the scratch libraries `--p2` builds (`verify`).]),
+    ([`--primary-shards`], [—], [Verify the library's primary shards against their exports instead of a collection (`verify`; `SMY-E505`).]),
+    ([`--primary`], [`SHARD`], [Make the shard primary, repeated: its records into the library's unit store (`migrate`; needs `--features store-redb`).]),
+    ([`--index`], [`SHARD`], [Make a primary shard an index-mode one again, its log written back out of the unit store (`migrate`).]),
+  ),
+)
+
+The library is `-s`/`--store`, as for `text`; `import` creates it if it is not there, and the
+other actions refuse a directory that is not one. `export` reads any store `-s` names and writes
+into `-o DIR`; the four `--with-*` flags that read a library are refused on a plain store. Before
+it writes anything it loads the collection into a store in memory and checks **P1** (that store's
+record-set digest is the index's) and **P3** (exporting that store again gives the same bytes,
+file for file). A CBOR collection that fails either is not written, and `export` exits 9.
+`verify` runs the same checks on a collection on disk; every file must match its index
+(`SMY-E494` otherwise). `--format` is `export`'s alone among the actions: `cbor` by default;
+`surface`, which writes `<slug>.smy` and counts what the surface cannot spell (`SMY-W428`), and
+writes an incomplete index if a file does not read back as exactly the rest (`SMY-E424`); or
+`pack`, a budgeted, lossy selection per file, outside P1 and P3.
+
+`migrate --primary SHARD` moves a shard's records from its log into the library's unit store,
+`index/units.redb`, which is where they are written from then on: an append to the shard is one
+transaction in the store, and no log is written. It does so only after a round trip — the
+shard's log, its records read back out of the store, and the store's own record hashes must give
+one record-set digest — and otherwise puts the store back and exits 9 (`SMY-E505`). The log is
+kept, set aside as `<stem>.cbor.pre-primary`, and `log/shards/<stem>.primary` marks the shard.
+`migrate --index SHARD` writes the log back out of the store, byte for byte, and removes the
+marker. A library with a primary shard opens only in a build with `--features store-redb`, and
+any reader of it — in memory, through the unit store, under `--shard` — reads the shard from the
+store. `verify --primary-shards` checks each primary shard's export against the store's record
+hashes again. Since 1.10.
+
+An import proposes `same-as` edges between the units it brought and the library's: the same
+bytes of one part read under two manifests with one gist (`identical-span`), and one entity name
+in one language from two expressions. They are staged as `join:<name>`, apart from the import,
+and `lib accept join:<name>` merges them. `--scope "from import:<name>"` over a collection
+`lib export` wrote resolves to that collection's export roots, so exporting it again with the
+index's options gives every file back byte for byte (P3 through a library).
+
+`--target-revision ID@N` writes the selection as an older (or newer) revision of one schema
+would have written it. Each unit's revision is inferred from what it holds, and it is read
+through the schema's lenses to revision `N`; a unit that changes becomes a new unit, with an
+attestation saying it was transformed from the original, and so does each edge and each unit
+grounded on one that changed, dependencies first. Commitments, datings, withdrawals,
+resolutions and contentions naming an original are left out and counted (`SMY-W491`). A path
+back through a lens step with no inverse — a `retire`, or a many-to-one value map — refuses the
+export (`SMY-E422`). The index records `derived: target-revision ID@N` and the lens chain's
+hash, and P1 and P3 are not claimed: the collection is a rewrite, not a round trip.
+
+#dtable(
+  (auto, 1fr),
+  (
+    ([Action], [Exit]),
+    ([`import`], [0 when everything was accepted or was already imported; 10 when anything was staged; 3 under `--strict` when anything was quarantined; 1 when an input did not decode (`SMY-E493`) or a collection did not match its index (`SMY-E494`).]),
+    ([`status`], [0. `--json` gives one object per import: its state, manifests and counts.]),
+    ([`accept`], [0; 5 under `--fail-on-contention` when the import would give rise to a contention; 2 when the name is not a staged import.]),
+    ([`discard`], [0; 2 when the name is not a staged import. The manifests stay, since the files were read, and so does the quarantine.]),
+    ([`export`], [0; 3 when a surface file does not read back (`SMY-E424`, the index written incomplete); 9 when a CBOR collection does not verify; 4 when a pack is infeasible; 2 for a missing `--scope` or `-o`, a scope that does not run, a bad `--as-of`, a `--target-revision` revision the store does not declare, or an occupied directory without `--force`; 1 when `--target-revision` refuses (`SMY-E422`).]),
+    ([`verify`], [0 when every file matches and P1 and P3 hold, or every `--p2` file comes back, or every primary shard agrees with its export (`--primary-shards`); 9 otherwise.]),
+    ([`migrate`], [0; 9 when a shard's round trip does not reproduce its digest (`SMY-E505`, nothing changed); 2 without `--primary` or `--index`, or in a build without `store-redb`; 1 for a shard the library does not have.]),
+  ),
+)
+
+Importing the same files a second time under the same options changes nothing, and each file
+reports `already imported`.
+
+#section("schema")
+
+*Show schema revisions; check the naming rule and lens totality.* Pure · TX-P12.
+
+A schema id evolves by revision, and since FC-9 a declaration carries a field table and the
+*lens steps* that read one revision's names as the next's (SMYSL-2.3 A-7, Appendix B). `schema
+show` prints an id's revisions, each revision's fields (type, values, `required-from` and its
+condition, `retired-in`), its steps with their ops, the chain from each revision to the current
+one with its hash, and any fork. `schema check` holds every revision against every earlier one
+under rule N: no name given a new meaning except by a declared widening with its paired key,
+no retired name reintroduced (`SMY-E426`); each step well formed against the revision it leaves
+(`SMY-E471`); forks reported (`SMY-W429`); and every unit the schema governs read through to the
+current revision, with any it cannot carry listed (`SMY-W420`).
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`show` or `check`.]),
+    ([`TARGET…`], [positional], [`show ID [STORE]`; `check [ID] [STORE]`. One target is the store unless `-s` gives it, and then it is the id. `check` without an id checks every schema the store declares.]),
+  ),
+)
+
+`check` exits 3 when rule N or a step fails, as `check` does, and 0 otherwise; warnings do not
+change the exit. A unit is governed by the schema declaring its type or, when no schema declares
+its type, by the one whose fields declare the payload keys it carries, so a kernel `claim` with a
+`text:mode` is read under `x.text/v1`.
+
+#section("migrate")
+
+*Re-derive a schema's units under a newer revision; staged.* Pure · TX-P12.
+
+A lens is a reading: a query reads an old unit as the current revision names it, and nothing
+is written. `migrate` is the one command that writes such a reading down. Each unit of the
+schema written below the target revision is read through the chain and staged as a new unit,
+attested as `Transformed` from the old one with the chain's hash as its recipe, and joined to it
+by a `supersedes` edge. Rule M caps each new unit at its grounds, as for any staged batch.
+Commitments and datings of the old units are proposed for the new ones, staged with them for
+review rather than carried over (`SMY-W472`). Nothing is changed in place: the old units stay,
+the supersession pass prefers the new heads, and `smysl relink` re-points references once
+`smysl merge --staged` has accepted the batch.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`--schema`], [`ID`], [The schema whose units are re-derived. Required.]),
+    ([`--to`], [`REV`], [The revision to re-derive them under. Required; the store must declare it.]),
+    ([`--agent`], [`ID`], [Whose migration it is; `tool:smysl-migrate` by default.]),
+    ([`--clock`], [`MS[.N]`], [The attestations' clock; by default one past the store's latest.]),
+    ([`--dry-run`], [—], [Report what would be staged and stage nothing.]),
+    ([`STORE`], [positional], [The store to migrate.]),
+  ),
+)
+
+`migrate` exits 10 when it stages, 11 when rule M lowered a unit, 0 when there is nothing to
+migrate or under `--dry-run`, and 1 when the store does not declare the target revision
+(`SMY-E466`) or a unit lacks a key the target requires and no `default` supplies
+(`SMY-E473`, which a model recipe would be needed for and this build does not offer).
 
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference
@@ -647,6 +1244,9 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-E011`], [error], [Rule X violation — unrecognised payload dropped on re-emission.]),
     ([`SMY-E012`], [error], [Extension schema attempts to weaken a kernel rule.]),
     ([`SMY-W013`], [warning], [Unknown relation kind treated as `elaborates` for closure.]),
+    ([`SMY-W409`], [warning], [An enumeration code this build does not know — a source kind, a thread schema, a step role or a detection kind. The code is preserved verbatim and treated as unknown, so the document round-trips; this is how a reader hears that it met one.]),
+    ([`SMY-W434`], [warning], [A bundle carries records this build cannot interpret. They travel, and the sender is told what the receiver will not read.]),
+    ([`SMY-W432`], [warning], [A payload key named `lang` becomes a unit core key in a later release. Emitted a release early on purpose: the warning is the whole migration.]),
   ),
 )
 
@@ -665,6 +1265,9 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-E307`], [error], [Attributed quote does not occur in the source text.]),
     ([`SMY-W308`], [warning], [Attributed quote occurs only loosely — elided or reworded.]),
     ([`SMY-W309`], [warning], [A unit's own source was replaced by the caller's, under a source policy that overrides.]),
+    ([`SMY-W435`], [warning], [A chunk failed an attempt and then succeeded; the earlier error is kept, naming its attempt. A repair that worked used to erase what it repaired.]),
+    ([`SMY-W433`], [warning], [An ingest input contains a marker this tool sends (`<<<SMYSL-`), with the byte offset. The fence around the input is derived from the input, so the marker cannot close it; the note is there because a document speaking in the tool's voice is a thing its reader should know.]),
+    ([`SMY-W436`], [warning], [A unit is not in the script of the passage it came from, naming the field and the share. The `source` language policy says a gist is written in the language of its passage; this is the only thing that checks it.]),
   ),
 )
 
@@ -679,7 +1282,81 @@ usage totals line" was simply wrong.
 
 `SMY-W306` is deleted. It described a usage threshold that does not exist and never did, and
 inventing the feature to justify the code would have been the wrong way round. A code nobody
-can trigger is worse than a missing one, because a reader waits for it.
+can trigger is worse than a missing one, because a reader waits for it. It stays retired rather
+than reused, which is why 1.10's language-policy check is `SMY-W436` and not the free number in
+this block: a reader who met `SMY-W306` in a 0.5 log should not find it means something else now.
+
+`SMY-W436` is what 1.9's language policy was missing. `--lang-policy source` tells the model to
+write each gist in the language of its passage, and nothing checked whether it did. The spike
+behind SMYSL-2 measured both directions of the failure on one corpus: a local model wrote 78.6%
+of its Russian gists in Latin script, and a hosted one wrote every gist of an English chapter in
+Chinese. Both staged without a remark.
+
+The same code reports the same defect for the pivot policy, with the comparand the policy named
+rather than the passage's: `--lang-policy pivot:ru` asks for Russian, and a gist that comes back
+in English is the identical failure measured against a different expectation. Where the script of
+a language is one this build cannot name, nothing is reported either way — a bound nobody can
+evaluate is not a bound that passed.
+
+The check counts letters by script and asks whether the passage's own script has *vanished* from
+the unit — below a quarter of its letters — rather than which script leads. That distinction is
+the whole design. `Сервер вернул 500 Internal Server Error` has more Latin letters than Cyrillic
+ones and is perfectly good Russian; a borrowed term is normal, and what the spike measured was
+gists with no Cyrillic in them at all.
+
+Three things it does not do. It compares *scripts*, not languages, so a Serbian gist of a Russian
+passage passes. It compares against the *passage*, not against a declared language tag, because
+`lang` on a view defaults to `en` and `ingest` never sets it — a tag-based check would have
+measured the default. And where either side has no majority script it reports nothing, on
+`SMY-W025`'s principle that unevaluable is neither passed nor breached.
+
+#subsection("Library — texts, parts and the object store")
+
+Twenty codes, new in 1.10.0, and the whole of the range RFC SMYSL-2.4 allocates. Six are
+raised by `smysl-text`, the crate that RFC adds for reading texts into a library, one by the
+store, four by the `library` check pass, four by the `time` pass, `SMY-W451` by `text align`,
+three by text ingest's windowing and span attachment, and `SMY-E410` by the surface parser as
+well as by `time` — refused where a value is written and reported where a store holds one.
+
+The last three are about a *place* in a text, which is why they could not arrive earlier: until
+there was code that cut a window and chose which bytes a quote names, nothing in this build could
+find the node named twice over, the quote the window does not hold, or the verse too long to show
+at once.
+
+Two of them arrived last and were held back on purpose. `SMY-E404` (a span past a part's length)
+and `SMY-W405` (a locator naming a different place than the span beside it) both read a unit's
+`source.span`, which the format gained in this release; until it existed the pass named them as
+what it did *not* check, because a code in the registry that nothing can raise is a promise a
+reader greps for and finds nothing behind. Both are raised now, and both need the part — and
+`SMY-W405` needs a locator resolved, which the pass asks the resolver for rather than reaching
+into the library layer it may not depend on.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Code], [Sev.], [Meaning]),
+    ([`SMY-E401`], [error], [A part was re-read and its structure hash or its `rdid` no longer matches the entry the manifest holds. The text is intact — that would be `SMY-E446` — so what changed is the *reading*, which is what happens when a reader is upgraded under a corpus. The message says which of the two identities moved.]),
+    ([`SMY-E402`], [error], [A manifest asked to carry the text itself under a licence that does not permit redistributing it. The permissive list is compiled in and sorted; changing it is a code change with a test, and there is no override flag, because the one thing a flag would buy is the ability to ship someone else's text by accident.]),
+    ([`SMY-E403`], [error], [Two defects, because A-2.4 names this code for both. First: a reference claims to be one of the four library identities and is not one. The four have text prefixes — `t3:`, `m3:`, `d3:`, `r3:` — so a reference either claims an identity or does not, and one that claims and fails is worse than a reference to nothing: a dangling reference says what it is, while an abbreviated identity is refused for the reason an abbreviated `uid` is, and the store's by-part index simply would not find the part. Second (rule 7): a unit of type `x.text/entity` carries a `span`, a `manifest`, a `published` date or `grounds`, or its source does not name an expression as `alias:<alias>`. An entity's identity is its name, its language and its expression and nothing else, which is what makes one entity named in fifty extraction windows one unit; a span would make it fifty. The message names which field broke it.]),
+    ([`SMY-E404`], [error], [A unit's span reaches past the end of the part it names. A span is a pair of byte offsets into the part's normalised bytes, and the part is the only thing that can say whether they are inside it — so this needs the objects, and `check --library` is where it is raised. An absent or unreadable part is not this defect: bytes that are there and wrong are `SMY-E446`, and a redacted part has no bytes by design.]),
+    ([`SMY-W405`], [warn], [A unit's locator and its span name different places. The span is authoritative and the locator is informative, so this is a warning about the locator and never a correction of the span: the span is what the extraction actually read, and the locator is a reader's name for a place. Raised only when the resolver can resolve a locator at all — an object store alone cannot, because a locator is a name in a reading.]),
+    ([`SMY-E410`], [error], [A malformed date where the format wants EDTF: a unit's `source.published`, or the `when:` value of an `@date` record. EDTF is ISO 8601-2 levels 0 and 1, which is what lets a title page saying "about 1920" be recorded as `1920~` rather than as a precision nobody has. Both fields sit inside an identity, so the parser accepts exactly one spelling of each value — `+1984`, `Y1984` and `1984-6-2` are refused for that reason and not because they are unclear. A *decoder* does not raise this: a value that arrived has to leave again byte for byte or the unit silently changes identity, so a malformed one in a store is reported by the `time` check pass instead.]),
+    ([`SMY-W418`], [warn], [One alias has two manifest heads: two manifests for the same expression, neither superseding the other. Usually two people catalogued the same book without having met. Both heads are returned rather than one being chosen, and the fork is reported rather than recorded — the next manifest to arrive may be the one that joins them, and a record would then be a stale finding with a hash chain behind it.]),
+    ([`SMY-W412`], [warn], [A live dating that rule E could not apply, reported rather than dropped. Two causes, and the message says which: the dating is **held** by a `canonical` commitment pending review, or it is less well evidenced than the value it would have overridden — somebody typed a date that disagrees with an instrument. The second is the whole point of the rule: a weakly evidenced value never quietly replaces a better one, and the disagreement is a thing to look at rather than a thing to lose. Derived and never written to a store, so a resolution names its derived id.]),
+    ([`SMY-W413`], [warn], [A temporal inconsistency: a set of records whose times cannot all be right. A negative cycle in the ordering — A before B and B before A — or an interval that has closed to nothing, such as a 1066 date on a unit an instrument timestamped in 2024. Every subject on it is reported *contested* and **nothing is chosen** for it, because picking one of two contradictory dates is an adjudication and this format does not adjudicate. The message names the datings and the free constraints involved.]),
+    ([`SMY-W411`], [warn], [A unit carries both an `observed` instant and a `published` interval, and the instant is not inside the interval. Both fields are permitted together — they answer different questions, when the manifestation was published and when this reading was taken — but a reading taken before its own source was published is a pair of records that cannot both be right. Reported rather than refused, because which of the two is wrong is not something a checker can know.]),
+    ([`SMY-E440`], [error], [A reader resource cap was exceeded. The message names the cap, its limit, what the input asked for and the flag that raises it; nothing was written. Inside a reader the budget is *fuel* rather than wall time, so a refusal happens at the same byte on every machine.]),
+    ([`SMY-E445`], [error], [The library or one of its shards is locked by another writer, named: pid, host and command. Nothing removes a lock by timeout — a stale lock is the notice that a writer died mid-append, and `--break-lock` is where an operator says they have read it.]),
+    ([`SMY-E446`], [error], [An object in the store does not hash to the identity it is stored under. Objects are content-addressed, so this is a corrupted or substituted file rather than a stale one.]),
+    ([`SMY-W449`], [warn], [An EDTF value that parses and names an instant no millisecond counter can hold — a `Y`-prefixed year of three hundred million, say. It is ordered as an *open bound* rather than clamped to the nearest representable instant, because a clamped bound is a claim nobody made and it would propagate through every ordering that touches it. The value itself is kept exactly as written.]),
+    ([`SMY-E450`], [error], [An append to a pseudonymised expression with no pseudonym key. The key lives at `secrets/pseudonym.key` under the library root and is what makes a pseudonym stable across appends; without it the same speaker would be given a second name and the conversation would read as two people. The refusal happens before anything is written.]),
+    ([`SMY-E452`], [error], [A part text or a part reading was offered to a log, and a log does not hold text. Text lives in the object store, and the whole batch is refused before a byte is written. The reason is the log's own integrity: a log holding text would one day have to be rewritten to honour a redaction, and rewriting an append-only log resets exactly the hash chain that would have shown the rewrite. Erasure is therefore always an unlink.]),
+    ([`SMY-W419`], [warn], [The quote a unit attributed itself to occurs more than once in the node the answer named. The earliest occurrence is taken and the warning says the choice was arbitrary — the alternative, picking some other occurrence, would be unstable between two runs over the same text, and a span that moves is worse than one that is merely coarse. A refrain is the usual cause: Psalm 136 ends twenty-six verses with "for his mercy endureth for ever". Raised only for the node the answer named, because that is the one scope whose job was to be unambiguous; a quote found three times in a chapter is not ambiguous in the same sense, since the search is then explicitly looking for the first of them.]),
+    ([`SMY-W441`], [warn], [A unit attributed itself to a quote the window does not support, after the repair turn that error buys. The unit is staged with *no span* and its status capped at `inferred` where it has grounds and `speculative` where it has none — not at `inferred` in both cases, because a unit with no grounds cannot be `inferred` at all. The quote is deliberately kept in the payload here, where a unit that received a span loses it: a spanless unit's quote is the only evidence a reviewer has of what was claimed. A unit already at or under its ceiling is left byte-identical, uid included.]),
+    ([`SMY-W447`], [warn], [A structure node is larger than the whole window budget, so it was cut at sentence boundaries to be shown at all. The only place anything splits a node, and nothing cuts inside a sentence: a node that is one long sentence travels whole and over budget rather than in half, because half a sentence is not a place anything can be quoted from. The pieces partition the node, so every byte of it is shown exactly once, and a span still names bytes of the whole part.]),
+    ([`SMY-W451`], [warn], [An alignment scheme does not cover a locator, so the pair is left unaligned and counted. Two misses give the same answer: a scheme that says nothing about this locator, and one that maps it somewhere the other expression does not hold. The count is what says whether a map covers a corpus — a guessed alignment would put a claim about one verse onto another, and this table is what a later engine grounds a `same-as` on.]),
+  ),
+)
 
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix C — Exit Codes
@@ -732,8 +1409,10 @@ and this page for a quick reminder of what the word means.
   A command's classification as *pure* (a bit-reproducible function of its inputs — same
   bytes in, same bytes out, on any machine, forever), *mixed* (pure except for one option),
   or *model-dependent* (the only kind that can reach off the machine). Only `ingest` and
-  `attest` are ever model-dependent; `thread` is mixed only because of an unwired
-  `--refine`.
+  `attest` are ever model-dependent. `find` and `pack` are mixed because semantic and hybrid
+  ranking read an embedding model, and `thread` is mixed only because of an unwired
+  `--refine` — a reservation rather than a description, which is why `--seed-check` lets
+  every `thread` invocation run.
 ]
 
 #term("Canonical form")[

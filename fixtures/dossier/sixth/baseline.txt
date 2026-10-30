@@ -1,0 +1,84 @@
+# GE-T10's sixth set, the front before the declared rules 14-21 (intent table and entity port as
+# of commit 9fabdf2), written by `cargo test -p smysl-text --features stem --test ge_t10_third -- --nocapture`.
+GE-T10, sixth set: the front
+  lang     intent   subject spelled   subject stemmed
+  de         2/16      3/16              4/16 
+  en         2/16      4/16              4/16 
+  es         2/16      2/16              2/16 
+  fr         0/16      0/16              0/16 
+  ru         4/16      2/16              4/16 
+  all       10/80     11/80             14/80 
+  every question lost, and every subject only the stems found:
+    sn-define3     en  SMY-E468: Describe John Snow
+    sn-define3     de  SMY-E468: Beschreibe John Snow
+    sn-define3     es  SMY-E468: Describe a John Snow
+    sn-define3     fr  SMY-E468: Qui fut John Snow ?
+    ch-define3     en  SMY-E468: Give me a definition of cholera
+    ch-define3     de  read as explain: Erkläre mir den Begriff Cholera
+    ch-define3     fr  SMY-E468: Que signifie le choléra ?
+    ch-define3     ru  SMY-E468: Что означает холера?
+    sc-explain3    en  SMY-E468: For what reason did sailors get scurvy?
+    sc-explain3    de  SMY-E468: Aus welchem Grund bekamen Seeleute Skorbut?
+    sc-explain3    es  SMY-E468: ¿Cómo es que los marineros sufrían escorbuto?
+    sc-explain3    fr  SMY-E468: Comment se fait-il que les marins aient eu le scorbut ?
+    sc-explain3    ru  SMY-E468: По какой причине моряки болели цингой?
+    ph-explain2    fr  SMY-E468: Pour quelle raison a-t-on abandonné le phlogistique ?
+    ph-explain2    ru  found by stems only: Почему отказались от флогистона?
+    je-verify3     de  SMY-E468: Hat Jenner seinen Impfstoff an einem Jungen getestet?
+    je-verify3     es  SMY-E468: ¿Probó Jenner su vacuna en un niño?
+    je-verify3     fr  SMY-E468: Est-ce que Jenner a testé son vaccin sur un garçon ?
+    je-verify3     ru  SMY-E468: Испытал ли Дженнер свою вакцину на мальчике?
+    ls-verify2     en  SMY-E468: Is it correct that Joseph Lister used carbolic acid?
+    ls-verify2     de  SMY-E468: Hatte Joseph Lister Erfolg mit Karbolsäure?
+    ls-verify2     es  SMY-E468: ¿Es correcto que Joseph Lister usó ácido carbólico?
+    ls-verify2     fr  SMY-E468: Est-ce qu'il est exact que Joseph Lister utilisait l'acide phénique ?
+    se-attribute2  en  SMY-E468: Who doubted Semmelweis?
+    se-attribute2  de  SMY-E468: Wer bezweifelte Semmelweis?
+    se-attribute2  es  SMY-E468: ¿Quién dudaba de Semmelweis?
+    se-attribute2  fr  SMY-E468: Qui contestait Semmelweis ?
+    se-attribute2  ru  SMY-E468: Кто сомневался в Земмельвейсе?
+    ph-attribute3  en  SMY-E468: Who opposed phlogiston?
+    ph-attribute3  de  SMY-E468: Wer behauptete, Phlogiston sei real?
+    ph-attribute3  es  SMY-E468: ¿Quién rechazó el flogisto?
+    ph-attribute3  fr  SMY-E468: Qui s'opposait au phlogistique ?
+    ph-attribute3  ru  SMY-E468: Кто верил во флогистон?
+    ls-trace2      en  SMY-E468: How did Joseph Lister's method arise?
+    ls-trace2      de  SMY-E468: Wie entstand die Methode von Joseph Lister?
+    ls-trace2      es  SMY-E468: ¿Cómo surgió el método de Joseph Lister?
+    ls-trace2      fr  SMY-E468: Comment est née la méthode de Joseph Lister ?
+    ls-trace2      ru  SMY-E468: Как возник метод Джозефа Листера?
+    sc-trace3      en  read as define: What is the origin of scurvy?
+    sc-trace3      de  read as define: Was ist der Ursprung des Skorbuts?
+    sc-trace3      de  found by stems only: Was ist der Ursprung des Skorbuts?
+    sc-trace3      es  SMY-E468: ¿Cuál es el origen del escorbuto?
+    sc-trace3      fr  SMY-E468: Quelle est l'origine du scorbut ?
+    sc-trace3      ru  SMY-E468: Каково происхождение цинги?
+    mi-locate2     en  SMY-E468: In which texts does miasma appear?
+    mi-locate2     de  SMY-E468: Wo taucht das Miasma auf?
+    mi-locate2     es  SMY-E468: ¿En qué textos aparece el miasma?
+    mi-locate2     fr  SMY-E468: Dans quels textes apparaît le miasme ?
+    mi-locate2     ru  SMY-E468: В каких текстах встречаются миазмы?
+    sp-locate2     en  SMY-E468: Where can I read about smallpox?
+    sp-locate2     es  SMY-E468: ¿Dónde puedo leer sobre la viruela?
+    sp-locate2     fr  SMY-E468: Où peut-on lire sur la variole ?
+    sp-locate2     ru  found by stems only: Где можно прочитать об оспе?
+    ch-depend3     en  read as define: What was built on the study of cholera?
+    ch-depend3     de  SMY-E468: Was baute auf der Erforschung der Cholera auf?
+    ch-depend3     es  SMY-E468: ¿Qué se basaba en el estudio del cólera?
+    ch-depend3     fr  SMY-E468: Qu'est-ce qui reposait sur l'étude du choléra ?
+    ch-depend3     ru  SMY-E468: Что опиралось на изучение холеры?
+    li-depend2     en  SMY-E468: What came out of James Lind's trial?
+    li-depend2     de  SMY-E468: Was ergab sich aus dem Versuch von James Lind?
+    li-depend2     es  SMY-E468: ¿Qué resultó del ensayo de James Lind?
+    li-depend2     fr  SMY-E468: Qu'est-il résulté de l'essai de James Lind ?
+    li-depend2     ru  SMY-E468: Что вытекает из опыта Джеймса Линда?
+    je-compare2    en  SMY-E468: How is Jenner different from Joseph Lister?
+    je-compare2    de  SMY-E468: Wie unterscheidet sich Jenner von Joseph Lister?
+    je-compare2    es  SMY-E468: ¿En qué se diferencia Jenner de Joseph Lister?
+    je-compare2    fr  SMY-E468: En quoi Jenner diffère-t-il de Joseph Lister ?
+    je-compare2    ru  SMY-E468: Чем Дженнер отличается от Джозефа Листера?
+    sc-compare2    en  SMY-E468: Contrast scurvy with cholera
+    sc-compare2    de  SMY-E468: Skorbut im Vergleich zur Cholera
+    sc-compare2    es  SMY-E468: Contrasta el escorbuto con el cólera
+    sc-compare2    fr  SMY-E468: Mets en regard le scorbut et le choléra
+    sc-compare2    ru  SMY-E468: Сопоставь цингу и холеру
