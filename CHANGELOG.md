@@ -7,6 +7,24 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.12.0
+
+What 1.11 leaves open, by what it blocks rather than the order it is easiest. Every SMYSL-2 open
+question but two is closed, so what follows is work owed rather than questions asked.
+
+**A subject written as part of another word.** `ask` finds a subject by its spelling and then
+by its stems, and neither reaches a name inside a German compound (`Cholerabazillus`,
+`Pockenimpfung`) or a Russian adjective made from it (`холерный`). These are the last subject
+misses in GE-T10's question sets whose intent is read.
+
+**An intent table no set closes.** Three rounds, each measured on questions written after its
+rules, lifted the fourth set 40 → 80, the fifth 21 → 76 and the sixth 10 → 43 of 80, and each
+round found new ways of asking. The next rules want questions people ask, not ones one hand
+writes.
+
+**And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
+GE-T10's gold is single-hand; they stay owed rather than planned.
+
 ## 1.11.0 — 2026-10-29
 
 What 1.10 leaves open, by the phase it blocks rather than the order it is easiest. The roadmap's §4
