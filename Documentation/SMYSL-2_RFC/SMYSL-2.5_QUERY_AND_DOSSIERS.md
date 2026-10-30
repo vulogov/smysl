@@ -1290,7 +1290,13 @@ Flags:
   store's `.smysl/`, or `-C`'s file's directory); `--misses` lists the distinct lines with their
   counts, by code and language. Off by default, local, no clock and no store in a line, and no
   exit code or output changes. It is how the intent table's next rules come from questions
-  people ask (CHANGELOG 1.12.0).
+  people ask (CHANGELOG 1.12.0). `--misses --as-set` writes them as a draft question set, and a
+  line with no `--lang` is listed under a guessed language marked `~`
+  (`dossier::intent::guess_lang`; 563 of 587 GE-T10 rows right, one wrong, 23 unguessed).
+  `ask --explain` prints the reading instead of the dossier — folded text, intent and rule,
+  topic, subject and the pass that found it (`Dossier::found`), slots, narrowing — as far as it
+  got, with `ask`'s exit code. `SMY-W417` lists each candidate with its language and the first
+  unit that mentions it.
 
 Test updates: `command_table_matches_section_23` (30 names), `only_ingest_and_attest_are_model_dependent`
 (mixed = `thread, find, q, ask, migrate`), `tests/dispatch.rs` (30), `tests/cli-surface.txt`,

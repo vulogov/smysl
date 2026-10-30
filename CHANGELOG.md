@@ -77,6 +77,40 @@ changes when it is on. A value other than `true` or `false` is refused when the 
 loads. It is how the intent table's next rules can come from questions people ask: a round
 writes its rules from the log, declares them, and is scored as the three before it were.
 
+### Reading `ask`, and reading what it missed
+
+Four changes to how a person sees what `ask` did, none to what it does.
+
+- **`ask --explain`** prints the reading instead of the dossier, one field a line: the question,
+  its folded text (what the rule table compares), the intent and the rule that read it, the
+  topic, the subject and the pass that found it — as spelled, by its stems, or as part of a word
+  (`Dossier::found`, `SubjectFound`) — the slots with the empty ones named, and the words the
+  narrowed slots looked for. It stops where the reading stopped, with the exit code `ask` would
+  have given: a question no rule reads shows its folded text and exits 2, one whose subject
+  nothing names shows its topic and exits 1. It refuses `--save`, and a reading is not logged
+  as a miss. Its first use found the next thing to fix: *"Is it true that citrus fruit cures
+  scurvy?"* narrows to `[citrus fruit cures]` and comes back empty, because the store says
+  *cured* — slot narrowing matches words, not stems.
+- **`ask --misses` groups an unmarked miss by a guessed language**, shown as `~de`, while the
+  log keeps only what `--lang` gave (`smysl_query::dossier::intent::guess_lang`: Cyrillic is
+  Russian; otherwise the Latin-script language whose common short words and letters the
+  question uses most, or none on a tie). Its word lists were written before it ran and not
+  changed after: over the 587 rows of every GE-T10 question set it is right on 563, wrong on
+  one (a German question with `an` read as English) and makes no guess on 23, mostly two- and
+  three-word questions such as *Describe scurvy*.
+- **`ask --misses --as-set`** writes the misses as a draft question set in
+  `fixtures/dossier/*/questions.tsv`'s layout, the most asked first: ids `m-1`, `m-2`, … for a
+  subject's prefix to replace, the intent where one was read and `?` where none was, the
+  language as given or guessed, under a header that says what a set needs before it scores
+  anything — rules declared, a baseline before any code, no rule changed after a run.
+- **`SMY-W417` tells its candidates apart**: each one's names with their language and source,
+  and the first unit that mentions it with how many more do — *Mary of Magdala stood by the
+  cross. — John 19:25* against *Mary of Nazareth kept these things in her heart. — Luke 2:19*,
+  where the list had shown two lines reading `Mary`.
+
+`link` and `summarise` were checked for the configuration fault fixed below and do not have it:
+neither takes a positional store, so theirs is always the `--store` the lookup reads.
+
 ### `q --from-question` asks the provider its store's configuration names
 
 `q --from-question "…" STORE` reads its one positional as the store, and that store never

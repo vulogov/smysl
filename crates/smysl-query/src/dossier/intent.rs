@@ -572,6 +572,113 @@ impl Folded {
 }
 
 /// Classify a question. `lang` narrows the table to one language; `None` tries all five.
+/// The question as the rule table reads it: trimmed of its opening and closing punctuation,
+/// lowercased, its runs of space made one, its commas dropped and a typographic apostrophe made
+/// a typed one. What `ask --explain` shows, so a question no rule reads can be compared with the
+/// rules' own spelling.
+pub fn folded(question: &str) -> String {
+    fold(question).text
+}
+
+/// Common short words of each Latin-script tier-1 language, for [`guess_lang`]: articles,
+/// question words, auxiliaries and prepositions. A word two languages share counts for both.
+const FUNCTION_WORDS: &[(&str, &[&str])] = &[
+    (
+        "en",
+        &[
+            "the", "a", "an", "is", "are", "was", "were", "what", "who", "how", "why", "where",
+            "which", "did", "does", "do", "of", "to", "in", "and", "about", "for", "from",
+        ],
+    ),
+    (
+        "de",
+        &[
+            "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "ist", "sind", "war",
+            "was", "wer", "wie", "warum", "wo", "woher", "welche", "und", "von", "vom", "zu",
+            "zum", "mit", "über", "es", "dass", "nicht",
+        ],
+    ),
+    (
+        "es",
+        &[
+            "el", "la", "los", "las", "un", "una", "es", "son", "fue", "qué", "quién", "cómo",
+            "por", "dónde", "cuál", "de", "del", "y", "que", "en", "se", "con", "sobre",
+        ],
+    ),
+    (
+        "fr",
+        &[
+            "le",
+            "la",
+            "les",
+            "un",
+            "une",
+            "est",
+            "sont",
+            "était",
+            "qu'est-ce",
+            "qui",
+            "que",
+            "quel",
+            "quelle",
+            "pourquoi",
+            "comment",
+            "où",
+            "de",
+            "du",
+            "des",
+            "et",
+            "en",
+            "sur",
+            "a",
+            "ce",
+            "d'où",
+        ],
+    ),
+];
+
+/// A guess at a question's tier-1 language, for a question no rule read and no `--lang` named:
+/// Cyrillic is Russian; otherwise the Latin-script language whose common short words the
+/// question uses most, with a letter only one of them writes (`ß`, `ñ`, `¿`, `ç`, …) counted
+/// twice. `None` on a tie or no evidence. A guess, never a reading: `ask --misses` shows it
+/// marked as one, and nothing classifies by it.
+pub fn guess_lang(question: &str) -> Option<&'static str> {
+    if question
+        .chars()
+        .any(|c| ('\u{0400}'..='\u{04FF}').contains(&c))
+    {
+        return Some("ru");
+    }
+    let folded = fold(question).text;
+    let mut scores = [0usize; 4];
+    for word in folded.split(|c: char| c.is_whitespace() || c == '?' || c == '!' || c == '.') {
+        let word = word.trim_matches(|c: char| c == '¿' || c == '¡' || c == '"');
+        for (i, (_, words)) in FUNCTION_WORDS.iter().enumerate() {
+            scores[i] += usize::from(words.contains(&word));
+        }
+    }
+    for c in question.chars() {
+        let only = match crate::fold::lower(c) {
+            'ß' | 'ä' | 'ö' | 'ü' => Some(1),
+            'ñ' | '¿' | '¡' | 'á' | 'í' | 'ó' | 'ú' => Some(2),
+            'ç' | 'è' | 'ê' | 'à' | 'â' | 'î' | 'ô' | 'û' | 'ë' | 'ï' | 'œ' => Some(3),
+            _ => None,
+        };
+        if let Some(i) = only {
+            scores[i] += 2;
+        }
+    }
+    let best = *scores.iter().max().expect("four languages");
+    if best == 0 || scores.iter().filter(|&&s| s == best).count() > 1 {
+        return None;
+    }
+    let i = scores
+        .iter()
+        .position(|&s| s == best)
+        .expect("the max is there");
+    Some(FUNCTION_WORDS[i].0)
+}
+
 pub fn classify(question: &str, lang: Option<&str>) -> Result<Classified, Diagnostic> {
     let folded = fold(question);
     let f = folded.text.as_str();

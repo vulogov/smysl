@@ -815,34 +815,36 @@ q          --help
 ask        [QUESTION]
 ask        [PATH]
 ask        --config
+ask        --explain
+ask        --as-set
 ask        --misses
-ask        --scope
-ask        --intent
-ask        [possible values: define, explain, verify, attribute, trace, locate, depend, compare]
 ask        --output
 ask        --format
 ask        [possible values: surface, cbor, pack]
+ask        --scope
+ask        --intent
+ask        [possible values: define, explain, verify, attribute, trace, locate, depend, compare]
+ask        --strict
 ask        --lang
 ask        [possible values: en, de, es, fr, ru]
-ask        --strict
-ask        --subject
 ask        --offline
+ask        --no-color
+ask        --subject
+ask        --noprogress
 ask        --templates
 ask        --budget
-ask        --no-color
-ask        --noprogress
-ask        --target
 ask        --json
-ask        --save
-ask        --answer
 ask        --quiet
-ask        --at
+ask        --target
+ask        --save
 ask        --verbose
+ask        --answer
 ask        --backend
 ask        [possible values: memory, redb]
-ask        --yes
+ask        --at
 ask        --shard
 ask        --seed-check
+ask        --yes
 ask        --help
 measure    <IDS>
 measure    [PATH]

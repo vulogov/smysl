@@ -299,3 +299,42 @@ fn ge_t10_false_friends() {
     println!("{out}");
     assert_eq!((friends, hits, guards, found), (14, 1, 16, 16), "{out}");
 }
+
+/// `guess_lang` over every question set, whose rows carry their language: what `ask --misses`
+/// would mark as each question's language with no `--lang`, and how often it is right. A
+/// heuristic's figure, pinned so a change to its word lists is a change to record.
+#[test]
+fn guess_lang_over_the_question_sets() {
+    let (mut asked, mut right, mut none) = (0, 0, 0);
+    let mut wrong: Vec<String> = Vec::new();
+    for set in [
+        "gold", "fresh", "third", "fourth", "fifth", "sixth", "parts",
+    ] {
+        let src = std::fs::read_to_string(repo(&format!("fixtures/dossier/{set}/questions.tsv")))
+            .unwrap();
+        for line in src
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        {
+            let cols: Vec<&str> = line.split('\t').collect();
+            let [id, _, lang, question, ..] = cols[..] else {
+                continue;
+            };
+            asked += 1;
+            match smysl_query::dossier::intent::guess_lang(question) {
+                Some(g) if g == lang => right += 1,
+                Some(g) => wrong.push(format!("    {set}/{id} {lang} as {g}: {question}")),
+                None => {
+                    none += 1;
+                    wrong.push(format!("    {set}/{id} {lang} as none: {question}"));
+                }
+            }
+        }
+    }
+    println!(
+        "guess_lang: {right}/{asked} right, {} wrong, {none} no guess\n{}",
+        asked - right - none,
+        wrong.join("\n")
+    );
+    assert_eq!((asked, right, none), (587, 563, 23));
+}

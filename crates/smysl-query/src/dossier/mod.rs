@@ -271,6 +271,32 @@ pub struct SlotResult {
     pub narrowed: bool,
 }
 
+/// Which pass of the subject search found the subject: the name as the question spells it, its
+/// stems, or a word with the name as a part of it (rules 22 to 25).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SubjectFound {
+    Spelled,
+    Stemmed,
+    Part,
+}
+
+impl SubjectFound {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            SubjectFound::Spelled => "as spelled",
+            SubjectFound::Stemmed => "by its stems",
+            SubjectFound::Part => "as part of a word",
+        }
+    }
+}
+
+impl std::fmt::Display for SubjectFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A dossier, ready to append.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -280,6 +306,8 @@ pub struct Dossier {
     /// The name the subject was found under, and the entities taken for it.
     pub subject: String,
     pub entities: Vec<Uid>,
+    /// How the subject search found [`Dossier::subject`].
+    pub found: SubjectFound,
     /// The words of the topic a narrowed slot looks for ([`topic_terms`]), empty for an intent
     /// with no narrowed slot, and whether any unit about the subject says one — which is what
     /// decides whether those slots narrow.
@@ -527,7 +555,7 @@ fn find_subject(
     pick: Option<Uid>,
     lang: &str,
     first: bool,
-) -> Result<(String, Vec<Uid>), AskError> {
+) -> Result<(String, Vec<Uid>, SubjectFound), AskError> {
     let ws = words(topic);
     let n = ws.len();
     let mut spans: Vec<(usize, usize)> = (1..=n)
@@ -539,7 +567,14 @@ fn find_subject(
         spans.sort_by_key(|&(start, len)| (std::cmp::Reverse(len), start));
     }
     // As spelled, then through the stems, then a word as a part of a name.
-    for pass in 0..3 {
+    for (pass, found) in [
+        SubjectFound::Spelled,
+        SubjectFound::Stemmed,
+        SubjectFound::Part,
+    ]
+    .into_iter()
+    .enumerate()
+    {
         for &(start, len) in &spans {
             if pass == 2 && len > 1 {
                 continue;
@@ -555,7 +590,7 @@ fn find_subject(
             }
             if let Some(uid) = pick {
                 if let Some(group) = candidates.iter().find(|g| g.contains(&uid)) {
-                    return Ok((name, group.clone()));
+                    return Ok((name, group.clone(), found));
                 }
                 // The pick may name an entity a shorter run means; keep looking.
                 continue;
@@ -582,7 +617,7 @@ fn find_subject(
                 });
             }
             let group = candidates.into_iter().next().expect("one candidate");
-            return Ok((name, group));
+            return Ok((name, group, found));
         }
     }
     match pick {
@@ -707,7 +742,7 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
     } else {
         classified.lang
     };
-    let (subject, group) = find_subject(
+    let (subject, group, found) = find_subject(
         &classified.topic,
         port,
         opts.subject,
@@ -1013,6 +1048,7 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
         classified,
         subject,
         entities: group,
+        found,
         topic,
         topic_found,
         slots: slot_results,

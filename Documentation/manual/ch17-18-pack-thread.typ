@@ -665,6 +665,35 @@ and the question. `smysl ask --misses store` lists them, the most asked first.
 The file stays where it is written; nothing sends it anywhere, and a line
 holds no time and no user. Its use is to show which ways of asking the rule
 table still misses, so the next rules are written from questions people asked.
+A question asked without `--lang` is listed under a guess at its language,
+marked `~de`, and `--misses --as-set` writes the list as a draft question set
+to fill in and score.
+
+To see why `ask` read a question the way it did, add `--explain`. Instead of
+the dossier you get the reading, a field a line:
+
+#screen(caption: "$ smysl ask --explain \"Is it true that citrus fruit cures scurvy?\" corpus.smy")[
+```
+question  Is it true that citrus fruit cures scurvy?
+folded    is it true that citrus fruit cures scurvy
+intent    verify, by en/verify/is it true that … (en)
+topic     citrus fruit cures scurvy
+subject   `scurvy`, found as spelled: 5 entities
+slots     support, evidence, counter, reported; empty: counter, reported
+narrowed  [citrus fruit cures]: counter, reported
+```
+]
+
+`folded` is what the rule table compares, so a question no rule reads can be
+set beside the rules' own wording; the reading stops there, with the same
+exit code. `found` says whether the subject was the question's own spelling,
+its stems, or a word with the name inside it. The example shows the narrowing
+rule at work: the two narrowed slots came back empty because the store says
+_cured_, not _cures_.
+
+When a name means two things, `ask` lists each with its language and source
+and the first passage that mentions it, so you can see which Mary is which
+before you pick one with `--subject`.
 
 #section("Deriving all five, one worked example each")
 
