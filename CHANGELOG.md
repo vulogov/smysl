@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.12.0
+## 1.12.0 — 2026-10-31
 
 What 1.11 leaves open, by what it blocks rather than the order it is easiest. Every SMYSL-2 open
 question but two is closed, so what follows is work owed rather than questions asked.
