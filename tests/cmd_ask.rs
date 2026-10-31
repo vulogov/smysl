@@ -388,3 +388,22 @@ fn explain_names_the_pass_that_found_the_subject() {
         assert!(stdout(&o).contains(pass), "{question}:\n{}", stdout(&o));
     }
 }
+
+/// Rule 26: a narrowed slot matches the forms of the topic's words the store uses, found by stem
+/// — the question says "cures", the claim it asks about says "cured", and the rebuttal of that
+/// claim is reached.
+#[test]
+fn a_narrowed_slot_matches_the_forms_the_store_uses() {
+    let corpus = repo("fixtures/dossier/gold/corpus.smy")
+        .to_string_lossy()
+        .to_string();
+    let question = "Is it true that citrus fruit cures scurvy?";
+    let o = run(&["ask", "--explain", question, &corpus]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let out = stdout(&o);
+    assert!(
+        out.contains("narrowed  [citrus fruit cures] (also cured): counter, reported"),
+        "{out}"
+    );
+    assert!(out.contains("empty: reported\n"), "{out}");
+}

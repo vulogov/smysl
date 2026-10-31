@@ -90,14 +90,14 @@ Four changes to how a person sees what `ask` did, none to what it does.
   nothing names shows its topic and exits 1. It refuses `--save`, and a reading is not logged
   as a miss. Its first use found the next thing to fix: *"Is it true that citrus fruit cures
   scurvy?"* narrows to `[citrus fruit cures]` and comes back empty, because the store says
-  *cured* — slot narrowing matches words, not stems.
+  *cured* — slot narrowing matched words, not stems (rule 26, below).
 - **`ask --misses` groups an unmarked miss by a guessed language**, shown as `~de`, while the
   log keeps only what `--lang` gave (`smysl_query::dossier::intent::guess_lang`: Cyrillic is
   Russian; otherwise the Latin-script language whose common short words and letters the
-  question uses most, or none on a tie). Its word lists were written before it ran and not
-  changed after: over the 587 rows of every GE-T10 question set it is right on 563, wrong on
-  one (a German question with `an` read as English) and makes no guess on 23, mostly two- and
-  three-word questions such as *Describe scurvy*.
+  question uses most, or none on a tie). Its word lists were written before it ran: over the
+  587 rows of every GE-T10 question set it was right on 563, wrong on one (a German question
+  with `an` read as English) and made no guess on 23, mostly two- and three-word questions
+  such as *Describe scurvy* — before the lists were completed by rule, below.
 - **`ask --misses --as-set`** writes the misses as a draft question set in
   `fixtures/dossier/*/questions.tsv`'s layout, the most asked first: ids `m-1`, `m-2`, … for a
   subject's prefix to replace, the intent where one was read and `?` where none was, the
@@ -110,6 +110,44 @@ Four changes to how a person sees what `ask` did, none to what it does.
 
 `link` and `summarise` were checked for the configuration fault fixed below and do not have it:
 neither takes a positional store, so theirs is always the `--store` the lookup reads.
+
+### What a question asks, in the words and forms it asks it
+
+Three changes to how `ask` reads a question, each measured the way the intent rounds were: the
+rule declared, the set written, a baseline taken before the code, nothing changed after a run.
+
+- **A narrowed slot matches the forms the store uses** (rule 26). `counter` and `reported`
+  look for the topic's words, as spelled; they now also look for each word of the units about
+  the subject that has a topic word's stem under the question's language — the chain that
+  indexes the library, through a new `Entities::stems` (none by default; the text crate's ports
+  answer it). The forms are written into the slot's text beside the words, so the saved query
+  carries what ran, and `--explain` names them: `narrowed  [citrus fruit cures] (also cured)`,
+  and the rebuttal of the claim asked about is reached where it was empty. The language is the
+  rule table's, else `--lang`, else `guess_lang`'s. Over a new set (`fixtures/dossier/forms/`,
+  each English verify and explain question of the gold and fresh sets with its words inflected
+  otherwise, scored on their gold) the variants went from P 0.840 R 0.700 to P 1.000 R 0.733,
+  and the originals, run beside them as guards, from P 1.000 R 0.700 to P 1.000 R 0.733. Two
+  variants moved the other way: they now narrow and miss a unit, where before nothing matched,
+  the slot ran unnarrowed and took a wrong one.
+- **A yes-or-no question is a verification** (rule 27): *Is scurvy cured by citrus fruit?*,
+  *Wird Skorbut … geheilt?*, *¿Se cura …?*, *Le scorbut est-il guéri … ?*, *Лечится ли …?* —
+  the opening verb, French inversion or Russian `ли`. A last-resort tier
+  (`intent::LAST_RESORT`): it reads a question only when no rule of the table does, so *why
+  is*, *where is* and *pourquoi … -t-il* keep their readings, and an inversion after a question
+  word (`qu'est-il résulté de …`) is not read as one. A new set (`fixtures/dossier/yesno/`,
+  eight verifications and two guards in five languages) went from 10 to 45 of 50; the five
+  left are the forms declared out of reach (Spanish `era`, `eran`, a Spanish question with no
+  verb to read, French `-t-on`) and a guard that stays unread. The sixth set went from 43 to 46
+  of 80. **One cost:** German *Was ergab sich aus …?* was unread and is now read as a
+  verification, by the English last-resort `was ` — the cross-language collision the
+  false-friend list found for names, here for an opener. Recorded, not tuned away.
+- **`guess_lang`'s lists are completed by a rule**: every article in all its forms, and every
+  word that opens a verification rule of the language. Over the 662 rows of all nine sets it is
+  right on 637, wrong on none and silent on 25, where it was 634, 1 and 27. In-sample: the
+  wrong one was known, and the two the new sets gained were seen in the run before the rule.
+
+Found on the way, for later: German `John Snows` does not stem to `Snow` (the German stemmer
+keeps an `s` after `w`), and *Hat Jenners Impfstoff vor den Pocken geschützt?* takes `Pocken`.
 
 ### `q --from-question` asks the provider its store's configuration names
 

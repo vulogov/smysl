@@ -6576,8 +6576,9 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .collect();
     if !narrowed.is_empty() {
         eprintln!(
-            "smysl ask: narrowed to [{}]: {}",
+            "smysl ask: narrowed to [{}]{}: {}",
             dossier.topic.join(" "),
+            also_said(&dossier.forms),
             narrowed.join(", ")
         );
     } else if !dossier.topic.is_empty() && !dossier.topic_found {
@@ -6757,9 +6758,24 @@ fn ask_explain(
             d.topic.join(" ")
         );
     } else {
-        println!("narrowed  [{}]: {}", d.topic.join(" "), narrowed.join(", "));
+        println!(
+            "narrowed  [{}]{}: {}",
+            d.topic.join(" "),
+            also_said(&d.forms),
+            narrowed.join(", ")
+        );
     }
     ExitCode::Success
+}
+
+/// The forms of the topic's words a narrowed slot matched by stem (rule 26), as a suffix to the
+/// topic: ` (also cured)`, or nothing.
+fn also_said(forms: &[String]) -> String {
+    if forms.is_empty() {
+        String::new()
+    } else {
+        format!(" (also {})", forms.join(" "))
+    }
 }
 
 /// Where `ask` logs the questions it could not read, when the configuration turns the log on

@@ -1,0 +1,52 @@
+# GE-T10's yes-or-no set, the front before the declared rule 27 (intent table as of commit b86c8ec),
+# written by `cargo test -p smysl-text --features stem --test ge_t10_third -- --nocapture`.
+GE-T10, yes-or-no set: the front
+  lang     intent   subject spelled   subject found
+  de         3/10      2/10              2/10 
+  en         2/10      2/10              2/10 
+  es         2/10      2/10              2/10 
+  fr         1/10      1/10              1/10 
+  ru         2/10      2/10              2/10 
+  all       10/50      9/50              9/50 
+  every question lost, and every subject only the stems found:
+    sc-verify4     en  SMY-E468: Is scurvy cured by citrus fruit?
+    sc-verify4     de  SMY-E468: Wird Skorbut durch Zitrusfrüchte geheilt?
+    sc-verify4     es  SMY-E468: ¿Se cura el escorbuto con cítricos?
+    sc-verify4     fr  SMY-E468: Le scorbut est-il guéri par les agrumes ?
+    sc-verify4     ru  SMY-E468: Лечится ли цинга цитрусовыми?
+    ch-verify4     en  SMY-E468: Was cholera spread by water?
+    ch-verify4     de  SMY-E468: Wurde die Cholera durch Wasser verbreitet?
+    ch-verify4     es  SMY-E468: ¿Fue el cólera propagado por el agua?
+    ch-verify4     fr  SMY-E468: Le choléra était-il transmis par l'eau ?
+    ch-verify4     ru  SMY-E468: Передавалась ли холера через воду?
+    mi-verify4     en  SMY-E468: Was miasma the cause of disease?
+    mi-verify4     de  SMY-E468: War Miasma die Ursache von Krankheiten?
+    mi-verify4     es  SMY-E468: ¿Era el miasma la causa de las enfermedades?
+    mi-verify4     fr  SMY-E468: Le miasme causait-il les maladies ?
+    mi-verify4     ru  SMY-E468: Вызывали ли миазмы болезни?
+    se-verify4     en  SMY-E468: Were deaths cut by Semmelweis's handwashing?
+    se-verify4     de  SMY-E468: Sind die Todesfälle durch Semmelweis gesunken?
+    se-verify4     es  SMY-E468: ¿Se redujeron las muertes con Semmelweis?
+    se-verify4     fr  SMY-E468: Semmelweis a-t-il réduit les décès ?
+    se-verify4     ru  SMY-E468: Снизил ли Земмельвейс смертность?
+    je-verify4     en  SMY-E468: Has Jenner's vaccine protected people from smallpox?
+    je-verify4     de  subject `Pocken`: Hat Jenners Impfstoff vor den Pocken geschützt?
+    je-verify4     es  SMY-E468: ¿Protegió la vacuna de Jenner contra la viruela?
+    je-verify4     fr  SMY-E468: La vaccine de Jenner protégeait-elle contre la variole ?
+    je-verify4     ru  SMY-E468: Защищала ли вакцина Дженнера от оспы?
+    li-verify4     en  SMY-E468: Can James Lind's trial be trusted?
+    li-verify4     de  SMY-E468: Kann man dem Versuch von James Lind trauen?
+    li-verify4     es  SMY-E468: ¿Puede uno fiarse del ensayo de James Lind?
+    li-verify4     fr  SMY-E468: Peut-on se fier à l'essai de James Lind ?
+    li-verify4     ru  SMY-E468: Можно ли доверять опыту Джеймса Линда?
+    ph-verify4     en  SMY-E468: Is phlogiston real?
+    ph-verify4     de  SMY-E468: Ist Phlogiston real?
+    ph-verify4     es  SMY-E468: ¿Es real el flogisto?
+    ph-verify4     fr  SMY-E468: Le phlogistique existe-t-il ?
+    ph-verify4     ru  SMY-E468: Существует ли флогистон?
+    sn-verify4     en  SMY-E468: Were John Snow's maps accurate?
+    sn-verify4     de  SMY-E468: Waren John Snows Karten genau?
+    sn-verify4     es  SMY-E468: ¿Eran exactos los mapas de John Snow?
+    sn-verify4     fr  SMY-E468: Les cartes de John Snow étaient-elles exactes ?
+    sn-verify4     ru  SMY-E468: Были ли карты Джона Сноу точными?
+    sp-locate3     fr  SMY-E468: Où la variole est-elle mentionnée ?

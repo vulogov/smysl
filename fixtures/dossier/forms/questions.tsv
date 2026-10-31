@@ -1,0 +1,61 @@
+# GE-T10, the forms set: a narrowed slot and the word forms a question uses (SMYSL-2.5 OQ-88).
+#
+# A verify or explain question narrows `counter` and `reported` to the units that say one of
+# its topic's words, and until this set `matches` compared words as spelled: "Is it true that
+# citrus fruit cures scurvy?" narrowed to units saying `citrus`, `fruit` or `cures`, and the
+# claim it asks about says "Scurvy is cured by oranges and lemons", so its rebuttal was never
+# reached. `ask --explain` showed it (1.12.0).
+#
+# THE RULE, declared before this file was written and not changed after its first run:
+#
+#   26. A topic word also matches a word of a unit about the subject when the two have the
+#       same stem under the question's language's analyzer chain — the chain that indexes the
+#       library, through the entity port (`Entities::stems`). The language is the rule
+#       table's, else `--lang`, else the guess `--misses` makes (`guess_lang`); with none, or
+#       a port that cannot stem, nothing changes. The forms found are written into the slot's
+#       text beside the topic's words, as `matches` alternatives, so the saved query carries
+#       what ran. Only words of units about the subject are candidates: they are the units a
+#       narrowed slot starts from.
+#
+# THE SET. Each English verify and explain question of the gold and fresh sets, twenty-five,
+# rewritten once with its topic's content words in another inflection of the same word —
+# tense, number, a participle — and as little else changed as English allows. The qid is the
+# original's, so each is scored against the original's gold slots (gold/slots.tsv,
+# fresh/slots.tsv). Written by the hand that wrote the corpus, which knows what its units
+# say; the set measures the mechanism, not how far it reaches into text nobody planned.
+#
+# THE GUARDS are the twenty-five originals, run beside the variants: a stem may join two
+# words a spelling keeps apart, and a unit reached that way that the gold does not want is a
+# loss of precision on questions that were already right.
+#
+# SCORED: `counter` and `reported`, precision and recall micro-averaged over (question, slot)
+# pairs, end to end in English (`--lang en`), the subject through the production port. The
+# baseline is `baseline.txt`, run before rule 26 existed. Kill: the guards' precision or
+# recall falls, or the variants' precision falls below GE-T10's bar of 0.8.
+#
+# qid	intent	lang	question
+ch-explain	explain	en	Why is cholera spreading so quickly?
+sc-explain	explain	en	Why does a sailor get scurvy?
+sc-verify	verify	en	Is it true that citrus fruits cure scurvy?
+mi-verify	verify	en	Is it true that miasma caused diseases?
+se-verify	verify	en	Is it true that Semmelweis's handwashing cut the death rate?
+sn-explain	explain	en	Why did John Snow have the pump's handle removed?
+li-verify	verify	en	Is it true that James Lind was the first to run a controlled trial?
+ls-explain	explain	en	Why was Joseph Lister using carbolic acids?
+ch-verify2	verify	en	Is it true that cholera spread through the water people drank?
+ch-verify3	verify	en	Is it true that Koch finds the cholera bacilli?
+sc-verify2	verify	en	Is it true that scurvy strikes a crew on a long voyage?
+mi-verify2	verify	en	Is it true that miasma is known by stenches?
+se-verify2	verify	en	Is it true that Semmelweis was dying in an asylum?
+sn-verify	verify	en	Is it true that John Snow was mapping cholera death?
+li-verify2	verify	en	Is it true that James Lind proves that an orange cures scurvy?
+ls-verify	verify	en	Is it true that Joseph Lister's antiseptic method was cutting amputation death?
+ph-verify	verify	en	Is it true that metals lose phlogiston on heating?
+je-verify	verify	en	Is it true that Jenner's cowpox gives lifelong protection?
+ch-explain2	explain	en	Why was cholera killing so many people in Soho in 1854?
+sc-explain2	explain	en	Why are the gums bleeding with scurvy?
+se-explain	explain	en	Why was Semmelweis making students wash hands?
+li-explain	explain	en	Why did James Lind give a sailor an orange and a lemon?
+ph-explain	explain	en	Why do people say phlogiston has negative weights?
+ls-explain2	explain	en	Why were Joseph Lister's amputation deaths falling?
+mi-explain	explain	en	Why do people blame miasma for cholera?

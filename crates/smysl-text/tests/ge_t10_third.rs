@@ -178,7 +178,12 @@ fn ge_t10_third_set() {
         (
             "sixth set",
             "fixtures/dossier/sixth/questions.tsv",
-            (80, 43, 40, 46),
+            (80, 46, 44, 50),
+        ),
+        (
+            "yes-or-no set",
+            "fixtures/dossier/yesno/questions.tsv",
+            (50, 45, 40, 43),
         ),
         (
             "parts set",
@@ -308,7 +313,7 @@ fn guess_lang_over_the_question_sets() {
     let (mut asked, mut right, mut none) = (0, 0, 0);
     let mut wrong: Vec<String> = Vec::new();
     for set in [
-        "gold", "fresh", "third", "fourth", "fifth", "sixth", "parts",
+        "gold", "fresh", "third", "fourth", "fifth", "sixth", "parts", "yesno", "forms",
     ] {
         let src = std::fs::read_to_string(repo(&format!("fixtures/dossier/{set}/questions.tsv")))
             .unwrap();
@@ -336,5 +341,128 @@ fn guess_lang_over_the_question_sets() {
         asked - right - none,
         wrong.join("\n")
     );
-    assert_eq!((asked, right, none), (587, 563, 23));
+    // Before the lists were completed (1.12.0): 563/587 over the first seven sets, 1 wrong and
+    // 23 unguessed; 634/662 with the yes-or-no and forms sets, 1 wrong and 27 unguessed.
+    assert_eq!((asked, right, none), (662, 637, 25));
+}
+
+/// Precision and recall of `counter` and `reported` over (question, slot) pairs.
+#[derive(Default)]
+struct Narrowed {
+    found: usize,
+    right: usize,
+    wanted: usize,
+}
+
+impl Narrowed {
+    fn figures(&self) -> (String, String) {
+        let f = |n: usize, d: usize| {
+            if d == 0 {
+                "—".to_string()
+            } else {
+                format!("{:.3}", n as f64 / d as f64)
+            }
+        };
+        (f(self.right, self.found), f(self.right, self.wanted))
+    }
+}
+
+/// The forms set (`fixtures/dossier/forms/`, rule 26): each English verify and explain question
+/// of the gold and fresh sets with its topic's words inflected otherwise, scored on the two
+/// narrowed slots against the original's gold, with the originals beside them as guards.
+#[test]
+fn ge_t10_forms() {
+    let src = std::fs::read_to_string(repo("fixtures/dossier/gold/corpus.smy")).unwrap();
+    let parsed = parse_surface(&src).unwrap();
+    let labels: BTreeMap<String, Uid> = parsed
+        .labels
+        .iter()
+        .map(|(l, u)| (l.to_string(), *u))
+        .collect();
+    let names: BTreeMap<Uid, String> = labels.iter().map(|(l, u)| (*u, l.clone())).collect();
+    let store = Store::from_records(parsed.records);
+    let scope = StoreScope::new("ge-t10", &store);
+    let stemmed = Stemmed::new(&store, &scope);
+    let env = Env::new(&store, &scope).with_entities(&stemmed as &dyn Entities);
+    let opts = AskOptions::new(AgentId::new("tool:ge-t10").unwrap()).with_lang("en");
+
+    let rows = |rel: &str| -> Vec<Vec<String>> {
+        std::fs::read_to_string(repo(rel))
+            .unwrap()
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .map(|l| l.split('\t').map(str::to_string).collect())
+            .collect()
+    };
+    let mut gold: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    for r in rows("fixtures/dossier/gold/slots.tsv")
+        .into_iter()
+        .chain(rows("fixtures/dossier/fresh/slots.tsv"))
+    {
+        if r[1] == "counter" || r[1] == "reported" {
+            let units = if r[2] == "-" {
+                Vec::new()
+            } else {
+                r[2].split(' ').map(str::to_string).collect()
+            };
+            gold.insert((r[0].clone(), r[1].clone()), units);
+        }
+    }
+    let originals: BTreeMap<String, String> = rows("fixtures/dossier/gold/questions.tsv")
+        .into_iter()
+        .chain(rows("fixtures/dossier/fresh/questions.tsv"))
+        .filter(|r| r[2] == "en")
+        .map(|r| (r[0].clone(), r[3].clone()))
+        .collect();
+
+    let mut out = String::from("GE-T10, forms set: the narrowed slots\n");
+    let mut score = |set: &str, qid: &str, question: &str, t: &mut Narrowed| {
+        let d = ask(question, &env, &opts);
+        for slot in ["counter", "reported"] {
+            let Some(want) = gold.get(&(qid.to_string(), slot.to_string())) else {
+                continue;
+            };
+            let got: Vec<String> = match &d {
+                Ok(d) => d
+                    .slots
+                    .iter()
+                    .filter(|s| s.name == slot)
+                    .flat_map(|s| s.units.iter())
+                    .map(|u| names.get(u).cloned().unwrap_or_else(|| u.canonical()))
+                    .collect(),
+                Err(_) => Vec::new(),
+            };
+            t.found += got.len();
+            t.wanted += want.len();
+            t.right += got.iter().filter(|u| want.contains(u)).count();
+            for u in got.iter().filter(|u| !want.contains(u)) {
+                let _ = writeln!(out, "    {set:<9} {qid:<12} {slot:<9} + {u}");
+            }
+            for u in want.iter().filter(|u| !got.contains(u)) {
+                let _ = writeln!(out, "    {set:<9} {qid:<12} {slot:<9} - {u}");
+            }
+        }
+        match &d {
+            Ok(d) => {
+                let _ = writeln!(out, "    {set:<9} {qid:<12} [{}]", d.topic.join(" "));
+            }
+            Err(e) => {
+                let _ = writeln!(out, "    {set:<9} {qid:<12} {e:?}");
+            }
+        }
+    };
+    let (mut variants, mut guards) = (Narrowed::default(), Narrowed::default());
+    for r in rows("fixtures/dossier/forms/questions.tsv") {
+        score("variant", &r[0], &r[3], &mut variants);
+        score("guard", &r[0], &originals[&r[0]], &mut guards);
+    }
+    let (vp, vr) = variants.figures();
+    let (gp, gr) = guards.figures();
+    let _ = writeln!(out, "  variants P {vp} R {vr}; guards P {gp} R {gr}");
+    println!("{out}");
+    assert_eq!(
+        (vp.as_str(), vr.as_str(), gp.as_str(), gr.as_str()),
+        ("1.000", "0.733", "1.000", "0.733"),
+        "{out}"
+    );
 }

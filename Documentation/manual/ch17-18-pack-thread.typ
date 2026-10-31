@@ -636,10 +636,11 @@ accounts a later one replaced. Both the old questions and seventeen new ones
 score 1.000 on counter-evidence precision. Two things to know when you read
 one:
 
-- *The words must match.* `matches` does not stem, so _spread_ does not find
-  _spreads_, and a rebuttal of a claim worded differently from your question
-  is missed. Recall on the new questions is 0.706. Phrase the question in the
-  store's words if a slot comes back thin.
+- *The words must match, up to their endings.* A narrowed slot also matches
+  the other forms of your words that the store's units about the subject use,
+  found by stem: asking _cures_ finds a claim that says _cured_. A different
+  word for the same thing is still missed (_remedy_ for _cure_), so phrase the
+  question in the store's words if a slot comes back thin.
 - *A question the store has no words for is not narrowed.* If no unit about the
   subject uses any of the question's words, as with a German question over an
   English store, the slot runs on the subject alone, as the first set did.
@@ -679,17 +680,23 @@ folded    is it true that citrus fruit cures scurvy
 intent    verify, by en/verify/is it true that … (en)
 topic     citrus fruit cures scurvy
 subject   `scurvy`, found as spelled: 5 entities
-slots     support, evidence, counter, reported; empty: counter, reported
-narrowed  [citrus fruit cures]: counter, reported
+slots     support, evidence, counter, reported; empty: reported
+narrowed  [citrus fruit cures] (also cured): counter, reported
 ```
 ]
 
 `folded` is what the rule table compares, so a question no rule reads can be
 set beside the rules' own wording; the reading stops there, with the same
 exit code. `found` says whether the subject was the question's own spelling,
-its stems, or a word with the name inside it. The example shows the narrowing
-rule at work: the two narrowed slots came back empty because the store says
-_cured_, not _cures_.
+its stems, or a word with the name inside it. `(also cured)` names the forms
+the narrowed slots matched beside your words: the store says _cured_, the
+question _cures_, and counter-evidence comes back with the claim's rebuttal.
+
+A plain yes-or-no question is read as a verification: "Is scurvy cured by
+citrus fruit?", "Wird Skorbut durch Zitrusfrüchte geheilt?", "Le scorbut
+est-il guéri par les agrumes ?", "Лечится ли цинга цитрусовыми?". These forms
+are tried only when no other rule reads the question, so "Why is …" and
+"Where is …" keep their meaning.
 
 When a name means two things, `ask` lists each with its language and source
 and the first passage that mentions it, so you can see which Mary is which

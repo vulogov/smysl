@@ -380,6 +380,15 @@ pub trait Entities {
         let _ = (word, lang);
         Vec::new()
     }
+
+    /// Each word of `text` as `lang`'s stemmer cuts it, in order: how a dossier finds the
+    /// forms of a narrowed slot's topic words that the units about its subject use (rule 26 —
+    /// "cures" asked, "cured" said). `None` when the port has no stemmer for `lang`, which is
+    /// the default: the topic is then matched as spelled, as it was before the rule.
+    fn stems(&self, text: &str, lang: &str) -> Option<Vec<String>> {
+        let _ = (text, lang);
+        None
+    }
 }
 
 /// The spelling of a scope item, for a diagnostic and for `--explain`.

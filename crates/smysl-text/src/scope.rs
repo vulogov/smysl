@@ -463,6 +463,10 @@ impl Entities for LibraryScope<'_> {
     fn candidates_derived(&self, word: &str, lang: &str) -> Vec<Vec<Uid>> {
         derived_candidates(self.library.store(), word, lang)
     }
+
+    fn stems(&self, text: &str, lang: &str) -> Option<Vec<String>> {
+        stems(text, lang)
+    }
 }
 
 /// The entities whose spelling has the same stems as `name` under `lang`'s analyzer chain —
@@ -484,6 +488,18 @@ pub fn stemmed_candidates(store: &Store, name: &str, lang: &str) -> Vec<Vec<Uid>
         return Vec::new();
     }
     smysl_query::store_scope::entity_candidates_where(store, |gist| chain.stems(gist) == want)
+}
+
+/// Each word of `text` through `lang`'s analyzer chain, the one that indexes the library, so a
+/// narrowed slot's topic word and a unit's word are cut alike (rule 26); `None` for a language
+/// with no stemmer, or a build without `stem`, where the chain would only fold.
+pub fn stems(text: &str, lang: &str) -> Option<Vec<String>> {
+    let tag = LangTag::new(lang).ok()?;
+    let chain = Chain::new(&tag);
+    if chain.lang().is_none() || !cfg!(feature = "stem") {
+        return None;
+    }
+    Some(chain.stems(text))
 }
 
 /// What a Russian adjective adds to the stem of the noun it is made from, longest first: the
@@ -580,6 +596,10 @@ impl Entities for Stemmed<'_> {
 
     fn candidates_derived(&self, word: &str, lang: &str) -> Vec<Vec<Uid>> {
         derived_candidates(self.store, word, lang)
+    }
+
+    fn stems(&self, text: &str, lang: &str) -> Option<Vec<String>> {
+        stems(text, lang)
     }
 }
 

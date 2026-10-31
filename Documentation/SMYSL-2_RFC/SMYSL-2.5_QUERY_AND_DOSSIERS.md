@@ -1292,11 +1292,26 @@ Flags:
   exit code or output changes. It is how the intent table's next rules come from questions
   people ask (CHANGELOG 1.12.0). `--misses --as-set` writes them as a draft question set, and a
   line with no `--lang` is listed under a guessed language marked `~`
-  (`dossier::intent::guess_lang`; 563 of 587 GE-T10 rows right, one wrong, 23 unguessed).
+  (`dossier::intent::guess_lang`).
   `ask --explain` prints the reading instead of the dossier — folded text, intent and rule,
   topic, subject and the pass that found it (`Dossier::found`), slots, narrowing — as far as it
   got, with `ask`'s exit code. `SMY-W417` lists each candidate with its language and the first
   unit that mentions it.
+- **Rule 26 (OQ-88, as built in 1.12.0):** a narrowed slot's topic words also match the words of
+  the units about the subject that share a topic word's stem under the question's language
+  (`Entities::stems`, default none; the rule table's language, else `--lang`, else
+  `guess_lang`). The forms are written into the slot text as further `matches` alternatives,
+  and into the recipe as `forms:…` only when there are any, so a recipe made before still
+  holds. Forms set (`fixtures/dossier/forms/`): variants P 0.840 R 0.700 → 1.000 0.733; the
+  originals as guards P 1.000 R 0.700 → 1.000 0.733.
+- **Rule 27 (OQ-22, as built in 1.12.0):** a yes-or-no question is a verification, by its
+  opening verb (en, de, es) or its inversion (fr `-il`/`-elle`, ru `ли`), in a last-resort tier
+  (`intent::LAST_RESORT`) consulted only when no rule of `RULES` reads the question; an infix
+  form is not read after an opening question word (`intent::QUESTION_WORDS`). Yes-or-no set
+  (`fixtures/dossier/yesno/`) 10 → 45 of 50, sixth set 43 → 46 of 80; one question unread
+  before is now misread (German *Was ergab sich …*, by English `was `). `guess_lang`'s lists
+  completed by rule (articles in every form, each verification opener): 637 of 662 rows right,
+  none wrong, 25 unguessed.
 
 Test updates: `command_table_matches_section_23` (30 names), `only_ingest_and_attest_are_model_dependent`
 (mixed = `thread, find, q, ask, migrate`), `tests/dispatch.rs` (30), `tests/cli-surface.txt`,
