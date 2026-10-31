@@ -696,7 +696,14 @@ A plain yes-or-no question is read as a verification: "Is scurvy cured by
 citrus fruit?", "Wird Skorbut durch Zitrusfrüchte geheilt?", "Le scorbut
 est-il guéri par les agrumes ?", "Лечится ли цинга цитрусовыми?". These forms
 are tried only when no other rule reads the question, so "Why is …" and
-"Where is …" keep their meaning.
+"Where is …" keep their meaning, and only for the language the question
+looks like it is in: German "Was ergab sich …?" is not English "was". A word
+two languages share at the start ("Was cholera spread by water?") gives no
+such sign, and `ask` refuses the question rather than guess; add `--lang en`.
+
+After `ask` learns new ways of asking, `smysl ask --misses store --recheck`
+reads every logged miss again and marks the ones that read now, with the
+intent or subject they read as. The log itself is not changed.
 
 When a name means two things, `ask` lists each with its language and source
 and the first passage that mentions it, so you can see which Mary is which

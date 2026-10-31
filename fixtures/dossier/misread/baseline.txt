@@ -1,0 +1,39 @@
+# GE-T10's misread set, the front before the declared rules 30-32 (as of commit a72e70a),
+# written by `cargo test -p smysl-text --features stem --test ge_t10_third ge_t10_misread -- --nocapture`.
+GE-T10, misread set: the front
+    sp-trace4   en  wanted trace, read as define: What is the origin of smallpox?
+    sp-trace4   de  wanted trace, read as define: Was ist der Ursprung der Pocken?
+    sp-trace4   es  wanted trace, SMY-E468: ¿Cuál es el origen de la viruela?
+    sp-trace4   es  SMY-E468: ¿Cuál es el origen de la viruela?
+    sp-trace4   fr  wanted trace, SMY-E468: Quelle est l'origine de la variole ?
+    sp-trace4   fr  SMY-E468: Quelle est l'origine de la variole ?
+    sp-trace4   ru  wanted trace, SMY-E468: Каково происхождение оспы?
+    sp-trace4   ru  SMY-E468: Каково происхождение оспы?
+    mi-trace4   en  wanted trace, read as define: What was the origin of the miasma theory?
+    mi-trace4   de  wanted trace, read as define: Was war der Ursprung der Miasmatheorie?
+    mi-trace4   es  wanted trace, SMY-E468: ¿Cuál fue el origen de la teoría del miasma?
+    mi-trace4   es  SMY-E468: ¿Cuál fue el origen de la teoría del miasma?
+    mi-trace4   fr  wanted trace, SMY-E468: Quelle était l'origine de la théorie du miasme ?
+    mi-trace4   fr  SMY-E468: Quelle était l'origine de la théorie du miasme ?
+    mi-trace4   ru  wanted trace, SMY-E468: Каким было происхождение теории миазмов?
+    mi-trace4   ru  SMY-E468: Каким было происхождение теории миазмов?
+    ch-trace4   en  wanted trace, read as define: What are the origins of cholera?
+    ch-trace4   es  wanted trace, SMY-E468: ¿Cuáles son los orígenes del cólera?
+    ch-trace4   es  SMY-E468: ¿Cuáles son los orígenes del cólera?
+    ch-trace4   fr  wanted trace, SMY-E468: Quelles sont les origines du choléra ?
+    ch-trace4   fr  SMY-E468: Quelles sont les origines du choléra ?
+    ph-define4  en  wanted define, read as explain: Explain the term phlogiston
+    ph-define4  de  wanted define, read as explain: Erkläre mir den Begriff Phlogiston
+    ph-define4  es  wanted define, SMY-E468: Explícame el término flogisto
+    ph-define4  es  SMY-E468: Explícame el término flogisto
+    ph-define4  fr  wanted define, SMY-E468: Explique-moi le terme phlogistique
+    ph-define4  fr  SMY-E468: Explique-moi le terme phlogistique
+    ph-define4  ru  wanted define, read as explain: Объясни понятие флогистон
+    mi-define4  en  wanted define, read as explain: Explain the word miasma
+    mi-define4  de  wanted define, read as explain: Erkläre das Wort Miasma
+    mi-define4  es  wanted define, read as explain: Explica la palabra miasma
+    mi-define4  fr  wanted define, read as explain: Explique le mot miasme
+    mi-define4  ru  wanted define, read as explain: Объясни слово миазмы
+    li-c5       de  wanted none, read as verify: Was bewies Linds Versuch?
+    se-c5       de  wanted none, read as verify: Was lehrte Semmelweis?
+  intent 15/40, misread 15, subject 27/37

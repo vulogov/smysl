@@ -816,33 +816,34 @@ ask        [QUESTION]
 ask        [PATH]
 ask        --config
 ask        --explain
+ask        --recheck
 ask        --as-set
-ask        --misses
 ask        --output
 ask        --format
 ask        [possible values: surface, cbor, pack]
+ask        --misses
 ask        --scope
+ask        --strict
 ask        --intent
 ask        [possible values: define, explain, verify, attribute, trace, locate, depend, compare]
-ask        --strict
+ask        --offline
 ask        --lang
 ask        [possible values: en, de, es, fr, ru]
-ask        --offline
 ask        --no-color
-ask        --subject
 ask        --noprogress
+ask        --subject
+ask        --json
 ask        --templates
 ask        --budget
-ask        --json
 ask        --quiet
 ask        --target
-ask        --save
 ask        --verbose
-ask        --answer
 ask        --backend
 ask        [possible values: memory, redb]
-ask        --at
+ask        --save
+ask        --answer
 ask        --shard
+ask        --at
 ask        --seed-check
 ask        --yes
 ask        --help

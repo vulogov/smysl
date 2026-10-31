@@ -161,6 +161,38 @@ them (`fixtures/dossier/collide/`: twenty questions, a baseline before the code)
   subject found), the fresh set P 0.484 R 0.750 → 0.478 0.800. *Listers* is still not found:
   the corpus names him only as *Joseph Lister*.
 
+### No question misread in any set, and the misses read again
+
+A misread question costs more than an unread one: an unread question says so, a misread one
+answers another. Swept from every set's report, three rules, declared before their set was
+written (`fixtures/dossier/misread/`, forty questions, a baseline before the code):
+
+- **A thing's origin is a trace** (rule 30): *What is the origin of …*, *Was ist der Ursprung …*,
+  *¿Cuál es el origen …?*, *Quelle est l'origine … ?*, *Каково происхождение …?* — read as
+  definitions, by `what is`, until a longer rule read them.
+- **Explaining a term is a definition** (rule 31): *Explain the term …*, *Erkläre mir den
+  Begriff …*, *Explique le mot …*, *Объясни понятие …* — read as explanations, by `explain`.
+- **An opener two languages share needs the guess** (rule 32): a last-resort opener that is
+  one of `guess_lang`'s words for another language — English `was` is German too, Spanish
+  `es` — reads only when the guess names its own language. *Was bewies Linds Versuch?* is no
+  longer an English verification. **Its price:** *Was cholera spread by water?*, which the
+  guess cannot place either, is now unread, once in each set that asks it.
+
+The misread set went from 15 to 39 of 40 with 15 misread to none, and the sixth set from 46 to
+52 of 80. No question in any set is now read as an intent it does not ask.
+
+**`ask --misses --recheck`** reads each logged miss again under the current rules and store
+and marks it `reads <intent>`, `subject <name>`, `ambiguous` or `still` — a question no rule
+read through the rule table, by the language `--lang` gave it; one whose subject was not found
+through `ask` over the store. The log is not changed: a question that reads now was still
+asked and missed then.
+
+**What rule 26 costs** (`crates/smysl-text/tests/narrow_scale.rs`, a measurement): one subject
+mentioned by 10³, 10⁴ and 10⁵ units, `ask` through a port that stems and one that does not, on a
+question both narrow. The forms cost 1.3× at every size — 48 ms against 38, 0.51 s against
+0.39, 5.2 s against 3.9. Most of the time is narrowing itself, older than the rule: `matches`
+tokenises a unit's text once per alternative, and an `or` of them could do it once.
+
 ### `q --from-question` asks the provider its store's configuration names
 
 `q --from-question "…" STORE` reads its one positional as the store, and that store never

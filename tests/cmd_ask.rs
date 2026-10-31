@@ -324,6 +324,28 @@ fn the_miss_log_is_opt_in_local_and_counted_by_misses() {
         ]
     );
     assert!(out.contains("take its baseline before any code"), "{out}");
+
+    // Read again under the current rules: a yes-or-no question rule 27 reads, and a subject the
+    // store has now, beside the ones still missed. The log is not changed.
+    let mut logged = std::fs::read_to_string(&log).unwrap();
+    logged.push_str("SMY-E468\t-\tIs Naomi a Moabite?\nno-subject\ten\tWhat is Naomi?\n");
+    std::fs::write(&log, &logged).unwrap();
+    let o = run(&["ask", "--misses", &store, "--recheck"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(
+        stdout(&o),
+        "2\tSMY-E468\t-\tstill\tGive me Naomi\n\
+         1\tSMY-E468\t-\treads verify\tIs Naomi a Moabite?\n\
+         1\tSMY-E468\ten\tstill\tGive me Naomi\n\
+         1\tno-subject\t-\tstill\tWhat is a Lindenbaum?\n\
+         1\tno-subject\ten\tsubject Naomi\tWhat is Naomi?\n"
+    );
+    assert!(
+        stderr(&o).contains("2 of 5 distinct miss(es) read now"),
+        "{}",
+        stderr(&o)
+    );
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), logged);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -178,12 +178,12 @@ fn ge_t10_third_set() {
         (
             "sixth set",
             "fixtures/dossier/sixth/questions.tsv",
-            (80, 46, 44, 49),
+            (80, 52, 46, 52),
         ),
         (
             "yes-or-no set",
             "fixtures/dossier/yesno/questions.tsv",
-            (50, 45, 42, 45),
+            (50, 44, 41, 44),
         ),
         (
             "parts set",
@@ -467,12 +467,11 @@ fn ge_t10_forms() {
     );
 }
 
-/// The collision set (`fixtures/dossier/collide/`, rules 28 and 29): questions no rule should
-/// misread as a verification, verifications the last-resort tier should still read, and German
-/// names in the genitive. Counts (asked, intent right, misread as verify, subjects wanted,
-/// subjects found), pinned like the sets.
-#[test]
-fn ge_t10_collisions() {
+/// A set whose rows want an intent or `none` (`fixtures/dossier/collide/`, `misread/`): counts
+/// (asked, intent right, misread, subjects wanted, subjects found), where a `none` row is right
+/// when it is not read as a verification, and a row is misread when it is read as an intent it
+/// does not want.
+fn wanted_set(title: &str, file: &str) -> ((usize, usize, usize, usize, usize), String) {
     let src = std::fs::read_to_string(repo("fixtures/dossier/gold/corpus.smy")).unwrap();
     let parsed = parse_surface(&src).unwrap();
     let labels: BTreeMap<String, Uid> = parsed
@@ -488,8 +487,8 @@ fn ge_t10_collisions() {
     let subjects: BTreeMap<&str, &str> = SUBJECTS.iter().copied().collect();
 
     let (mut asked, mut right, mut misread, mut wanted, mut found) = (0, 0, 0, 0, 0);
-    let mut out = String::from("GE-T10, collision set: the front\n");
-    let text = std::fs::read_to_string(repo("fixtures/dossier/collide/questions.tsv")).unwrap();
+    let mut out = format!("GE-T10, {title}: the front\n");
+    let text = std::fs::read_to_string(repo(file)).unwrap();
     for line in text
         .lines()
         .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
@@ -498,20 +497,23 @@ fn ge_t10_collisions() {
         let (qid, want, lang, question) = (r[0], r[1], r[2], r[3]);
         asked += 1;
         let read = smysl_query::dossier::classify(question, None);
-        let verify = read.as_ref().is_ok_and(|c| c.intent == Intent::Verify);
         let ok = match (want, &read) {
-            ("none", _) => !verify,
+            ("none", Ok(c)) => c.intent != Intent::Verify,
+            ("none", Err(_)) => true,
             (w, Ok(c)) => Intent::parse(w) == Some(c.intent),
             _ => false,
         };
         right += usize::from(ok);
-        misread += usize::from(verify && want != "verify");
+        misread += usize::from(!ok && read.is_ok());
         if !ok {
             let how = match &read {
                 Ok(c) => format!("read as {}", c.intent),
                 Err(d) => d.code.as_str().to_string(),
             };
-            let _ = writeln!(out, "    {qid:<8} {lang}  wanted {want}, {how}: {question}");
+            let _ = writeln!(
+                out,
+                "    {qid:<11} {lang}  wanted {want}, {how}: {question}"
+            );
         }
         if want != "none" {
             wanted += 1;
@@ -519,19 +521,32 @@ fn ge_t10_collisions() {
             match subject(question, &env, &opts, uid) {
                 Ok(()) => found += 1,
                 Err(why) => {
-                    let _ = writeln!(out, "    {qid:<8} {lang}  {why}: {question}");
+                    let _ = writeln!(out, "    {qid:<11} {lang}  {why}: {question}");
                 }
             }
         }
     }
     let _ = writeln!(
         out,
-        "  intent {right}/{asked}, misread as verify {misread}, subject {found}/{wanted}"
+        "  intent {right}/{asked}, misread {misread}, subject {found}/{wanted}"
     );
+    ((asked, right, misread, wanted, found), out)
+}
+
+/// The collision set (rules 28 and 29): questions no rule should misread as a verification,
+/// verifications the last-resort tier should still read, and German names in the genitive.
+#[test]
+fn ge_t10_collisions() {
+    let (got, out) = wanted_set("collision set", "fixtures/dossier/collide/questions.tsv");
     println!("{out}");
-    assert_eq!(
-        (asked, right, misread, wanted, found),
-        (20, 19, 1, 15, 14),
-        "{out}"
-    );
+    assert_eq!(got, (20, 19, 0, 15, 13), "{out}");
+}
+
+/// The misread set (rules 30 to 32): origins asked as traces, terms asked to be explained as
+/// definitions, and a last-resort opener another language shares.
+#[test]
+fn ge_t10_misread() {
+    let (got, out) = wanted_set("misread set", "fixtures/dossier/misread/questions.tsv");
+    println!("{out}");
+    assert_eq!(got, (40, 39, 0, 37, 36), "{out}");
 }

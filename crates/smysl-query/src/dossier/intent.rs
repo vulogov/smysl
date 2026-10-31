@@ -174,6 +174,12 @@ pub const RULES: &[Rule] = &[
     r("en", Explain, "explain "),
     r("en", Explain, "what caused "),
     r("en", Explain, "what made "),
+    // Rule 30: a trace asked by a thing's origin; rule 31: a definition asked as a term explained.
+    r("en", Trace, "what is the origin of "),
+    r("en", Trace, "what was the origin of "),
+    r("en", Trace, "what are the origins of "),
+    r("en", Define, "explain the term "),
+    r("en", Define, "explain the word "),
     r("en", Verify, "is it true that "),
     r("en", Verify, "is there evidence that "),
     r("en", Verify, "is there any evidence that "),
@@ -243,6 +249,11 @@ pub const RULES: &[Rule] = &[
     r("de", Explain, "weshalb "),
     r("de", Explain, "erkläre "),
     r("de", Explain, "aus welchem grund "),
+    r("de", Trace, "was ist der ursprung "),
+    r("de", Trace, "was war der ursprung "),
+    r("de", Define, "erkläre mir den begriff "),
+    r("de", Define, "erkläre den begriff "),
+    r("de", Define, "erkläre das wort "),
     r("de", Verify, "stimmt es dass "),
     r("de", Verify, "ist es wahr dass "),
     r("de", Verify, "gibt es belege dass "),
@@ -321,6 +332,12 @@ pub const RULES: &[Rule] = &[
     r("es", Explain, "por que "),
     r("es", Explain, "explica "),
     r("es", Explain, "cómo es que "),
+    r("es", Trace, "cuál es el origen "),
+    r("es", Trace, "cuál fue el origen "),
+    r("es", Trace, "cuáles son los orígenes "),
+    r("es", Define, "explica el término "),
+    r("es", Define, "explícame el término "),
+    r("es", Define, "explica la palabra "),
     r("es", Verify, "es cierto que "),
     r("es", Verify, "es verdad que "),
     r("es", Verify, "hay pruebas de que "),
@@ -390,6 +407,12 @@ pub const RULES: &[Rule] = &[
     r("fr", Explain, "expliquez "),
     r("fr", Explain, "comment se fait-il que "),
     r("fr", Explain, "comment se fait-il qu'"),
+    r("fr", Trace, "quelle est l'origine "),
+    r("fr", Trace, "quelle était l'origine "),
+    r("fr", Trace, "quelles sont les origines "),
+    r("fr", Define, "explique le terme "),
+    r("fr", Define, "explique-moi le terme "),
+    r("fr", Define, "explique le mot "),
     r("fr", Verify, "est-il vrai que "),
     r("fr", Verify, "est-il vrai qu'"),
     r("fr", Verify, "est-ce vrai que "),
@@ -464,6 +487,11 @@ pub const RULES: &[Rule] = &[
     r("ru", Explain, "зачем "),
     r("ru", Explain, "отчего "),
     r("ru", Explain, "объясни "),
+    r("ru", Trace, "каково происхождение "),
+    r("ru", Trace, "каким было происхождение "),
+    r("ru", Define, "объясни термин "),
+    r("ru", Define, "объясни понятие "),
+    r("ru", Define, "объясни слово "),
     r("ru", Verify, "правда ли что "),
     r("ru", Verify, "верно ли что "),
     r("ru", Verify, "действительно ли "),
@@ -824,7 +852,8 @@ pub fn classify(question: &str, lang: Option<&str>) -> Result<Classified, Diagno
 
 /// The first rule of [`LAST_RESORT`] that reads the folded question, and its topic's bounds.
 /// Rule 28: not a rule of a language other than the one [`guess_lang`] puts the question in —
-/// German `Was ergab sich …` is not English `was `.
+/// German `Was ergab sich …` is not English `was `; and rule 32, not an opener another
+/// language shares unless the guess names this one.
 fn last_resort(
     f: &str,
     lang: Option<&str>,
@@ -835,6 +864,15 @@ fn last_resort(
         .iter()
         .filter(|rule| lang.is_none_or(|l| l == rule.lang))
         .filter(|rule| guess.is_none_or(|g| g == rule.lang))
+        // Rule 32: an opener another language's guess words share (`was`, `es`) needs the
+        // guess to name the rule's own language.
+        .filter(|rule| {
+            let opener = rule.prefix.trim();
+            let shared = FUNCTION_WORDS
+                .iter()
+                .any(|(l, w)| *l != rule.lang && w.contains(&opener));
+            !shared || guess == Some(rule.lang)
+        })
         .find_map(|rule| {
             if rule.infix.is_empty() {
                 return (f.starts_with(rule.prefix) && f.len() > rule.prefix.len()).then_some((

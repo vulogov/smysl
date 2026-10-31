@@ -1,0 +1,75 @@
+# GE-T10's misread set: the questions every earlier set still reads as the wrong intent, which
+# costs more than one left unread — an unread question says so, a misread one answers another.
+#
+# WHY. Swept from every set's report after rule 29 (1.12.0): "What is the origin of scurvy?" and
+# "Was ist der Ursprung des Skorbuts?" read as definitions, by `what is` / `was ist`; "Erkläre
+# mir den Begriff Cholera" as an explanation, by `erkläre`; "Was bewies Linds Versuch?" as an
+# English verification, by the last-resort `was `, which rule 28 lets through because `was` is
+# a word of both languages and the guess makes none.
+#
+# THE RULES, DECLARED before a word of this set was written; scored first without them
+# (`baseline.txt`), and not changed after a run:
+#  30. a trace asked by a thing's origin:
+#        en  what is the origin of / what was the origin of / what are the origins of
+#        de  was ist der ursprung / was war der ursprung
+#        es  cuál es el origen / cuál fue el origen / cuáles son los orígenes
+#        fr  quelle est l'origine / quelle était l'origine / quelles sont les origines
+#        ru  каково происхождение / каким было происхождение
+#  31. a definition asked as explaining a term:
+#        en  explain the term / explain the word
+#        de  erkläre mir den begriff / erkläre den begriff / erkläre das wort
+#        es  explica el término / explícame el término / explica la palabra
+#        fr  explique le terme / explique-moi le terme / explique le mot
+#        ru  объясни термин / объясни понятие / объясни слово
+#  32. a last-resort opener that is also one of `guess_lang`'s words for another language (`was`
+#      is German too, `es` German too) reads a question only when the guess names its own
+#      language; with no guess it does not read. Every other last-resort opener reads as rule 28
+#      lets it.
+#
+# THE SET. Columns as `../collide/`: qid, want, lang, question; `want` an intent, or `none` for
+# a question no rule should read as a verification. Some rows reach for a form no rule writes
+# (`woher stammt`, `откуда пришла`), as a person would. Two guards per rule: an explanation
+# asked with `explain`, a definition asked with `what is`, and two English questions opening
+# with `was` that rule 32 may cost — its price, scored rather than assumed.
+#
+# WHO WROTE THIS. The hand that declared the rules, after declaring them. Single hand.
+sp-trace4	trace	en	What is the origin of smallpox?
+sp-trace4	trace	de	Was ist der Ursprung der Pocken?
+sp-trace4	trace	es	¿Cuál es el origen de la viruela?
+sp-trace4	trace	fr	Quelle est l'origine de la variole ?
+sp-trace4	trace	ru	Каково происхождение оспы?
+mi-trace4	trace	en	What was the origin of the miasma theory?
+mi-trace4	trace	de	Was war der Ursprung der Miasmatheorie?
+mi-trace4	trace	es	¿Cuál fue el origen de la teoría del miasma?
+mi-trace4	trace	fr	Quelle était l'origine de la théorie du miasme ?
+mi-trace4	trace	ru	Каким было происхождение теории миазмов?
+ch-trace4	trace	en	What are the origins of cholera?
+ch-trace4	trace	de	Woher stammt die Cholera?
+ch-trace4	trace	es	¿Cuáles son los orígenes del cólera?
+ch-trace4	trace	fr	Quelles sont les origines du choléra ?
+ch-trace4	trace	ru	Откуда пришла холера?
+ph-define4	define	en	Explain the term phlogiston
+ph-define4	define	de	Erkläre mir den Begriff Phlogiston
+ph-define4	define	es	Explícame el término flogisto
+ph-define4	define	fr	Explique-moi le terme phlogistique
+ph-define4	define	ru	Объясни понятие флогистон
+mi-define4	define	en	Explain the word miasma
+mi-define4	define	de	Erkläre das Wort Miasma
+mi-define4	define	es	Explica la palabra miasma
+mi-define4	define	fr	Explique le mot miasme
+mi-define4	define	ru	Объясни слово миазмы
+sc-explain5	explain	en	Explain why sailors got scurvy
+sc-explain5	explain	de	Erkläre, warum Seeleute Skorbut bekamen
+sc-explain5	explain	es	Explica por qué los marineros tenían escorbuto
+sc-explain5	explain	fr	Explique pourquoi les marins avaient le scorbut
+sc-explain5	explain	ru	Объясни, почему моряки болели цингой
+sp-define5	define	en	What is smallpox?
+sp-define5	define	de	Was sind die Pocken?
+sp-define5	define	es	¿Qué es la viruela?
+sp-define5	define	fr	Qu'est-ce que la variole ?
+sp-define5	define	ru	Что такое оспа?
+li-c5	none	de	Was bewies Linds Versuch?
+li-c6	none	de	Was zeigte der Versuch von James Lind?
+se-c5	none	de	Was lehrte Semmelweis?
+ch-c5	verify	en	Was cholera spread by water?
+sn-c5	verify	en	Was the pump handle removed by John Snow?

@@ -1317,6 +1317,13 @@ Flags:
   tries a run that names nothing without a final `s` or `'` (the genitive of a name). Collision
   set (`fixtures/dossier/collide/`): misread as verification 5 → 1 of 20, subjects 11 → 14 of
   15; GE-T10 German end to end, set 1 R 0.945 → 0.967, fresh R 0.750 → 0.800.
+- **Rules 30 to 32 (OQ-22, as built in 1.12.0):** origins asked as traces, terms asked to be
+  explained as definitions, and a last-resort opener another language's guess words share
+  (`was`, `es`) read only when `guess_lang` names the rule's language. Misread set
+  (`fixtures/dossier/misread/`) 15 → 39 of 40, misread 15 → 0; sixth set 46 → 52 of 80; no
+  question of any set read as an intent it does not ask. `ask --misses --recheck` reads the
+  log again under the current rules and store, and changes nothing. Rule 26's own cost, on a
+  subject mentioned by 10⁵ units: 1.3× (`narrow_scale.rs`).
 
 Test updates: `command_table_matches_section_23` (30 names), `only_ingest_and_attest_are_model_dependent`
 (mixed = `thread, find, q, ask, migrate`), `tests/dispatch.rs` (30), `tests/cli-surface.txt`,

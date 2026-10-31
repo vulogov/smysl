@@ -966,6 +966,16 @@ fn cli() -> Command {
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
+                    Arg::new("recheck")
+                        .long("recheck")
+                        .requires("misses")
+                        .conflicts_with("as-set")
+                        .help(
+                            "With --misses: read each one again under the current rules and                              store, and say which now read; the log is not changed",
+                        )
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
                     Arg::new("as-set")
                         .long("as-set")
                         .requires("misses")
@@ -6347,11 +6357,11 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     use smysl::query::{ask, AskError, AskOptions, Env};
 
     if let Some(store) = m.get_one::<String>("misses") {
-        return ask_misses(
-            global,
-            Some(store.as_str()).filter(|s| !s.is_empty()),
-            m.get_flag("as-set"),
-        );
+        let store = Some(store.as_str()).filter(|s| !s.is_empty());
+        if m.get_flag("recheck") {
+            return ask_recheck(global, store);
+        }
+        return ask_misses(global, store, m.get_flag("as-set"));
     }
     let question = m.get_one::<String>("question").expect("required by clap");
     let Some(path) = store_arg(m, global).or(m.get_one::<String>("store").cloned()) else {
@@ -6863,21 +6873,119 @@ fn log_ask_miss(
 /// `ask --misses`: the log, one line a distinct miss — count, code, language, question — grouped
 /// by code and language, the most asked first.
 #[cfg(feature = "text")]
-fn ask_misses(global: &ArgMatches, store: Option<&str>, as_set: bool) -> ExitCode {
-    let path = match ask_log_path(global, store) {
-        Ok(p) => p,
-        Err(why) => {
-            eprintln!("smysl ask: {why}");
-            return ExitCode::Usage;
-        }
-    };
-    let src = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+/// The miss log's path and its text, empty when nothing was logged yet.
+#[cfg(feature = "text")]
+fn read_ask_log(
+    global: &ArgMatches,
+    store: Option<&str>,
+) -> Result<(std::path::PathBuf, String), ExitCode> {
+    let path = ask_log_path(global, store).map_err(|why| {
+        eprintln!("smysl ask: {why}");
+        ExitCode::Usage
+    })?;
+    match std::fs::read_to_string(&path) {
+        Ok(s) => Ok((path, s)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok((path, String::new())),
         Err(e) => {
             eprintln!("smysl ask: {}: {e}", path.display());
+            Err(ExitCode::Failure)
+        }
+    }
+}
+
+/// `ask --misses --recheck`: each distinct miss read again — a question no rule read through the
+/// rule table, by the language `--lang` gave it; one whose subject was not found through `ask`
+/// over the store — and marked `reads <intent>`, `subject <name>`, `ambiguous` or `still`. Rows
+/// are `count, code, lang, now, question`; the log is left as it is, since a question that reads
+/// now was still asked and missed then.
+#[cfg(feature = "text")]
+fn ask_recheck(global: &ArgMatches, store: Option<&str>) -> ExitCode {
+    use smysl::query::dossier::classify;
+    use smysl::query::{ask, AskError, AskOptions, Env};
+
+    let (path, src) = match read_ask_log(global, store) {
+        Ok(x) => x,
+        Err(code) => return code,
+    };
+    let mut counts: std::collections::BTreeMap<(&str, &str, &str), usize> = Default::default();
+    for line in src.lines().filter(|l| !l.trim().is_empty()) {
+        let mut cols = line.splitn(3, '\t');
+        if let (Some(code), Some(lang), Some(q)) = (cols.next(), cols.next(), cols.next()) {
+            *counts.entry((code, lang, q)).or_default() += 1;
+        }
+    }
+    let corpus_path = store
+        .map(str::to_string)
+        .or_else(|| global.get_one::<String>("store").cloned());
+    let corpus = match corpus_path.as_deref().map(Corpus::open) {
+        Some(Ok(c)) => Some(c),
+        Some(Err(e)) => {
+            eprintln!(
+                "smysl ask: {}: {e}",
+                corpus_path.as_deref().unwrap_or_default()
+            );
             return ExitCode::Failure;
         }
+        None => None,
+    };
+    let owner = AgentId::new("tool:smysl-ask").expect("a valid agent");
+    let mut read_now = 0;
+    for ((code, lang, q), n) in &counts {
+        let given = (*lang != "-").then_some(*lang);
+        let now = if *code == "no-subject" {
+            match &corpus {
+                None => "needs the store".to_string(),
+                Some(corpus) => {
+                    let mut opts = AskOptions::new(owner.clone());
+                    if let Some(l) = given {
+                        opts = opts.with_lang(l);
+                    }
+                    let asked = match corpus {
+                        Corpus::Library(library) => {
+                            let scope = smysl::text::scope::LibraryScope::new("recheck", library);
+                            let env = Env::new(library.store(), &scope)
+                                .with_times(&scope)
+                                .with_entities(&scope);
+                            ask(q, &env, &opts)
+                        }
+                        Corpus::Store(store, _) => {
+                            let scope = smysl::query::StoreScope::new("recheck", store);
+                            let stemmed = smysl::text::scope::Stemmed::new(store, &scope);
+                            let env = Env::new(store, &scope).with_entities(&stemmed);
+                            ask(q, &env, &opts)
+                        }
+                    };
+                    match asked {
+                        Ok(d) => format!("subject {}", d.subject),
+                        Err(AskError::Ambiguous { name, .. }) => format!("ambiguous {name}"),
+                        Err(_) => "still".to_string(),
+                    }
+                }
+            }
+        } else {
+            match classify(q, given) {
+                Ok(c) => format!("reads {}", c.intent),
+                Err(_) => "still".to_string(),
+            }
+        };
+        if now.starts_with("reads") || now.starts_with("subject") {
+            read_now += 1;
+        }
+        println!("{n}\t{code}\t{lang}\t{now}\t{q}");
+    }
+    eprintln!(
+        "smysl ask: {read_now} of {} distinct miss(es) read now, in {}",
+        counts.len(),
+        path.display()
+    );
+    ExitCode::Success
+}
+
+#[cfg(feature = "text")]
+fn ask_misses(global: &ArgMatches, store: Option<&str>, as_set: bool) -> ExitCode {
+    let (path, src) = match read_ask_log(global, store) {
+        Ok(x) => x,
+        Err(code) => return code,
     };
     // A line without `--lang` is grouped under a guess at its language, marked `~` so it reads
     // as one; the log itself keeps only what was given.
