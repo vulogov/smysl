@@ -1312,6 +1312,11 @@ Flags:
   before is now misread (German *Was ergab sich …*, by English `was `). `guess_lang`'s lists
   completed by rule (articles in every form, each verification opener): 637 of 662 rows right,
   none wrong, 25 unguessed.
+- **Rules 28 and 29 (OQ-22, as built in 1.12.0):** a `LAST_RESORT` rule does not read a question
+  `guess_lang` puts in another language; and in a German question the spelled subject pass
+  tries a run that names nothing without a final `s` or `'` (the genitive of a name). Collision
+  set (`fixtures/dossier/collide/`): misread as verification 5 → 1 of 20, subjects 11 → 14 of
+  15; GE-T10 German end to end, set 1 R 0.945 → 0.967, fresh R 0.750 → 0.800.
 
 Test updates: `command_table_matches_section_23` (30 names), `only_ingest_and_attest_are_model_dependent`
 (mixed = `thread, find, q, ask, migrate`), `tests/dispatch.rs` (30), `tests/cli-surface.txt`,

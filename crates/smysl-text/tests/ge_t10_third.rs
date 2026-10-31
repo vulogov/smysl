@@ -163,27 +163,27 @@ fn ge_t10_third_set() {
         (
             "third set",
             "fixtures/dossier/third/questions.tsv",
-            (80, 80, 69, 80),
+            (80, 80, 74, 80),
         ),
         (
             "fourth set",
             "fixtures/dossier/fourth/questions.tsv",
-            (80, 80, 71, 80),
+            (80, 80, 72, 80),
         ),
         (
             "fifth set",
             "fixtures/dossier/fifth/questions.tsv",
-            (80, 76, 69, 76),
+            (80, 76, 70, 76),
         ),
         (
             "sixth set",
             "fixtures/dossier/sixth/questions.tsv",
-            (80, 46, 44, 50),
+            (80, 46, 44, 49),
         ),
         (
             "yes-or-no set",
             "fixtures/dossier/yesno/questions.tsv",
-            (50, 45, 40, 43),
+            (50, 45, 42, 45),
         ),
         (
             "parts set",
@@ -193,12 +193,12 @@ fn ge_t10_third_set() {
         (
             "set 1 (in-sample)",
             "fixtures/dossier/gold/questions.tsv",
-            (150, 150, 143, 150),
+            (150, 150, 144, 150),
         ),
         (
             "fresh set (in-sample)",
             "fixtures/dossier/fresh/questions.tsv",
-            (85, 85, 77, 85),
+            (85, 85, 79, 85),
         ),
     ] {
         let (report, all) = table(title, file);
@@ -463,6 +463,75 @@ fn ge_t10_forms() {
     assert_eq!(
         (vp.as_str(), vr.as_str(), gp.as_str(), gr.as_str()),
         ("1.000", "0.733", "1.000", "0.733"),
+        "{out}"
+    );
+}
+
+/// The collision set (`fixtures/dossier/collide/`, rules 28 and 29): questions no rule should
+/// misread as a verification, verifications the last-resort tier should still read, and German
+/// names in the genitive. Counts (asked, intent right, misread as verify, subjects wanted,
+/// subjects found), pinned like the sets.
+#[test]
+fn ge_t10_collisions() {
+    let src = std::fs::read_to_string(repo("fixtures/dossier/gold/corpus.smy")).unwrap();
+    let parsed = parse_surface(&src).unwrap();
+    let labels: BTreeMap<String, Uid> = parsed
+        .labels
+        .iter()
+        .map(|(l, u)| (l.to_string(), *u))
+        .collect();
+    let store = Store::from_records(parsed.records);
+    let scope = StoreScope::new("ge-t10", &store);
+    let stemmed = Stemmed::new(&store, &scope);
+    let env = Env::new(&store, &scope).with_entities(&stemmed as &dyn Entities);
+    let opts = AskOptions::new(AgentId::new("tool:ge-t10").unwrap());
+    let subjects: BTreeMap<&str, &str> = SUBJECTS.iter().copied().collect();
+
+    let (mut asked, mut right, mut misread, mut wanted, mut found) = (0, 0, 0, 0, 0);
+    let mut out = String::from("GE-T10, collision set: the front\n");
+    let text = std::fs::read_to_string(repo("fixtures/dossier/collide/questions.tsv")).unwrap();
+    for line in text
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+    {
+        let r: Vec<&str> = line.split('\t').collect();
+        let (qid, want, lang, question) = (r[0], r[1], r[2], r[3]);
+        asked += 1;
+        let read = smysl_query::dossier::classify(question, None);
+        let verify = read.as_ref().is_ok_and(|c| c.intent == Intent::Verify);
+        let ok = match (want, &read) {
+            ("none", _) => !verify,
+            (w, Ok(c)) => Intent::parse(w) == Some(c.intent),
+            _ => false,
+        };
+        right += usize::from(ok);
+        misread += usize::from(verify && want != "verify");
+        if !ok {
+            let how = match &read {
+                Ok(c) => format!("read as {}", c.intent),
+                Err(d) => d.code.as_str().to_string(),
+            };
+            let _ = writeln!(out, "    {qid:<8} {lang}  wanted {want}, {how}: {question}");
+        }
+        if want != "none" {
+            wanted += 1;
+            let uid = labels[subjects[qid.split('-').next().unwrap()]];
+            match subject(question, &env, &opts, uid) {
+                Ok(()) => found += 1,
+                Err(why) => {
+                    let _ = writeln!(out, "    {qid:<8} {lang}  {why}: {question}");
+                }
+            }
+        }
+    }
+    let _ = writeln!(
+        out,
+        "  intent {right}/{asked}, misread as verify {misread}, subject {found}/{wanted}"
+    );
+    println!("{out}");
+    assert_eq!(
+        (asked, right, misread, wanted, found),
+        (20, 19, 1, 15, 14),
         "{out}"
     );
 }

@@ -146,8 +146,20 @@ rule declared, the set written, a baseline taken before the code, nothing change
   right on 637, wrong on none and silent on 25, where it was 634, 1 and 27. In-sample: the
   wrong one was known, and the two the new sets gained were seen in the run before the rule.
 
-Found on the way, for later: German `John Snows` does not stem to `Snow` (the German stemmer
-keeps an `s` after `w`), and *Hat Jenners Impfstoff vor den Pocken geschützt?* takes `Pocken`.
+Then the two things the yes-or-no set found, declared as rules before a set was written for
+them (`fixtures/dossier/collide/`: twenty questions, a baseline before the code):
+
+- **A last-resort rule keeps to its language** (rule 28): it does not read a question
+  `guess_lang` puts in another, so German *Was ergab sich …?* is no longer an English `was `.
+  Misread as a verification on the set 5 → 1 of 20, and the sixth set's misreading is undone.
+  The one left, *Was bewies Linds Versuch?*, gives the guess no German word to go on.
+- **A German name in the genitive is a name** (rule 29): when the question is German and a run
+  names nothing as written, the spelled pass tries it without a final `s` or `'` — *Jenners*,
+  *John Snows*. In the spelled pass, so the name written first wins over *Pocken* later in the
+  question. Subjects on the set 11 → 14 of 15, and spelled subjects up on every older set
+  (third 69 → 74 of 80). GE-T10's German end to end: set 1 P 0.784 R 0.945 → 0.788 0.967 (every
+  subject found), the fresh set P 0.484 R 0.750 → 0.478 0.800. *Listers* is still not found:
+  the corpus names him only as *Joseph Lister*.
 
 ### `q --from-question` asks the provider its store's configuration names
 

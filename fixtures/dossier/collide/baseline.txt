@@ -1,0 +1,13 @@
+# GE-T10's collision set, the front before the declared rules 28-29 (as of commit 98d6b89),
+# written by `cargo test -p smysl-text --features stem --test ge_t10_third ge_t10_collisions -- --nocapture`.
+GE-T10, collision set: the front
+    li-c1    de  wanted none, read as verify: Was ergab sich aus dem Versuch von James Lind?
+    se-c1    de  wanted none, read as verify: Was bewirkte das Händewaschen von Semmelweis?
+    mi-c1    de  wanted none, read as verify: Was hielt man von der Lehre vom Miasma?
+    sc-c1    de  wanted none, read as verify: Was wusste man damals über Skorbut?
+    li-c2    de  wanted none, read as verify: Was bewies Linds Versuch?
+    je-c3    de  subject `Pocken`: Hat Jenners Impfstoff vor den Pocken geschützt?
+    sn-c3    de  no subject: Waren John Snows Karten genau?
+    ls-c3    de  no subject: Warum wirkte Listers Karbolsäure?
+    sn-c4    de  no subject: Wo wird John Snows Pumpe erwähnt?
+  intent 15/20, misread as verify 5, subject 11/15

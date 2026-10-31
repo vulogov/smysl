@@ -791,8 +791,9 @@ pub fn classify(question: &str, lang: Option<&str>) -> Result<Classified, Diagno
             best = Some((rule, w, start, end));
         }
     }
-    let best =
-        best.or_else(|| last_resort(f, lang).map(|(rule, start, end)| (rule, 0, start, end)));
+    let best = best.or_else(|| {
+        last_resort(f, lang, guess_lang(question)).map(|(rule, start, end)| (rule, 0, start, end))
+    });
     let Some((rule, _, start, end)) = best else {
         return Err(Diagnostic::new(Code::E468).with_message(format!(
             "`{}` matches no intent rule{}; name the intent with --intent ({})",
@@ -822,11 +823,18 @@ pub fn classify(question: &str, lang: Option<&str>) -> Result<Classified, Diagno
 }
 
 /// The first rule of [`LAST_RESORT`] that reads the folded question, and its topic's bounds.
-fn last_resort(f: &str, lang: Option<&str>) -> Option<(&'static Rule, usize, usize)> {
+/// Rule 28: not a rule of a language other than the one [`guess_lang`] puts the question in —
+/// German `Was ergab sich …` is not English `was `.
+fn last_resort(
+    f: &str,
+    lang: Option<&str>,
+    guess: Option<&str>,
+) -> Option<(&'static Rule, usize, usize)> {
     let first = f.split_whitespace().next().unwrap_or_default();
     LAST_RESORT
         .iter()
         .filter(|rule| lang.is_none_or(|l| l == rule.lang))
+        .filter(|rule| guess.is_none_or(|g| g == rule.lang))
         .find_map(|rule| {
             if rule.infix.is_empty() {
                 return (f.starts_with(rule.prefix) && f.len() > rule.prefix.len()).then_some((

@@ -601,6 +601,16 @@ fn topic_forms(
     out
 }
 
+/// Rule 29: a German name in the genitive, without its ending — `Jenners`, `John Snows`,
+/// `Semmelweis'` — for the spelled pass to try when the run as written names nothing.
+fn genitive(name: &str) -> Option<String> {
+    let base = name
+        .strip_suffix('s')
+        .or_else(|| name.strip_suffix('\''))
+        .or_else(|| name.strip_suffix('’'))?;
+    (base.chars().last().is_some_and(char::is_alphabetic)).then(|| base.to_string())
+}
+
 /// Step 1: the longest run of the topic's words the port has candidates for — as spelled, and
 /// only when no run matches as spelled, through `lang`'s stemmer
 /// ([`Entities::candidates_stemmed`]); and only when neither finds anything, each single word
@@ -639,7 +649,12 @@ fn find_subject(
             }
             let name = ws[start..start + len].join(" ");
             let candidates = match pass {
-                0 => port.candidates(&name),
+                0 => match port.candidates(&name) {
+                    c if c.is_empty() && lang == "de" => {
+                        genitive(&name).map_or(c, |g| port.candidates(&g))
+                    }
+                    c => c,
+                },
                 1 => port.candidates_stemmed(&name, lang),
                 _ => port.candidates_derived(&name, lang),
             };
