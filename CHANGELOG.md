@@ -7,6 +7,29 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.13.0
+
+What 1.12 leaves open, by what it blocks rather than the order it is easiest. No question in any
+GE-T10 set is read as an intent it does not ask, so what follows is reading more, not reading
+better.
+
+**Questions still unread.** The sixth set reads 52 of 80. The yes-or-no forms declared out of
+reach stay so (Spanish `era`, `eran`, a Spanish question with no verb to read, French `-t-on`),
+and rule 32's price stands: *Was cholera spread by water?* gives `guess_lang` nothing to place
+it by and is unread. The next rules want questions people ask; `ask --misses --recheck`
+collects them, and the rules wait for what it collects.
+
+**A subject by another name.** *Listers* is not found because the corpus names him only as
+*Joseph Lister*, and a question that names a subject by a synonym the store does not write is
+not found at all. The semantic tier is the place to look, behind the spelled, stemmed and
+derived passes so that none of them changes.
+
+**What narrowing costs.** Rule 26's forms cost 1.3× at every size measured, because `matches`
+tokenises a unit's text once per alternative; an `or` of them could do it once.
+
+**And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
+GE-T10's gold is single-hand; they stay owed rather than planned.
+
 ## 1.12.0 — 2026-10-31
 
 What 1.11 leaves open, by what it blocks rather than the order it is easiest. Every SMYSL-2 open
