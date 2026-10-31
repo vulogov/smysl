@@ -772,9 +772,30 @@ no version marker is read without a lens and counted (`SMY-W475`). Unit conversi
    adjective (`холерный`). *Since 2026-10-29, a comparison:* it names two subjects and the
    dossier has one, so the run that starts earliest wins and the longest only at that start —
    `How does Semmelweis compare with Joseph Lister?` asks about Semmelweis, where the longest
-   name anywhere made it Lister; every other intent keeps the longest. On the fourth set the subject is found for every question whose intent
-   is read, 55 of 80; on the fifth 44 of 80, every miss an unread intent; on the sixth 46.
-   `crates/smysl-text/tests/ge_t10_third.rs` pins the six.
+   name anywhere made it Lister; every other intent keeps the longest. On the fourth set the
+   subject is found for every question whose intent is read, 55 of 80; on the fifth 44 of 80,
+   every miss an unread intent; on the sixth 46. *Since 2026-10-30, a word as a part of a
+   name:* when neither a spelling nor a stem finds anything, each single word is tried as
+   containing a name (`Entities::candidates_derived`, `smysl_text::scope::derived_candidates`)
+   — in German, a compound whose first part is the name with at least three letters after it
+   (`Cholera|bazillus`, `Lister|sche`; never a later part, so `Kuhpocken` is not smallpox); in
+   Russian, an adjective whose stem less one relational suffix (`-н`, `-ен`, `-отн`,
+   `-атическ`, `-овск`, …) is the name's stem (`холерный`, `дженнеровский`). A name of more
+   than one word is matched by its last. Both rules were declared before a set of thirty-two
+   German and Russian questions was written (`fixtures/dossier/parts/`) and scored without
+   them: subjects **2 → 32 of 32**, and the fresh set, in-sample, 83 → 85 of 85; no set gained
+   a wrong subject. Five of the thirty-two were expected to fail and did not — hyphenated names
+   (`Semmelweis-Methode`) are a first part too. The German rule's cost is a word that only
+   begins like a name (`Lindenbaum` would find James Lind); it is asked last, so it reaches
+   such a word only in a question nothing else in which names an entity. *Then two rules for
+   that cost*, declared before a list of thirty false friends and guard words was written
+   (`fixtures/dossier/parts/false-friends.tsv`, scored first in `false-friends-baseline.txt`):
+   a German name of fewer than five letters is a first part only before a hyphen or `sch`
+   (`Lind-Versuch`, `Lindsche`; rule 24), and Russian drops `-ическ` (`холерический` is a
+   temperament; rule 25). False hits **10 → 1 of 14**, guards 16 of 16 throughout, and no set's
+   figure moved. The one left is the one expected: `Jennerwein`, a long name, which rule 24
+   does not touch. `crates/smysl-text/tests/ge_t10_third.rs` pins the seven sets, the list and
+   the rules.
 2. **Intent.** A closed rule table per tier-1 language (`define, explain, verify, attribute,
    trace, locate, depend, compare`): ordered regular patterns over the folded question ("what
    is", "что такое", "qu'est-ce que", "was ist", "qué es", …). No rule matches: `SMY-E468`,
@@ -1263,6 +1284,46 @@ Flags:
   flag: routing is the configuration's, as for every model-backed command. `--seed-check` asks
   twice and compares the dossiers record for record, and refuses `--answer`. `q` over a plain
   store now binds the entity port as well, so a dossier slot saved there can be rerun.
+- **As built in 1.12.0:** `ask --misses [STORE]`, and `ask: { log: true }` in the configuration.
+  With the key set, a question no rule reads (`SMY-E468`) or no subject is found for appends a
+  line — code, `--lang` or `-`, the question — to `ask-misses.tsv` beside the configuration (the
+  store's `.smysl/`, or `-C`'s file's directory); `--misses` lists the distinct lines with their
+  counts, by code and language. Off by default, local, no clock and no store in a line, and no
+  exit code or output changes. It is how the intent table's next rules come from questions
+  people ask (CHANGELOG 1.12.0). `--misses --as-set` writes them as a draft question set, and a
+  line with no `--lang` is listed under a guessed language marked `~`
+  (`dossier::intent::guess_lang`).
+  `ask --explain` prints the reading instead of the dossier — folded text, intent and rule,
+  topic, subject and the pass that found it (`Dossier::found`), slots, narrowing — as far as it
+  got, with `ask`'s exit code. `SMY-W417` lists each candidate with its language and the first
+  unit that mentions it.
+- **Rule 26 (OQ-88, as built in 1.12.0):** a narrowed slot's topic words also match the words of
+  the units about the subject that share a topic word's stem under the question's language
+  (`Entities::stems`, default none; the rule table's language, else `--lang`, else
+  `guess_lang`). The forms are written into the slot text as further `matches` alternatives,
+  and into the recipe as `forms:…` only when there are any, so a recipe made before still
+  holds. Forms set (`fixtures/dossier/forms/`): variants P 0.840 R 0.700 → 1.000 0.733; the
+  originals as guards P 1.000 R 0.700 → 1.000 0.733.
+- **Rule 27 (OQ-22, as built in 1.12.0):** a yes-or-no question is a verification, by its
+  opening verb (en, de, es) or its inversion (fr `-il`/`-elle`, ru `ли`), in a last-resort tier
+  (`intent::LAST_RESORT`) consulted only when no rule of `RULES` reads the question; an infix
+  form is not read after an opening question word (`intent::QUESTION_WORDS`). Yes-or-no set
+  (`fixtures/dossier/yesno/`) 10 → 45 of 50, sixth set 43 → 46 of 80; one question unread
+  before is now misread (German *Was ergab sich …*, by English `was `). `guess_lang`'s lists
+  completed by rule (articles in every form, each verification opener): 637 of 662 rows right,
+  none wrong, 25 unguessed.
+- **Rules 28 and 29 (OQ-22, as built in 1.12.0):** a `LAST_RESORT` rule does not read a question
+  `guess_lang` puts in another language; and in a German question the spelled subject pass
+  tries a run that names nothing without a final `s` or `'` (the genitive of a name). Collision
+  set (`fixtures/dossier/collide/`): misread as verification 5 → 1 of 20, subjects 11 → 14 of
+  15; GE-T10 German end to end, set 1 R 0.945 → 0.967, fresh R 0.750 → 0.800.
+- **Rules 30 to 32 (OQ-22, as built in 1.12.0):** origins asked as traces, terms asked to be
+  explained as definitions, and a last-resort opener another language's guess words share
+  (`was`, `es`) read only when `guess_lang` names the rule's language. Misread set
+  (`fixtures/dossier/misread/`) 15 → 39 of 40, misread 15 → 0; sixth set 46 → 52 of 80; no
+  question of any set read as an intent it does not ask. `ask --misses --recheck` reads the
+  log again under the current rules and store, and changes nothing. Rule 26's own cost, on a
+  subject mentioned by 10⁵ units: 1.3× (`narrow_scale.rs`).
 
 Test updates: `command_table_matches_section_23` (30 names), `only_ingest_and_attest_are_model_dependent`
 (mixed = `thread, find, q, ask, migrate`), `tests/dispatch.rs` (30), `tests/cli-surface.txt`,

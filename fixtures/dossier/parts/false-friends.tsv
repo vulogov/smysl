@@ -1,0 +1,57 @@
+# GE-T10's false-friend list for the subject-parts pass (CHANGELOG 1.12.0, the `Lindenbaum`
+# cost): single words scored by `smysl_text::scope::derived_candidates` over the committed
+# corpus (`../gold/corpus.smy`), each with the entity it names or `-` for none. The pass runs
+# only when nothing else in a question names an entity, so a word is scored alone.
+#
+# WHY THIS LIST. Rules 22 and 23 found 32 of 32 subjects in `questions.tsv` and left one cost
+# recorded: a German word that merely begins like a name (`Lindenbaum`, James Lind). Russian has
+# the same cost through a suffix: `холерический` is "choleric", a temperament, and its stem less
+# `ическ` is `холер`. The rules below are scored here, on words written after the rules were
+# declared and before any code, whose result was taken first (`false-friends-baseline.txt`). No
+# rule is added or changed after a run of this list.
+#
+# THE RULES, DECLARED.
+#   24. German: a name of fewer than five letters is a compound's first part only when a hyphen
+#       or the adjective ending `sch` follows it (`Lind-Versuch`, `Lindsche`), never a bare
+#       letter (`Lind|enbaum`, `Snow|board`). A name of five letters or more is unchanged.
+#   25. Russian: `ическ` is no longer a relational suffix; `атическ` stays (`миазм|атическ`).
+#       A disease's adjective is `-н-` (`холерный`), and `-ическ-` on its root names something
+#       else (`холерический`).
+# The guard rows (an entity expected) are the words rules 22 and 23 must still find.
+#
+# EXPECTED, WRITTEN BEFORE ANY RUN. Rule 24 does nothing for a long name, so `Jennerwein` (a
+# surname, not Jenner) and `Listerien` are expected to be found anyway; `Listerien` is named for
+# Lister and is listed as found, `Jennerwein` as `-`, an expected failure. `Lindsche` and
+# `Snowsche` must stay found; `Lind-Versuch` and `Snow-Karte` too.
+#
+# id	lang	word	entity
+ff-de-1	de	Lindenbaum	-
+ff-de-2	de	Linderung	-
+ff-de-3	de	Lindwurm	-
+ff-de-4	de	Lindauer	-
+ff-de-5	de	Lindgrün	-
+ff-de-6	de	Snowboard	-
+ff-de-7	de	Snowboarder	-
+ff-de-8	de	Jennerwein	-
+ff-de-9	de	Choleriker	-
+ff-ru-1	ru	холерический	-
+ff-ru-2	ru	холерическая	-
+ff-ru-3	ru	холерик	-
+ff-ru-4	ru	листовой	-
+ff-ru-5	ru	линейный	-
+gd-de-1	de	Lindsche	e/lind
+gd-de-2	de	Lind-Versuch	e/lind
+gd-de-3	de	Snowsche	e/snow
+gd-de-4	de	Snow-Karte	e/snow
+gd-de-5	de	Choleraerreger	e/cholera
+gd-de-6	de	Pockennarbe	e/smallpox
+gd-de-7	de	Listersche	e/lister
+gd-de-8	de	Listerien	e/lister
+gd-de-9	de	Jennersche	e/jenner
+gd-de-10	de	Skorbutfälle	e/scurvy
+gd-ru-1	ru	холерный	e/cholera
+gd-ru-2	ru	миазматический	e/miasma
+gd-ru-3	ru	линдовский	e/lind
+gd-ru-4	ru	дженнеровский	e/jenner
+gd-ru-5	ru	оспенный	e/smallpox
+gd-ru-6	ru	цинготный	e/scurvy

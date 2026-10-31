@@ -459,6 +459,14 @@ impl Entities for LibraryScope<'_> {
     fn candidates_stemmed(&self, name: &str, lang: &str) -> Vec<Vec<Uid>> {
         stemmed_candidates(self.library.store(), name, lang)
     }
+
+    fn candidates_derived(&self, word: &str, lang: &str) -> Vec<Vec<Uid>> {
+        derived_candidates(self.library.store(), word, lang)
+    }
+
+    fn stems(&self, text: &str, lang: &str) -> Option<Vec<String>> {
+        stems(text, lang)
+    }
 }
 
 /// The entities whose spelling has the same stems as `name` under `lang`'s analyzer chain —
@@ -480,6 +488,84 @@ pub fn stemmed_candidates(store: &Store, name: &str, lang: &str) -> Vec<Vec<Uid>
         return Vec::new();
     }
     smysl_query::store_scope::entity_candidates_where(store, |gist| chain.stems(gist) == want)
+}
+
+/// Each word of `text` through `lang`'s analyzer chain, the one that indexes the library, so a
+/// narrowed slot's topic word and a unit's word are cut alike (rule 26); `None` for a language
+/// with no stemmer, or a build without `stem`, where the chain would only fold.
+pub fn stems(text: &str, lang: &str) -> Option<Vec<String>> {
+    let tag = LangTag::new(lang).ok()?;
+    let chain = Chain::new(&tag);
+    if chain.lang().is_none() || !cfg!(feature = "stem") {
+        return None;
+    }
+    Some(chain.stems(text))
+}
+
+/// What a Russian adjective adds to the stem of the noun it is made from, longest first: the
+/// relational suffixes `холерн`, `оспен`, `цинготн`, `миазматическ` and `дженнеровск` carry.
+const RU_ADJECTIVE: &[&str] = &[
+    "атическ",
+    "овск",
+    "евск",
+    "ск",
+    "отн",
+    "енн",
+    "ен",
+    "ов",
+    "ев",
+    "н",
+];
+
+/// The entities `word` names as a part of itself (GE-T10's subject-parts set, rules 22 and 23),
+/// matched by an entity's name when it is one word and by its last word when it is more. In
+/// German, the name folded is the compound's first part, with at least three letters after it
+/// (`Cholera|bazillus`; `Kuhpocken` is cowpox, so never a later part); a name of fewer than five
+/// letters only before a hyphen or `sch` (`Lind-Versuch`, `Lindsche`, never `Lind|enbaum`, rule
+/// 24). In Russian, the word's stem less one relational suffix is the name's stem, of at least
+/// three letters (`холерн` → `холер`; not `ическ`, since `холерический` is a temperament, rule
+/// 25). Any other language, or a build without `stem` for Russian, finds nothing.
+pub fn derived_candidates(store: &Store, word: &str, lang: &str) -> Vec<Vec<Uid>> {
+    fn key(gist: &str) -> &str {
+        gist.split_whitespace().last().unwrap_or("")
+    }
+    match lang {
+        "de" => {
+            let word = word.to_lowercase();
+            smysl_query::store_scope::entity_candidates_where(store, |gist| {
+                let name = key(gist).to_lowercase();
+                let short = name.chars().count() < 5;
+                name.chars().count() >= 3
+                    && word.strip_prefix(name.as_str()).is_some_and(|rest| {
+                        rest.chars().count() >= 3
+                            && (!short || rest.starts_with('-') || rest.starts_with("sch"))
+                    })
+            })
+        }
+        "ru" => {
+            let Ok(tag) = LangTag::new(lang) else {
+                return Vec::new();
+            };
+            let chain = Chain::new(&tag);
+            if chain.lang().is_none() {
+                return Vec::new();
+            }
+            let [stem] = chain.stems(word).try_into().unwrap_or_default();
+            let bases: Vec<&str> = RU_ADJECTIVE
+                .iter()
+                .filter_map(|s| stem.strip_suffix(s))
+                .filter(|b| b.chars().count() >= 3)
+                .collect();
+            if bases.is_empty() {
+                return Vec::new();
+            }
+            smysl_query::store_scope::entity_candidates_where(store, |gist| {
+                let names = chain.stems(key(gist));
+                names.len() == 1 && bases.contains(&names[0].as_str())
+            })
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Any entity port, with [`stemmed_candidates`] over `store` for what no spelling finds: how a
@@ -506,6 +592,14 @@ impl Entities for Stemmed<'_> {
 
     fn candidates_stemmed(&self, name: &str, lang: &str) -> Vec<Vec<Uid>> {
         stemmed_candidates(self.store, name, lang)
+    }
+
+    fn candidates_derived(&self, word: &str, lang: &str) -> Vec<Vec<Uid>> {
+        derived_candidates(self.store, word, lang)
+    }
+
+    fn stems(&self, text: &str, lang: &str) -> Option<Vec<String>> {
+        stems(text, lang)
     }
 }
 

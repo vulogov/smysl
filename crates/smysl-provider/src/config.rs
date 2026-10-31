@@ -108,6 +108,13 @@ pub struct Config {
     /// `ingest.path`, it is a fact about the project's provider rather than something to type
     /// on every invocation.
     pub ingest_temperature: Option<f32>,
+    /// `ask: { log: true }` — `ask` appends each question it cannot read to
+    /// `ask-misses.tsv` beside this file: the question, the code, and `--lang` when given.
+    ///
+    /// Off unless a project turns it on, and local: the file is written where the
+    /// configuration is and read by `ask --misses`, and nothing sends it anywhere. It is how an
+    /// intent table grows from questions people ask rather than ones one hand writes.
+    pub ask_log: bool,
 }
 
 /// `Eq` by hand, because `ingest_temperature` is an `f32` and `f32` is not `Eq`.
@@ -258,6 +265,22 @@ impl Config {
             }
         }
 
+        if let Some(ask) = obj.get("ask").and_then(|v| v.value.as_object()) {
+            if let Some(v) = ask.get("log") {
+                cfg.ask_log = v.value.as_bool().ok_or_else(|| {
+                    let kind = v.value.type_name();
+                    let article = if kind.starts_with(['a', 'e', 'i', 'o', 'u']) {
+                        "an"
+                    } else {
+                        "a"
+                    };
+                    ProviderError::Config(format!(
+                        "`ask.log` is {article} {kind}; expected true or false"
+                    ))
+                })?;
+            }
+        }
+
         cfg.validate()?;
         Ok(cfg)
     }
@@ -304,6 +327,7 @@ impl Config {
             ingest_prompt: None,
             ingest_path: None,
             ingest_temperature: None,
+            ask_log: false,
         };
         for &t in Task::ALL {
             cfg.routing.insert(t, id.clone());
@@ -548,6 +572,20 @@ mod tests {
                 e.to_string().contains("0.0 to 2.0"),
                 "the refusal must say the range: {e}"
             );
+        }
+    }
+
+    /// `ask.log` is a boolean, off when absent, and anything else is refused at load.
+    #[test]
+    fn an_ask_log_is_a_boolean_and_off_by_default() {
+        assert!(Config::load("{ ask: { log: true } }").unwrap().ask_log);
+        assert!(!Config::load("{ ask: { log: false } }").unwrap().ask_log);
+        assert!(!Config::load("{}").unwrap().ask_log);
+        assert!(!Config::local_default().ask_log);
+        for src in ["\"yes\"", "1", "[true]"] {
+            let e = Config::load(&format!("{{ ask: {{ log: {src} }} }}"))
+                .expect_err(&format!("{src} was accepted"));
+            assert!(e.to_string().contains("true or false"), "{e}");
         }
     }
 }

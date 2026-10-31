@@ -1,0 +1,43 @@
+# GE-T10's collision set: what rule 27 misread, and the German names the yes-or-no set lost.
+#
+# WHY. Rule 27's last-resort tier read German "Was ergab sich aus dem Versuch von James Lind?"
+# as an English verification, by `was `; and the yes-or-no set lost two German subjects: "John
+# Snows" names nobody (the German stemmer keeps an `s` after `w`), and "Hat Jenners Impfstoff
+# vor den Pocken geschützt?" took `Pocken`, which the spelled pass finds before the stemmed
+# pass ever reads `Jenners`.
+#
+# THE RULES, DECLARED before a word of this set was written; scored first without them
+# (`baseline.txt`), and not changed after a run:
+#  28. a rule of `LAST_RESORT` in one language does not read a question `guess_lang` puts in
+#      another; with no guess, it reads as before.
+#  29. a German name in the genitive: when the question is German, the spelled pass also tries
+#      each run whose last word ends in `s` or `'` without that ending (`Jenners` → `Jenner`,
+#      `John Snows` → `John Snow`, `Semmelweis'` → `Semmelweis`). In the spelled pass, so the
+#      name written first wins over a later one as any spelled name does.
+#
+# THE SET. Columns: qid, want, lang, question. `want` is the intent the question asks, or
+# `none` for a question no rule should read and none should misread: scored as right when it
+# is left unread (SMY-E468) or read as anything but a verification. The subject is the qid
+# prefix's, as in every set, and is scored only on rows that want an intent.
+#
+# WHO WROTE THIS. The hand that declared the rules, after declaring them. Single hand.
+li-c1	none	de	Was ergab sich aus dem Versuch von James Lind?
+se-c1	none	de	Was bewirkte das Händewaschen von Semmelweis?
+mi-c1	none	de	Was hielt man von der Lehre vom Miasma?
+sc-c1	none	de	Was wusste man damals über Skorbut?
+li-c2	none	de	Was bewies Linds Versuch?
+ch-c2	verify	en	Was cholera spread by water?
+sn-c2	verify	en	Was the pump handle removed by John Snow?
+mi-c2	verify	de	War Miasma die Ursache von Krankheiten?
+ph-c2	verify	es	¿Es real el flogisto?
+se-c2	verify	de	Ist Semmelweis an einer Blutvergiftung gestorben?
+ph-c3	verify	en	Is phlogiston real?
+je-c3	verify	de	Hat Jenners Impfstoff vor den Pocken geschützt?
+sn-c3	verify	de	Waren John Snows Karten genau?
+ls-c3	explain	de	Warum wirkte Listers Karbolsäure?
+se-c3	trace	de	Wie entstand Semmelweis' Lehre?
+sn-c4	locate	de	Wo wird John Snows Pumpe erwähnt?
+je-c4	define	de	Wer war Jenner?
+se-c4	define	de	Wer war Semmelweis?
+sc-c4	trace	de	Geschichte des Skorbuts
+ch-c4	explain	de	Warum breitete sich die Cholera aus?

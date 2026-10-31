@@ -1,0 +1,76 @@
+# GE-T10, forms set: the narrowed slots before the declared rule 26 (as of commit b86c8ec),
+# written by `cargo test -p smysl-text --features stem --test ge_t10_third ge_t10_forms -- --nocapture`.
+GE-T10, forms set: the narrowed slots
+    variant   ch-explain   counter   + ch/counter-named
+    variant   ch-explain   [spreading quickly]
+    guard     ch-explain   counter   - ch/counter
+    guard     ch-explain   [spread quickly]
+    variant   sc-explain   counter   + sc/counter
+    variant   sc-explain   [sailor get]
+    guard     sc-explain   counter   - sc/counter-voyage
+    guard     sc-explain   [sailors get]
+    variant   sc-verify    counter   - sc/counter
+    variant   sc-verify    reported  - sc/reported
+    variant   sc-verify    [citrus fruits cure]
+    guard     sc-verify    reported  - sc/reported
+    guard     sc-verify    [cured citrus fruit]
+    variant   mi-verify    [caused diseases]
+    guard     mi-verify    [causes disease]
+    variant   se-verify    reported  - se/reported
+    variant   se-verify    [handwashing cut death rate]
+    guard     se-verify    [cut deaths handwashing]
+    variant   sn-explain   [pump handle removed]
+    guard     sn-explain   [remove pump handle]
+    variant   li-verify    [first run controlled trial]
+    guard     li-verify    [ran first controlled trial]
+    variant   ls-explain   [using carbolic acids]
+    guard     ls-explain   [use carbolic acid]
+    variant   ch-verify2   [spread through water people drank]
+    guard     ch-verify2   [spreads through drinking water]
+    variant   ch-verify3   [koch finds bacilli]
+    guard     ch-verify3   [koch found bacillus]
+    variant   sc-verify2   counter   - sc/counter-voyage
+    variant   sc-verify2   [strikes crew long voyage]
+    guard     sc-verify2   [struck crews long voyages]
+    variant   mi-verify2   reported  - mi/reported
+    variant   mi-verify2   [known stenches]
+    guard     mi-verify2   reported  - mi/reported
+    guard     mi-verify2   [known stench]
+    variant   se-verify2   [dying asylum]
+    guard     se-verify2   [died asylum]
+    variant   sn-verify    [mapping cholera death]
+    guard     sn-verify    [mapped cholera deaths]
+    variant   li-verify2   [proves orange cures scurvy]
+    guard     li-verify2   [proved oranges cure scurvy]
+    variant   ls-verify    [antiseptic method cutting amputation death]
+    guard     ls-verify    [antiseptic methods cut amputation deaths]
+    variant   ph-verify    counter   + ph/counter-named
+    variant   ph-verify    counter   - ph/contrast
+    variant   ph-verify    [metals lose heating]
+    guard     ph-verify    counter   - ph/contrast
+    guard     ph-verify    [metal loses heated]
+    variant   je-verify    [cowpox gives lifelong protection]
+    guard     je-verify    [cowpox gave lifelong protection]
+    variant   ch-explain2  counter   - ch/counter
+    variant   ch-explain2  [killing many people soho 1854]
+    guard     ch-explain2  counter   - ch/counter
+    guard     ch-explain2  [kill many people soho 1854]
+    variant   sc-explain2  [gums bleeding]
+    guard     sc-explain2  [make gums bleed]
+    variant   se-explain   [making students wash hands]
+    guard     se-explain   [make students wash hands]
+    variant   li-explain   counter   + li/counter
+    variant   li-explain   [give sailor orange lemon]
+    guard     li-explain   counter   - li/counter-cure
+    guard     li-explain   [give sailors oranges lemons]
+    variant   ph-explain   counter   - ph/counter
+    variant   ph-explain   counter   - ph/contrast
+    variant   ph-explain   [people say negative weights]
+    guard     ph-explain   counter   - ph/counter
+    guard     ph-explain   counter   - ph/contrast
+    guard     ph-explain   [said negative weight]
+    variant   ls-explain2  [amputation deaths falling]
+    guard     ls-explain2  [amputation deaths fall]
+    variant   mi-explain   [people blame cholera]
+    guard     mi-explain   [blamed cholera]
+  variants P 0.840 R 0.700; guards P 1.000 R 0.700

@@ -82,6 +82,14 @@ fn an_ambiguous_subject_is_w417_with_the_candidates_listed() {
         err.contains("alias:kjv/john") && err.contains("alias:kjv/luke"),
         "{err}"
     );
+    // Each told apart by a unit that mentions it, as a person would pick.
+    assert!(
+        err.contains("     mentioned: Mary of Magdala stood by the cross. — John 19:25\n")
+            && err.contains(
+                "     mentioned: Mary of Nazareth kept these things in her heart. — Luke 2:19\n"
+            ),
+        "{err}"
+    );
 
     // Pick the first one by the uid the listing printed.
     let pick = err
@@ -231,4 +239,193 @@ fn ask_is_labelled_experimental_with_the_figures_that_keep_it_so() {
         "{err}"
     );
     assert!(!stdout(&o).contains("experimental"));
+}
+
+/// The miss log: off until the store's configuration says `ask: { log: true }`, then one line a
+/// question no rule read (`SMY-E468`) or no subject was found for, and `--misses` counting them.
+/// Logging changes no exit code and no other output.
+#[cfg(feature = "providers")]
+#[test]
+fn the_miss_log_is_opt_in_local_and_counted_by_misses() {
+    let dir = scratch("misses");
+    let store = dir.join("subjects.smy");
+    std::fs::copy(fixture(), &store).expect("copy the fixture");
+    let store = store.to_string_lossy().to_string();
+    let log = dir.join(".smysl/ask-misses.tsv");
+
+    let o = run(&["ask", "Give me Naomi", &store]);
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    assert!(
+        !log.exists(),
+        "nothing is logged until the configuration asks"
+    );
+    let o = run(&["ask", "--misses", &store]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(stderr(&o).contains("the miss log is off"), "{}", stderr(&o));
+
+    std::fs::create_dir_all(dir.join(".smysl")).unwrap();
+    std::fs::write(dir.join(".smysl/config.hjson"), "{ ask: { log: true } }").unwrap();
+    for _ in 0..2 {
+        let o = run(&["ask", "Give me Naomi", &store]);
+        assert_eq!(
+            o.status.code(),
+            Some(2),
+            "a logged miss keeps its exit code"
+        );
+    }
+    let o = run(&["ask", "--lang", "en", "Give me\tNaomi", &store]);
+    assert_eq!(o.status.code(), Some(2));
+    let o = run(&["ask", "What is a Lindenbaum?", &store]);
+    assert_eq!(
+        o.status.code(),
+        Some(1),
+        "no subject is a failure, as it was"
+    );
+    let o = run(&["ask", "What is Naomi?", &store]);
+    assert!(o.status.success(), "a question that is read is not logged");
+
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        "SMY-E468\t-\tGive me Naomi\n\
+         SMY-E468\t-\tGive me Naomi\n\
+         SMY-E468\ten\tGive me Naomi\n\
+         no-subject\t-\tWhat is a Lindenbaum?\n"
+    );
+    let o = run(&["ask", "--misses", &store]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(
+        stdout(&o),
+        "2\tSMY-E468\t-\tGive me Naomi\n\
+         1\tSMY-E468\ten\tGive me Naomi\n\
+         1\tno-subject\t~en\tWhat is a Lindenbaum?\n"
+    );
+    assert!(
+        stderr(&o).contains("4 miss(es), 3 distinct"),
+        "{}",
+        stderr(&o)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap().lines().last(),
+        Some("no-subject\t-\tWhat is a Lindenbaum?"),
+        "the log keeps what was given; the guess, marked `~`, is the listing's"
+    );
+
+    // As a draft set: the most asked first, the intent where one was read, `?` where none was.
+    let o = run(&["ask", "--misses", &store, "--as-set"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let out = stdout(&o);
+    let rows: Vec<&str> = out.lines().filter(|l| !l.starts_with('#')).collect();
+    assert_eq!(
+        rows,
+        [
+            "m-1\t?\t-\tGive me Naomi",
+            "m-2\t?\ten\tGive me Naomi",
+            "m-3\tdefine\t~en\tWhat is a Lindenbaum?",
+        ]
+    );
+    assert!(out.contains("take its baseline before any code"), "{out}");
+
+    // Read again under the current rules: a yes-or-no question rule 27 reads, and a subject the
+    // store has now, beside the ones still missed. The log is not changed.
+    let mut logged = std::fs::read_to_string(&log).unwrap();
+    logged.push_str("SMY-E468\t-\tIs Naomi a Moabite?\nno-subject\ten\tWhat is Naomi?\n");
+    std::fs::write(&log, &logged).unwrap();
+    let o = run(&["ask", "--misses", &store, "--recheck"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(
+        stdout(&o),
+        "2\tSMY-E468\t-\tstill\tGive me Naomi\n\
+         1\tSMY-E468\t-\treads verify\tIs Naomi a Moabite?\n\
+         1\tSMY-E468\ten\tstill\tGive me Naomi\n\
+         1\tno-subject\t-\tstill\tWhat is a Lindenbaum?\n\
+         1\tno-subject\ten\tsubject Naomi\tWhat is Naomi?\n"
+    );
+    assert!(
+        stderr(&o).contains("2 of 5 distinct miss(es) read now"),
+        "{}",
+        stderr(&o)
+    );
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), logged);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `--explain`: the reading instead of the dossier, as far as it got — a question no rule
+/// reads stops at its folded text (exit 2), an ambiguous subject at its candidates (exit 2),
+/// and a read question names the rule, the subject's pass, the slots and the narrowing.
+#[test]
+fn explain_shows_the_reading_as_far_as_it_got() {
+    let o = run(&["ask", "--explain", "What is Naomi?", &fixture()]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let out = stdout(&o);
+    for line in [
+        "question  What is Naomi?\n",
+        "folded    what is naomi\n",
+        "intent    define, by en/define/what is … (en)\n",
+        "topic     Naomi\n",
+        "subject   `Naomi`, found as spelled: 2 entities\n",
+    ] {
+        assert!(out.contains(line), "{line:?} missing:\n{out}");
+    }
+    assert!(out.contains("slots     definition, "), "{out}");
+    assert!(
+        !out.contains("## question"),
+        "no dossier is rendered:\n{out}"
+    );
+
+    let o = run(&["ask", "--explain", "Naomi, please!", &fixture()]);
+    assert_eq!(o.status.code(), Some(2));
+    assert_eq!(
+        stdout(&o),
+        "question  Naomi, please!\nfolded    naomi please\nintent    none: no rule matches (SMY-E468)\n"
+    );
+
+    let o = run(&["ask", "--explain", "Who is Mary?", &fixture()]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(
+        stdout(&o).contains("subject   `Mary`: 2 candidates; pick one with --subject"),
+        "{}",
+        stdout(&o)
+    );
+
+    let o = run(&["ask", "--explain", "--save", "What is Naomi?", &fixture()]);
+    assert_eq!(o.status.code(), Some(2), "a reading saves nothing");
+}
+
+/// The three passes of the subject search, each named by `--explain` over GE-T10's corpus.
+#[test]
+fn explain_names_the_pass_that_found_the_subject() {
+    let corpus = repo("fixtures/dossier/gold/corpus.smy")
+        .to_string_lossy()
+        .to_string();
+    for (question, pass) in [
+        ("What is cholera?", "`cholera`, found as spelled"),
+        ("Что такое холеры?", "`холеры`, found by its stems"),
+        (
+            "Was ist die Listersche Antisepsis?",
+            "`Listersche`, found as part of a word",
+        ),
+    ] {
+        let o = run(&["ask", "--explain", question, &corpus]);
+        assert!(o.status.success(), "{question}: {}", stderr(&o));
+        assert!(stdout(&o).contains(pass), "{question}:\n{}", stdout(&o));
+    }
+}
+
+/// Rule 26: a narrowed slot matches the forms of the topic's words the store uses, found by stem
+/// — the question says "cures", the claim it asks about says "cured", and the rebuttal of that
+/// claim is reached.
+#[test]
+fn a_narrowed_slot_matches_the_forms_the_store_uses() {
+    let corpus = repo("fixtures/dossier/gold/corpus.smy")
+        .to_string_lossy()
+        .to_string();
+    let question = "Is it true that citrus fruit cures scurvy?";
+    let o = run(&["ask", "--explain", question, &corpus]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let out = stdout(&o);
+    assert!(
+        out.contains("narrowed  [citrus fruit cures] (also cured): counter, reported"),
+        "{out}"
+    );
+    assert!(out.contains("empty: reported\n"), "{out}");
 }

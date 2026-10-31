@@ -702,3 +702,46 @@ fn from_question_is_refused_where_it_cannot_ask() {
     ]);
     assert_eq!(o.status.code(), Some(2));
 }
+
+/// The configuration that routes a model is the one beside the store, however the store is
+/// given. `q --from-question "…" STORE` reads its one positional as the store, and that store
+/// never reached `--store`, so the provider came from the current directory's configuration or
+/// the all-local default — a project routed to a hosted model asked a local one, or the other
+/// way round. A configuration that does not load, beside a copy of F1, shows which file each
+/// form reads, and stops before any provider is built. `attest`, whose positional is `--store`
+/// already, is the control.
+#[cfg(feature = "ingest")]
+#[test]
+fn from_question_reads_the_configuration_beside_its_store() {
+    let dir = scratch("config-beside");
+    let store = dir.join("F1-incident.smy");
+    std::fs::copy(f1(), &store).expect("copy F1");
+    let store = store.to_string_lossy().to_string();
+    std::fs::create_dir_all(dir.join(".smysl")).unwrap();
+    std::fs::write(dir.join(".smysl/config.hjson"), "{ ask: { log: \"on\" } }").unwrap();
+    let config = dir
+        .join(".smysl/config.hjson")
+        .to_string_lossy()
+        .to_string();
+
+    let q = |args: &[&str]| {
+        let o = run(args);
+        assert_eq!(o.status.code(), Some(1), "{args:?}: {}", stderr(&o));
+        assert!(stdout(&o).is_empty(), "nothing ran: {}", stdout(&o));
+        assert!(
+            stderr(&o).contains(&config) && stderr(&o).contains("`ask.log`"),
+            "{args:?} read another configuration: {}",
+            stderr(&o)
+        );
+    };
+    q(&["q", "--from-question", "Which claims are there?", &store]);
+    q(&[
+        "--store",
+        &store,
+        "q",
+        "--from-question",
+        "Which claims are there?",
+    ]);
+    q(&["attest", "--sample", "1", &store]);
+    let _ = std::fs::remove_dir_all(&dir);
+}

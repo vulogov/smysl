@@ -174,6 +174,12 @@ pub const RULES: &[Rule] = &[
     r("en", Explain, "explain "),
     r("en", Explain, "what caused "),
     r("en", Explain, "what made "),
+    // Rule 30: a trace asked by a thing's origin; rule 31: a definition asked as a term explained.
+    r("en", Trace, "what is the origin of "),
+    r("en", Trace, "what was the origin of "),
+    r("en", Trace, "what are the origins of "),
+    r("en", Define, "explain the term "),
+    r("en", Define, "explain the word "),
     r("en", Verify, "is it true that "),
     r("en", Verify, "is there evidence that "),
     r("en", Verify, "is there any evidence that "),
@@ -243,6 +249,11 @@ pub const RULES: &[Rule] = &[
     r("de", Explain, "weshalb "),
     r("de", Explain, "erkläre "),
     r("de", Explain, "aus welchem grund "),
+    r("de", Trace, "was ist der ursprung "),
+    r("de", Trace, "was war der ursprung "),
+    r("de", Define, "erkläre mir den begriff "),
+    r("de", Define, "erkläre den begriff "),
+    r("de", Define, "erkläre das wort "),
     r("de", Verify, "stimmt es dass "),
     r("de", Verify, "ist es wahr dass "),
     r("de", Verify, "gibt es belege dass "),
@@ -321,6 +332,12 @@ pub const RULES: &[Rule] = &[
     r("es", Explain, "por que "),
     r("es", Explain, "explica "),
     r("es", Explain, "cómo es que "),
+    r("es", Trace, "cuál es el origen "),
+    r("es", Trace, "cuál fue el origen "),
+    r("es", Trace, "cuáles son los orígenes "),
+    r("es", Define, "explica el término "),
+    r("es", Define, "explícame el término "),
+    r("es", Define, "explica la palabra "),
     r("es", Verify, "es cierto que "),
     r("es", Verify, "es verdad que "),
     r("es", Verify, "hay pruebas de que "),
@@ -390,6 +407,12 @@ pub const RULES: &[Rule] = &[
     r("fr", Explain, "expliquez "),
     r("fr", Explain, "comment se fait-il que "),
     r("fr", Explain, "comment se fait-il qu'"),
+    r("fr", Trace, "quelle est l'origine "),
+    r("fr", Trace, "quelle était l'origine "),
+    r("fr", Trace, "quelles sont les origines "),
+    r("fr", Define, "explique le terme "),
+    r("fr", Define, "explique-moi le terme "),
+    r("fr", Define, "explique le mot "),
     r("fr", Verify, "est-il vrai que "),
     r("fr", Verify, "est-il vrai qu'"),
     r("fr", Verify, "est-ce vrai que "),
@@ -464,6 +487,11 @@ pub const RULES: &[Rule] = &[
     r("ru", Explain, "зачем "),
     r("ru", Explain, "отчего "),
     r("ru", Explain, "объясни "),
+    r("ru", Trace, "каково происхождение "),
+    r("ru", Trace, "каким было происхождение "),
+    r("ru", Define, "объясни термин "),
+    r("ru", Define, "объясни понятие "),
+    r("ru", Define, "объясни слово "),
     r("ru", Verify, "правда ли что "),
     r("ru", Verify, "верно ли что "),
     r("ru", Verify, "действительно ли "),
@@ -499,6 +527,80 @@ pub const RULES: &[Rule] = &[
     r("ru", Compare, "чем отличается "),
     r("ru", Compare, "разница между "),
     ri("ru", Compare, " отличается от "),
+];
+/// Rule 27: a yes-or-no question as verification, by the verb that opens it or the inversion
+/// that marks it. A last-resort tier — read only when no rule of [`RULES`] reads the question,
+/// so `why is`, `where is` and `pourquoi … -t-il` keep their readings however short they are.
+///
+/// An infix here is matched against whole words, as a word's ending when it starts with `-`
+/// (French inversion, `existe-t-il`) and as the word itself otherwise (Russian `ли`), and only
+/// in a question that does not open with one of [`QUESTION_WORDS`]: `qu'est-il résulté de …`
+/// asks what, not whether.
+pub const LAST_RESORT: &[Rule] = &[
+    r("en", Verify, "is "),
+    r("en", Verify, "are "),
+    r("en", Verify, "was "),
+    r("en", Verify, "were "),
+    r("en", Verify, "has "),
+    r("en", Verify, "have "),
+    r("en", Verify, "had "),
+    r("en", Verify, "do "),
+    r("en", Verify, "can "),
+    r("en", Verify, "could "),
+    r("de", Verify, "ist "),
+    r("de", Verify, "sind "),
+    r("de", Verify, "war "),
+    r("de", Verify, "waren "),
+    r("de", Verify, "wird "),
+    r("de", Verify, "werden "),
+    r("de", Verify, "wurde "),
+    r("de", Verify, "wurden "),
+    r("de", Verify, "kann "),
+    r("de", Verify, "konnte "),
+    r("es", Verify, "es "),
+    r("es", Verify, "son "),
+    r("es", Verify, "fue "),
+    r("es", Verify, "fueron "),
+    r("es", Verify, "se "),
+    r("es", Verify, "puede "),
+    ri("fr", Verify, "-t-il"),
+    ri("fr", Verify, "-t-elle"),
+    ri("fr", Verify, "-il"),
+    ri("fr", Verify, "-elle"),
+    ri("fr", Verify, "-ils"),
+    ri("fr", Verify, "-elles"),
+    ri("ru", Verify, "ли"),
+];
+
+/// The words that open a question asking something other than whether, per language with an
+/// infix in [`LAST_RESORT`]; `qu'` matches as the start of the first word.
+pub const QUESTION_WORDS: &[(&str, &[&str])] = &[
+    (
+        "fr",
+        &[
+            "qu'", "que", "quel", "quelle", "quels", "quelles", "qui", "comment", "où", "pourquoi",
+            "combien", "quand",
+        ],
+    ),
+    (
+        "ru",
+        &[
+            "что",
+            "кто",
+            "как",
+            "где",
+            "почему",
+            "зачем",
+            "когда",
+            "какой",
+            "какая",
+            "какое",
+            "какие",
+            "каков",
+            "сколько",
+            "откуда",
+        ],
+    ),
 ];
 
 /// What the table made of a question.
@@ -572,6 +674,123 @@ impl Folded {
 }
 
 /// Classify a question. `lang` narrows the table to one language; `None` tries all five.
+/// The question as the rule table reads it: trimmed of its opening and closing punctuation,
+/// lowercased, its runs of space made one, its commas dropped and a typographic apostrophe made
+/// a typed one. What `ask --explain` shows, so a question no rule reads can be compared with the
+/// rules' own spelling.
+pub fn folded(question: &str) -> String {
+    fold(question).text
+}
+
+/// Common short words of each Latin-script tier-1 language, for [`guess_lang`]: articles,
+/// question words, auxiliaries and prepositions. A word two languages share counts for both.
+///
+/// Completed in 1.12.0 by a rule rather than by a question: each language's articles in all
+/// their forms (German `einem`, `einer`, `eines`; Spanish `unos`, `unas`), and each word that
+/// opens one of its verification rules in [`RULES`] or [`LAST_RESORT`] (English `has`, `can`;
+/// German `hat`, `wird`; Spanish `fueron`, `puede`). In-sample for the one question it was
+/// wrong on, a German `Hat … an einem …` read as English by its `an`; the yes-or-no and forms
+/// sets were written before it and were run under the lists before it.
+const FUNCTION_WORDS: &[(&str, &[&str])] = &[
+    (
+        "en",
+        &[
+            "the", "a", "an", "is", "are", "was", "were", "what", "who", "how", "why", "where",
+            "which", "did", "does", "do", "of", "to", "in", "and", "about", "for", "from", "has",
+            "have", "had", "can", "could",
+        ],
+    ),
+    (
+        "de",
+        &[
+            "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "ist", "sind", "war",
+            "was", "wer", "wie", "warum", "wo", "woher", "welche", "und", "von", "vom", "zu",
+            "zum", "mit", "über", "es", "dass", "nicht", "einem", "einer", "eines", "waren",
+            "wird", "werden", "wurde", "wurden", "hat", "haben", "hatte", "kann", "konnte",
+        ],
+    ),
+    (
+        "es",
+        &[
+            "el", "la", "los", "las", "un", "una", "es", "son", "fue", "qué", "quién", "cómo",
+            "por", "dónde", "cuál", "de", "del", "y", "que", "en", "se", "con", "sobre", "unos",
+            "unas", "fueron", "puede",
+        ],
+    ),
+    (
+        "fr",
+        &[
+            "le",
+            "la",
+            "les",
+            "un",
+            "une",
+            "est",
+            "sont",
+            "était",
+            "qu'est-ce",
+            "qui",
+            "que",
+            "quel",
+            "quelle",
+            "pourquoi",
+            "comment",
+            "où",
+            "de",
+            "du",
+            "des",
+            "et",
+            "en",
+            "sur",
+            "a",
+            "ce",
+            "d'où",
+        ],
+    ),
+];
+
+/// A guess at a question's tier-1 language, for a question no rule read and no `--lang` named:
+/// Cyrillic is Russian; otherwise the Latin-script language whose common short words the
+/// question uses most, with a letter only one of them writes (`ß`, `ñ`, `¿`, `ç`, …) counted
+/// twice. `None` on a tie or no evidence. A guess, never a reading: `ask --misses` shows it
+/// marked as one, and nothing classifies by it.
+pub fn guess_lang(question: &str) -> Option<&'static str> {
+    if question
+        .chars()
+        .any(|c| ('\u{0400}'..='\u{04FF}').contains(&c))
+    {
+        return Some("ru");
+    }
+    let folded = fold(question).text;
+    let mut scores = [0usize; 4];
+    for word in folded.split(|c: char| c.is_whitespace() || c == '?' || c == '!' || c == '.') {
+        let word = word.trim_matches(|c: char| c == '¿' || c == '¡' || c == '"');
+        for (i, (_, words)) in FUNCTION_WORDS.iter().enumerate() {
+            scores[i] += usize::from(words.contains(&word));
+        }
+    }
+    for c in question.chars() {
+        let only = match crate::fold::lower(c) {
+            'ß' | 'ä' | 'ö' | 'ü' => Some(1),
+            'ñ' | '¿' | '¡' | 'á' | 'í' | 'ó' | 'ú' => Some(2),
+            'ç' | 'è' | 'ê' | 'à' | 'â' | 'î' | 'ô' | 'û' | 'ë' | 'ï' | 'œ' => Some(3),
+            _ => None,
+        };
+        if let Some(i) = only {
+            scores[i] += 2;
+        }
+    }
+    let best = *scores.iter().max().expect("four languages");
+    if best == 0 || scores.iter().filter(|&&s| s == best).count() > 1 {
+        return None;
+    }
+    let i = scores
+        .iter()
+        .position(|&s| s == best)
+        .expect("the max is there");
+    Some(FUNCTION_WORDS[i].0)
+}
+
 pub fn classify(question: &str, lang: Option<&str>) -> Result<Classified, Diagnostic> {
     let folded = fold(question);
     let f = folded.text.as_str();
@@ -600,6 +819,9 @@ pub fn classify(question: &str, lang: Option<&str>) -> Result<Classified, Diagno
             best = Some((rule, w, start, end));
         }
     }
+    let best = best.or_else(|| {
+        last_resort(f, lang, guess_lang(question)).map(|(rule, start, end)| (rule, 0, start, end))
+    });
     let Some((rule, _, start, end)) = best else {
         return Err(Diagnostic::new(Code::E468).with_message(format!(
             "`{}` matches no intent rule{}; name the intent with --intent ({})",
@@ -626,6 +848,53 @@ pub fn classify(question: &str, lang: Option<&str>) -> Result<Classified, Diagno
         rule: rule.id(),
         topic,
     })
+}
+
+/// The first rule of [`LAST_RESORT`] that reads the folded question, and its topic's bounds.
+/// Rule 28: not a rule of a language other than the one [`guess_lang`] puts the question in —
+/// German `Was ergab sich …` is not English `was `; and rule 32, not an opener another
+/// language shares unless the guess names this one.
+fn last_resort(
+    f: &str,
+    lang: Option<&str>,
+    guess: Option<&str>,
+) -> Option<(&'static Rule, usize, usize)> {
+    let first = f.split_whitespace().next().unwrap_or_default();
+    LAST_RESORT
+        .iter()
+        .filter(|rule| lang.is_none_or(|l| l == rule.lang))
+        .filter(|rule| guess.is_none_or(|g| g == rule.lang))
+        // Rule 32: an opener another language's guess words share (`was`, `es`) needs the
+        // guess to name the rule's own language.
+        .filter(|rule| {
+            let opener = rule.prefix.trim();
+            let shared = FUNCTION_WORDS
+                .iter()
+                .any(|(l, w)| *l != rule.lang && w.contains(&opener));
+            !shared || guess == Some(rule.lang)
+        })
+        .find_map(|rule| {
+            if rule.infix.is_empty() {
+                return (f.starts_with(rule.prefix) && f.len() > rule.prefix.len()).then_some((
+                    rule,
+                    rule.prefix.len(),
+                    f.len(),
+                ));
+            }
+            let asks = QUESTION_WORDS
+                .iter()
+                .filter(|(l, _)| *l == rule.lang)
+                .flat_map(|(_, w)| w.iter())
+                .any(|w| first == *w || (w.ends_with('\'') && first.starts_with(w)));
+            let marked = f.split_whitespace().any(|w| {
+                if rule.infix.starts_with('-') {
+                    w.len() > rule.infix.len() && w.ends_with(rule.infix)
+                } else {
+                    w == rule.infix
+                }
+            });
+            (marked && !asks).then_some((rule, 0, f.len()))
+        })
 }
 
 /// The topic with no rule applied: the whole question, folded only at its ends. What `--intent`
@@ -657,6 +926,30 @@ mod tests {
                 );
             }
             assert_eq!(rule.prefix, crate::fold::fold(rule.prefix), "{}", rule.id());
+        }
+    }
+
+    #[test]
+    fn a_yes_or_no_question_is_verification_only_when_nothing_else_reads_it() {
+        for (q, intent) in [
+            ("Is scurvy cured by citrus fruit?", Intent::Verify),
+            ("Le scorbut est-il guéri par les agrumes ?", Intent::Verify),
+            ("Лечится ли цинга цитрусовыми?", Intent::Verify),
+            ("Why is cholera spread by water?", Intent::Explain),
+            ("Where is smallpox mentioned?", Intent::Locate),
+            (
+                "Pourquoi le choléra est-il transmis par l'eau ?",
+                Intent::Explain,
+            ),
+        ] {
+            assert_eq!(classify(q, None).unwrap().intent, intent, "{q}");
+        }
+        // An inversion after a question word asks something other than whether.
+        for q in ["Qu'est-il résulté de l'essai ?", "Сколько ли их было?"] {
+            assert!(
+                !classify(q, None).is_ok_and(|c| c.intent == Intent::Verify),
+                "{q}"
+            );
         }
     }
 

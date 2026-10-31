@@ -1,0 +1,60 @@
+# GE-T10's subject-parts set (CHANGELOG 1.12.0, a subject written as part of another word):
+# sixteen questions in German and sixteen in Russian, thirty-two rows, over the committed corpus
+# (`../gold/corpus.smy`). Only the front is scored on it. Every question uses an opener the
+# intent table reads, so what it measures is the subject.
+#
+# WHY THIS SET. GE-T10's sets lost four subjects with the intent read, each a name inside
+# another word: `Cholerabazillus`, `Pockenimpfung`, `Miasmatheorie` and `холерный`. A rule
+# written from those four is scored here, on questions written after the rules were declared
+# and before any code, whose front was taken first (`baseline.txt`). No rule is added or changed
+# after a run of this set.
+#
+# THE RULES, DECLARED. A third pass of the subject search, after the spelled and the stemmed
+# ones, over single words only, in the question's language only; the name an entity is matched
+# by is its whole name when it is one word, and its last word when it is more:
+#  22. German, a compound's first part: the entity's folded name is a prefix of the folded word,
+#      with at least three letters after it (`Cholera|bazillus`, `Pocken|impfung`,
+#      `Lister|sche`). Only the first part: `Kuhpocken` is cowpox, not smallpox.
+#  23. Russian, an adjective made from a name: the word's stem, less one of `атическ`, `ическ`,
+#      `овск`, `евск`, `ск`, `отн`, `енн`, `ен`, `ов`, `ев`, `н`, is the stem of the entity's
+#      name (`холерн` → `холер`, `оспен` → `осп`, `дженнеровск` → `дженнер`), and is at least
+#      three letters long.
+#
+# WHO WROTE THIS. The same hand that declared the rules, after declaring them; several
+# questions are expected to fail in ways neither rule touches (a hyphenated name, a surname the
+# corpus spells only with a forename, a word whose adjective is irregular). Nothing was
+# rephrased after a run. Single hand, so no agreement figure.
+#
+# Columns as `../gold/questions.tsv`: qid, intent, lang, question.
+ch-define4	define	de	Was ist ein Choleraerreger?
+ch-locate3	locate	de	Wo werden Choleraepidemien erwähnt?
+sp-define4	define	de	Was sind Pockenviren?
+sp-trace4	trace	de	Woher stammt die Pockenschutzimpfung?
+sc-explain4	explain	de	Warum war die Skorbutbehandlung so schwierig?
+sc-locate3	locate	de	Wo werden Skorbutfälle erwähnt?
+mi-attribute3	attribute	de	Wer behauptet, die Miasmalehre sei richtig?
+mi-depend3	depend	de	Was folgt aus der Miasmavorstellung?
+ph-define4	define	de	Was ist die Phlogistontheorie?
+ph-verify4	verify	de	Stimmt es, dass die Phlogistonchemie widerlegt wurde?
+ls-define4	define	de	Was ist die Listersche Antisepsis?
+je-attribute3	attribute	de	Wer sagte, die Jennersche Impfung sei gefährlich?
+se-explain4	explain	de	Warum wurde die Semmelweis-Methode abgelehnt?
+sn-locate3	locate	de	Wo wird die Snow-Karte erwähnt?
+li-depend3	depend	de	Was folgt aus dem Lind-Experiment?
+ch-compare3	compare	de	Vergleiche Choleraepidemien und Pockenepidemien
+ch-define4	define	ru	Что такое холерный вибрион?
+ch-locate3	locate	ru	Где упоминаются холерные эпидемии?
+sp-explain4	explain	ru	Почему оспенная вакцина работала?
+sp-trace4	trace	ru	Откуда пришла оспенная эпидемия?
+sc-define4	define	ru	Что такое цинготная болезнь?
+sc-attribute3	attribute	ru	Кто утверждает, что цинготные симптомы излечимы?
+mi-depend3	depend	ru	Что следует из миазматической теории?
+mi-verify4	verify	ru	Правда ли, что миазматическая гипотеза была ошибочной?
+ph-define4	define	ru	Что такое флогистонная теория?
+ph-explain4	explain	ru	Почему флогистонная химия была отвергнута?
+je-define4	define	ru	Что такое дженнеровская вакцина?
+je-attribute3	attribute	ru	Кто сказал, что дженнеровский метод опасен?
+ls-depend3	depend	ru	Что зависит от листеровского метода?
+se-explain4	explain	ru	Почему земмельвейсовский метод отвергли?
+li-depend3	depend	ru	Что следует из линдовского опыта?
+ch-compare3	compare	ru	Сравни холерные и оспенные эпидемии

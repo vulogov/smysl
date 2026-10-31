@@ -951,8 +951,51 @@ fn cli() -> Command {
                 .arg(
                     Arg::new("question")
                         .value_name("QUESTION")
-                        .required(true)
+                        .required_unless_present("misses")
                         .help("The question, in any tier-1 language (en, de, es, fr, ru)"),
+                )
+                .arg(
+                    Arg::new("explain")
+                        .long("explain")
+                        .conflicts_with_all(["save", "misses"])
+                        .help(
+                            "Show how the question was read — its folded text, intent rule, \
+                             subject and how it was found, slots and narrowing — instead of the \
+                             dossier",
+                        )
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("recheck")
+                        .long("recheck")
+                        .requires("misses")
+                        .conflicts_with("as-set")
+                        .help(
+                            "With --misses: read each one again under the current rules and                              store, and say which now read; the log is not changed",
+                        )
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("as-set")
+                        .long("as-set")
+                        .requires("misses")
+                        .help(
+                            "With --misses: write them as a draft question set, in the layout \
+                             of fixtures/dossier/*/questions.tsv",
+                        )
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("misses")
+                        .long("misses")
+                        .value_name("PATH")
+                        .num_args(0..=1)
+                        .default_missing_value("")
+                        .conflicts_with("question")
+                        .help(
+                            "List the questions no rule read or no subject was found for, from the \
+                             log `ask: { log: true }` in the store's configuration turns on",
+                        ),
                 )
                 .arg(
                     Arg::new("scope")
@@ -6157,6 +6200,7 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             Job::Ask {
                 question: question.clone().expect("guarded"),
                 yes: m.get_flag("yes"),
+                store: path.clone(),
             }
         }
         (None, Some(text)) => {
@@ -6312,6 +6356,13 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     use smysl::query::dossier::Intent;
     use smysl::query::{ask, AskError, AskOptions, Env};
 
+    if let Some(store) = m.get_one::<String>("misses") {
+        let store = Some(store.as_str()).filter(|s| !s.is_empty());
+        if m.get_flag("recheck") {
+            return ask_recheck(global, store);
+        }
+        return ask_misses(global, store, m.get_flag("as-set"));
+    }
     let question = m.get_one::<String>("question").expect("required by clap");
     let Some(path) = store_arg(m, global).or(m.get_one::<String>("store").cloned()) else {
         eprintln!("smysl ask: no store given");
@@ -6418,6 +6469,20 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             }
         }
     }
+    // A reading is an inspection, not a question asked: shown, and never logged as a miss.
+    if m.get_flag("explain") {
+        return ask_explain(question, &asked, m);
+    }
+    // The two misses an intent table or an entity list could learn from, logged when the
+    // configuration asks (`ask: { log: true }`).
+    let missed = match &asked {
+        Err(AskError::Refused(d)) if d.code == smysl::Code::E468 => Some(d.code.as_str()),
+        Err(AskError::NoSubject { .. }) => Some("no-subject"),
+        _ => None,
+    };
+    if let Some(code) = missed {
+        log_ask_miss(global, &path, code, m.get_one::<String>("lang"), question);
+    }
     let dossier = match asked {
         Ok(d) => d,
         Err(AskError::Ambiguous {
@@ -6430,17 +6495,53 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 diagnostic.code.as_str(),
                 diagnostic.message
             );
+            // Each candidate as a person would tell them apart: its names with their language
+            // and source, and the first unit that mentions it, with how many do.
             for (i, group) in candidates.iter().enumerate() {
                 let label = group
                     .iter()
                     .filter_map(|u| corpus.store().get(u))
-                    .map(|u| match u.core.source.as_ref() {
-                        Some(s) => format!("{} ({})", u.core.gist, s.reference),
-                        None => u.core.gist.clone(),
+                    .map(|u| {
+                        let lang = u
+                            .core
+                            .lang
+                            .as_ref()
+                            .map(|l| format!("{}, ", l.as_str()))
+                            .unwrap_or_default();
+                        match u.core.source.as_ref() {
+                            Some(s) => format!("{} ({lang}{})", u.core.gist, s.reference),
+                            None if lang.is_empty() => u.core.gist.clone(),
+                            None => format!("{} ({})", u.core.gist, lang.trim_end_matches(", ")),
+                        }
                     })
                     .collect::<Vec<_>>()
                     .join(" = ");
                 eprintln!("  {}. --subject {}  {label}", i + 1, group[0].canonical());
+                let mut mentions: Vec<Uid> = corpus
+                    .store()
+                    .relations()
+                    .filter(|r| r.kind.as_str() == "x.text/mentions" && group.contains(&r.to))
+                    .map(|r| r.from)
+                    .collect();
+                mentions.sort();
+                mentions.dedup();
+                let first = mentions
+                    .iter()
+                    .filter_map(|u| corpus.store().get(u))
+                    .min_by_key(|u| u.core.source.as_ref().map(|s| s.reference.clone()));
+                if let Some(u) = first {
+                    let more = match mentions.len() {
+                        1 => String::new(),
+                        n => format!(" (and {} more)", n - 1),
+                    };
+                    let source = u
+                        .core
+                        .source
+                        .as_ref()
+                        .map(|s| format!(" — {}", s.reference))
+                        .unwrap_or_default();
+                    eprintln!("     mentioned: {}{source}{more}", u.core.gist);
+                }
             }
             let _ = name;
             return ExitCode::Usage;
@@ -6485,8 +6586,9 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .collect();
     if !narrowed.is_empty() {
         eprintln!(
-            "smysl ask: narrowed to [{}]: {}",
+            "smysl ask: narrowed to [{}]{}: {}",
             dossier.topic.join(" "),
+            also_said(&dossier.forms),
             narrowed.join(", ")
         );
     } else if !dossier.topic.is_empty() && !dossier.topic_found {
@@ -6555,6 +6657,398 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         return ExitCode::Success;
     }
     ask_answer(m, global, &path, corpus, scratch, &dossier)
+}
+
+/// `ask --explain`: how `ask` read the question, one field a line on stdout, as far as it got.
+/// A question no rule reads stops after its folded text and exits 2, and one whose subject
+/// nothing names stops after its topic and exits 1, as without `--explain`; what the rules saw
+/// is the point of the reading when they saw nothing.
+#[cfg(feature = "text")]
+fn ask_explain(
+    question: &str,
+    asked: &Result<smysl::query::Dossier, smysl::query::AskError>,
+    m: &ArgMatches,
+) -> ExitCode {
+    use smysl::query::dossier::{classify, intent, Intent};
+    use smysl::query::AskError;
+
+    let lang = m.get_one::<String>("lang").map(String::as_str);
+    println!("question  {}", question.trim());
+    println!("folded    {}", intent::folded(question));
+    let classified = match m.get_one::<String>("intent") {
+        Some(i) => intent::untouched(question, Intent::parse(i).expect("checked by clap")),
+        None => match classify(question, lang) {
+            Ok(c) => c,
+            Err(d) => {
+                println!(
+                    "intent    none: no rule{} matches ({})",
+                    lang.map(|l| format!(" for `{l}`")).unwrap_or_default(),
+                    d.code.as_str()
+                );
+                return ExitCode::Usage;
+            }
+        },
+    };
+    let read_as = if classified.lang.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", classified.lang)
+    };
+    println!(
+        "intent    {}, by {}{read_as}",
+        classified.intent, classified.rule
+    );
+    println!("topic     {}", classified.topic);
+    let d = match asked {
+        Ok(d) => d,
+        Err(e @ AskError::NoSubject { .. }) => {
+            println!(
+                "subject   none: no run of the topic's words names an entity as spelled, by its \
+                 stems, or as part of a word"
+            );
+            eprintln!("smysl ask: {e}");
+            return ExitCode::Failure;
+        }
+        Err(
+            e @ AskError::Ambiguous {
+                name, candidates, ..
+            },
+        ) => {
+            println!(
+                "subject   `{name}`: {} candidates; pick one with --subject",
+                candidates.len()
+            );
+            eprintln!("smysl ask: {e}");
+            return ExitCode::Usage;
+        }
+        Err(e) => {
+            eprintln!("smysl ask: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    println!(
+        "subject   `{}`, found {}: {} entit{}",
+        d.subject,
+        d.found,
+        d.entities.len(),
+        if d.entities.len() == 1 { "y" } else { "ies" }
+    );
+    let gaps: Vec<&str> = d
+        .slots
+        .iter()
+        .filter(|s| s.units.is_empty())
+        .map(|s| s.name)
+        .collect();
+    println!(
+        "slots     {}{}",
+        d.slots
+            .iter()
+            .map(|s| s.name)
+            .collect::<Vec<_>>()
+            .join(", "),
+        if gaps.is_empty() {
+            String::new()
+        } else {
+            format!("; empty: {}", gaps.join(", "))
+        }
+    );
+    let narrowed: Vec<&str> = d
+        .slots
+        .iter()
+        .filter(|s| s.narrowed)
+        .map(|s| s.name)
+        .collect();
+    if d.topic.is_empty() {
+        println!(
+            "narrowed  none: the intent narrows no slot, or the topic has no word but the subject"
+        );
+    } else if narrowed.is_empty() {
+        println!(
+            "narrowed  none: no unit about the subject says any of [{}]",
+            d.topic.join(" ")
+        );
+    } else {
+        println!(
+            "narrowed  [{}]{}: {}",
+            d.topic.join(" "),
+            also_said(&d.forms),
+            narrowed.join(", ")
+        );
+    }
+    ExitCode::Success
+}
+
+/// The forms of the topic's words a narrowed slot matched by stem (rule 26), as a suffix to the
+/// topic: ` (also cured)`, or nothing.
+fn also_said(forms: &[String]) -> String {
+    if forms.is_empty() {
+        String::new()
+    } else {
+        format!(" (also {})", forms.join(" "))
+    }
+}
+
+/// Where `ask` logs the questions it could not read, when the configuration turns the log on
+/// (`ask: { log: true }`): `ask-misses.tsv` beside the configuration — `-C`'s file, or the
+/// store's `.smysl/config.hjson`, `ask` taking its store as an argument rather than `--store`.
+/// `Err` when the log is off, with the line that says why.
+#[cfg(all(feature = "text", feature = "providers"))]
+fn ask_log_path(global: &ArgMatches, store: Option<&str>) -> Result<std::path::PathBuf, String> {
+    let (path, required) = config_path_at(global, store);
+    let off = || {
+        format!(
+            "the miss log is off; `ask: {{ log: true }}` in {} turns it on",
+            path.display()
+        )
+    };
+    let src = match std::fs::read_to_string(&path) {
+        Ok(src) => src,
+        Err(e) if required => return Err(format!("{}: {e}", path.display())),
+        Err(_) => return Err(off()),
+    };
+    match smysl::ProviderConfigFile::load(&src) {
+        Ok(cfg) if cfg.ask_log => Ok(path.with_file_name("ask-misses.tsv")),
+        Ok(_) => Err(off()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+#[cfg(all(feature = "text", not(feature = "providers")))]
+fn ask_log_path(_global: &ArgMatches, _store: Option<&str>) -> Result<std::path::PathBuf, String> {
+    Err(
+        "the miss log is off: it is turned on in the configuration, which this build has no \
+         provider layer to read (build with --features providers)"
+            .into(),
+    )
+}
+
+/// One line of the miss log: the code, the language `--lang` named (`-` for none) and the
+/// question, tab-separated, with tabs and line breaks in the question made spaces. No clock and
+/// no store: the line says what was asked and what stopped it, and nothing about who or when.
+/// A log that cannot be written is said on stderr and changes nothing else.
+#[cfg(feature = "text")]
+fn log_ask_miss(
+    global: &ArgMatches,
+    store: &str,
+    code: &str,
+    lang: Option<&String>,
+    question: &str,
+) {
+    use std::io::Write as _;
+    // Off is the default and says nothing; a configuration that does not load says why.
+    let path = match ask_log_path(global, Some(store)) {
+        Ok(p) => p,
+        Err(why) if why.starts_with("the miss log is off") => return,
+        Err(why) => {
+            eprintln!("smysl ask: the miss log: {why}");
+            return;
+        }
+    };
+    let question: String = question
+        .chars()
+        .map(|c| {
+            if matches!(c, '\t' | '\n' | '\r') {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let line = format!(
+        "{code}\t{}\t{}\n",
+        lang.map_or("-", String::as_str),
+        question.trim()
+    );
+    let written = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut f| f.write_all(line.as_bytes()));
+    match written {
+        Ok(()) => eprintln!("smysl ask: logged to {}", path.display()),
+        Err(e) => eprintln!("smysl ask: the miss log {}: {e}", path.display()),
+    }
+}
+
+/// `ask --misses`: the log, one line a distinct miss — count, code, language, question — grouped
+/// by code and language, the most asked first.
+#[cfg(feature = "text")]
+/// The miss log's path and its text, empty when nothing was logged yet.
+#[cfg(feature = "text")]
+fn read_ask_log(
+    global: &ArgMatches,
+    store: Option<&str>,
+) -> Result<(std::path::PathBuf, String), ExitCode> {
+    let path = ask_log_path(global, store).map_err(|why| {
+        eprintln!("smysl ask: {why}");
+        ExitCode::Usage
+    })?;
+    match std::fs::read_to_string(&path) {
+        Ok(s) => Ok((path, s)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok((path, String::new())),
+        Err(e) => {
+            eprintln!("smysl ask: {}: {e}", path.display());
+            Err(ExitCode::Failure)
+        }
+    }
+}
+
+/// `ask --misses --recheck`: each distinct miss read again — a question no rule read through the
+/// rule table, by the language `--lang` gave it; one whose subject was not found through `ask`
+/// over the store — and marked `reads <intent>`, `subject <name>`, `ambiguous` or `still`. Rows
+/// are `count, code, lang, now, question`; the log is left as it is, since a question that reads
+/// now was still asked and missed then.
+#[cfg(feature = "text")]
+fn ask_recheck(global: &ArgMatches, store: Option<&str>) -> ExitCode {
+    use smysl::query::dossier::classify;
+    use smysl::query::{ask, AskError, AskOptions, Env};
+
+    let (path, src) = match read_ask_log(global, store) {
+        Ok(x) => x,
+        Err(code) => return code,
+    };
+    let mut counts: std::collections::BTreeMap<(&str, &str, &str), usize> = Default::default();
+    for line in src.lines().filter(|l| !l.trim().is_empty()) {
+        let mut cols = line.splitn(3, '\t');
+        if let (Some(code), Some(lang), Some(q)) = (cols.next(), cols.next(), cols.next()) {
+            *counts.entry((code, lang, q)).or_default() += 1;
+        }
+    }
+    let corpus_path = store
+        .map(str::to_string)
+        .or_else(|| global.get_one::<String>("store").cloned());
+    let corpus = match corpus_path.as_deref().map(Corpus::open) {
+        Some(Ok(c)) => Some(c),
+        Some(Err(e)) => {
+            eprintln!(
+                "smysl ask: {}: {e}",
+                corpus_path.as_deref().unwrap_or_default()
+            );
+            return ExitCode::Failure;
+        }
+        None => None,
+    };
+    let owner = AgentId::new("tool:smysl-ask").expect("a valid agent");
+    let mut read_now = 0;
+    for ((code, lang, q), n) in &counts {
+        let given = (*lang != "-").then_some(*lang);
+        let now = if *code == "no-subject" {
+            match &corpus {
+                None => "needs the store".to_string(),
+                Some(corpus) => {
+                    let mut opts = AskOptions::new(owner.clone());
+                    if let Some(l) = given {
+                        opts = opts.with_lang(l);
+                    }
+                    let asked = match corpus {
+                        Corpus::Library(library) => {
+                            let scope = smysl::text::scope::LibraryScope::new("recheck", library);
+                            let env = Env::new(library.store(), &scope)
+                                .with_times(&scope)
+                                .with_entities(&scope);
+                            ask(q, &env, &opts)
+                        }
+                        Corpus::Store(store, _) => {
+                            let scope = smysl::query::StoreScope::new("recheck", store);
+                            let stemmed = smysl::text::scope::Stemmed::new(store, &scope);
+                            let env = Env::new(store, &scope).with_entities(&stemmed);
+                            ask(q, &env, &opts)
+                        }
+                    };
+                    match asked {
+                        Ok(d) => format!("subject {}", d.subject),
+                        Err(AskError::Ambiguous { name, .. }) => format!("ambiguous {name}"),
+                        Err(_) => "still".to_string(),
+                    }
+                }
+            }
+        } else {
+            match classify(q, given) {
+                Ok(c) => format!("reads {}", c.intent),
+                Err(_) => "still".to_string(),
+            }
+        };
+        if now.starts_with("reads") || now.starts_with("subject") {
+            read_now += 1;
+        }
+        println!("{n}\t{code}\t{lang}\t{now}\t{q}");
+    }
+    eprintln!(
+        "smysl ask: {read_now} of {} distinct miss(es) read now, in {}",
+        counts.len(),
+        path.display()
+    );
+    ExitCode::Success
+}
+
+#[cfg(feature = "text")]
+fn ask_misses(global: &ArgMatches, store: Option<&str>, as_set: bool) -> ExitCode {
+    let (path, src) = match read_ask_log(global, store) {
+        Ok(x) => x,
+        Err(code) => return code,
+    };
+    // A line without `--lang` is grouped under a guess at its language, marked `~` so it reads
+    // as one; the log itself keeps only what was given.
+    let mut counts: std::collections::BTreeMap<(&str, String, &str), usize> = Default::default();
+    for line in src.lines().filter(|l| !l.trim().is_empty()) {
+        let mut cols = line.splitn(3, '\t');
+        let (Some(code), Some(lang), Some(q)) = (cols.next(), cols.next(), cols.next()) else {
+            continue;
+        };
+        let lang = match lang {
+            "-" => smysl::query::dossier::intent::guess_lang(q)
+                .map_or_else(|| "-".to_string(), |g| format!("~{g}")),
+            given => given.to_string(),
+        };
+        *counts.entry((code, lang, q)).or_default() += 1;
+    }
+    let mut rows: Vec<_> = counts.into_iter().collect();
+    rows.sort_by(|((c1, l1, q1), n1), ((c2, l2, q2), n2)| {
+        (c1, l1, std::cmp::Reverse(n1), q1).cmp(&(c2, l2, std::cmp::Reverse(n2), q2))
+    });
+    if as_set {
+        print!("{}", misses_as_set(&rows));
+    } else {
+        for ((code, lang, q), n) in &rows {
+            println!("{n}\t{code}\t{lang}\t{q}");
+        }
+    }
+    let asked: usize = rows.iter().map(|(_, n)| n).sum();
+    eprintln!(
+        "smysl ask: {asked} miss(es), {} distinct, in {}",
+        rows.len(),
+        path.display()
+    );
+    ExitCode::Success
+}
+
+/// `ask --misses --as-set`: the misses as a draft question set in the layout of
+/// `fixtures/dossier/*/questions.tsv` — id, intent, language, question — the most asked first,
+/// under a header that says what a set needs before it scores anything. A miss whose intent was
+/// read (no subject) carries it; one no rule read carries `?`. Ids are `m-1`, `m-2`, … for the
+/// subject's prefix to replace.
+#[cfg(feature = "text")]
+fn misses_as_set(rows: &[((&str, String, &str), usize)]) -> String {
+    use smysl::query::dossier::classify;
+    let mut ordered: Vec<&((&str, String, &str), usize)> = rows.iter().collect();
+    ordered.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    let mut out = format!(
+        "# A question-set draft from {} distinct logged miss(es) (`smysl ask --misses --as-set`).\n\
+         # Before it scores anything: give each `?` its intent, check each language marked `~` (a\n\
+         # guess) and replace each id's `m` with the subject's prefix; then declare the rules the set\n\
+         # is to score in this header, take its baseline before any code, and change no rule after a\n\
+         # run of it.\n#\n",
+        rows.len()
+    );
+    for (i, ((_, lang, q), _)) in ordered.iter().enumerate() {
+        // Read as `ask` read it: by the language `--lang` gave, never by a guess.
+        let given = (!lang.starts_with('~') && lang != "-").then_some(lang.as_str());
+        let intent = classify(q, given)
+            .map(|c| c.intent.to_string())
+            .unwrap_or_else(|_| "?".to_string());
+        out.push_str(&format!("m-{}\t{intent}\t{lang}\t{q}\n", i + 1));
+    }
+    out
 }
 
 #[cfg(not(feature = "text"))]
@@ -9085,10 +9579,13 @@ enum Job {
         uid: String,
         current: bool,
     },
-    /// `--from-question`: a model writes the query (SMYSL-2.5 §3.15, TX-P10 step 5).
+    /// `--from-question`: a model writes the query (SMYSL-2.5 §3.15, TX-P10 step 5). `store` is
+    /// the store as given, positional or `--store`, because the configuration that routes the
+    /// model is the one beside it.
     Ask {
         question: String,
         yes: bool,
+        store: String,
     },
 }
 
@@ -9116,6 +9613,7 @@ fn declares_query(store: &(impl StoreRead + ?Sized)) -> bool {
 fn q_from_question(
     question: &str,
     yes: bool,
+    store: &str,
     env: &smysl::query::Env<'_>,
     opts: &smysl::query::PlanOptions,
     m: &ArgMatches,
@@ -9124,7 +9622,7 @@ fn q_from_question(
     use smysl::query::Translator as _;
     use std::io::IsTerminal as _;
 
-    let registry = match load_registry(global) {
+    let registry = match load_registry_at(global, Some(store)) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("smysl q: {}", e.message);
@@ -9218,6 +9716,7 @@ fn q_from_question(
 fn q_from_question(
     _question: &str,
     _yes: bool,
+    _store: &str,
     _env: &smysl::query::Env<'_>,
     _opts: &smysl::query::PlanOptions,
     _m: &ArgMatches,
@@ -9309,8 +9808,13 @@ fn q_run(
     use smysl::query::{explain, run};
 
     let mut records: Vec<Record> = Vec::new();
-    if let Job::Ask { question, yes } = job {
-        return q_from_question(question, *yes, env, opts, m, global);
+    if let Job::Ask {
+        question,
+        yes,
+        store,
+    } = job
+    {
+        return q_from_question(question, *yes, store, env, opts, m, global);
     }
     let (plan, first, as_view, effect) = match job {
         Job::Rerun { uid, current } => {
@@ -10070,9 +10574,23 @@ impl std::fmt::Display for ConfigError {
 /// caller did not ask for and did not see.
 #[cfg(feature = "providers")]
 fn config_path(global: &ArgMatches) -> (std::path::PathBuf, bool) {
+    config_path_at(
+        global,
+        global.get_one::<String>("store").map(String::as_str),
+    )
+}
+
+/// [`config_path`] for a store the caller names, for a command whose store is not always
+/// `--store`: `q --from-question "…" STORE` reads its one positional as the store, and the
+/// configuration beside that store is the one that routes its model.
+#[cfg(feature = "providers")]
+fn config_path_at(global: &ArgMatches, store: Option<&str>) -> (std::path::PathBuf, bool) {
     match global.get_one::<String>("config") {
         Some(p) => (std::path::PathBuf::from(p), true),
-        None => (project_file(global, smysl::ProviderConfigFile::PATH), false),
+        None => (
+            root_beside(store).join(smysl::ProviderConfigFile::PATH),
+            false,
+        ),
     }
 }
 
@@ -10098,7 +10616,14 @@ fn config_relative(global: &ArgMatches, p: &str) -> std::path::PathBuf {
 /// there.
 #[cfg(feature = "providers")]
 fn load_config(global: &ArgMatches) -> Result<smysl::ProviderConfigFile, ConfigError> {
-    let (path, required) = config_path(global);
+    load_config_from(config_path(global))
+}
+
+/// [`load_config`] from a path [`config_path`] or [`config_path_at`] chose.
+#[cfg(feature = "providers")]
+fn load_config_from(
+    (path, required): (std::path::PathBuf, bool),
+) -> Result<smysl::ProviderConfigFile, ConfigError> {
     match std::fs::read_to_string(&path) {
         Ok(src) => smysl::ProviderConfigFile::load(&src).map_err(|e| ConfigError {
             code: ExitCode::Failure,
@@ -10142,7 +10667,19 @@ fn load_prompt(
 /// Load the provider configuration, falling back to the all-local default.
 #[cfg(feature = "providers")]
 fn load_registry(global: &ArgMatches) -> Result<smysl::Registry, ConfigError> {
-    let cfg = load_config(global)?;
+    load_registry_at(
+        global,
+        global.get_one::<String>("store").map(String::as_str),
+    )
+}
+
+/// [`load_registry`] from the configuration beside `store` ([`config_path_at`]).
+#[cfg(feature = "providers")]
+fn load_registry_at(
+    global: &ArgMatches,
+    store: Option<&str>,
+) -> Result<smysl::Registry, ConfigError> {
+    let cfg = load_config_from(config_path_at(global, store))?;
 
     let mut r = smysl::Registry::new().offline(global.get_flag("offline"));
     for p in cfg.providers.values() {

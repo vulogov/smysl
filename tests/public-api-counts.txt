@@ -31,11 +31,11 @@ smysl-thread     267
 smysl-render     915
 smysl-retrieve   379
 smysl-embed      64
-smysl-provider   726
+smysl-provider   729
 smysl-ingest     1841
 smysl-tui        218
-smysl-text       3853
-smysl-query      3622
+smysl-text       3861
+smysl-query      3666
 smysl-measure    3360
 smysl-lib        1537
 smysl-embed-candle 128

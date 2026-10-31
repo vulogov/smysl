@@ -1,0 +1,14 @@
+# GE-T10's false-friend list, the parts pass before the declared rules 24-25 (rules 22-23 as of
+# commit a70c60a), written by `cargo test -p smysl-text --features stem --test ge_t10_third ge_t10_false_friends -- --nocapture`.
+GE-T10, false-friend list: the parts pass alone
+    ff-de-1    de  Lindenbaum: wanted -, found [e/lind e/lind-ru]
+    ff-de-2    de  Linderung: wanted -, found [e/lind e/lind-ru]
+    ff-de-3    de  Lindwurm: wanted -, found [e/lind e/lind-ru]
+    ff-de-4    de  Lindauer: wanted -, found [e/lind e/lind-ru]
+    ff-de-5    de  Lindgrün: wanted -, found [e/lind e/lind-ru]
+    ff-de-6    de  Snowboard: wanted -, found [e/snow e/snow-ru]
+    ff-de-7    de  Snowboarder: wanted -, found [e/snow e/snow-ru]
+    ff-de-8    de  Jennerwein: wanted -, found [e/jenner e/jenner-ru]
+    ff-ru-1    ru  холерический: wanted -, found [e/cholera e/cholera-es e/cholera-fr e/cholera-ru]
+    ff-ru-2    ru  холерическая: wanted -, found [e/cholera e/cholera-es e/cholera-fr e/cholera-ru]
+  false hits 10/14, guards found 16/16

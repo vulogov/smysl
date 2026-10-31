@@ -1,0 +1,84 @@
+# GE-T10's yes-or-no set (SMYSL-2.5 OQ-22's owed intent vocabulary, fourth round): ten
+# questions, eight verifications asked as a bare yes-or-no question and two guards of other
+# intents written with the same verbs, each in the five tier-1 languages, fifty rows, over the
+# committed corpus (`../gold/corpus.smy`). Only the front is scored, as on `../sixth/`.
+#
+# WHY. `ask --explain` read "Is it true that scurvy is cured by citrus fruit?" and refused "Is
+# scurvy cured by citrus fruit?" (SMY-E468): the table reads verification by its openers ("is
+# it true that", English `did`/`does`, German `hat`, French `est-ce que`) and not by the shape
+# a yes-or-no question takes in each language — a verb first, an inverted subject, a particle.
+#
+# THE RULE, DECLARED before a word of this set was written; scored first without it
+# (`baseline.txt`), and not changed after a run:
+#  27. a yes-or-no question as verification, by the verb that opens it or the inversion that
+#      marks it — a LAST-RESORT tier: these rules read a question only when no other rule
+#      reads it, so `why is`, `where is`, `pourquoi … -t-il` keep their readings whatever their
+#      length:
+#        en  is / are / was / were / has / have / had / do / can / could
+#        de  ist / sind / war / waren / wird / werden / wurde / wurden / kann / konnte
+#        es  es / son / fue / fueron / se / puede
+#        fr  -t-il / -t-elle / -il / -elle / -ils / -elles (infixes)
+#        ru  ли (infix)
+#      and an infix form only in a question that does not open with a question word:
+#        fr  qu' que quel quelle quels quelles qui comment où pourquoi combien quand
+#        ru  что кто как где почему зачем когда какой какая какое какие каков сколько откуда
+#
+# NOT DECLARED, ON PURPOSE: a Spanish yes-or-no question with no such verb ("¿Probó Jenner su
+# vacuna?") is marked only by its question marks, which the table does not see; and French
+# `-t-on` is as often an explanation's ("pour quelle raison a-t-on …") as a verification's.
+#
+# WHO WROTE THIS. The hand that declared the rule, after declaring it; some rows reach for a
+# verb the rule does not list (Spanish `era`, `eran`, French `-t-on`), as a person would.
+# Single hand, so no agreement figure.
+#
+# Columns as `../gold/questions.tsv`: qid, intent, lang, question.
+sc-verify4	verify	en	Is scurvy cured by citrus fruit?
+sc-verify4	verify	de	Wird Skorbut durch Zitrusfrüchte geheilt?
+sc-verify4	verify	es	¿Se cura el escorbuto con cítricos?
+sc-verify4	verify	fr	Le scorbut est-il guéri par les agrumes ?
+sc-verify4	verify	ru	Лечится ли цинга цитрусовыми?
+ch-verify4	verify	en	Was cholera spread by water?
+ch-verify4	verify	de	Wurde die Cholera durch Wasser verbreitet?
+ch-verify4	verify	es	¿Fue el cólera propagado por el agua?
+ch-verify4	verify	fr	Le choléra était-il transmis par l'eau ?
+ch-verify4	verify	ru	Передавалась ли холера через воду?
+mi-verify4	verify	en	Was miasma the cause of disease?
+mi-verify4	verify	de	War Miasma die Ursache von Krankheiten?
+mi-verify4	verify	es	¿Era el miasma la causa de las enfermedades?
+mi-verify4	verify	fr	Le miasme causait-il les maladies ?
+mi-verify4	verify	ru	Вызывали ли миазмы болезни?
+se-verify4	verify	en	Were deaths cut by Semmelweis's handwashing?
+se-verify4	verify	de	Sind die Todesfälle durch Semmelweis gesunken?
+se-verify4	verify	es	¿Se redujeron las muertes con Semmelweis?
+se-verify4	verify	fr	Semmelweis a-t-il réduit les décès ?
+se-verify4	verify	ru	Снизил ли Земмельвейс смертность?
+je-verify4	verify	en	Has Jenner's vaccine protected people from smallpox?
+je-verify4	verify	de	Hat Jenners Impfstoff vor den Pocken geschützt?
+je-verify4	verify	es	¿Protegió la vacuna de Jenner contra la viruela?
+je-verify4	verify	fr	La vaccine de Jenner protégeait-elle contre la variole ?
+je-verify4	verify	ru	Защищала ли вакцина Дженнера от оспы?
+li-verify4	verify	en	Can James Lind's trial be trusted?
+li-verify4	verify	de	Kann man dem Versuch von James Lind trauen?
+li-verify4	verify	es	¿Puede uno fiarse del ensayo de James Lind?
+li-verify4	verify	fr	Peut-on se fier à l'essai de James Lind ?
+li-verify4	verify	ru	Можно ли доверять опыту Джеймса Линда?
+ph-verify4	verify	en	Is phlogiston real?
+ph-verify4	verify	de	Ist Phlogiston real?
+ph-verify4	verify	es	¿Es real el flogisto?
+ph-verify4	verify	fr	Le phlogistique existe-t-il ?
+ph-verify4	verify	ru	Существует ли флогистон?
+sn-verify4	verify	en	Were John Snow's maps accurate?
+sn-verify4	verify	de	Waren John Snows Karten genau?
+sn-verify4	verify	es	¿Eran exactos los mapas de John Snow?
+sn-verify4	verify	fr	Les cartes de John Snow étaient-elles exactes ?
+sn-verify4	verify	ru	Были ли карты Джона Сноу точными?
+ch-explain4	explain	en	Why is cholera spread by water?
+ch-explain4	explain	de	Warum wird die Cholera durch Wasser verbreitet?
+ch-explain4	explain	es	¿Por qué se propaga el cólera por el agua?
+ch-explain4	explain	fr	Pourquoi le choléra est-il transmis par l'eau ?
+ch-explain4	explain	ru	Почему холера передаётся через воду?
+sp-locate3	locate	en	Where is smallpox mentioned?
+sp-locate3	locate	de	Wo werden die Pocken erwähnt?
+sp-locate3	locate	es	¿Dónde se menciona la viruela?
+sp-locate3	locate	fr	Où la variole est-elle mentionnée ?
+sp-locate3	locate	ru	Где упоминается оспа?

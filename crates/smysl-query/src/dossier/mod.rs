@@ -58,7 +58,7 @@ use smysl_core::{
     canonical_uid, hash_bytes, quantise, Hlc, KernelType, Role, Status, ThreadSchema,
     UnitCoreBuilder,
 };
-use smysl_graph::SalienceRequest;
+use smysl_graph::{SalienceRequest, Store};
 
 use crate::exec::{Answer, Run};
 use crate::plan::{Env, PlanOptions, Purity};
@@ -271,6 +271,32 @@ pub struct SlotResult {
     pub narrowed: bool,
 }
 
+/// Which pass of the subject search found the subject: the name as the question spells it, its
+/// stems, or a word with the name as a part of it (rules 22 to 25).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SubjectFound {
+    Spelled,
+    Stemmed,
+    Part,
+}
+
+impl SubjectFound {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            SubjectFound::Spelled => "as spelled",
+            SubjectFound::Stemmed => "by its stems",
+            SubjectFound::Part => "as part of a word",
+        }
+    }
+}
+
+impl std::fmt::Display for SubjectFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A dossier, ready to append.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -280,10 +306,15 @@ pub struct Dossier {
     /// The name the subject was found under, and the entities taken for it.
     pub subject: String,
     pub entities: Vec<Uid>,
+    /// How the subject search found [`Dossier::subject`].
+    pub found: SubjectFound,
     /// The words of the topic a narrowed slot looks for ([`topic_terms`]), empty for an intent
     /// with no narrowed slot, and whether any unit about the subject says one — which is what
     /// decides whether those slots narrow.
     pub topic: Vec<String>,
+    /// The other forms of the topic's words that units about the subject use, found by stem
+    /// and matched beside them (rule 26): `cured` for a question that asked `cures`.
+    pub forms: Vec<String>,
     pub topic_found: bool,
     pub slots: Vec<SlotResult>,
     pub thread: Thread,
@@ -313,6 +344,10 @@ impl Entities for Picked<'_> {
         } else {
             self.inner.resolve(name)
         }
+    }
+
+    fn stems(&self, text: &str, lang: &str) -> Option<Vec<String>> {
+        self.inner.stems(text, lang)
     }
 }
 
@@ -515,9 +550,71 @@ pub fn topic_terms(topic: &str, subject: &str, lang: &str) -> Vec<String> {
         .collect()
 }
 
+/// The language a narrowed slot's words are stemmed in (rule 26): the rule table's or
+/// `--lang`, else the one [`intent::guess_lang`] reads off the question; `None` with neither.
+fn port_lang<'a>(given: &'a str, question: &str) -> Option<&'a str> {
+    if given.is_empty() {
+        intent::guess_lang(question)
+    } else {
+        Some(given)
+    }
+}
+
+/// Rule 26: each word of the units in `about` whose stem under `lang` is a topic word's, and
+/// which is not a topic word itself — once each, in the order of the topic word it stems with,
+/// then the store's. Empty when the port cannot stem.
+fn topic_forms(
+    topic: &[String],
+    about: &[Uid],
+    store: &Store,
+    port: &dyn Entities,
+    lang: &str,
+) -> Vec<String> {
+    let one = |w: &str| {
+        port.stems(w, lang)
+            .and_then(|s| (s.len() == 1).then(|| s[0].clone()))
+    };
+    let wanted: Vec<Option<String>> = topic.iter().map(|t| one(t)).collect();
+    if wanted.iter().all(Option::is_none) {
+        return Vec::new();
+    }
+    let tok = smysl_retrieve::Tokenizer::plain();
+    let mut said = BTreeSet::new();
+    for uid in about {
+        if let Some(text) = smysl_retrieve::postings::document_text(store, uid) {
+            said.extend(tok.terms(&text));
+        }
+    }
+    let stemmed: Vec<(String, String)> = said
+        .into_iter()
+        .filter(|w| !topic.contains(w))
+        .filter_map(|w| one(&w).map(|s| (w, s)))
+        .collect();
+    let mut out = Vec::new();
+    for want in wanted.iter().flatten() {
+        for (w, s) in &stemmed {
+            if s == want && !out.contains(w) {
+                out.push(w.clone());
+            }
+        }
+    }
+    out
+}
+
+/// Rule 29: a German name in the genitive, without its ending — `Jenners`, `John Snows`,
+/// `Semmelweis'` — for the spelled pass to try when the run as written names nothing.
+fn genitive(name: &str) -> Option<String> {
+    let base = name
+        .strip_suffix('s')
+        .or_else(|| name.strip_suffix('\''))
+        .or_else(|| name.strip_suffix('’'))?;
+    (base.chars().last().is_some_and(char::is_alphabetic)).then(|| base.to_string())
+}
+
 /// Step 1: the longest run of the topic's words the port has candidates for — as spelled, and
 /// only when no run matches as spelled, through `lang`'s stemmer
-/// ([`Entities::candidates_stemmed`]). With `first`, which a comparison asks for, the run that
+/// ([`Entities::candidates_stemmed`]); and only when neither finds anything, each single word
+/// as a part of a name ([`Entities::candidates_derived`]). With `first`, which a comparison asks for, the run that
 /// starts earliest wins and the longest only at that start: a comparison names two subjects,
 /// and the one written first is the one it asks about.
 fn find_subject(
@@ -526,7 +623,7 @@ fn find_subject(
     pick: Option<Uid>,
     lang: &str,
     first: bool,
-) -> Result<(String, Vec<Uid>), AskError> {
+) -> Result<(String, Vec<Uid>, SubjectFound), AskError> {
     let ws = words(topic);
     let n = ws.len();
     let mut spans: Vec<(usize, usize)> = (1..=n)
@@ -537,21 +634,36 @@ fn find_subject(
     } else {
         spans.sort_by_key(|&(start, len)| (std::cmp::Reverse(len), start));
     }
-    // As spelled, then through the stems.
-    for stemmed in [false, true] {
+    // As spelled, then through the stems, then a word as a part of a name.
+    for (pass, found) in [
+        SubjectFound::Spelled,
+        SubjectFound::Stemmed,
+        SubjectFound::Part,
+    ]
+    .into_iter()
+    .enumerate()
+    {
         for &(start, len) in &spans {
+            if pass == 2 && len > 1 {
+                continue;
+            }
             let name = ws[start..start + len].join(" ");
-            let candidates = if stemmed {
-                port.candidates_stemmed(&name, lang)
-            } else {
-                port.candidates(&name)
+            let candidates = match pass {
+                0 => match port.candidates(&name) {
+                    c if c.is_empty() && lang == "de" => {
+                        genitive(&name).map_or(c, |g| port.candidates(&g))
+                    }
+                    c => c,
+                },
+                1 => port.candidates_stemmed(&name, lang),
+                _ => port.candidates_derived(&name, lang),
             };
             if candidates.is_empty() {
                 continue;
             }
             if let Some(uid) = pick {
                 if let Some(group) = candidates.iter().find(|g| g.contains(&uid)) {
-                    return Ok((name, group.clone()));
+                    return Ok((name, group.clone(), found));
                 }
                 // The pick may name an entity a shorter run means; keep looking.
                 continue;
@@ -578,7 +690,7 @@ fn find_subject(
                 });
             }
             let group = candidates.into_iter().next().expect("one candidate");
-            return Ok((name, group));
+            return Ok((name, group, found));
         }
     }
     match pick {
@@ -703,7 +815,7 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
     } else {
         classified.lang
     };
-    let (subject, group) = find_subject(
+    let (subject, group, found) = find_subject(
         &classified.topic,
         port,
         opts.subject,
@@ -734,9 +846,9 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
     } else {
         Vec::new()
     };
-    let topic_found = !topic.is_empty() && {
+    let about = |terms: &[String]| -> Result<Vec<Uid>, AskError> {
         let text = templates::expand_scope(
-            &templates::narrow("about entity($subject)\n", &topic),
+            &templates::narrow("about entity($subject)\n", terms),
             opts.scope.as_deref(),
         );
         let fail = |diagnostics: Vec<Diagnostic>| AskError::Slot {
@@ -749,8 +861,16 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
         let bound = crate::bind(&parsed.query, &popts.params).map_err(|d| fail(vec![d]))?;
         let plan = crate::plan(&bound, &scoped, &popts).map_err(fail)?;
         let run = crate::run(&plan, &scoped, &popts).map_err(fail)?;
-        !run.answer.uids().is_empty()
+        Ok(run.answer.uids())
     };
+    // Rule 26: the forms of the topic's words that the units about the subject use, found by
+    // stem, matched beside the words as asked.
+    let forms = match (topic.is_empty(), port_lang(stem_lang, question)) {
+        (false, Some(l)) => topic_forms(&topic, &about(&[])?, env.store, port, l),
+        _ => Vec::new(),
+    };
+    let narrow_to: Vec<String> = topic.iter().chain(&forms).cloned().collect();
+    let topic_found = !topic.is_empty() && !about(&narrow_to)?.is_empty();
 
     let salience = smysl_graph::salience(env.store, &SalienceRequest::default());
     let mut slot_results = Vec::new();
@@ -759,7 +879,7 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
     for slot in templates::slots(classified.intent) {
         let narrowed = topic_found && templates::narrowed(classified.intent, slot.name);
         let text = if narrowed {
-            templates::narrow(slot.text, &topic)
+            templates::narrow(slot.text, &narrow_to)
         } else {
             slot.text.to_string()
         };
@@ -818,6 +938,10 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
         field(&uid.to_string());
     }
     field(&topic.join(" "));
+    // Only when there are any, so a recipe made before rule 26 still holds.
+    if !forms.is_empty() {
+        field(&format!("forms:{}", forms.join(" ")));
+    }
     field(opts.scope.as_deref().unwrap_or(""));
     field(&opts.budget.map(|n| n.to_string()).unwrap_or_default());
     // Only when it is not the default, so every dossier recipe made before OQ-52 still holds.
@@ -1009,7 +1133,9 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
         classified,
         subject,
         entities: group,
+        found,
         topic,
+        forms,
         topic_found,
         slots: slot_results,
         thread,

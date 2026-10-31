@@ -636,10 +636,11 @@ accounts a later one replaced. Both the old questions and seventeen new ones
 score 1.000 on counter-evidence precision. Two things to know when you read
 one:
 
-- *The words must match.* `matches` does not stem, so _spread_ does not find
-  _spreads_, and a rebuttal of a claim worded differently from your question
-  is missed. Recall on the new questions is 0.706. Phrase the question in the
-  store's words if a slot comes back thin.
+- *The words must match, up to their endings.* A narrowed slot also matches
+  the other forms of your words that the store's units about the subject use,
+  found by stem: asking _cures_ finds a claim that says _cured_. A different
+  word for the same thing is still missed (_remedy_ for _cure_), so phrase the
+  question in the store's words if a slot comes back thin.
 - *A question the store has no words for is not narrowed.* If no unit about the
   subject uses any of the question's words, as with a German question over an
   English store, the slot runs on the subject alone, as the first set did.
@@ -656,6 +657,57 @@ English spelling and one other. A question asked in any of the remaining three
 languages finds only the units that use its own spelling. Assert every pair. A class is
 a clique by design: one wrong edge shouldn't merge two things nobody said
 were the same.
+
+`ask` can keep the questions it could not read, if you ask it to. Put
+`ask: { log: true }` in the store's `.smysl/config.hjson`, and each question no
+rule reads (`SMY-E468`) or whose subject nothing in the store names is
+appended to `.smysl/ask-misses.tsv`: the code, the `--lang` you gave or `-`,
+and the question. `smysl ask --misses store` lists them, the most asked first.
+The file stays where it is written; nothing sends it anywhere, and a line
+holds no time and no user. Its use is to show which ways of asking the rule
+table still misses, so the next rules are written from questions people asked.
+A question asked without `--lang` is listed under a guess at its language,
+marked `~de`, and `--misses --as-set` writes the list as a draft question set
+to fill in and score.
+
+To see why `ask` read a question the way it did, add `--explain`. Instead of
+the dossier you get the reading, a field a line:
+
+#screen(caption: "$ smysl ask --explain \"Is it true that citrus fruit cures scurvy?\" corpus.smy")[
+```
+question  Is it true that citrus fruit cures scurvy?
+folded    is it true that citrus fruit cures scurvy
+intent    verify, by en/verify/is it true that … (en)
+topic     citrus fruit cures scurvy
+subject   `scurvy`, found as spelled: 5 entities
+slots     support, evidence, counter, reported; empty: reported
+narrowed  [citrus fruit cures] (also cured): counter, reported
+```
+]
+
+`folded` is what the rule table compares, so a question no rule reads can be
+set beside the rules' own wording; the reading stops there, with the same
+exit code. `found` says whether the subject was the question's own spelling,
+its stems, or a word with the name inside it. `(also cured)` names the forms
+the narrowed slots matched beside your words: the store says _cured_, the
+question _cures_, and counter-evidence comes back with the claim's rebuttal.
+
+A plain yes-or-no question is read as a verification: "Is scurvy cured by
+citrus fruit?", "Wird Skorbut durch Zitrusfrüchte geheilt?", "Le scorbut
+est-il guéri par les agrumes ?", "Лечится ли цинга цитрусовыми?". These forms
+are tried only when no other rule reads the question, so "Why is …" and
+"Where is …" keep their meaning, and only for the language the question
+looks like it is in: German "Was ergab sich …?" is not English "was". A word
+two languages share at the start ("Was cholera spread by water?") gives no
+such sign, and `ask` refuses the question rather than guess; add `--lang en`.
+
+After `ask` learns new ways of asking, `smysl ask --misses store --recheck`
+reads every logged miss again and marks the ones that read now, with the
+intent or subject they read as. The log itself is not changed.
+
+When a name means two things, `ask` lists each with its language and source
+and the first passage that mentions it, so you can see which Mary is which
+before you pick one with `--subject`.
 
 #section("Deriving all five, one worked example each")
 

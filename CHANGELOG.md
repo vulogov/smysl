@@ -7,6 +7,202 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.12.0 — 2026-10-31
+
+What 1.11 leaves open, by what it blocks rather than the order it is easiest. Every SMYSL-2 open
+question but two is closed, so what follows is work owed rather than questions asked.
+
+**A subject written as part of another word** — *done, see below.*
+
+**An intent table no set closes.** Three rounds, each measured on questions written after its
+rules, lifted the fourth set 40 → 80, the fifth 21 → 76 and the sixth 10 → 43 of 80, and each
+round found new ways of asking. The next rules want questions people ask, not ones one hand
+writes — *a way to collect them is done, see below; the rules wait for what it collects.*
+
+**And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
+GE-T10's gold is single-hand; they stay owed rather than planned.
+
+### A subject inside another word
+
+`ask` found a subject by its spelling and then by its stems, and neither reached a name inside a
+German compound (`Cholerabazillus`, `Pockenimpfung`) or a Russian adjective made from it
+(`холерный`) — the last subject misses in GE-T10's sets with the intent read. A third pass now
+tries each single word as containing a name, when nothing else in the question names one
+(`Entities::candidates_derived`; `smysl_text::scope::derived_candidates` for a library and a
+plain store alike): in German the name is the compound's first part, with three letters or
+more after it, and never a later part, so `Kuhpocken` stays cowpox; in Russian the word's stem
+less one relational suffix is the name's (`холерн` → `холер`, `дженнеровск` → `дженнер`). A
+name of several words is matched by its last.
+
+The two rules were declared before a **subject-parts set** of sixteen German and sixteen Russian
+questions was written (`fixtures/dossier/parts/`) and scored without them (`baseline.txt`):
+
+| parts set, 32 rows | before | after |
+|---|---:|---:|
+| subject found | 2 | 32 |
+
+In-sample, the fresh set's subjects go 83 → 85 of 85, and the fourth and fifth sets each gain
+the one compound they missed; no set gains a wrong subject. Five questions written to fail —
+hyphenated names, `земмельвейсовский` — did not, since a hyphenated name is a first part too.
+The cost is a German word that merely begins like a name: `Lindenbaum` would find James Lind,
+though only in a question in which nothing else names an entity.
+
+### The cost of a name inside a word, measured and cut
+
+Two more rules were declared before a list of fourteen false friends and sixteen guard words was
+written (`fixtures/dossier/parts/false-friends.tsv`) and scored without them
+(`false-friends-baseline.txt`). A German name of fewer than five letters is a first part only
+before a hyphen or `sch` — `Lind-Versuch` and `Lindsche` still, `Lind|enbaum` and `Snow|board`
+no longer (rule 24). Russian drops `-ическ` from the suffixes, since `холерический` is a
+temperament and not the disease, whose adjective is `холерный`; `-атическ` stays for
+`миазматический` (rule 25).
+
+| false-friend list | before | after |
+|---|---:|---:|
+| false hits, of 14 | 10 | 1 |
+| guards found, of 16 | 16 | 16 |
+
+The one left is the one expected before the run: `Jennerwein`, a surname, which begins with a
+name of six letters and is out of rule 24's reach. No question set's figure moved, the parts
+set's 32 of 32 among them.
+
+### Questions `ask` could not read, kept on request
+
+`ask: { log: true }` in a store's configuration makes `ask` append each question no rule reads
+(`SMY-E468`) or no subject is found for to `ask-misses.tsv` beside the configuration — the code,
+the `--lang` given or `-`, and the question — and `smysl ask --misses [STORE]` lists the distinct
+ones with their counts, by code and language, the most asked first. It is off unless set, the
+file stays where it is written, a line holds no time and no user, and no exit code or output
+changes when it is on. A value other than `true` or `false` is refused when the configuration
+loads. It is how the intent table's next rules can come from questions people ask: a round
+writes its rules from the log, declares them, and is scored as the three before it were.
+
+### Reading `ask`, and reading what it missed
+
+Four changes to how a person sees what `ask` did, none to what it does.
+
+- **`ask --explain`** prints the reading instead of the dossier, one field a line: the question,
+  its folded text (what the rule table compares), the intent and the rule that read it, the
+  topic, the subject and the pass that found it — as spelled, by its stems, or as part of a word
+  (`Dossier::found`, `SubjectFound`) — the slots with the empty ones named, and the words the
+  narrowed slots looked for. It stops where the reading stopped, with the exit code `ask` would
+  have given: a question no rule reads shows its folded text and exits 2, one whose subject
+  nothing names shows its topic and exits 1. It refuses `--save`, and a reading is not logged
+  as a miss. Its first use found the next thing to fix: *"Is it true that citrus fruit cures
+  scurvy?"* narrows to `[citrus fruit cures]` and comes back empty, because the store says
+  *cured* — slot narrowing matched words, not stems (rule 26, below).
+- **`ask --misses` groups an unmarked miss by a guessed language**, shown as `~de`, while the
+  log keeps only what `--lang` gave (`smysl_query::dossier::intent::guess_lang`: Cyrillic is
+  Russian; otherwise the Latin-script language whose common short words and letters the
+  question uses most, or none on a tie). Its word lists were written before it ran: over the
+  587 rows of every GE-T10 question set it was right on 563, wrong on one (a German question
+  with `an` read as English) and made no guess on 23, mostly two- and three-word questions
+  such as *Describe scurvy* — before the lists were completed by rule, below.
+- **`ask --misses --as-set`** writes the misses as a draft question set in
+  `fixtures/dossier/*/questions.tsv`'s layout, the most asked first: ids `m-1`, `m-2`, … for a
+  subject's prefix to replace, the intent where one was read and `?` where none was, the
+  language as given or guessed, under a header that says what a set needs before it scores
+  anything — rules declared, a baseline before any code, no rule changed after a run.
+- **`SMY-W417` tells its candidates apart**: each one's names with their language and source,
+  and the first unit that mentions it with how many more do — *Mary of Magdala stood by the
+  cross. — John 19:25* against *Mary of Nazareth kept these things in her heart. — Luke 2:19*,
+  where the list had shown two lines reading `Mary`.
+
+`link` and `summarise` were checked for the configuration fault fixed below and do not have it:
+neither takes a positional store, so theirs is always the `--store` the lookup reads.
+
+### What a question asks, in the words and forms it asks it
+
+Three changes to how `ask` reads a question, each measured the way the intent rounds were: the
+rule declared, the set written, a baseline taken before the code, nothing changed after a run.
+
+- **A narrowed slot matches the forms the store uses** (rule 26). `counter` and `reported`
+  look for the topic's words, as spelled; they now also look for each word of the units about
+  the subject that has a topic word's stem under the question's language — the chain that
+  indexes the library, through a new `Entities::stems` (none by default; the text crate's ports
+  answer it). The forms are written into the slot's text beside the words, so the saved query
+  carries what ran, and `--explain` names them: `narrowed  [citrus fruit cures] (also cured)`,
+  and the rebuttal of the claim asked about is reached where it was empty. The language is the
+  rule table's, else `--lang`, else `guess_lang`'s. Over a new set (`fixtures/dossier/forms/`,
+  each English verify and explain question of the gold and fresh sets with its words inflected
+  otherwise, scored on their gold) the variants went from P 0.840 R 0.700 to P 1.000 R 0.733,
+  and the originals, run beside them as guards, from P 1.000 R 0.700 to P 1.000 R 0.733. Two
+  variants moved the other way: they now narrow and miss a unit, where before nothing matched,
+  the slot ran unnarrowed and took a wrong one.
+- **A yes-or-no question is a verification** (rule 27): *Is scurvy cured by citrus fruit?*,
+  *Wird Skorbut … geheilt?*, *¿Se cura …?*, *Le scorbut est-il guéri … ?*, *Лечится ли …?* —
+  the opening verb, French inversion or Russian `ли`. A last-resort tier
+  (`intent::LAST_RESORT`): it reads a question only when no rule of the table does, so *why
+  is*, *where is* and *pourquoi … -t-il* keep their readings, and an inversion after a question
+  word (`qu'est-il résulté de …`) is not read as one. A new set (`fixtures/dossier/yesno/`,
+  eight verifications and two guards in five languages) went from 10 to 45 of 50; the five
+  left are the forms declared out of reach (Spanish `era`, `eran`, a Spanish question with no
+  verb to read, French `-t-on`) and a guard that stays unread. The sixth set went from 43 to 46
+  of 80. **One cost:** German *Was ergab sich aus …?* was unread and is now read as a
+  verification, by the English last-resort `was ` — the cross-language collision the
+  false-friend list found for names, here for an opener. Recorded, not tuned away.
+- **`guess_lang`'s lists are completed by a rule**: every article in all its forms, and every
+  word that opens a verification rule of the language. Over the 662 rows of all nine sets it is
+  right on 637, wrong on none and silent on 25, where it was 634, 1 and 27. In-sample: the
+  wrong one was known, and the two the new sets gained were seen in the run before the rule.
+
+Then the two things the yes-or-no set found, declared as rules before a set was written for
+them (`fixtures/dossier/collide/`: twenty questions, a baseline before the code):
+
+- **A last-resort rule keeps to its language** (rule 28): it does not read a question
+  `guess_lang` puts in another, so German *Was ergab sich …?* is no longer an English `was `.
+  Misread as a verification on the set 5 → 1 of 20, and the sixth set's misreading is undone.
+  The one left, *Was bewies Linds Versuch?*, gives the guess no German word to go on.
+- **A German name in the genitive is a name** (rule 29): when the question is German and a run
+  names nothing as written, the spelled pass tries it without a final `s` or `'` — *Jenners*,
+  *John Snows*. In the spelled pass, so the name written first wins over *Pocken* later in the
+  question. Subjects on the set 11 → 14 of 15, and spelled subjects up on every older set
+  (third 69 → 74 of 80). GE-T10's German end to end: set 1 P 0.784 R 0.945 → 0.788 0.967 (every
+  subject found), the fresh set P 0.484 R 0.750 → 0.478 0.800. *Listers* is still not found:
+  the corpus names him only as *Joseph Lister*.
+
+### No question misread in any set, and the misses read again
+
+A misread question costs more than an unread one: an unread question says so, a misread one
+answers another. Swept from every set's report, three rules, declared before their set was
+written (`fixtures/dossier/misread/`, forty questions, a baseline before the code):
+
+- **A thing's origin is a trace** (rule 30): *What is the origin of …*, *Was ist der Ursprung …*,
+  *¿Cuál es el origen …?*, *Quelle est l'origine … ?*, *Каково происхождение …?* — read as
+  definitions, by `what is`, until a longer rule read them.
+- **Explaining a term is a definition** (rule 31): *Explain the term …*, *Erkläre mir den
+  Begriff …*, *Explique le mot …*, *Объясни понятие …* — read as explanations, by `explain`.
+- **An opener two languages share needs the guess** (rule 32): a last-resort opener that is
+  one of `guess_lang`'s words for another language — English `was` is German too, Spanish
+  `es` — reads only when the guess names its own language. *Was bewies Linds Versuch?* is no
+  longer an English verification. **Its price:** *Was cholera spread by water?*, which the
+  guess cannot place either, is now unread, once in each set that asks it.
+
+The misread set went from 15 to 39 of 40 with 15 misread to none, and the sixth set from 46 to
+52 of 80. No question in any set is now read as an intent it does not ask.
+
+**`ask --misses --recheck`** reads each logged miss again under the current rules and store
+and marks it `reads <intent>`, `subject <name>`, `ambiguous` or `still` — a question no rule
+read through the rule table, by the language `--lang` gave it; one whose subject was not found
+through `ask` over the store. The log is not changed: a question that reads now was still
+asked and missed then.
+
+**What rule 26 costs** (`crates/smysl-text/tests/narrow_scale.rs`, a measurement): one subject
+mentioned by 10³, 10⁴ and 10⁵ units, `ask` through a port that stems and one that does not, on a
+question both narrow. The forms cost 1.3× at every size — 48 ms against 38, 0.51 s against
+0.39, 5.2 s against 3.9. Most of the time is narrowing itself, older than the rule: `matches`
+tokenises a unit's text once per alternative, and an `or` of them could do it once.
+
+### `q --from-question` asks the provider its store's configuration names
+
+`q --from-question "…" STORE` reads its one positional as the store, and that store never
+reached the global `--store`, so the configuration that routes the model was looked for in the
+current directory and, absent there, was the all-local default. Run from anywhere but the
+project, a store whose configuration routes to a hosted model had its question translated by a
+local one — or by whatever another directory's configuration named. It now reads the
+configuration beside the store it was given, as `ask --answer` and `attest` already did
+(`tests/cmd_q.rs`, both forms of the store and `attest` as the control). `-C` still overrides.
+
 ## 1.11.0 — 2026-10-29
 
 What 1.10 leaves open, by the phase it blocks rather than the order it is easiest. The roadmap's §4
