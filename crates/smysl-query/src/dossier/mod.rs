@@ -579,7 +579,10 @@ fn topic_forms(
         return Vec::new();
     }
     let tok = smysl_retrieve::Tokenizer::plain();
-    let mut said = BTreeSet::new();
+    // Hashed, not ordered: a popular subject's units say a vocabulary of thousands, and
+    // keeping it sorted as it is read cost as much as tokenising it. The few forms found are
+    // sorted below, which is the store's order the output promises.
+    let mut said = std::collections::HashSet::new();
     for uid in about {
         if let Some(text) = smysl_retrieve::postings::document_text(store, uid) {
             said.extend(tok.terms(&text));
@@ -592,11 +595,13 @@ fn topic_forms(
         .collect();
     let mut out = Vec::new();
     for want in wanted.iter().flatten() {
-        for (w, s) in &stemmed {
-            if s == want && !out.contains(w) {
-                out.push(w.clone());
-            }
-        }
+        let mut forms: Vec<&String> = stemmed
+            .iter()
+            .filter(|(w, s)| s == want && !out.contains(w))
+            .map(|(w, _)| w)
+            .collect();
+        forms.sort();
+        out.extend(forms.into_iter().cloned());
     }
     out
 }

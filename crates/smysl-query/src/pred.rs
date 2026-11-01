@@ -25,6 +25,7 @@
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use smysl_core::diag::{Code, Diagnostic, Span};
 use smysl_core::ids::{SchemaId, Uid};
@@ -452,6 +453,9 @@ impl Lensed {
     }
 }
 
+/// A unit's text as `matches` reads it: its terms, once tokenised.
+type Terms = Arc<BTreeSet<String>>;
+
 /// Reads units for predicates, through the store's declarations (§3.9).
 ///
 /// One per environment: the declarations are decoded once, each unit is lensed once however
@@ -463,6 +467,7 @@ pub struct Reader<'a> {
     views: RefCell<BTreeMap<Uid, Option<Lensed>>>,
     chains: RefCell<BTreeMap<(String, u32), Option<LensChain>>>,
     lost: RefCell<BTreeMap<String, BTreeSet<Uid>>>,
+    terms: RefCell<Option<(Uid, Option<Terms>)>>,
 }
 
 impl<'a> Reader<'a> {
@@ -473,6 +478,7 @@ impl<'a> Reader<'a> {
             views: RefCell::new(BTreeMap::new()),
             chains: RefCell::new(BTreeMap::new()),
             lost: RefCell::new(BTreeMap::new()),
+            terms: RefCell::new(None),
         }
     }
 
@@ -550,6 +556,29 @@ impl<'a> Reader<'a> {
             payload: view.payload,
             lost,
         })
+    }
+
+    /// The terms of a unit's indexable text, `None` when it has none.
+    ///
+    /// Only the last unit asked about is kept: a predicate is judged one unit at a time, so
+    /// every `matches` of an `or` (a narrowed slot is one per form) reads the same unit, and
+    /// holding every unit's terms would cost a run's whole corpus in memory.
+    fn terms(&self, uid: &Uid) -> Option<Terms> {
+        if let Some((at, t)) = &*self.terms.borrow() {
+            if at == uid {
+                return t.clone();
+            }
+        }
+        let t = smysl_retrieve::postings::document_text(self.store, uid).map(|text| {
+            Arc::new(
+                smysl_retrieve::Tokenizer::plain()
+                    .terms(&text)
+                    .into_iter()
+                    .collect(),
+            )
+        });
+        *self.terms.borrow_mut() = Some((*uid, t.clone()));
+        t
     }
 
     fn unmappable(&self, key: &str, uid: &Uid) {
@@ -681,7 +710,6 @@ pub fn holds_near(
     params: &std::collections::BTreeMap<String, String>,
     near: &Near,
 ) -> bool {
-    let store = r.store;
     match pred {
         Lowered::And(items) => items.iter().all(|p| holds_near(r, uid, p, params, near)),
         Lowered::Or(items) => items.iter().any(|p| holds_near(r, uid, p, params, near)),
@@ -705,7 +733,7 @@ pub fn holds_near(
             }) else {
                 return false;
             };
-            matches_terms(store, uid, &query)
+            matches_terms(r, uid, &query)
         }
         Lowered::Cmp {
             field, op, value, ..
@@ -757,13 +785,11 @@ pub fn holds_near(
 /// goes through `smysl-retrieve`'s tokeniser rather than a second one, because a filter that
 /// split words differently from the index would accept units `find` cannot retrieve and
 /// reject units it can.
-fn matches_terms(store: &Store, uid: &Uid, query: &str) -> bool {
-    let tok = smysl_retrieve::Tokenizer::plain();
-    let Some(text) = smysl_retrieve::postings::document_text(store, uid) else {
+fn matches_terms(r: &Reader<'_>, uid: &Uid, query: &str) -> bool {
+    let Some(have) = r.terms(uid) else {
         return false;
     };
-    let have: std::collections::BTreeSet<String> = tok.terms(&text).into_iter().collect();
-    let want = tok.terms(query);
+    let want = smysl_retrieve::Tokenizer::plain().terms(query);
     !want.is_empty() && want.iter().all(|t| have.contains(t))
 }
 

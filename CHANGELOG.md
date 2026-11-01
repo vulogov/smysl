@@ -24,11 +24,34 @@ collects them, and the rules wait for what it collects.
 not found at all. The semantic tier is the place to look, behind the spelled, stemmed and
 derived passes so that none of them changes.
 
-**What narrowing costs.** Rule 26's forms cost 1.3× at every size measured, because `matches`
-tokenises a unit's text once per alternative; an `or` of them could do it once.
+**What narrowing costs** — *measured, see below: the reason given here was not the cost.*
 
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 GE-T10's gold is single-hand; they stay owed rather than planned.
+
+### What narrowing costs, and where
+
+`where matches` read and tokenised a unit's text once per `matches`, and a narrowed slot is an
+`or` of one per word and form. The predicate reader now keeps the terms of the unit it is
+judging, so an `or` of them tokenises it once; only the last unit's, since a predicate is judged
+a unit at a time and every unit's would hold a run's corpus in memory. That was not rule 26's
+cost, which the 1.12 entry said it was: it was every narrowed slot's, forms or none, and both
+columns of the measurement (`crates/smysl-text/tests/narrow_scale.rs`) fell by a fifth while the
+gap between them stayed — 1.29 s against 1.30 s at 10⁵ units.
+
+The gap was the forms themselves. Finding them reads every unit about the subject once more,
+and half of that was keeping the words it read sorted as it read them; stemming the 7,698 words
+10⁴ units say took 1.5 ms of 122. They are gathered unsorted now and the few forms found sorted
+after, which is the order they were given in before.
+
+| units | plain, before | plain, after | stems, before | stems, after | ratio after |
+|------:|--------------:|-------------:|--------------:|-------------:|------------:|
+| 10³   | 38 ms  | 30 ms  | 49 ms  | 37 ms  | 1.24 |
+| 10⁴   | 0.39 s | 0.30 s | 0.52 s | 0.38 s | 1.27 |
+| 10⁵   | 3.97 s | 3.06 s | 5.26 s | 3.91 s | 1.28 |
+
+What is left of the ratio is that second reading of the subject's units, which the forms cannot
+be found without. Nothing a question returns changed.
 
 ## 1.12.0 — 2026-10-31
 
