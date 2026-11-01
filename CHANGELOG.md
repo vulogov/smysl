@@ -21,14 +21,46 @@ collects them, and the rules wait for what it collects.
 
 **A subject by another name.** *Listers* was not found because the corpus names him only as
 *Joseph Lister* — *a surname, see below.* What is left is a subject named by a synonym the
-store does not write at all, *consumption* for *tuberculosis*, which no spelling, stem or part
-of a word reaches. The semantic tier is the place to look, behind every other pass so that none
-of them changes; it makes `ask` model-dependent, and it wants its set written first.
+store does not write at all, *Blattern* for smallpox, which no spelling, stem or part of a word
+reaches — *declared as rule 34 and not adopted, see below.* It stays open, for a model that can
+tell a synonym from its neighbour.
 
 **What narrowing costs** — *measured, see below: the reason given here was not the cost.*
 
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 GE-T10's gold is single-hand; they stay owed rather than planned.
+
+### A subject by meaning: declared, calibrated, not adopted
+
+Rule 34 was to find what no name reaches through the store's model: the question's topic put to
+the semantic source, each entity scored by the best cosine of its own unit or of a unit that
+mentions it, the best naming the subject at a floor T, and `SMY-W417` within a margin M of the
+next. It was declared with its set before any code (`fixtures/dossier/synonyms/`): 34 questions
+naming a subject by a name the corpus does not write — old and medical names, paraphrases,
+epithets, in five languages — and 15 guards beside them, with ten calibration rows apart to fix
+T and M before the set was scored, and a stated outcome if they could not be fixed: *reported,
+not tuned around.*
+
+They could not. With `potion-multilingual-128M` the guards outscore the synonyms (`tests/ge_t10_synonyms.rs`,
+a measurement behind `SMYSL_EMBED_MODEL_MULTILINGUAL`):
+
+| row | wanted | its score | best other |
+|---|---|---:|---:|
+| *Was ist die Variola?* | smallpox | 0.560 | 0.224 |
+| *Who was the pioneer of vaccination?* | Jenner | 0.618 | 0.488 |
+| *Explain the term inflammable principle* | phlogiston | 0.193 | 0.210 |
+| *Erkläre den Begriff faulige Dünste* | miasma | 0.213 | 0.288 |
+| *What is yellow fever?* | none | — | 0.645 |
+| *Who was Koch?* | none | — | 0.492 |
+
+The lowest wanted score is 0.193 and the highest guard's 0.645, so no floor takes the synonyms
+and leaves the guards; two synonyms do not even put their subject first. Nearness by meaning,
+in a static model, is nearness of topic — a fever is near a fever, a bacteriologist near a
+surgeon — and a subject has to be a thing, not a topic. So `ask` has no fourth pass: a question
+that names its subject by a synonym is not found, says so, and costs no model. The set and its
+baseline stay (15 of 49, 4 of 10, the guards), and the measurement asks the question again of
+any model the variable names; one that separates the rows is the occasion to declare the rule
+anew, on rows written for it.
 
 ### A subject named by its surname
 
