@@ -1082,8 +1082,10 @@ test asserts rebuild and incremental produce the same bytes.
   asks `doc_len` once per *posting*, so a common term paid one b-tree descent per document, and
   the one query whose term has a single posting came back in 0.88 ms. So `doclen` is read into
   memory when a view opens and `postings` is read a term at a time. A length is 36 bytes a unit
-  against a list's 1.1 KB — 5.6 MB at 155k and 36 MB at 10⁶, against the 7 GB this file exists
-  for — so the table asked per posting is in memory and the table that is 97% of the bytes is not.
+  against a list's 1.1 KB — 5.6 MB at 155k and 36 MB at 10⁶, against the gigabyte this file
+  exists for — so the table asked per posting is in memory and the table that is 97% of the bytes
+  is not. (Since 1.14.0 the lengths are one `docs` blob per partition, which is also what turns
+  a dense id back into a uid.)
 
   What that buys is measured and modest: the same query, slightly faster, with 143 MB no longer
   resident. Two costs are owed and both are off the query path — the file is 1.8× the sidecar's
@@ -1114,12 +1116,21 @@ test asserts rebuild and incremental produce the same bytes.
 - `align` is derived from the library and from nothing else: the two manifests' `versification`
   declarations (key 14), the maps installed at `versification/*.tsv`, and the `locators` table.
   A map given on a command line would make the table unreproducible, so `text align` installs it.
-- A **dense document id** is owed beside the store, and it is a second decision rather than the
+- A **dense document id** was owed beside the store, and it is a second decision rather than the
   other half of this one — which is the correction the wiring above forced. A posting is a 32-byte content-addressed
-  uid and a `u32`, so the table is about 1.1 KB per unit — 169 MB at 155k and 7 GB at 10⁶ — and a
-  uid is a hash, so a postings list of them cannot be delta-encoded. The remedy is a `u32` per
-  unit internal to the table, which is a format decision about the backing and is recorded with
-  it.
+  uid and a `u32`, so the table is about 1.1 KB per unit — 169 MB at 155k and about 1.1 GB at
+  10⁶ (earlier text here said 7 GB, which 1.1 KB a unit does not come to) — and a uid is a hash,
+  so a postings list of them cannot be delta-encoded. The remedy is a `u32` per unit internal to
+  the table, which is a format decision about the backing. **Taken in 1.14.0**, in
+  `index/substrate.redb` version 2: a document's id is its rank in its partition's uid order,
+  assigned when the table is encoded and never kept, so the rebuild gate holds as written (a rank
+  is a function of the table) and the `Postings` seam still speaks uids. A partition's documents
+  are one `docs` blob of `(uid, length)` in uid order — the row's position is the id — and a
+  list is varint gaps and term frequencies in blocks of 128 behind a fixed-width directory, so
+  `tf` stays a binary search. At 155k units the file went from 539 MB (327 MB allocated) to
+  84 MB (43 MB), a view opens in 1.5 ms instead of 17.5, the write takes about 400 ms instead
+  of 650, and query p95 is unchanged at 27 ms. The sidecar keeps uids: it is decoded whole into
+  memory, where a rank would have to be turned back into a uid per posting to be used.
 
 ### 3.9 Security (D-10)
 
@@ -2901,7 +2912,8 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
 
     **The 169 MB sidecar is what will force §3.8's redb decision.** A posting is a 32-byte
    content-addressed uid and a `u32`, so 25 terms a unit is about 1.1 KB a unit — 169 MB at 155k,
-   and 7 GB at the 10⁶ units SMYSL-2.8 sizes for, all of it in memory while the library is open.
+   and about 1.1 GB at the 10⁶ units SMYSL-2.8 sizes for (*7 GB* as first written, which the
+   per-unit figure does not support), all of it in memory while the library is open.
    The usual remedy does not apply: a uid is a hash, so a postings list of uids **cannot** be
    delta-encoded, and the fix is an internal dense document id — a `u32` per unit, which would
    take the posting from 36 bytes to about 5. That is a format decision about the table and
@@ -2921,7 +2933,8 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
      that is what makes it a function of the library rather than of arrival order, which the gate
      requires — so appending one window to a partition of size *p* re-ranks *p* postings. Ingest
      commits window by window, which makes it quadratic per manifest. Assigned at *encode* time
-     instead it keeps the gate and the appends and buys the disk win alone.
+     instead it keeps the gate and the appends and buys the disk win alone — **which is what
+     1.14.0 built**, in the redb backing's version 2 (§3.8's last bullet has the figures).
    - **Paging the table** makes the resident cost a page cache the caller sizes, and leaves the
      gate alone.
 

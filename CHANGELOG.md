@@ -81,6 +81,39 @@ kind, status descending` is `order by status descending` with the other kinds ta
 control flips the second key's direction and requires the answer to move, and both new forms
 join the shuffled-log determinism list.
 
+### The dense document id, on disk
+
+A posting in `index/substrate.redb` was a 32-byte uid and a four-byte count, and a uid is a
+hash, so a list of them could not be delta-encoded. The dense id had been recorded as owed since
+TX-P4, refused for the *resident* table because a rank maintained incrementally re-ranks a
+partition per window and would cost the byte-for-byte rebuild gate. On disk that objection does
+not reach it: `Db::write` already rewrites the whole table in one transaction, so a rank
+assigned when the table is **encoded** costs nothing a write was not paying, and it is a
+function of the table, so two tables that agree still encode to the same bytes.
+
+The file is version 2. A partition's documents are one `docs` blob of `(uid, length)` in uid
+order, in place of a `doclen` row per document, and a document's id is its row's position. A
+postings list is its count, its block count, a fixed-width directory of `(first id, offset)` per
+block of 128, and then a varint id gap and a varint term frequency per posting — so `df` is a
+header read and `tf` a binary search over the directory and the decode of one block. The
+`Postings` seam, the in-memory table and the sidecar still speak uids; the ranks never leave the
+file. A file of another version is a cache in a format this build does not write, and
+`Db::open` now **replaces** it, where it used to refuse it and leave every later write refused.
+
+Measured against version 1 on one machine at 155,510 units (`tests/postings_timing.rs`): the
+file from 539.5 MB (327.4 MB allocated) to 84.5 MB (42.5 MB), a view opened in 1.5 ms instead of
+17.5 ms, the index written in about 405 ms instead of 646, and query p95 27.0 ms against
+27.2. The first form of the decoder cost 36.8 ms, decoding block by block into a vector each and
+re-sorting partitions' runs that were already in order; one pass and a stable merge bought it
+back, and the table above is after that. The codec has its own tests: lists across block
+boundaries and gaps of every width, every document's `tf` found or zero, a posting for a document
+with no length refused, documents out of order refused, and every truncation and every flipped
+byte of a list decoding to an error or a list rather than a panic.
+
+One figure corrected on the way: SMYSL-2.4 and this module said the uid table would be **7 GB**
+at 10⁶ units, beside the 1.1 KB a unit that 169 MB at 155k measures — which comes to about
+1.1 GB. The text now says so.
+
 ## 1.13.0 — 2026-11-01
 
 What 1.12 leaves open, by what it blocks rather than the order it is easiest. No question in any
