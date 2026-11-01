@@ -65,8 +65,9 @@ pub use fuse::{Fused, Placement, Ranked, RRF_K};
 pub use nl::{accept, Accepted, TranslateContext, TranslateError, Translator};
 pub use parse::{parse, Parsed};
 pub use plan::{
-    plan, ClosurePlan, Direction, EntitySource, Env, Lexical, OrderPlan, OutputPlan, PipelinePlan,
-    Plan, PlanExpr, PlanOptions, PlanStep, Purity, ShapePlan, Source, TimePlan, TraversalPlan,
+    plan, ClosurePlan, Direction, EntitySource, Env, KeyPlan, Lexical, OrderPlan, OutputPlan,
+    PipelinePlan, Plan, PlanExpr, PlanOptions, PlanStep, Purity, ShapePlan, Source, TimePlan,
+    TraversalPlan,
 };
 pub use ports::{
     routes_to_lexical, Axis, Bounds, Candidates, Entities, IdfScope, Partition, PartitionKey,

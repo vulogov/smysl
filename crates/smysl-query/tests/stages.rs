@@ -224,6 +224,67 @@ fn every_mapped_stage_this_build_answers_runs() {
 ///
 /// The complement of the test above, and the half that keeps the table honest: a stage that
 /// quietly did nothing would pass the coverage test by being absent from it.
+/// `order by` with several keys is lexicographic: within a run of units tied on the first key,
+/// the second orders them exactly as it would alone, and each key keeps its own direction.
+///
+/// Asserted against the one-key orders rather than against a sort written again here: a run of
+/// one kind in `order by kind, status descending` must be `order by status descending` with the
+/// other kinds taken out, because both break their last tie by uid.
+#[test]
+fn several_keys_order_lexicographically_each_in_its_own_direction() {
+    let store = store();
+    let kind = |u: &smysl_core::Uid| store.get(u).expect("a unit").core.schema.clone();
+    let status = |u: &smysl_core::Uid| store.get(u).expect("a unit").core.status;
+
+    for (query, first, alone) in [
+        (
+            "order by kind, status descending",
+            "kind",
+            "order by status descending",
+        ),
+        ("order by kind, status", "kind", "order by status"),
+        (
+            "order by status, salience descending",
+            "status",
+            "order by salience descending",
+        ),
+    ] {
+        let both = answer(&store, query).uids();
+        let second = answer(&store, alone).uids();
+        assert_eq!(both.len(), store.units().count(), "{query} keeps the set");
+        let same = |a: &smysl_core::Uid, b: &smysl_core::Uid| match first {
+            "kind" => kind(a) == kind(b),
+            _ => status(a) == status(b),
+        };
+        // The first key never goes backwards …
+        let firsts = answer(&store, &format!("order by {first}")).uids();
+        let rank = |u: &smysl_core::Uid| firsts.iter().position(|v| same(u, v)).unwrap();
+        assert!(
+            both.windows(2).all(|w| rank(&w[0]) <= rank(&w[1])),
+            "{query}: the first key is out of order"
+        );
+        // … and within each run of it, the order is the second key's alone.
+        let mut runs = 0;
+        for run in both.chunk_by(|a, b| same(a, b)) {
+            let expected: Vec<_> = second
+                .iter()
+                .filter(|u| same(u, &run[0]))
+                .copied()
+                .collect();
+            assert_eq!(run, expected.as_slice(), "{query}: a run out of order");
+            runs += usize::from(run.len() > 1);
+        }
+        assert!(runs > 0, "{query}: no tie for the second key to break");
+    }
+
+    // The control: the second key's direction is its own, and it moves the answer.
+    assert_ne!(
+        answer(&store, "order by kind, status").uids(),
+        answer(&store, "order by kind, status descending").uids(),
+        "a second key whose direction changes nothing is not being read"
+    );
+}
+
 #[test]
 fn every_unmapped_stage_is_refused_with_what_it_needs() {
     let store = store();
@@ -317,6 +378,8 @@ fn every_stage_answers_the_same_over_a_shuffled_log() {
         "order by salience descending",
         "order by status",
         "order by status descending",
+        "order by kind, status descending",
+        "order by status, salience descending",
         "group by kind",
         "compare by status",
         "limit 4",

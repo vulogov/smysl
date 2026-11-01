@@ -54,8 +54,8 @@ use crate::ast::TimeOp;
 use crate::ast::{Atom, Count, Dir};
 use crate::fuse::{rrf, Fused, Placement, Ranked};
 use crate::plan::{
-    ClosurePlan, Direction, EntitySource, Env, Lexical, OrderPlan, OutputPlan, PipelinePlan, Plan,
-    PlanExpr, PlanOptions, Route, SemanticPlan, ShapePlan, Source, TimePlan,
+    ClosurePlan, Direction, EntitySource, Env, KeyPlan, Lexical, OrderPlan, OutputPlan,
+    PipelinePlan, Plan, PlanExpr, PlanOptions, Route, SemanticPlan, ShapePlan, Source, TimePlan,
 };
 use crate::ports::{Bounds, IdfScope};
 use crate::pred::{holds_near, Field, Near, Reader};
@@ -1045,6 +1045,56 @@ fn order(answer: Answer, stage: &OrderPlan, env: &Env<'_>) -> Result<Answer, Vec
             });
             Answer::Scope(sorted)
         }
+        OrderPlan::Keys { keys } => {
+            // Every key of every unit computed once, rather than twice per comparison: the sort
+            // makes n log n of those, and a field read can be a payload decode.
+            let salience = keys
+                .iter()
+                .any(|k| matches!(k, KeyPlan::Salience { .. }))
+                .then(|| {
+                    smysl_graph::salience(
+                        env.store,
+                        &SalienceRequest::default().seeded(uids.iter().copied()),
+                    )
+                    .renormalise(&uids)
+                });
+            let row = |uid: &Uid| -> Vec<Key> {
+                keys.iter()
+                    .map(|k| match k {
+                        KeyPlan::Salience { .. } => Key::Score(
+                            salience
+                                .as_ref()
+                                .and_then(|s| s.get(uid).copied())
+                                .unwrap_or(0.0),
+                        ),
+                        KeyPlan::Field { field, .. } => Key::Field(key_of(&env.reader, uid, field)),
+                    })
+                    .collect()
+            };
+            let dirs: Vec<Dir> = keys
+                .iter()
+                .map(|k| match k {
+                    KeyPlan::Salience { dir } | KeyPlan::Field { dir, .. } => *dir,
+                })
+                .collect();
+            let mut rows: Vec<(Vec<Key>, Uid)> = uids.iter().map(|u| (row(u), *u)).collect();
+            rows.sort_by(|(x, a), (y, b)| {
+                x.iter()
+                    .zip(y)
+                    .zip(&dirs)
+                    .map(|((p, q), d)| {
+                        let cmp = p.cmp_to(q);
+                        match d {
+                            Dir::Ascending => cmp,
+                            Dir::Descending => cmp.reverse(),
+                        }
+                    })
+                    .find(|c| c.is_ne())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.cmp(b))
+            });
+            Answer::Scope(rows.into_iter().map(|(_, u)| u).collect())
+        }
         OrderPlan::GroupBy { field } | OrderPlan::CompareBy { field } => {
             let mut groups: BTreeMap<String, Vec<Uid>> = BTreeMap::new();
             for uid in uids {
@@ -1056,6 +1106,25 @@ fn order(answer: Answer, stage: &OrderPlan, env: &Env<'_>) -> Result<Answer, Vec
             Answer::Groups(groups.into_iter().collect())
         }
     })
+}
+
+/// One key's value for one unit, in a multi-key order.
+enum Key {
+    /// Salience, renormalised over the result; a unit it has no score for is 0.
+    Score(f32),
+    Field((Option<i64>, String)),
+}
+
+impl Key {
+    /// Two values of the same key. A score that does not compare — a NaN, which renormalising
+    /// does not produce — ties, as the one-key salience order treats it.
+    fn cmp_to(&self, other: &Key) -> std::cmp::Ordering {
+        match (self, other) {
+            (Key::Score(x), Key::Score(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+            (Key::Field(x), Key::Field(y)) => x.cmp(y),
+            _ => std::cmp::Ordering::Equal,
+        }
+    }
 }
 
 /// A sort key for a field: ordered fields sort on their ladder, the rest on their text.

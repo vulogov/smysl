@@ -64,6 +64,23 @@ nine messages across several windows, with two replies crossing windows and one 
 export lacks, and asserts the two edges by their units, the one `W448`, the two constraints, and
 a rerun that adds nothing; the dialogue test now draws its edges with the producer.
 
+### `order by` takes more than one key
+
+The grammar has always admitted `order by kind, status descending` (SMYSL-2.9 §4.6), and the
+planner refused the second key with `SMY-E461`, recorded at TX-P6's exit as owed. It is now
+`OrderPlan::Keys`: lexicographic, each key in its own direction (ascending unless it says
+otherwise), a later key read only where every earlier one ties, the uid last. A field key
+resolves as it does alone, so a bad field is the same diagnostic in either position, and a
+declared field in any position is pinned like a first one. Each key of each unit is computed
+once before the sort, and salience once per stage when any key asks for it.
+
+A one-key stage still lowers to `OrderPlan::Salience` or `OrderPlan::Field`, so no plan a single
+key produced has moved. `crates/smysl-query/tests/stages.rs` asserts the order against the
+one-key orders rather than against a sort written again: within a run of one kind, `order by
+kind, status descending` is `order by status descending` with the other kinds taken out. The
+control flips the second key's direction and requires the answer to move, and both new forms
+join the shuffled-log determinism list.
+
 ## 1.13.0 — 2026-11-01
 
 What 1.12 leaves open, by what it blocks rather than the order it is easiest. No question in any
