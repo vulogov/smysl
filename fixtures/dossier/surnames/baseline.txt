@@ -1,0 +1,29 @@
+# GE-T10's surname set, the subject before the declared rule 33 (as of commit 051ce6d),
+# written by `cargo test -p smysl-text --features stem --test ge_t10_third ge_t10_surnames -- --nocapture`.
+GE-T10, surname set: the subject
+    sn-s1   en  wanted e/snow, no subject: Who was Snow?
+    sn-s1   de  wanted e/snow, no subject: Wer war Snow?
+    sn-s1   es  wanted e/snow, no subject: ¿Quién era Snow?
+    sn-s1   fr  wanted e/snow, no subject: Qui était Snow ?
+    sn-s1   ru  wanted e/snow, no subject: Кто такой Сноу?
+    li-s1   en  wanted e/lind, no subject: Who was Lind?
+    li-s1   de  wanted e/lind, no subject: Wer war Lind?
+    li-s1   es  wanted e/lind, no subject: ¿Quién fue Lind?
+    li-s1   fr  wanted e/lind, no subject: Qui était Lind ?
+    li-s1   ru  wanted e/lind, no subject: Кем был Линд?
+    ls-s1   en  wanted e/lister, no subject: Who was Lister?
+    ls-s1   de  wanted e/lister, no subject: Wer war Lister?
+    ls-s1   es  wanted e/lister, no subject: ¿Quién fue Lister?
+    ls-s1   fr  wanted e/lister, no subject: Qui était Lister ?
+    ls-s1   ru  wanted e/lister, no subject: Кем был Листер?
+    ls-s2   en  wanted e/lister, no subject: What depends on Lister's work?
+    ls-s2   de  wanted e/lister, no subject: Warum wirkte Listers Karbolsäure?
+    ls-s2   ru  wanted e/lister, no subject: Что зависит от работ Листера?
+    sn-s2   de  wanted e/snow, no subject: Wo wird Snows Pumpe erwähnt?
+    sn-s2   en  wanted e/snow, no subject: Why did Snow remove the pump handle?
+    li-s2   de  wanted e/lind, no subject: Wer behauptet, Linds Versuch habe das Heilmittel gefunden?
+    li-s2   ru  wanted e/lind, no subject: Кто утверждает, что опыт Линда открыл лекарство?
+    li-s2   en  wanted e/lind, no subject: Who claims Lind discovered the cure?
+    ls-p1   de  wanted e/lister, subject `Cholera`: Warum behandelte Lister die Cholera nicht?
+    sn-p1   en  wanted e/snow, subject `cholera`: Why did Snow blame the water for cholera?
+  subject 4/29, unread 0, wrong subject 2

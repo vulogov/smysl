@@ -19,15 +19,39 @@ and rule 32's price stands: *Was cholera spread by water?* gives `guess_lang` no
 it by and is unread. The next rules want questions people ask; `ask --misses --recheck`
 collects them, and the rules wait for what it collects.
 
-**A subject by another name.** *Listers* is not found because the corpus names him only as
-*Joseph Lister*, and a question that names a subject by a synonym the store does not write is
-not found at all. The semantic tier is the place to look, behind the spelled, stemmed and
-derived passes so that none of them changes.
+**A subject by another name.** *Listers* was not found because the corpus names him only as
+*Joseph Lister* — *a surname, see below.* What is left is a subject named by a synonym the
+store does not write at all, *consumption* for *tuberculosis*, which no spelling, stem or part
+of a word reaches. The semantic tier is the place to look, behind every other pass so that none
+of them changes; it makes `ask` model-dependent, and it wants its set written first.
 
 **What narrowing costs** — *measured, see below: the reason given here was not the cost.*
 
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 GE-T10's gold is single-hand; they stay owed rather than planned.
+
+### A subject named by its surname
+
+*Warum wirkte Listers Karbolsäure?* found no subject: rule 29 takes the genitive off, and
+`Lister` is still not a name the store writes, which is *Joseph Lister*. Three of GE-T10's
+people are written that way, and a question names a person by the surname more often than not.
+
+- **A surname names the entity whose name it ends** (rule 33): when no pass finds any run, a
+  single word written with a capital that is the last word of an entity's name of more than one
+  word names that entity — as spelled, ignoring case; in German also without its genitive
+  ending; and through the question's language's stemmer, so *Листера* finds *Джозеф Листер*.
+  Last, behind the spelled, stemmed and derived passes, so no question any of them reads
+  changes; the last word only, since a given name is shared far more often than a surname. Two
+  entities with one surname are `SMY-W417`, as any two are. A new port method,
+  `Entities::candidates_surname` (none by default; the text crate's ports answer it), and
+  `--explain` says `found as a surname`.
+
+A new set (`fixtures/dossier/surnames/`, 29 questions in five languages: surnames as spelled
+and inflected, a given name alone and a lower-case *snow* as guards, and two rows of the rule's
+price declared with it) went from 4 of 29 to 27 of 29, the guards holding. The two it misses are
+the price: *Warum behandelte Lister die Cholera nicht?* names its subject by the surname and
+another in full, and the earlier passes read *Cholera* first. On the collision set *Listers*
+is found, subjects 13 → 14 of 15; no other set moved.
 
 ### What narrowing costs, and where
 

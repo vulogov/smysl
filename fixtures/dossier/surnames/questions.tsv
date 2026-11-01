@@ -1,0 +1,54 @@
+# GE-T10's surname set: a subject the question names by the last word of a name the store
+# writes whole.
+#
+# WHY. "Warum wirkte Listers Karbolsäure?" finds no subject: rule 29 takes the genitive off,
+# and `Lister` is still not a name the store writes, which is "Joseph Lister". Three of the
+# corpus's people are written that way (John Snow, James Lind, Joseph Lister, and the Russian
+# spellings of each), and a question names a person by the surname more often than not.
+#
+# THE RULE, DECLARED before a word of this set was written; scored first without it
+# (`baseline.txt`), and not changed after a run:
+#  33. a surname for a name: when no pass finds any run, a single word written with a capital
+#      that is the last word of an entity's name of more than one word names that entity — as
+#      spelled, ignoring case; in German, also without its genitive `s` or `'` (rule 29's
+#      ending); and through the question's language's stemmer, which cuts both alike
+#      (`Листера`, `Листер`). Last, behind the spelled, stemmed and derived passes, so that no
+#      question any of them reads changes; and the last word only, since a given name is shared
+#      far more often than a surname. Two entities with the surname are SMY-W417, as any two are.
+#
+# THE SET. Columns: qid, subject, lang, question. `subject` is the entity label the question is
+# about, or `none` for one that names nobody the store writes and should find no subject. The
+# `-g` rows are guards: a given name alone, and a lower-case word that spells a surname. The
+# `-p` rows are the rule's price, declared with it: a question that names its subject by the
+# surname and another subject in full finds the other, since the earlier passes read it first.
+#
+# WHO WROTE THIS. The hand that declared the rule, after declaring it. Single hand.
+sn-s1	e/snow	en	Who was Snow?
+sn-s1	e/snow	de	Wer war Snow?
+sn-s1	e/snow	es	¿Quién era Snow?
+sn-s1	e/snow	fr	Qui était Snow ?
+sn-s1	e/snow	ru	Кто такой Сноу?
+li-s1	e/lind	en	Who was Lind?
+li-s1	e/lind	de	Wer war Lind?
+li-s1	e/lind	es	¿Quién fue Lind?
+li-s1	e/lind	fr	Qui était Lind ?
+li-s1	e/lind	ru	Кем был Линд?
+ls-s1	e/lister	en	Who was Lister?
+ls-s1	e/lister	de	Wer war Lister?
+ls-s1	e/lister	es	¿Quién fue Lister?
+ls-s1	e/lister	fr	Qui était Lister ?
+ls-s1	e/lister	ru	Кем был Листер?
+ls-s2	e/lister	en	What depends on Lister's work?
+ls-s2	e/lister	de	Warum wirkte Listers Karbolsäure?
+ls-s2	e/lister	ru	Что зависит от работ Листера?
+sn-s2	e/snow	de	Wo wird Snows Pumpe erwähnt?
+sn-s2	e/snow	en	Why did Snow remove the pump handle?
+li-s2	e/lind	de	Wer behauptet, Linds Versuch habe das Heilmittel gefunden?
+li-s2	e/lind	ru	Кто утверждает, что опыт Линда открыл лекарство?
+li-s2	e/lind	en	Who claims Lind discovered the cure?
+sn-g1	none	en	Who was John?
+li-g1	none	de	Wer war James?
+ls-g1	none	ru	Кем был Джозеф?
+sn-g2	none	en	Who was snow?
+ls-p1	e/lister	de	Warum behandelte Lister die Cholera nicht?
+sn-p1	e/snow	en	Why did Snow blame the water for cholera?

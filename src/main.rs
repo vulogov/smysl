@@ -6704,7 +6704,7 @@ fn ask_explain(
         Err(e @ AskError::NoSubject { .. }) => {
             println!(
                 "subject   none: no run of the topic's words names an entity as spelled, by its \
-                 stems, or as part of a word"
+                 stems, as part of a word or as a surname"
             );
             eprintln!("smysl ask: {e}");
             return ExitCode::Failure;

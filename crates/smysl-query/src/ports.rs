@@ -381,6 +381,15 @@ pub trait Entities {
         Vec::new()
     }
 
+    /// The entities whose name of more than one word ends in `word` — `Lister` for *Joseph
+    /// Lister*, as spelled or through `lang`'s stemmer (`Листера`) — grouped as
+    /// [`Entities::candidates`] groups them (rule 33). A dossier asks this last, behind every
+    /// other pass, of single words written with a capital. The default is none.
+    fn candidates_surname(&self, word: &str, lang: &str) -> Vec<Vec<Uid>> {
+        let _ = (word, lang);
+        Vec::new()
+    }
+
     /// Each word of `text` as `lang`'s stemmer cuts it, in order: how a dossier finds the
     /// forms of a narrowed slot's topic words that the units about its subject use (rule 26 —
     /// "cures" asked, "cured" said). `None` when the port has no stemmer for `lang`, which is
