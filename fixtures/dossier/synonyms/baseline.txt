@@ -1,0 +1,47 @@
+# GE-T10's synonym set and its calibration rows, the subject before the declared rule 34
+# (as of commit 4521f21), written by
+# `cargo test -p smysl-text --features stem --test ge_t10_third ge_t10_synonyms -- --nocapture --test-threads 1`.
+GE-T10, synonym set: the subject
+    sp-y1   en  wanted e/smallpox, no subject: What was the speckled monster?
+    sp-y1   de  wanted e/smallpox, no subject: Was sind die Blattern?
+    sp-y1   fr  wanted e/smallpox, no subject: Qu'était la petite vérole ?
+    sc-y1   en  wanted e/scurvy, no subject: What is scorbutus?
+    sc-y1   de  wanted e/scurvy, no subject: Was ist der Scharbock?
+    sc-y1   ru  wanted e/scurvy, no subject: Что такое скорбут?
+    mi-y1   en  wanted e/miasma, no subject: Explain the term noxious vapours
+    mi-y1   de  wanted e/miasma, no subject: Erkläre den Begriff Pesthauch
+    mi-y1   es  wanted e/miasma, no subject: Explica el término aire corrupto
+    mi-y1   fr  wanted e/miasma, no subject: Explique le terme mauvais air
+    mi-y1   ru  wanted e/miasma, no subject: Объясни понятие дурной воздух
+    ph-y1   en  wanted e/phlogiston, no subject: Explain the term fire principle
+    ph-y1   de  wanted e/phlogiston, no subject: Erkläre den Begriff Feuerstoff
+    ph-y1   es  wanted e/phlogiston, no subject: Explica el término principio del fuego
+    ph-y1   fr  wanted e/phlogiston, no subject: Explique le terme principe du feu
+    ph-y1   ru  wanted e/phlogiston, no subject: Объясни понятие огненная материя
+    se-y1   en  wanted e/semmelweis, no subject: Who was the saviour of mothers?
+    se-y1   de  wanted e/semmelweis, no subject: Wer war der Retter der Mütter?
+    se-y1   es  wanted e/semmelweis, no subject: ¿Quién fue el salvador de las madres?
+    se-y1   fr  wanted e/semmelweis, no subject: Qui était le sauveur des mères ?
+    se-y1   ru  wanted e/semmelweis, no subject: Кем был спаситель матерей?
+    je-y1   en  wanted e/jenner, no subject: Who was the father of immunology?
+    je-y1   de  wanted e/jenner, no subject: Wer war der Vater der Immunologie?
+    je-y1   es  wanted e/jenner, no subject: ¿Quién fue el padre de la inmunología?
+    je-y1   fr  wanted e/jenner, no subject: Qui était le père de l'immunologie ?
+    je-y1   ru  wanted e/jenner, no subject: Кем был отец иммунологии?
+    sn-y1   en  wanted e/snow, no subject: Who was the father of epidemiology?
+    sn-y1   de  wanted e/snow, no subject: Wer war der Vater der Epidemiologie?
+    sn-y1   fr  wanted e/snow, no subject: Qui était le père de l'épidémiologie ?
+    ls-y1   en  wanted e/lister, no subject: Who was the father of antiseptic surgery?
+    ls-y1   de  wanted e/lister, no subject: Wer war der Vater der antiseptischen Chirurgie?
+    ls-y1   ru  wanted e/lister, no subject: Кем был отец антисептической хирургии?
+    ch-y1   en  wanted e/cholera, no subject: What was the blue death?
+    ch-y1   de  wanted e/cholera, no subject: Was war die Brechruhr?
+  subject 15/49, unread 0, wrong subject 0
+GE-T10, synonym calibration: the subject
+    sc-k1   en  wanted e/scurvy, no subject: What was the sailors' scourge?
+    sp-k1   de  wanted e/smallpox, no subject: Was ist die Variola?
+    je-k1   en  wanted e/jenner, no subject: Who was the pioneer of vaccination?
+    ph-k1   en  wanted e/phlogiston, no subject: Explain the term inflammable principle
+    mi-k1   de  wanted e/miasma, no subject: Erkläre den Begriff faulige Dünste
+    se-k1   fr  wanted e/semmelweis, no subject: Qui était le médecin des accouchées ?
+  subject 4/10, unread 0, wrong subject 0

@@ -1,0 +1,22 @@
+# GE-T10's synonym set, the calibration rows: where rule 34's T and M are fixed (see
+# `questions.tsv`), written with it and disjoint from it — no synonym or guard here is one there.
+#
+# T is set to the midpoint between the lowest score a wanted row's subject gets and the highest
+# score any entity gets on a `none` row; M to the smallest gap, on a wanted row, between its
+# subject and the next entity. Both rounded down to 0.01 and written into the rule's code with
+# this file named beside them. If the wanted rows' lowest score is not above every guard's,
+# no T separates them, and that is reported, not tuned around.
+#
+# Columns: qid, subject, lang, question, as `questions.tsv`.
+#
+# WHO WROTE THIS. The hand that declared the rule, after declaring it. Single hand.
+sc-k1	e/scurvy	en	What was the sailors' scourge?
+sp-k1	e/smallpox	de	Was ist die Variola?
+je-k1	e/jenner	en	Who was the pioneer of vaccination?
+ph-k1	e/phlogiston	en	Explain the term inflammable principle
+mi-k1	e/miasma	de	Erkläre den Begriff faulige Dünste
+se-k1	e/semmelweis	fr	Qui était le médecin des accouchées ?
+gd-k1	none	en	What is leprosy?
+gd-k1	none	de	Was ist die Tollwut?
+gd-k2	none	en	Who was Koch?
+gd-k3	none	en	What is yellow fever?

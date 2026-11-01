@@ -272,13 +272,15 @@ pub struct SlotResult {
 }
 
 /// Which pass of the subject search found the subject: the name as the question spells it, its
-/// stems, or a word with the name as a part of it (rules 22 to 25).
+/// stems, a word with the name as a part of it (rules 22 to 25), or the last word of a name the
+/// store writes whole (rule 33).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SubjectFound {
     Spelled,
     Stemmed,
     Part,
+    Surname,
 }
 
 impl SubjectFound {
@@ -287,6 +289,7 @@ impl SubjectFound {
             SubjectFound::Spelled => "as spelled",
             SubjectFound::Stemmed => "by its stems",
             SubjectFound::Part => "as part of a word",
+            SubjectFound::Surname => "as a surname",
         }
     }
 }
@@ -579,7 +582,10 @@ fn topic_forms(
         return Vec::new();
     }
     let tok = smysl_retrieve::Tokenizer::plain();
-    let mut said = BTreeSet::new();
+    // Hashed, not ordered: a popular subject's units say a vocabulary of thousands, and
+    // keeping it sorted as it is read cost as much as tokenising it. The few forms found are
+    // sorted below, which is the store's order the output promises.
+    let mut said = std::collections::HashSet::new();
     for uid in about {
         if let Some(text) = smysl_retrieve::postings::document_text(store, uid) {
             said.extend(tok.terms(&text));
@@ -592,11 +598,13 @@ fn topic_forms(
         .collect();
     let mut out = Vec::new();
     for want in wanted.iter().flatten() {
-        for (w, s) in &stemmed {
-            if s == want && !out.contains(w) {
-                out.push(w.clone());
-            }
-        }
+        let mut forms: Vec<&String> = stemmed
+            .iter()
+            .filter(|(w, s)| s == want && !out.contains(w))
+            .map(|(w, _)| w)
+            .collect();
+        forms.sort();
+        out.extend(forms.into_iter().cloned());
     }
     out
 }
@@ -634,17 +642,22 @@ fn find_subject(
     } else {
         spans.sort_by_key(|&(start, len)| (std::cmp::Reverse(len), start));
     }
-    // As spelled, then through the stems, then a word as a part of a name.
+    // As spelled, then through the stems, then a word as a part of a name, then a word as the
+    // last of one — a surname, which only a word written with a capital can be.
     for (pass, found) in [
         SubjectFound::Spelled,
         SubjectFound::Stemmed,
         SubjectFound::Part,
+        SubjectFound::Surname,
     ]
     .into_iter()
     .enumerate()
     {
         for &(start, len) in &spans {
-            if pass == 2 && len > 1 {
+            if pass >= 2 && len > 1 {
+                continue;
+            }
+            if pass == 3 && !ws[start].starts_with(char::is_uppercase) {
                 continue;
             }
             let name = ws[start..start + len].join(" ");
@@ -656,7 +669,13 @@ fn find_subject(
                     c => c,
                 },
                 1 => port.candidates_stemmed(&name, lang),
-                _ => port.candidates_derived(&name, lang),
+                2 => port.candidates_derived(&name, lang),
+                _ => match port.candidates_surname(&name, lang) {
+                    c if c.is_empty() && lang == "de" => {
+                        genitive(&name).map_or(c, |g| port.candidates_surname(&g, lang))
+                    }
+                    c => c,
+                },
             };
             if candidates.is_empty() {
                 continue;

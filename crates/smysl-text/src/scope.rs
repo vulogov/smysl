@@ -464,6 +464,10 @@ impl Entities for LibraryScope<'_> {
         derived_candidates(self.library.store(), word, lang)
     }
 
+    fn candidates_surname(&self, word: &str, lang: &str) -> Vec<Vec<Uid>> {
+        surname_candidates(self.library.store(), word, lang)
+    }
+
     fn stems(&self, text: &str, lang: &str) -> Option<Vec<String>> {
         stems(text, lang)
     }
@@ -568,6 +572,36 @@ pub fn derived_candidates(store: &Store, word: &str, lang: &str) -> Vec<Vec<Uid>
     }
 }
 
+/// The entities whose name is more than one word and whose last word is `word` (rule 33):
+/// folded as the spelled pass folds, or — when `lang` has a stemmer — cut alike by it, the
+/// chain that indexes the library, so `Листера` finds *Джозеф Листер*. Only the last word,
+/// since a given name is shared far more often than a surname.
+pub fn surname_candidates(store: &Store, word: &str, lang: &str) -> Vec<Vec<Uid>> {
+    fn surname(gist: &str) -> Option<&str> {
+        let mut ws = gist.split_whitespace();
+        let last = ws.next_back()?;
+        ws.next().map(|_| last)
+    }
+    let folded = smysl_query::fold::fold(word);
+    let chain = LangTag::new(lang)
+        .ok()
+        .map(|tag| Chain::new(&tag))
+        .filter(|c| c.lang().is_some());
+    let stem = chain
+        .as_ref()
+        .map(|c| c.stems(word))
+        .filter(|s| s.len() == 1);
+    smysl_query::store_scope::entity_candidates_where(store, |gist| {
+        surname(gist).is_some_and(|last| {
+            smysl_query::fold::fold(last) == folded
+                || chain
+                    .as_ref()
+                    .zip(stem.as_ref())
+                    .is_some_and(|(c, s)| &c.stems(last) == s)
+        })
+    })
+}
+
 /// Any entity port, with [`stemmed_candidates`] over `store` for what no spelling finds: how a
 /// plain store's `StoreScope` gets the library's morphology for `ask`.
 pub struct Stemmed<'a> {
@@ -596,6 +630,10 @@ impl Entities for Stemmed<'_> {
 
     fn candidates_derived(&self, word: &str, lang: &str) -> Vec<Vec<Uid>> {
         derived_candidates(self.store, word, lang)
+    }
+
+    fn candidates_surname(&self, word: &str, lang: &str) -> Vec<Vec<Uid>> {
+        surname_candidates(self.store, word, lang)
     }
 
     fn stems(&self, text: &str, lang: &str) -> Option<Vec<String>> {

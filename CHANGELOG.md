@@ -7,6 +7,108 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.13.0 — 2026-11-01
+
+What 1.12 leaves open, by what it blocks rather than the order it is easiest. No question in any
+GE-T10 set is read as an intent it does not ask, so what follows is reading more, not reading
+better.
+
+**Questions still unread.** The sixth set reads 52 of 80. The yes-or-no forms declared out of
+reach stay so (Spanish `era`, `eran`, a Spanish question with no verb to read, French `-t-on`),
+and rule 32's price stands: *Was cholera spread by water?* gives `guess_lang` nothing to place
+it by and is unread. The next rules want questions people ask; `ask --misses --recheck`
+collects them, and the rules wait for what it collects.
+
+**A subject by another name.** *Listers* was not found because the corpus names him only as
+*Joseph Lister* — *a surname, see below.* What is left is a subject named by a synonym the
+store does not write at all, *Blattern* for smallpox, which no spelling, stem or part of a word
+reaches — *declared as rule 34 and not adopted, see below.* It stays open, for a model that can
+tell a synonym from its neighbour.
+
+**What narrowing costs** — *measured, see below: the reason given here was not the cost.*
+
+**And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
+GE-T10's gold is single-hand; they stay owed rather than planned.
+
+### A subject by meaning: declared, calibrated, not adopted
+
+Rule 34 was to find what no name reaches through the store's model: the question's topic put to
+the semantic source, each entity scored by the best cosine of its own unit or of a unit that
+mentions it, the best naming the subject at a floor T, and `SMY-W417` within a margin M of the
+next. It was declared with its set before any code (`fixtures/dossier/synonyms/`): 34 questions
+naming a subject by a name the corpus does not write — old and medical names, paraphrases,
+epithets, in five languages — and 15 guards beside them, with ten calibration rows apart to fix
+T and M before the set was scored, and a stated outcome if they could not be fixed: *reported,
+not tuned around.*
+
+They could not. With `potion-multilingual-128M` the guards outscore the synonyms (`tests/ge_t10_synonyms.rs`,
+a measurement behind `SMYSL_EMBED_MODEL_MULTILINGUAL`):
+
+| row | wanted | its score | best other |
+|---|---|---:|---:|
+| *Was ist die Variola?* | smallpox | 0.560 | 0.224 |
+| *Who was the pioneer of vaccination?* | Jenner | 0.618 | 0.488 |
+| *Explain the term inflammable principle* | phlogiston | 0.193 | 0.210 |
+| *Erkläre den Begriff faulige Dünste* | miasma | 0.213 | 0.288 |
+| *What is yellow fever?* | none | — | 0.645 |
+| *Who was Koch?* | none | — | 0.492 |
+
+The lowest wanted score is 0.193 and the highest guard's 0.645, so no floor takes the synonyms
+and leaves the guards; two synonyms do not even put their subject first. Nearness by meaning,
+in a static model, is nearness of topic — a fever is near a fever, a bacteriologist near a
+surgeon — and a subject has to be a thing, not a topic. So `ask` has no fourth pass: a question
+that names its subject by a synonym is not found, says so, and costs no model. The set and its
+baseline stay (15 of 49, 4 of 10, the guards), and the measurement asks the question again of
+any model the variable names; one that separates the rows is the occasion to declare the rule
+anew, on rows written for it.
+
+### A subject named by its surname
+
+*Warum wirkte Listers Karbolsäure?* found no subject: rule 29 takes the genitive off, and
+`Lister` is still not a name the store writes, which is *Joseph Lister*. Three of GE-T10's
+people are written that way, and a question names a person by the surname more often than not.
+
+- **A surname names the entity whose name it ends** (rule 33): when no pass finds any run, a
+  single word written with a capital that is the last word of an entity's name of more than one
+  word names that entity — as spelled, ignoring case; in German also without its genitive
+  ending; and through the question's language's stemmer, so *Листера* finds *Джозеф Листер*.
+  Last, behind the spelled, stemmed and derived passes, so no question any of them reads
+  changes; the last word only, since a given name is shared far more often than a surname. Two
+  entities with one surname are `SMY-W417`, as any two are. A new port method,
+  `Entities::candidates_surname` (none by default; the text crate's ports answer it), and
+  `--explain` says `found as a surname`.
+
+A new set (`fixtures/dossier/surnames/`, 29 questions in five languages: surnames as spelled
+and inflected, a given name alone and a lower-case *snow* as guards, and two rows of the rule's
+price declared with it) went from 4 of 29 to 27 of 29, the guards holding. The two it misses are
+the price: *Warum behandelte Lister die Cholera nicht?* names its subject by the surname and
+another in full, and the earlier passes read *Cholera* first. On the collision set *Listers*
+is found, subjects 13 → 14 of 15; no other set moved.
+
+### What narrowing costs, and where
+
+`where matches` read and tokenised a unit's text once per `matches`, and a narrowed slot is an
+`or` of one per word and form. The predicate reader now keeps the terms of the unit it is
+judging, so an `or` of them tokenises it once; only the last unit's, since a predicate is judged
+a unit at a time and every unit's would hold a run's corpus in memory. That was not rule 26's
+cost, which the 1.12 entry said it was: it was every narrowed slot's, forms or none, and both
+columns of the measurement (`crates/smysl-text/tests/narrow_scale.rs`) fell by a fifth while the
+gap between them stayed — 1.29 s against 1.30 s at 10⁵ units.
+
+The gap was the forms themselves. Finding them reads every unit about the subject once more,
+and half of that was keeping the words it read sorted as it read them; stemming the 7,698 words
+10⁴ units say took 1.5 ms of 122. They are gathered unsorted now and the few forms found sorted
+after, which is the order they were given in before.
+
+| units | plain, before | plain, after | stems, before | stems, after | ratio after |
+|------:|--------------:|-------------:|--------------:|-------------:|------------:|
+| 10³   | 38 ms  | 30 ms  | 49 ms  | 37 ms  | 1.24 |
+| 10⁴   | 0.39 s | 0.30 s | 0.52 s | 0.38 s | 1.27 |
+| 10⁵   | 3.97 s | 3.06 s | 5.26 s | 3.91 s | 1.28 |
+
+What is left of the ratio is that second reading of the subject's units, which the forms cannot
+be found without. Nothing a question returns changed.
+
 ## 1.12.0 — 2026-10-31
 
 What 1.11 leaves open, by what it blocks rather than the order it is easiest. Every SMYSL-2 open
