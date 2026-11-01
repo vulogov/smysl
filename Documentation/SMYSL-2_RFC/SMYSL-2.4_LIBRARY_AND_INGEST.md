@@ -2590,7 +2590,10 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
    resolves through the manifest's part list, because a unit does not name its manifest until
    FC-3 (TX-P5); that over-selects on a supersession chain, where two manifests share a part,
    and `Effective::inexact_scopes` counts it. The **reply** free constraint has no data: the
-   ids it would be built from live in a segment row and reach a unit only through ingest. And
+   ids it would be built from live in a segment row and reach a unit only through ingest.
+   *(1.14.0: they do now. A text ingest draws `x.text/replies` between the units of a message
+   and those of the message it answers, after its windows, and `free` reads each edge as a
+   `cited` order.)* And
    nothing dates a manifest, which is **OQ-72**.
 3. ~~`smysl-check` `Time` pass. *Exit:* `E410`, `W411`, `W412`, `W413`, `W449` fixtures.~~
    **Done**, as pass 13. Five fixtures are `.smy` documents in
@@ -3809,7 +3812,7 @@ meanings and are not repeated here.
 | `SMY-E445` | library or shard is locked by another writer (holder printed) | every writing command |
 | `SMY-E446` | object or record 15/18 does not hash to its tid/rdid | object store, `check` |
 | `SMY-W447` | a structure node larger than the window was split at sentence boundaries | `ingest --text` |
-| `SMY-W448` | a reply or quotation constraint names a message or unit not found; constraint skipped | time engine |
+| `SMY-W448` | a reply names a message the expression does not hold; no edge drawn (registered 1.14.0, raised where the id is resolved rather than one step later) | text ingest (`smysl_text::replies`) |
 | `SMY-W449` | EDTF value outside the index's representable range; indexed as an open bound | time engine, `check` |
 | `SMY-E450` | appending to a pseudonymised expression without its pseudonym key | `text append` (**raisable since TX-P2 step 3**; `--pseudonymise` landed in step 2 and the code was deliberately left unregistered until there was an append to refuse) |
 | `SMY-W451` | an alignment scheme does not cover a locator; the pair is left unaligned and counted | `text align`, `anchored` engine |

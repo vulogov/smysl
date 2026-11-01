@@ -15,10 +15,16 @@
 //!    the mode from structure;
 //! 7. **stage** the batch and commit it;
 //! 8. **journal** the window — *after* the commit, which is what makes a kill lose at most the
-//!    batch in flight.
+//!    batch in flight;
+//! 9. **reply** edges, once every window is in: `x.text/replies` between the units of a message
+//!    and the units of the message it answers ([`smysl_text::replies`]).
 //!
 //! Steps 7 and 8 are in that order and not the other, and the ordering is the resume property.
 //! A journal entry written first would record a window as done that no store holds.
+//!
+//! Step 9 is not journalled and needs not be. It reads the store rather than the windows, so a
+//! reply is linked to the message it answers whichever window drew either, and on whichever run;
+//! and its edges are content-addressed, so a rerun that finds them all present stages nothing.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -113,6 +119,8 @@ pub struct TextReport {
     pub units: usize,
     /// `x.text/entity` units the attributions added (step 3b).
     pub entities: usize,
+    /// `x.text/replies` edges this run added (step 9): those the store did not already hold.
+    pub replies: usize,
     pub spanned: usize,
     pub spanless: usize,
     pub degraded: usize,
@@ -575,6 +583,56 @@ impl Ingestor<'_> {
             }
         }
 
+        // Step 9. After the windows and over the whole expression, so that the order windows
+        // ran in decides nothing.
+        let (edges, unresolved) = replies_of(t.lib.store(), &panes);
+        if !unresolved.is_empty() {
+            let shown: Vec<&str> = unresolved.iter().take(5).map(String::as_str).collect();
+            report.diagnostics.push(
+                Diagnostic::new(Code::W448)
+                    .with_message(format!(
+                        "{} repl{} name{} a message `{alias}` does not hold ({}{}); no edge was \
+                         drawn for {}",
+                        unresolved.len(),
+                        if unresolved.len() == 1 { "y" } else { "ies" },
+                        if unresolved.len() == 1 { "s" } else { "" },
+                        shown.join(", "),
+                        if unresolved.len() > shown.len() {
+                            ", …"
+                        } else {
+                            ""
+                        },
+                        if unresolved.len() == 1 { "it" } else { "them" },
+                    ))
+                    .with_suggestion("the message was deleted, or is in another export"),
+            );
+        }
+        if !edges.is_empty() {
+            let schemas = if declares_text(t.lib.store()) {
+                Vec::new()
+            } else {
+                vec![smysl_core::schemas::text::decl()]
+            };
+            let n = edges.len();
+            let staged = stage::prepare_under(
+                t.lib.store(),
+                Vec::new(),
+                edges,
+                BTreeMap::new(),
+                schemas,
+                &attest,
+                Some(profile),
+            );
+            report.diagnostics.extend(staged.report.iter().cloned());
+            match t.lib.append_records(&staged.records()) {
+                Ok(_) => report.replies = n,
+                Err(e) => report.diagnostics.push(
+                    Diagnostic::new(Code::E001)
+                        .with_message(format!("the reply edges could not be committed: {e}")),
+                ),
+            }
+        }
+
         report.units = staged_units.len();
         report.entities = staged_entities.len();
         Ok(report)
@@ -679,6 +737,61 @@ fn declares_text(store: &smysl_graph::Store) -> bool {
         matches!(r, smysl_core::Record::SchemaDecl(d)
             if d.id.as_str() == smysl_core::schemas::text::ID)
     })
+}
+
+/// The `x.text/replies` edges an expression's readings imply and the store does not hold yet,
+/// and the reply ids that named no message (step 9, [`smysl_text::replies`]).
+///
+/// What sits in a message is a unit drawn from it: one with a span into one of these parts.
+/// An entity has none, and a translation says what its source unit says — which takes the edge
+/// itself, so giving the translation one too would only say it twice.
+fn replies_of(store: &smysl_graph::Store, panes: &[PaneData]) -> (Vec<Relation>, Vec<String>) {
+    use smysl_core::schemas::text::{ENTITY, REPLIES, TRANSLATES};
+    use smysl_core::RelKind;
+    use smysl_text::replies::{self, Sited};
+
+    let translations: BTreeSet<Uid> = store
+        .relations_of_kind(&RelKind::Extension(TRANSLATES.to_string()))
+        .into_iter()
+        .map(|r| r.from)
+        .collect();
+    let mut sited = Vec::new();
+    for p in panes {
+        for uid in store.units_with_tid(&p.tid) {
+            if translations.contains(&uid) {
+                continue;
+            }
+            let Some(u) = store.get(&uid) else { continue };
+            if u.core.schema.as_str() == ENTITY {
+                continue;
+            }
+            let Some(span) = u.core.source.as_ref().and_then(|s| s.span()) else {
+                continue;
+            };
+            sited.push(Sited {
+                uid,
+                tid: p.tid,
+                span,
+            });
+        }
+    }
+    let parts: Vec<(Tid, &[smysl_text::reading::Segment])> =
+        panes.iter().map(|p| (p.tid, p.rows.as_slice())).collect();
+    let linked = replies::link(&parts, &sited);
+
+    let kind = RelKind::Extension(REPLIES.to_string());
+    let held: BTreeSet<(Uid, Uid)> = store
+        .relations_of_kind(&kind)
+        .into_iter()
+        .map(|r| (r.from, r.to))
+        .collect();
+    let edges = linked
+        .pairs
+        .into_iter()
+        .filter(|p| !held.contains(p))
+        .map(|(from, to)| Relation::new(kind.clone(), from, to))
+        .collect();
+    (edges, linked.unresolved)
 }
 
 /// A part, held so the windowing can borrow it.

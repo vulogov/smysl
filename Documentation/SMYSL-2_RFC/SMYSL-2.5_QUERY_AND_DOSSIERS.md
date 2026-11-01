@@ -1601,7 +1601,9 @@ Each step has an exit test. Steps within a phase are ordered.
    ends of that order are the first and last. *Nothing writes `x.text/replies`*: `x.text/v1`
    declares it and rule E reads it, and the readers record `reply` ids on rows that no path turns
    into edges; the dialogue test draws them from the ids, and **the producer is owed** — it
-   belongs with the converter that already turns rows into units. **The five existing schemas
+   belongs with the converter that already turns rows into units. *(Paid in 1.14.0:
+   `smysl_text::replies`, run by a text ingest after its windows; the test now draws its edges
+   with it.)* **The five existing schemas
    derive byte for byte what they did:** the H-18 golden is now pinned to those five by name,
    because a digest over `ThreadSchema::ALL` would have moved for the new schemas alone and hidden
    the answer, and it holds the digest recorded before H-18. The exit's tests are

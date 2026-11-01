@@ -15,10 +15,11 @@
 //! | reply | a reply is no earlier than the message it answers | cited |
 //! | first seen | nothing is published after the earliest attestation of it | derived |
 //!
-//! **Two of the five have no data in this release and are not silently absent.** A *reply*
-//! needs the reply ids a chat reader writes into a segment row (record 18, key 7), and a
-//! segment row reaches a unit only through ingest (TX-P5); until then no unit in any store is
-//! known to answer another. The *manifest* half of quotation and derivation works, because
+//! **A reply is an edge, and only a text ingest writes one.** The reply ids a chat reader
+//! writes into a segment row (record 18, key 7) reach units as `x.text/replies` edges, which
+//! [`crate::replies`] draws and a text ingest stages once its windows are in (1.14.0); a store
+//! no conversation was ingested into holds none, and [`Unbuilt::reply_needs_ingest`] says so.
+//! The *manifest* half of quotation and derivation works, because
 //! manifests are records a store holds — but a derivation bound reaches the **units** under a
 //! manifest only through `source.manifest`, which is FC-3 and also TX-P5. So this release
 //! computes manifest orderings among manifests and unit orderings among units, and the bridge
@@ -37,6 +38,9 @@ use super::{Instant, Subject, TimeStatus};
 ///
 /// Re-exported from the declaration rather than spelled again here (TX-P5 step 2).
 pub use smysl_core::schemas::text::QUOTES;
+
+/// The relation a reply is written as (A-11), drawn by [`crate::replies`].
+pub use smysl_core::schemas::text::REPLIES;
 
 /// Which rule produced a constraint, for a why-chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -108,8 +112,9 @@ pub struct Unbuilt {
     /// has one end missing. Counted because a corpus where this is common is a corpus whose
     /// chains were split, which is worth knowing before reading the dates.
     pub dangling_manifests: usize,
-    /// Whether a reply constraint could have existed. Always true in this release: the ids a
-    /// reply would be built from live in a reading, and no unit carries one yet (TX-P5).
+    /// Whether the store holds no `x.text/replies` edge at all, so that no reply constraint
+    /// could be built. The ids a reply is built from live in a reading, and reach units only
+    /// when a text ingest of a conversation draws the edges between them.
     pub reply_needs_ingest: bool,
 }
 
@@ -124,6 +129,22 @@ pub fn free(store: &(impl StoreRead + ?Sized)) -> (Vec<Free>, Unbuilt) {
         dangling_manifests: 0,
         reply_needs_ingest: true,
     };
+
+    // Reply. `cited`, because the conversation's own export said which message answers which;
+    // the answered message is the earlier subject.
+    let replies = RelKind::Extension(REPLIES.to_string());
+    for r in store.relations() {
+        if r.kind != replies {
+            continue;
+        }
+        unbuilt.reply_needs_ingest = false;
+        out.push(Free::Order {
+            kind: FreeKind::Reply,
+            earlier: Subject::Unit(r.to),
+            later: Subject::Unit(r.from),
+            status: TimeStatus::Cited,
+        });
+    }
 
     // Quotation. The status is the quoting unit's, mapped from its epistemic status: a claim
     // somebody speculated about cannot order two publication dates as firmly as a measurement.
@@ -276,7 +297,38 @@ mod tests {
         assert_eq!(unbuilt.dangling_manifests, 0);
         assert!(
             unbuilt.reply_needs_ingest,
-            "the reply rule has no data until a unit can carry a reply id"
+            "the reply rule has no data until an ingest draws a reply edge"
+        );
+    }
+
+    #[test]
+    fn a_reply_edge_is_a_cited_order_with_the_answered_unit_first() {
+        use smysl_core::types::{Relation, UnitCoreBuilder};
+        use smysl_core::KernelType;
+        use smysl_core::{canonical_uid, Record};
+
+        let unit = |gist: &str| {
+            UnitCoreBuilder::new(KernelType::Claim, gist, Status::Speculative)
+                .build()
+                .unwrap()
+        };
+        let (asked, answer) = (unit("What did you see?"), unit("A pump."));
+        let (a, b) = (canonical_uid(&asked), canonical_uid(&answer));
+        let store = Store::from_records(vec![
+            Record::Unit(asked),
+            Record::Unit(answer),
+            Record::Relation(Relation::new(RelKind::Extension(REPLIES.to_string()), b, a)),
+        ]);
+        let (free, unbuilt) = free(&store);
+        assert!(!unbuilt.reply_needs_ingest);
+        assert_eq!(
+            free,
+            vec![Free::Order {
+                kind: FreeKind::Reply,
+                earlier: Subject::Unit(a),
+                later: Subject::Unit(b),
+                status: TimeStatus::Cited,
+            }]
         );
     }
 }

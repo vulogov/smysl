@@ -30,6 +30,40 @@ its own set, and one that reaches only the names someone wrote down.
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 GE-T10's gold is single-hand; they stay owed rather than planned.
 
+### A reply is an edge at last
+
+`x.text/v1` has declared `x.text/replies` since 1.10, rule E has named a reply constraint since
+TX-P3, and `dialogue` derives by the edge since TX-P8 — and nothing wrote one. The chat readers
+record what a message answers as an id on its row (Telegram's `reply_to_message_id`, Slack's
+`thread_ts`), a row is not a unit, and SMYSL-2.5 §6 recorded the producer as owed, to live with
+the converter that turns rows into units. The dialogue test drew its edges by hand.
+
+`smysl_text::replies` draws them, as a function of the readings and of where units sit in them:
+
+1. A row's `reply` id, or failing that its `thread` id, names the message whose `msg` id it is,
+   within the expression. A Slack thread is flat, so a Slack reply answers the message that
+   opened it, which is what the export says and no more.
+2. A unit belongs to the message whose row holds its whole span. One with no span sits nowhere;
+   an entity has none, and a translation is left out because its source unit carries the edge.
+3. An edge goes from every unit of the answering message to every unit of the answered one. A
+   message with no units gives and takes none.
+4. A reply naming a message the expression does not hold is **`SMY-W448`** and draws nothing —
+   registered now, 150 codes, and raised where the id is resolved rather than by the time engine
+   one step later, which is where SMYSL-2.4 had allocated it.
+
+`ingest_text` runs it as a ninth step, after every window and over the whole expression, so a
+reply is linked whichever window drew it or the message it answers, and on whichever run. It is
+not journalled and needs not be: the edges are content-addressed and filtered against the store,
+so a rerun that skips every window adds none, and a library ingested before 1.14 gets its edges
+on its next run. `TextReport::replies` counts what a run added, and `ingest --text` prints it.
+
+Rule E reads each edge as the reply constraint SMYSL-2.4 §3.3 states — `cited`, the answered
+unit the earlier — and `Unbuilt::reply_needs_ingest` now says whether the store holds any edge
+rather than being true by construction. `crates/smysl-ingest/tests/replies.rs` ingests a chat of
+nine messages across several windows, with two replies crossing windows and one to a message the
+export lacks, and asserts the two edges by their units, the one `W448`, the two constraints, and
+a rerun that adds nothing; the dialogue test now draws its edges with the producer.
+
 ## 1.13.0 — 2026-11-01
 
 What 1.12 leaves open, by what it blocks rather than the order it is easiest. No question in any

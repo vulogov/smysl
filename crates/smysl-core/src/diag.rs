@@ -326,6 +326,7 @@ registry! {
         W419 = "SMY-W419", Warn,  "Ambiguous attribution: the quote occurs more than once in the node named";
         W441 = "SMY-W441", Warn,  "An attributed quote was absent after repair; staged with no span and a capped status";
         W447 = "SMY-W447", Warn,  "A structure node larger than the window was split at sentence boundaries";
+        W448 = "SMY-W448", Warn,  "A reply names a message the expression does not hold; no edge was drawn for it";
         E442 = "SMY-E442", Error, "A model answer references a unit outside its batch and ledger digest";
         W443 = "SMY-W443", Warn,  "Untrusted text contained a prompt fence marker; neutralised in the prompt only";
         W444 = "SMY-W444", Warn,  "A tool-owned field in a model answer was dropped";
@@ -966,9 +967,15 @@ mod tests {
     /// under another model hash; 148 with `SMY-E416` and `SMY-W467` in step 4, raised by
     /// `--seed-check` on a model-dependent plan and by a rerun under another model; 149 with
     /// `SMY-E474` in step 5, raised by the natural-language front end.
+    ///
+    /// 150 with `SMY-W448` in 1.14.0, where something turns a chat's reply ids into
+    /// `x.text/replies` edges (`smysl_text::replies`): a reply naming a message the expression
+    /// does not hold. SMYSL-2.4 allocated it to the time engine, which would have reported the
+    /// same absence one step later; the producer is where the id is resolved, so it is where the
+    /// absence is seen.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 149);
+        assert_eq!(Code::ALL.len(), 150);
     }
 
     #[test]

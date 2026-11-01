@@ -10901,8 +10901,8 @@ fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl ingest: {d}");
     }
     println!(
-        "{} window(s), {} skipped, {} call(s), {} unit(s), {} entit(ies)",
-        report.windows, report.skipped, report.calls, report.units, report.entities
+        "{} window(s), {} skipped, {} call(s), {} unit(s), {} entit(ies), {} repl(ies)",
+        report.windows, report.skipped, report.calls, report.units, report.entities, report.replies
     );
     println!(
         "spans        {} attached, {} without one{}",
