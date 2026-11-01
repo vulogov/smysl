@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.13.0
+## 1.13.0 — 2026-11-01
 
 What 1.12 leaves open, by what it blocks rather than the order it is easiest. No question in any
 GE-T10 set is read as an intent it does not ask, so what follows is reading more, not reading
