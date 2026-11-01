@@ -7,6 +7,29 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.14.0
+
+What 1.13 leaves open, by what it blocks rather than the order it is easiest. A subject is
+found by any form of the name the store writes, its surname included; what is left is a subject
+the store does not name at all, and questions not yet read.
+
+**Questions still unread.** The sixth set reads 52 of 80. The yes-or-no forms declared out of
+reach stay so (Spanish `era`, `eran`, a Spanish question with no verb to read, French `-t-on`),
+and rule 32's price stands: *Was cholera spread by water?* is unread. The next rules want
+questions people ask; `ask --misses --recheck` collects them, and the rules wait for what it
+collects.
+
+**A subject by a name the store does not write.** Rule 34 was declared and not adopted: with
+`potion-multilingual-128M` no floor separates a synonym from its guards (lowest wanted 0.193,
+highest guard 0.645). Two ways stay open. A model that separates `calibrate.tsv`'s rows, which
+`tests/ge_t10_synonyms.rs` asks of whatever the variable names, is the occasion to declare the
+rule again on fresh rows. Or the store writes the other name itself, as an entity's declared
+alternative, and the spelled and stemmed passes find it with no model — a rule of its own, with
+its own set, and one that reaches only the names someone wrote down.
+
+**And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
+GE-T10's gold is single-hand; they stay owed rather than planned.
+
 ## 1.13.0 — 2026-11-01
 
 What 1.12 leaves open, by what it blocks rather than the order it is easiest. No question in any
