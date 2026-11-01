@@ -102,6 +102,11 @@ required-features = ["text", "model"]
 name              = "ge_t2"
 required-features = ["text", "model"]
 
+# Reply edges from a text ingest (1.14.0): a chat, through the Telegram reader.
+[[test]]
+name              = "replies"
+required-features = ["text", "model"]
+
 [dev-dependencies]
 # `tests/text_gate.rs` and `tests/redteam.rs` build a real library on disk, which means reading
 # a file into one: `txt/1` is the smallest reader that produces nodes, and a dev-dependency is

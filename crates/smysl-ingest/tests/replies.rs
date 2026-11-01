@@ -10,7 +10,7 @@
 //! the prompt — so the units, and therefore the edges, do not depend on how the windowing
 //! happened to fall.
 
-#![cfg(feature = "model")]
+#![cfg(all(feature = "text", feature = "model"))]
 
 use std::path::{Path, PathBuf};
 

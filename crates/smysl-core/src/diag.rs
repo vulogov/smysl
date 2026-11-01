@@ -326,7 +326,6 @@ registry! {
         W419 = "SMY-W419", Warn,  "Ambiguous attribution: the quote occurs more than once in the node named";
         W441 = "SMY-W441", Warn,  "An attributed quote was absent after repair; staged with no span and a capped status";
         W447 = "SMY-W447", Warn,  "A structure node larger than the window was split at sentence boundaries";
-        W448 = "SMY-W448", Warn,  "A reply names a message the expression does not hold; no edge was drawn for it";
         E442 = "SMY-E442", Error, "A model answer references a unit outside its batch and ledger digest";
         W443 = "SMY-W443", Warn,  "Untrusted text contained a prompt fence marker; neutralised in the prompt only";
         W444 = "SMY-W444", Warn,  "A tool-owned field in a model answer was dropped";
@@ -476,6 +475,16 @@ registry! {
         E503 = "SMY-E503", Error, "The unit store's layout is newer than this build reads; it is derived, so delete it to rebuild";
         W504 = "SMY-W504", Warn,  "The unit store is held by another process; read from the CBOR log instead";
         E505 = "SMY-E505", Error, "A primary shard and its export disagree on the record-set digest";
+    }
+
+    // --- Added after 1.13, at the end so no code is renumbered ---------------------------------
+    //
+    // 1.14.0: a text ingest draws `x.text/replies` (`smysl_text::replies`) and reports a reply
+    // naming a message the expression does not hold. A library code in a trailing block, since
+    // `Store` is the last group and a code inserted beside `W447` renumbered every code after
+    // it — which `cargo-semver-checks` caught as a major break.
+    Library => {
+        W448 = "SMY-W448", Warn,  "A reply names a message the expression does not hold; no edge was drawn for it";
     }
 }
 
