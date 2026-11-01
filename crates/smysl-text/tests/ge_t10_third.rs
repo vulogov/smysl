@@ -552,11 +552,11 @@ fn ge_t10_misread() {
     assert_eq!(got, (40, 39, 0, 37, 36), "{out}");
 }
 
-/// The surname set (`fixtures/dossier/surnames/`, rule 33): a subject named by the last word of
-/// a name the store writes whole. Counts (asked, unread, subject right, wrong subject found),
-/// where a `none` row is right when no subject is found, and an unread row — its intent not
-/// read, so its subject never asked for — is neither.
-fn surname_set() -> ((usize, usize, usize, usize), String) {
+/// A set whose rows want a subject or `none` (`fixtures/dossier/surnames/`, `synonyms/`): counts
+/// (asked, unread, subject right, wrong subject found), where a `none` row is right when no
+/// subject is found, and an unread row — its intent not read, so its subject never asked for —
+/// is neither.
+fn subject_set(title: &str, file: &str) -> ((usize, usize, usize, usize), String) {
     let src = std::fs::read_to_string(repo("fixtures/dossier/gold/corpus.smy")).unwrap();
     let parsed = parse_surface(&src).unwrap();
     let labels: BTreeMap<String, Uid> = parsed
@@ -571,8 +571,8 @@ fn surname_set() -> ((usize, usize, usize, usize), String) {
     let opts = AskOptions::new(AgentId::new("tool:ge-t10").unwrap());
 
     let (mut asked, mut unread, mut right, mut wrong) = (0, 0, 0, 0);
-    let mut out = "GE-T10, surname set: the subject\n".to_string();
-    let text = std::fs::read_to_string(repo("fixtures/dossier/surnames/questions.tsv")).unwrap();
+    let mut out = format!("GE-T10, {title}: the subject\n");
+    let text = std::fs::read_to_string(repo(file)).unwrap();
     for line in text
         .lines()
         .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
@@ -611,10 +611,29 @@ fn surname_set() -> ((usize, usize, usize, usize), String) {
     ((asked, unread, right, wrong), out)
 }
 
-/// The surname set (rule 33).
+/// The surname set (rule 33): a subject named by the last word of a name the store writes whole.
 #[test]
 fn ge_t10_surnames() {
-    let (got, out) = surname_set();
+    let (got, out) = subject_set("surname set", "fixtures/dossier/surnames/questions.tsv");
     println!("{out}");
     assert_eq!(got, (29, 0, 27, 2), "{out}");
+}
+
+/// The synonym set (rule 34): a subject named by a name the store does not write at all.
+#[test]
+fn ge_t10_synonyms() {
+    let (got, out) = subject_set("synonym set", "fixtures/dossier/synonyms/questions.tsv");
+    println!("{out}");
+    assert_eq!(got, (49, 0, 15, 0), "{out}");
+}
+
+/// The synonym set's calibration rows (rule 34's T and M), scored as the set is.
+#[test]
+fn ge_t10_synonyms_calibration() {
+    let (got, out) = subject_set(
+        "synonym calibration",
+        "fixtures/dossier/synonyms/calibrate.tsv",
+    );
+    println!("{out}");
+    assert_eq!(got, (10, 0, 4, 0), "{out}");
 }

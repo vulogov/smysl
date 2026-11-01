@@ -1,0 +1,85 @@
+# GE-T10's synonym set: a subject the question names by a name the store does not write at all.
+#
+# WHY. Spelled, stemmed, derived and surname passes (rules 22 to 25, 29, 33) find a subject only
+# when some form of its written name is in the question. A question that calls smallpox the
+# Blattern, scurvy the Scharbock, or Semmelweis the saviour of mothers names nothing any of them
+# can reach; nor does one that asks after miasma as bad air in another language. Every synonym
+# below was checked against `fixtures/dossier/gold/corpus.smy` before it was written: none is an
+# entity's name, and none but *epidemiology* and *antiseptic* (inside the epithets for Snow and
+# Lister) is anywhere in its text.
+#
+# THE RULE, DECLARED before a word of this set was written; scored first without it
+# (`baseline.txt`), and not changed after a run:
+#  34. a subject by meaning: when no pass finds any run, the question's topic, whole, is put to
+#      the store's semantic source, and each entity is scored by the best cosine of its own unit
+#      or of any unit that mentions it (`x.text/mentions`). The best entity names the subject
+#      when its score is at least T; when the second-best is within M of it, SMY-W417, as any
+#      two candidates are. No semantic source, no pass: it finds nothing, as the other passes'
+#      defaults do. Last, behind rule 33, so that no question an earlier pass reads changes. A
+#      dossier whose subject this pass found records the model's hash; one any other pass
+#      found does not, and stays model-free.
+#      T and M are fixed on `calibrate.tsv`, written with this file and disjoint from it, before
+#      this file is scored with the rule, and are not changed after.
+#
+# THE SET. Columns: qid, subject, lang, question — as the surname set. `subject` is the entity
+# label the question is about, or `none` for a question that names nobody the store writes and
+# should find no subject. The `gd-` rows are the guards: a disease, a substance and two men the
+# corpus does not hold as subjects, each near one it does — measles beside smallpox, caloric
+# beside phlogiston, malaria (*bad air*) beside miasma, Pasteur and Koch beside Lister, the
+# father of microbiology beside the fathers of immunology and epidemiology, and the plague,
+# which the corpus mentions without making it a subject.
+#
+# Each question's intent was checked to read (`dossier::classify`) before the baseline was
+# taken, and a wording that did not read was changed then: the rule under test is the subject's,
+# and an unread question never asks for one.
+#
+# WHO WROTE THIS. The hand that declared the rule, after declaring it. Single hand.
+sp-y1	e/smallpox	en	What was the speckled monster?
+sp-y1	e/smallpox	de	Was sind die Blattern?
+sp-y1	e/smallpox	fr	Qu'était la petite vérole ?
+sc-y1	e/scurvy	en	What is scorbutus?
+sc-y1	e/scurvy	de	Was ist der Scharbock?
+sc-y1	e/scurvy	ru	Что такое скорбут?
+mi-y1	e/miasma	en	Explain the term noxious vapours
+mi-y1	e/miasma	de	Erkläre den Begriff Pesthauch
+mi-y1	e/miasma	es	Explica el término aire corrupto
+mi-y1	e/miasma	fr	Explique le terme mauvais air
+mi-y1	e/miasma	ru	Объясни понятие дурной воздух
+ph-y1	e/phlogiston	en	Explain the term fire principle
+ph-y1	e/phlogiston	de	Erkläre den Begriff Feuerstoff
+ph-y1	e/phlogiston	es	Explica el término principio del fuego
+ph-y1	e/phlogiston	fr	Explique le terme principe du feu
+ph-y1	e/phlogiston	ru	Объясни понятие огненная материя
+se-y1	e/semmelweis	en	Who was the saviour of mothers?
+se-y1	e/semmelweis	de	Wer war der Retter der Mütter?
+se-y1	e/semmelweis	es	¿Quién fue el salvador de las madres?
+se-y1	e/semmelweis	fr	Qui était le sauveur des mères ?
+se-y1	e/semmelweis	ru	Кем был спаситель матерей?
+je-y1	e/jenner	en	Who was the father of immunology?
+je-y1	e/jenner	de	Wer war der Vater der Immunologie?
+je-y1	e/jenner	es	¿Quién fue el padre de la inmunología?
+je-y1	e/jenner	fr	Qui était le père de l'immunologie ?
+je-y1	e/jenner	ru	Кем был отец иммунологии?
+sn-y1	e/snow	en	Who was the father of epidemiology?
+sn-y1	e/snow	de	Wer war der Vater der Epidemiologie?
+sn-y1	e/snow	fr	Qui était le père de l'épidémiologie ?
+ls-y1	e/lister	en	Who was the father of antiseptic surgery?
+ls-y1	e/lister	de	Wer war der Vater der antiseptischen Chirurgie?
+ls-y1	e/lister	ru	Кем был отец антисептической хирургии?
+ch-y1	e/cholera	en	What was the blue death?
+ch-y1	e/cholera	de	Was war die Brechruhr?
+gd-y1	none	en	What is measles?
+gd-y1	none	de	Was sind die Masern?
+gd-y1	none	es	¿Qué es el sarampión?
+gd-y1	none	fr	Qu'est-ce que la rougeole ?
+gd-y1	none	ru	Что такое корь?
+gd-y2	none	en	Explain the term caloric
+gd-y2	none	de	Erkläre den Begriff Wärmestoff
+gd-y2	none	ru	Объясни понятие теплород
+gd-y3	none	en	What is malaria?
+gd-y3	none	es	¿Qué es la malaria?
+gd-y4	none	en	Who was Pasteur?
+gd-y4	none	fr	Qui était Pasteur ?
+gd-y5	none	en	Who was the father of microbiology?
+gd-y5	none	de	Wer war der Vater der Mikrobiologie?
+gd-y6	none	en	What was the plague?
