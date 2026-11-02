@@ -27,8 +27,84 @@ rule again on fresh rows. Or the store writes the other name itself, as an entit
 alternative, and the spelled and stemmed passes find it with no model — a rule of its own, with
 its own set, and one that reaches only the names someone wrote down.
 
-**And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
-GE-T10's gold is single-hand; they stay owed rather than planned.
+**And the ones only people can close** — *no longer holding anything.* OQ-44 is decided as
+built (a `lexical` same-as is never auto-accepted), OQ-15 is deferred, and TX-P7's exit is
+restated so that it does not wait on coders, as GE-T2's was. GE-T5's coder sheet and GE-T10's
+second hand stay owed indefinitely, not planned.
+
+**What 1.14 is.** The last pieces of the RFC that were owed in code, then its open questions
+closed, then two examples to show it whole:
+
+- **Built:**
+  - reply edges, drawn by text ingest from a chat's reply ids (`x.text/replies`);
+  - `order by` on more than one key;
+  - the dense document id on disk, which shrinks `substrate.redb` from 540 MB to 85 MB at
+    155k units and opens a view in 1.5 ms instead of 17.5;
+  - the structure hash narrowed to the segment tree (OQ-70);
+  - a record, beside the agreement figure, of whether the provider reproduced at temperature 0
+    (OQ-74, `SMY-W454`);
+  - `d3:` for a dating in `@commit` and `@withdraw` (OQ-73).
+- **Decided:**
+  - nine questions decided as built;
+  - OQ-4: no versification map ships;
+  - OQ-18 to OQ-20 restated and decided;
+  - OQ-15 deferred and OQ-5 withdrawn.
+
+  Every question on the path to a release is now closed.
+- **Shown:** `examples/simple_demo`, the format's basics in ten steps, and
+  `examples/information_theory`, every layer of SMYSL-2 over one small library, both running
+  offline.
+- **Changed identities:** OQ-70 moves the structure hash, and with it the mid, of any reading
+  whose rows carry more than the tree: chats, and scripture with reported-speech marks. Its
+  section lists what was re-blessed. `substrate.redb` is version 2, and a version-1 file is
+  rebuilt on open.
+
+### `ingest` attests at a clock, not at 1970
+
+`IngestOptions` defaults its clock to time zero, and `smysl ingest` and `smysl ingest --text`
+both took the default, so every unit they staged was attested at 1970. Rule E reads a unit's
+earliest attestation as a ceiling on when it was said (first seen). So every chat message
+ingested from the CLI was "said after it was first seen", and `check` reported each one
+contested (`SMY-W413`): a chat's times, the reason to ingest one, were unusable from the CLI.
+`link`, `attest` and the other model commands already took `--at` or the wall clock;
+`ingest` now does the same. It gains `--at <MS>`, to make the attestations reproducible.
+
+Found while writing the manual's ingest chapter, where `examples/information_theory` showed the
+same thing through the library API until it called `IngestOptions::with_now`.
+`tests/cmd_ingest_clock.rs` ingests the fixture chat through the CLI, against a loopback stub
+speaking Ollama's protocol, and asserts no `SMY-W413`. At `--at 0`, the old default, it reports
+one for every message.
+
+### The manual covers SMYSL-2, and two things found writing it
+
+`Documentation/SMYSL_MANUAL.typ` gains **Part X, Libraries of Texts**, in eight chapters:
+
+30. libraries, parts, readings and identities;
+31. ingest over texts, consensus and replies;
+32. datings, effective time and locks;
+33. same-as, links and summaries;
+34. sq/1, saved queries and `ask`;
+35. measures;
+36. export, import and verify;
+37. scale, and the library from Rust.
+
+Every terminal block is the 1.14.0 binary's output, except where a step needs a model; those
+quote the offline `information_theory` example and say so. The README is brought up to 1.14,
+having still described 1.8, and `examples/README.md` indexes the two examples.
+
+Writing chapter 34 turned up two defects in `q`, both fixed:
+
+- **`q --save` said `saved b3:…` before the write**, so a store that refused the records still
+  printed a uid it did not hold, and exited 1. The line is now printed after the write succeeds.
+- **`persist` had no arm for a schema declaration**, as it once had none for a dating. The
+  `x.query/v1` that goes with a store's first saved query was refused by a surface document,
+  though the writer can write it.
+
+A saved query still needs a CBOR store, because its unit has no surface spelling; the manual
+says so.
+
+`smysl commit <did>` also printed the dating as `b3:…`, the slip OQ-73 fixed in the file. It
+now prints `d3:…`.
 
 ### A first example: `examples/simple_demo`
 
