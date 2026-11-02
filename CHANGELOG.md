@@ -30,6 +30,24 @@ its own set, and one that reaches only the names someone wrote down.
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 GE-T10's gold is single-hand; they stay owed rather than planned.
 
+### A first example: `examples/simple_demo`
+
+`cargo run --example simple_demo` takes one short surface document, about a CI build that got
+slow, through the basics in ten steps:
+
+1. parsing;
+2. identity as content;
+3. CBOR round trip;
+4. a store and `check`, plus a broken document's diagnostics;
+5. sq/1 queries;
+6. salience;
+7. packing to a budget;
+8. rendering a thread as Markdown;
+9. withdrawing an edge;
+10. canonical surface text.
+
+It is pure and needs no features, so it builds under `--no-default-features` too.
+
 ### An example of all of SMYSL-2: `examples/information_theory`
 
 `cargo run --example information_theory` builds a small library about information theory and
