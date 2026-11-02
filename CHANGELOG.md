@@ -7,6 +7,43 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.15.0
+
+What 1.14 leaves open, by what it blocks rather than the order it is easiest. Every question on
+the path to a release is closed, and the last of RFC SMYSL-2 that was owed in code is built; what
+is left is what a decision deferred, what a store does not yet hold, and questions not yet read.
+
+**Questions still unread.** The sixth set reads 52 of 80. The yes-or-no forms declared out of
+reach stay so (Spanish `era`, `eran`, a Spanish question with no verb to read, French `-t-on`),
+and rule 32's price stands: *Was cholera spread by water?* is unread. The next rules want
+questions people ask; `ask --misses --recheck` collects them, and the rules wait for what it
+collects. The subject-finder fixes measured in-sample on the sixth set are owed a run on fresh
+questions before any of them counts.
+
+**A subject by a name the store does not write.** Rule 34 was declared and not adopted: with
+`potion-multilingual-128M` no floor separates a synonym from its guards (lowest wanted 0.193,
+highest guard 0.645). Two ways stay open. A model that separates `calibrate.tsv`'s rows, which
+`tests/ge_t10_synonyms.rs` asks of whatever the variable names, is the occasion to declare the
+rule again on fresh rows. Or the store writes the other name itself, as an entity's declared
+alternative, and the spelled and stemmed passes find it with no model — a rule of its own, with
+its own set, and one that reaches only the names someone wrote down.
+
+**What waits on a store that does not exist yet.** A saved query still needs a CBOR store,
+because its unit has no surface spelling. A pinned traversal is not renamed: edges are followed
+by the kind they were written with, and SMYSL-2.5 §3.9's lazy rename waits for a store whose
+relations carry a schema revision. Neither blocks anything measured, and each is additive when
+it comes.
+
+**A thousand real works.** Every threshold of GE-T7 is met on the stand-in, in index mode and on
+primary shards; GE-T7 on a real corpus of a thousand works stays owed, and the stand-in's
+12 MB is not a thousand books.
+
+**And the ones only people can close.** GE-T5's coder sheet, GE-T10's second hand and GE-T9's
+human ceiling stay owed indefinitely, not planned, and OQ-15, partial dependence between
+witnesses, stays deferred until something measured needs it.
+
+---
+
 ## 1.14.0 — 2026-11-02
 
 What 1.13 leaves open, by what it blocks rather than the order it is easiest. A subject is
