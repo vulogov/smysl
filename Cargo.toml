@@ -165,6 +165,12 @@ all-features = true
 name = "smysl"
 path = "src/lib.rs"
 
+# The SMYSL-2 walk-through. It reads texts, runs an ingest and queries the library, so it needs
+# the library layer and the ingest boundary, which a `--no-default-features` build has neither of.
+[[example]]
+name              = "information_theory"
+required-features = ["cli", "ingest"]
+
 [[bin]]
 name              = "smysl"
 path              = "src/main.rs"

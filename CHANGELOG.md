@@ -30,6 +30,29 @@ its own set, and one that reaches only the names someone wrote down.
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 GE-T10's gold is single-hand; they stay owed rather than planned.
 
+### An example of all of SMYSL-2: `examples/information_theory`
+
+`cargo run --example information_theory` builds a small library about information theory and
+walks it through every layer, in fourteen numbered sections:
+
+- texts read into manifests, parts and readings;
+- pseudonymised speakers;
+- drawn units and an entity;
+- a consensus text ingest, with its agreement, whether the provider reproduced, and its reply
+  edges;
+- same-as classes;
+- datings, effective time, and a lock released by a review;
+- sq/1 queries, a saved query rerun, and a dossier;
+- the text and unit measures;
+- export, verify and import;
+- redaction and `check`;
+- with `--features store-redb`, the on-disk unit store.
+
+It runs offline against a scripted provider and ends with `check` clean. Its README maps each
+section to its RFC, and names the three steps a first program tends to miss: declaring
+`x.text/v1` and `x.query/v1`, giving ingest a clock, and giving a dating a basis. It requires
+`cli` and `ingest`, so a `--no-default-features` build skips it.
+
 ### OQ-4 decided, OQ-15 deferred, OQ-5 withdrawn, OQ-18 to OQ-20 restated and decided
 
 - **OQ-4**: the crate ships no versification map. A map is installed in a library — the mechanism
