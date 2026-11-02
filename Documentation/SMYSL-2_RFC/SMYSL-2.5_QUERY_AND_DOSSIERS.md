@@ -2309,7 +2309,7 @@ E421, E422, E426, E427, W429, W430, W431. Existing: W036, E001.
 
 Draft 3 questions this RFC touches: ~~**OQ-14**~~ **answered** (IDF over the query's declared
 scope, default collection, recorded per query — §3.2 step 4 has the reasoning and the two
-defects that decided it), **OQ-15** (partial dependence; `Witnesses` trait leaves room), **OQ-16** (contentions
+defects that decided it), **OQ-15** (partial dependence; **deferred 2026-11-02** — nothing measured needs it, and the `Witnesses` trait leaves room), **OQ-16** (contentions
 across stores; computed by merge into the scratch store until SMYSL-2.8), ~~**OQ-21**~~ **decided
 2026-10-28: the name stays `sq`**, because it is no longer only a name — `using sq/1` is how a
 query states its version (`SMY-E427` for one this build does not support), the three ports

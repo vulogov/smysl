@@ -30,6 +30,28 @@ its own set, and one that reaches only the names someone wrote down.
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 GE-T10's gold is single-hand; they stay owed rather than planned.
 
+### OQ-4 decided, OQ-15 deferred, OQ-5 withdrawn, OQ-18 to OQ-20 restated and decided
+
+- **OQ-4**: the crate ships no versification map. A map is installed in a library — the mechanism
+  TX-P4 step 4 built, which needs no licence of this repository's — and a shipped map would make
+  the crate the distributor of a dataset with a provenance and a licence to answer for, for
+  nothing measured. `data/versification/` stays empty, now by decision.
+- **OQ-15**, partial dependence between witnesses: deferred. Nothing measured needs it, it no
+  longer holds TX-P7's exit, and the `Witnesses` trait leaves room for it.
+- **OQ-5** is withdrawn. Its wording was in draft 3, which this repository does not hold, and
+  nothing recorded what it asked; its number is not reused.
+- **OQ-18 to OQ-20** are restated, because draft 3's wording is lost too, each from the one
+  subject SMYSL-2.4 kept for it, with options and a recommendation: a span's address (tid and
+  offsets, with a renormalised text as a new part), a message's edit history, and which
+  pointers between messages become edges. The row they replace said the segment table *keeps*
+  edit history; it does not: Telegram's and Slack's `edited` keys are dropped and the read is
+  marked lossy, and the restated OQ-19 says so.
+
+  All three are then **decided as recommended**: a renormalised text is a new part, with
+  `text align` relating the two; edit history stays dropped and marked lossy, and the
+  last-edit instant as a row key is the additive path if a measure ever needs it; and replies
+  are edges, forwards are dropped, quotations are marks — as built.
+
 ### Nine open questions decided as built, and TX-P7's exit restated
 
 Each of these had an answer in the code and none in the specification, so each is decided as

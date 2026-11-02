@@ -1245,7 +1245,7 @@ half a corpus depends on.
 crates/smysl-text/
   Cargo.toml
   data/abbr/{en,ru,es,fr,de}.txt     abbreviation exception lists (segmenter data)
-  data/versification/               mapping tables, licence per OQ-4 (TX-P4)
+  data/versification/               empty by decision (OQ-4): maps are installed per library
   src/
     lib.rs          re-exports; Library handle
     norm.rs         Normalised newtype: UTF-8, BOM, LF, NFC
@@ -3879,14 +3879,17 @@ nothing behind it.
 | OQ-1 | decided by D-2; implemented in §4.3.1 |
 | ~~OQ-2~~ | **decided 2026-11-01**: stems only; Russian type statistics labelled as stem-level |
 | OQ-3 | open; a reader parameter `--param orthography=pre1918` is the cheaper path and keeps one manifest |
-| OQ-4 | open, and TX-P4 step 4 shipped without it: a map **installed in a library** is a mechanism and needed no answer, where a map **distributed with the crate** is a dataset with a provenance and a licence and still needs one. §4.1's `data/versification/` is empty |
+| ~~OQ-4~~ | **decided 2026-11-02: the crate ships no map.** A map is installed in a library, which is the mechanism step 4 built and needs no licence of this repository's; a shipped map would make the crate the distributor of a dataset with a provenance and a licence to answer for, and nothing measured needs one. `data/versification/` stays empty. *Was:* open, and TX-P4 step 4 shipped without it: a map **installed in a library** is a mechanism and needed no answer, where a map **distributed with the crate** is a dataset with a provenance and a licence and still needs one. §4.1's `data/versification/` is empty |
+| ~~OQ-5~~ | **withdrawn 2026-11-02.** Its wording was in draft 3, which this repository does not hold, and nothing in the set or the code recorded what it asked. Nothing depends on it. A question it held can be raised again under a new number; this one is not reused |
 | ~~OQ-8~~ | **decided 2026-11-01**: 15/18 are objects beside logs, a log refuses them (`E452`, OQ-39), and bundles may carry them under `carry: text` |
 | ~~OQ-9~~ | **decided 2026-11-01**: the hand-rolled parser, levels 0 and 1, with `fixtures/library/edtf` as the published suite |
 | OQ-10, OQ-12 | decided by D-3, D-4; implemented in §3.3 |
 | ~~OQ-11~~ | **decided 2026-11-01**, as GE-T7 left it: one solve over the subjects any dating or constraint involves, re-solved after an append that touches time (`findings_among`). The per-component split this row first proposed was never built and nothing measured a need for it |
 | OQ-13 | **decided 2026-10-29: no speaker or device target in SMYSL-2.** Window targets are the selector (§9) |
 | OQ-17 | decided by D-1; `provenance::stamp` writes exactly that set |
-| OQ-18, OQ-19, OQ-20 | open; the segment table keeps offsets, edit history and pointers so either answer is possible later |
+| ~~OQ-18~~ | **Decided 2026-11-02: (a), a renormalised text is a new part.** *Restated 2026-11-02.* Draft 3's wording is not in this repository; each of these three is rebuilt from the one subject this row recorded for it: offsets, edit history and pointers. **Is a span's address its part's tid and byte offsets, permanently?** A span is a range in a part's *normalised* bytes (A-2.1), so a change to normalisation, such as a later Unicode version or a new rule, gives the same source a different tid and moves every offset. (a) A renormalised text is a **new part**: units keep pointing at the old tid, and `text align` relates the two, as built. (b) A span carries a second anchor, such as a locator plus an offset within it, that survives renormalisation. *Recommended: (a).* The tid is what makes a span verifiable, and (b) brings back the drift an address over normalised bytes exists to remove. |
+| ~~OQ-19~~ | **Decided 2026-11-02: (a), dropped and marked lossy, with (b) the additive path.** *Restated 2026-11-02* (see OQ-18). **Does a reading keep a message's edit history?** It does **not**. This row used to say the segment table keeps it, but Telegram's `edited`/`edited_unixtime` and Slack's `edited` are dropped and the read is marked lossy; no export in scope carries the earlier text, only the time of the last edit. (a) Keep dropping it, marked lossy, as built. (b) Carry the last-edit instant as a row key, so rule E can tell *said at* from *last changed at*. (c) Model each version as its own row. *Recommended: (a) now, with (b) as the additive path* if a measure ever needs the distinction. (c) has nothing to read: the exports in scope do not carry earlier versions. |
+| ~~OQ-20~~ | **Decided 2026-11-02: (a), as built.** *Restated 2026-11-02* (see OQ-18). **Which pointers between messages become edges?** As built: a **reply id** becomes `x.text/replies` (1.14.0, step 9 of `ingest_text`); a **forward** is dropped and marked lossy, since `forwarded_from` is a display name with no id to key (§3.2); a **quotation** inside the text is a reported-speech mark on the row, not a pointer. (a) Decide as built. (b) Draw an edge for a forward too, to a speaker that cannot be keyed. *Recommended: (a).* (b) would make a display name a speaker, which §3.2 rules out. |
 
 **New questions:**
 
