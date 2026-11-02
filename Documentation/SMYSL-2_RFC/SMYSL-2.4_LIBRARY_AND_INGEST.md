@@ -779,6 +779,22 @@ compared. The agreement is recorded by the run rather than recomputed from the b
 batch cannot answer it — two passes that found one claim produce one uid. Step 3a's note in §6
 carries the four points that decided the shape.
 
+**Whether the provider reproduced** is recorded beside the figure (OQ-74, decided 1.14.0). A
+configured temperature of 0 is what the caller asked for, and not what every provider does:
+hosted `deepseek-chat` at `"temperature": 0.0` varied as much within one language as between
+languages. So each input's **first** answer from each pass is compared byte for byte — the first
+only, because every pass sends that request unchanged and a repair turn's request carries the
+answer it repairs — and the agreement counts the inputs every pass answered (`answered`) and,
+of those, the ones answered identically (`reproduced`). The two readings of the figure follow.
+Where every input reproduced, the second pass repeated the first and the rate is 1.0 less
+whatever the conversion lost: it measures the extraction, not the model. Where any did not, the
+rate measures the provider's variation as well, is **a lower bound** on what a reproducible
+provider would show, and is comparable only with runs that also did not reproduce; the run
+says so once with `SMY-W454`, and `ingest --text` prints `reproduced n of m` beside
+`stability`. The comparison is made on the run's own windows rather than on a probe sent
+before it: it costs no call, and it measures the requests whose figure it qualifies, where a
+short probe could reproduce while long windows did not.
+
 **Holder and mode are structural from the first ingest** (§1.1 item 4). Draft 1 left this to the
 prompt. S0 measured reported speech extracted as asserted in 11.1–24.5% of attribution-bearing
 units across every model and coder pairing, every cell above the 10% threshold (T8), and the arm
@@ -3579,7 +3595,8 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    already had — `J_class` 1.000 local against 0.327 hosted, and MS-8's 145 bit-identical runs,
    which were the **local** arm. A hosted model is not reproducible at temperature 0, and
    `admits` cannot see it, because it checks the temperature a caller configured and not whether
-   the provider honours it. **OQ-74** records the gap.
+   the provider honours it. **OQ-74** records the gap *(decided 1.14.0: the run now compares its
+   passes' first answers and records whether the provider reproduced, §3.4)*.
 
    **The figure could not be read as it stood**, which cost one addition to the instrument.
    `identical-span` includes the gist (§3.5), so a pass that found the same bytes and wrote a
@@ -3833,6 +3850,7 @@ meanings and are not repeated here.
 | `SMY-W451` | an alignment scheme does not cover a locator; the pair is left unaligned and counted | `text align`, `anchored` engine |
 | `SMY-E452` | a record 15 or 18 was offered to a log; text lives in the object store (OQ-39) | `append`, `check` |
 | `SMY-W453` | the pivot pass returned no translation for a unit; it is staged in the source language only | `ingest --text --lang-policy pivot:L` |
+| `SMY-W454` | two passes at temperature 0 got different first answers to the same request; the provider did not reproduce and the agreement figure is a lower bound (registered 1.14.0, OQ-74) | `ingest`, `ingest --text` |
 
 `454`–`459` are unallocated. SMYSL-2.3 may adopt `E446` as a C-Library obligation.
 
@@ -3885,4 +3903,4 @@ nothing behind it.
 | ~~OQ-44~~ | `lexical` same-as proposals: auto-accept above a threshold at rung `computed`, or always require a judge (model or human)? **decided 2026-11-01**: **never auto-accept.** A proposal is staged at rung `computed` and a class is settled by agreement between engines (`attested:2`), as built; GE-T5's paraphrase set measures precision 0.6724 at k=1 and every planted near-miss proposed from k=2, so no threshold separates them |
 | ~~OQ-13~~ (draft 3) | Speaker and device selectors for datings, beside the window targets. **Decided 2026-10-29: neither in SMYSL-2.** A dating's target is inside its did and A-5 lists four kinds, which the decoder holds to (`dec_dating_target` refuses any other, since an unknown kind cannot be kept), so a fifth is a wire amendment every older reader refuses. A speaker target would also have to name a speaker the way the rows do, and a pseudonymised library holds `spk:` keys, not the platform ids a caller knows. And nothing records a device: no reader fills one and the segment row has no field for it. Dating what one speaker said is a selection followed by unit datings, which the format already carries. |
 | ~~OQ-70~~ | **Decided and built 1.14.0: narrowed to the tree.** The structure hash is over the segment table with each row cut to keys 0 to 3 (start, end, level, locator), in all four implementations (`smysl_core::types::library::structure_hash_of`, and `tree` in each port); A-5 and the format spec say so. Chat and marked readings moved their structure hashes and mids once, and scripture without marks did not move at all; pseudonymising a chat now keeps every part entry's `structure`. **Found in TX-P2 step 2.** A part entry's `structure` is A-5's hash of the whole segment table, so it moves when a row's *metadata* moves — a speaker, a timestamp, an id — and not only when the segmentation does. `SMY-E401` then reports `which: "structure"` for a change that is not structural. Should A-5 narrow the hash to the tree (level, range, locator) and leave the rest to the rdid, which already covers it? It is an amendment to the normative document and it would move every structure hash ever computed, so it is a question for SMYSL-2.3 rather than for a reader's commit. The cost of leaving it: pseudonymising a corpus re-identifies every part *entry* — no part, no object, no tid. §3.2 |
-| OQ-74 | **Found in TX-P5 step 5, measuring GE-T2's corpus.** `Passes::admits` refuses two passes above temperature 0, on MS-8's measurement that two runs at T>0 cannot agree by `identical-span` except by accident. It checks the temperature a **caller configured**, and nothing checks whether the provider honours it. Measured against hosted `deepseek-chat` with `"temperature": 0.0` on the wire: three runs of five languages gave `identical-span` rates spread 0.333 to 0.637 *within* one language, which is the size of the spread *between* languages — the second pass bought much of what MS-8 says a T>0 run buys, at a configured T of 0. S0 had the same split from the other side (`J_class` 1.000 local, 0.327 hosted; MS-8's 145 bit-identical runs were the local arm). The consensus policy's premise is therefore a property of the *provider*, not of the configuration, and this build cannot tell the two apart. What would close it is a determinism probe — the same request twice at T=0 before the run, recorded beside the figure — which is cheap and is not a policy change; the alternative is to say in §3.4 that `identical-span` is defined for providers that are reproducible at T=0 and is a lower bound elsewhere. §3.4, §5.5 |
+| ~~OQ-74~~ | **Decided and built 1.14.0: measured on the run's own windows, recorded beside the figure.** Each input's first answer from each pass is compared byte for byte; `Agreement` carries `answered` and `reproduced`, `reproduced()` says which reading of the rate applies, `SMY-W454` is raised once where a run at temperature 0 did not reproduce, and `ingest --text` prints the count beside `stability` (§3.4). Not a probe before the run: the run's windows cost no extra call and are the requests the figure is about. Both of the options below, in effect: the measurement, and §3.4's statement that the figure is a lower bound where the provider varied. *Found in TX-P5 step 5, measuring GE-T2's corpus.** `Passes::admits` refuses two passes above temperature 0, on MS-8's measurement that two runs at T>0 cannot agree by `identical-span` except by accident. It checks the temperature a **caller configured**, and nothing checks whether the provider honours it. Measured against hosted `deepseek-chat` with `"temperature": 0.0` on the wire: three runs of five languages gave `identical-span` rates spread 0.333 to 0.637 *within* one language, which is the size of the spread *between* languages — the second pass bought much of what MS-8 says a T>0 run buys, at a configured T of 0. S0 had the same split from the other side (`J_class` 1.000 local, 0.327 hosted; MS-8's 145 bit-identical runs were the local arm). The consensus policy's premise is therefore a property of the *provider*, not of the configuration, and this build cannot tell the two apart. What would close it is a determinism probe — the same request twice at T=0 before the run, recorded beside the figure — which is cheap and is not a policy change; the alternative is to say in §3.4 that `identical-span` is defined for providers that are reproducible at T=0 and is a lower bound elsewhere. §3.4, §5.5 |

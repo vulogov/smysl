@@ -10930,6 +10930,15 @@ fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         ),
         None => println!("stability    - (one pass, or nothing comparable)"),
     }
+    // Beside the figure, because it decides how the figure reads (OQ-74): a provider that
+    // repeated itself makes the rate 1.0 by construction, and one that did not makes it a
+    // lower bound. Absent for one pass, which has nothing to repeat.
+    if report.agreement.reproduced().is_some() {
+        println!(
+            "reproduced   {} of {} window(s) answered identically by every pass",
+            report.agreement.reproduced, report.agreement.answered
+        );
+    }
     // Printed only under the policy that runs it, so a `source` run's output is unchanged.
     if report.pivot_calls > 0 || report.pivoted > 0 || report.pivot_missing > 0 {
         println!(

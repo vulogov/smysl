@@ -229,6 +229,41 @@ fn a_single_pass_run_makes_one_call_and_claims_no_agreement() {
     assert_eq!(staged.units.len(), 2, "only the first pass ran");
 }
 
+/// **OQ-74.** Whether the provider repeated itself is recorded beside the figure, because it
+/// decides how the figure reads. `agree` is a provider that returned the same bytes twice:
+/// reproduced, and nothing said. `drift` is one that, asked the same thing at temperature 0,
+/// answered differently — which a configured temperature cannot rule out (hosted
+/// `deepseek-chat` did it on GE-T2's corpus) — and the run says so, once, with `SMY-W454`.
+#[test]
+fn a_provider_that_does_not_reproduce_at_zero_is_named_beside_the_figure() {
+    let (agreeing, _, _) = run("agree", Passes::Consensus);
+    let a = agreeing.agreement.expect("a consensus run");
+    assert_eq!(
+        (a.answered, a.reproduced, a.reproduced()),
+        (1, 1, Some(true))
+    );
+    assert!(!agreeing.diagnostics.iter().any(|d| d.code == Code::W454));
+
+    let (drifting, _, _) = run("drift", Passes::Consensus);
+    let a = drifting.agreement.expect("a consensus run");
+    assert_eq!(
+        (a.answered, a.reproduced, a.reproduced()),
+        (1, 0, Some(false))
+    );
+    let w454: Vec<_> = drifting
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == Code::W454)
+        .collect();
+    assert_eq!(w454.len(), 1, "{:?}", drifting.diagnostics);
+    assert!(w454[0].message.contains("1 of 1"), "{}", w454[0].message);
+
+    // One pass has nothing to repeat, and claims nothing about it either way.
+    let (single, _, _) = run("drift", Passes::Single);
+    assert!(single.agreement.is_none());
+    assert!(!single.diagnostics.iter().any(|d| d.code == Code::W454));
+}
+
 // ---------------------------------------------------------------------------
 // The exit clause, second half: the refusal
 // ---------------------------------------------------------------------------

@@ -831,10 +831,13 @@ impl<'a> Ingestor<'a> {
         // because identical content is one unit, and a merged batch cannot be asked which pass
         // produced what.
         let mut per_pass: Vec<Vec<UnitCore>> = Vec::with_capacity(self.opts.passes.count());
+        // Each chunk's first answer per pass, compared once every pass has run (OQ-74).
+        let mut firsts: Vec<Vec<Option<String>>> = vec![Vec::new(); chunks.len()];
         for _pass in 0..self.opts.passes.count() {
             let mut pass_units: Vec<UnitCore> = Vec::new();
-            for piece in &chunks {
-                let out = self.one_chunk(provider, choice.path, &piece.text, &mut report.usage);
+            for (i, piece) in chunks.iter().enumerate() {
+                let mut out = self.one_chunk(provider, choice.path, &piece.text, &mut report.usage);
+                firsts[i].push(out.first.take());
                 report.calls += out.calls;
                 report.degraded += out.degraded;
                 report.repaired += out.repaired;
@@ -874,7 +877,14 @@ impl<'a> Ingestor<'a> {
         // `IngestReport::agreement`. Nothing here deduplicates, merges or votes — §3.4 reads
         // the agreement, it does not act on it.
         if self.opts.passes.count() > 1 {
-            report.agreement = Some(consensus::agreement(&per_pass));
+            let mut agreement = consensus::agreement(&per_pass);
+            for f in &firsts {
+                agreement.count_answers(f);
+            }
+            report
+                .diagnostics
+                .extend(agreement.unreproduced(self.opts.temperature));
+            report.agreement = Some(agreement);
         }
 
         // Chunk-boundary duplication self-heals: two chunks that produced the same claim
@@ -969,6 +979,10 @@ impl<'a> Ingestor<'a> {
         // The last attempt's warnings, so a refused chunk still reports them: see the
         // assignment below.
         let mut last_warnings: Vec<Diagnostic> = Vec::new();
+        // The first attempt's answer, as the provider returned it: what a second pass is
+        // compared against to learn whether the provider reproduces (OQ-74). Only the first,
+        // because a repair turn's request depends on the answer it repairs.
+        let mut first: Option<String> = None;
 
         for attempt in 0..=self.opts.repair_attempts {
             let completion = match provider.complete(&request) {
@@ -1003,10 +1017,14 @@ impl<'a> Ingestor<'a> {
                         degraded: 1,
                         repaired: 0,
                         diagnostics: vec![d],
+                        first,
                     };
                 }
             };
             calls += 1;
+            if attempt == 0 {
+                first = Some(completion.text.clone());
+            }
             usage.input_tokens += completion.usage.input_tokens;
             usage.output_tokens += completion.usage.output_tokens;
             usage.estimated |= completion.usage.estimated;
@@ -1065,6 +1083,7 @@ impl<'a> Ingestor<'a> {
                     degraded: 0,
                     repaired: usize::from(!history.is_empty()),
                     diagnostics,
+                    first,
                 };
             }
 
@@ -1128,6 +1147,7 @@ impl<'a> Ingestor<'a> {
                     degraded: s.degraded,
                     repaired: 0,
                     diagnostics: history,
+                    first,
                 };
             }
         }
@@ -1143,6 +1163,7 @@ impl<'a> Ingestor<'a> {
             degraded: 1,
             repaired: 0,
             diagnostics: history,
+            first,
         }
     }
 
@@ -1251,6 +1272,8 @@ struct ChunkOutcome {
     /// 1 when this chunk succeeded after an attempt that did not.
     repaired: usize,
     diagnostics: Vec<Diagnostic>,
+    /// The first attempt's answer, or `None` where the provider gave none (OQ-74).
+    first: Option<String>,
 }
 
 #[cfg(all(test, feature = "model"))]

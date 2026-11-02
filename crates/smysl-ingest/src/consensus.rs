@@ -105,6 +105,12 @@ pub struct Agreement {
     pub comparable_places: usize,
     /// Places **every** pass produced, whatever words each pass described them in.
     pub agreed_places: usize,
+    /// Inputs — windows, or a document's chunks — for which every pass got a first answer
+    /// from the provider (OQ-74).
+    pub answered: usize,
+    /// Of those, the inputs where every pass's first answer was **byte-identical**: where the
+    /// provider reproduced the same request. See [`Agreement::reproduced`].
+    pub reproduced: usize,
 }
 
 impl Agreement {
@@ -137,6 +143,71 @@ impl Agreement {
         self.spanless += other.spanless;
         self.comparable_places += other.comparable_places;
         self.agreed_places += other.agreed_places;
+        self.answered += other.answered;
+        self.reproduced += other.reproduced;
+    }
+
+    /// Count one input's first answers, one per pass: `None` for a pass the provider gave
+    /// no answer to.
+    ///
+    /// Only the **first** attempt is compared, because every pass sends that request
+    /// unchanged; a repair turn's request carries the answer it repairs, so two repair turns
+    /// differ whenever their first answers did, and comparing them would count one difference
+    /// twice.
+    pub fn count_answers(&mut self, firsts: &[Option<String>]) {
+        if firsts.len() < 2 || firsts.iter().any(Option::is_none) {
+            return;
+        }
+        self.answered += 1;
+        if firsts.windows(2).all(|w| w[0] == w[1]) {
+            self.reproduced += 1;
+        }
+    }
+
+    /// Whether the provider **reproduced** at this run's settings: every pass's first answer
+    /// the same bytes, for every input that got one (OQ-74). `None` for one pass, or where no
+    /// input was answered by every pass.
+    ///
+    /// What `identical-span` means depends on this, and the configuration cannot say it.
+    /// S0's local arm was bit-identical at temperature 0 over 145 runs, and hosted
+    /// `deepseek-chat`, sent `"temperature": 0.0`, was not: GE-T2's corpus spread 0.333 to
+    /// 0.637 *within* one language. So the two readings of [`Agreement::rate`]:
+    ///
+    /// - `Some(true)`: the second pass repeated the first. The rate is 1.0 by construction,
+    ///   less whatever the conversion lost, and measures the extraction, not the model's
+    ///   stability; the second pass bought no information.
+    /// - `Some(false)`: the provider varied on an identical request, so the rate measures that
+    ///   variation as much as the extraction — a *lower bound* on what a reproducible provider
+    ///   would show, and comparable across runs only with runs that also did not reproduce.
+    pub fn reproduced(&self) -> Option<bool> {
+        (self.passes > 1 && self.answered > 0).then_some(self.reproduced == self.answered)
+    }
+
+    /// `SMY-W454`, where a run asked for temperature 0 and the provider did not reproduce: the
+    /// configuration said one thing and the provider did another, and the agreement figure
+    /// beside it reads differently for that (see [`Agreement::reproduced`]).
+    ///
+    /// Above temperature 0 nothing is said, since [`Passes::admits`] refused two passes there
+    /// and one pass compares nothing.
+    pub fn unreproduced(&self, temperature: f32) -> Option<smysl_core::Diagnostic> {
+        if temperature > 0.0 || self.reproduced() != Some(false) {
+            return None;
+        }
+        Some(
+            smysl_core::Diagnostic::new(smysl_core::Code::W454)
+                .with_message(format!(
+                    "the provider did not reproduce at temperature 0: {} of {} input(s) got \
+                     different answers to the same request, so the `identical-span` figure \
+                     measures the provider's variation as well as the extraction and is a \
+                     lower bound (OQ-74)",
+                    self.answered - self.reproduced,
+                    self.answered
+                ))
+                .with_suggestion(
+                    "compare it only with runs that also did not reproduce, or measure \
+                     stability on a provider that does",
+                ),
+        )
     }
 
     /// The same question with the **gist left out**: `agreed_places / comparable_places`.
@@ -212,6 +283,8 @@ pub fn agreement(passes: &[Vec<UnitCore>]) -> Agreement {
         spanless,
         comparable_places: places.len(),
         agreed_places: places.values().filter(|p| p.len() == n).count(),
+        answered: 0,
+        reproduced: 0,
     }
 }
 
@@ -234,6 +307,40 @@ mod tests {
             .source(source)
             .build()
             .expect("a gist-only speculative unit")
+    }
+
+    #[test]
+    fn an_input_is_reproduced_only_when_every_pass_answered_the_same_bytes() {
+        let s = |x: &str| Some(x.to_string());
+        let mut a = agreement(&[Vec::new(), Vec::new()]);
+        assert_eq!(a.reproduced(), None, "nothing answered yet");
+        a.count_answers(&[s("{}"), s("{}")]);
+        assert_eq!(a.reproduced(), Some(true));
+        // A pass the provider failed is not a difference: there was nothing to compare.
+        a.count_answers(&[s("{}"), None]);
+        assert_eq!((a.answered, a.reproduced), (1, 1));
+        a.count_answers(&[s("{}"), s("{ }")]);
+        assert_eq!(
+            (a.answered, a.reproduced, a.reproduced()),
+            (2, 1, Some(false))
+        );
+
+        // Said at temperature 0, where the configuration promised otherwise, and not above it.
+        let w = a.unreproduced(0.0).expect("SMY-W454");
+        assert_eq!(w.code, smysl_core::Code::W454);
+        assert!(w.message.contains("1 of 2"), "{}", w.message);
+        assert!(a.unreproduced(0.7).is_none());
+
+        // Summed by `merge`, like every other count.
+        let mut run = Agreement::default();
+        run.merge(&a);
+        run.merge(&a);
+        assert_eq!((run.answered, run.reproduced), (4, 2));
+
+        // One pass compares nothing.
+        let mut one = agreement(&[Vec::new()]);
+        one.count_answers(&[s("{}")]);
+        assert_eq!((one.answered, one.reproduced()), (0, None));
     }
 
     #[test]

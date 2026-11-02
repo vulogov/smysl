@@ -410,9 +410,10 @@ impl Ingestor<'_> {
             let mut relations: Vec<Relation> = Vec::new();
             let mut labels: BTreeMap<Label, Uid> = BTreeMap::new();
             let mut verdicts = Verdicts::default();
+            let mut firsts: Vec<Option<String>> = Vec::new();
 
             for _pass in 0..self.opts.passes.count() {
-                let out = self.one_call(
+                let mut out = self.one_call(
                     provider,
                     path,
                     &template,
@@ -429,6 +430,7 @@ impl Ingestor<'_> {
                     Some(&window_source),
                     &mut report.usage,
                 );
+                firsts.push(out.first.take());
                 report.calls += out.calls;
                 report.degraded += out.degraded;
                 report.repaired += out.repaired;
@@ -461,9 +463,9 @@ impl Ingestor<'_> {
 
             // GE-T2 under the consensus policy, this window's share of it. `merge` is what
             // decides that the shares are summed and not averaged, and says why.
-            report
-                .agreement
-                .merge(&crate::consensus::agreement(&per_pass));
+            let mut share = crate::consensus::agreement(&per_pass);
+            share.count_answers(&firsts);
+            report.agreement.merge(&share);
             let units: Vec<UnitCore> = per_pass.into_iter().flatten().collect();
 
             report.verdicts.present += verdicts.present;
@@ -582,6 +584,12 @@ impl Ingestor<'_> {
                 );
             }
         }
+
+        // Said once for the run rather than per window: whether the provider reproduces is a
+        // property of the run's figure, and a window is too small a sample to say it of (OQ-74).
+        report
+            .diagnostics
+            .extend(report.agreement.unreproduced(self.opts.temperature));
 
         // Step 9. After the windows and over the whole expression, so that the order windows
         // ran in decides nothing.

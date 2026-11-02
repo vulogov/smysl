@@ -91,6 +91,25 @@ The pseudonymising test, written expecting the structure to stand and amended to
 did not, now asserts that it stands; the three ports, which recompute the chat fixture's
 identities, agree with it.
 
+### Whether the provider reproduced, beside the figure (OQ-74)
+
+Two passes at temperature 0 were refused nothing and checked for nothing: `Passes::admits` reads
+the temperature a caller configured, and hosted `deepseek-chat`, sent `"temperature": 0.0`,
+answered the same window differently often enough that GE-T2's rates spread as far within one
+language as between languages. The configuration could not say which kind of provider a figure
+came from, and the figure means different things for the two.
+
+Now each input's **first** answer from each pass is compared byte for byte — the first only,
+since every pass sends that request unchanged and a repair turn's request carries the answer it
+repairs. `Agreement` carries `answered` and `reproduced`, summed by `merge` like the rest, and
+`Agreement::reproduced()` says which reading of the rate applies: every input reproduced, and
+the rate measures the extraction alone; any did not, and it measures the provider's variation as
+well and is a lower bound. A run at temperature 0 that did not reproduce says so once, with the
+new **`SMY-W454`**, and `ingest --text` prints `reproduced n of m window(s)` beside `stability`.
+Measured on the run's own windows rather than by a probe sent first: it costs no call, and it
+measures the requests the figure is about. The `drift` consensus fixture is exactly such a
+provider, and now carries the warning.
+
 ### A reply is an edge at last
 
 `x.text/v1` has declared `x.text/replies` since 1.10, rule E has named a reply constraint since

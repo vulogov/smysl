@@ -486,6 +486,12 @@ registry! {
     Library => {
         W448 = "SMY-W448", Warn,  "A reply names a message the expression does not hold; no edge was drawn for it";
     }
+
+    // 1.14.0, OQ-74: two passes at temperature 0 whose first answers differed. Ingest's, in a
+    // block of its own for the same reason as the one above.
+    Provider => {
+        W454 = "SMY-W454", Warn,  "The provider did not reproduce at temperature 0; the agreement figure is a lower bound";
+    }
 }
 
 impl fmt::Display for Code {
@@ -982,9 +988,12 @@ mod tests {
     /// does not hold. SMYSL-2.4 allocated it to the time engine, which would have reported the
     /// same absence one step later; the producer is where the id is resolved, so it is where the
     /// absence is seen.
+    ///
+    /// 151 with `SMY-W454` in 1.14.0 (OQ-74): two passes at temperature 0 whose first answers
+    /// to the same request differed, so the provider did not do what the configuration said.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 150);
+        assert_eq!(Code::ALL.len(), 151);
     }
 
     #[test]

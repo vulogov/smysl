@@ -562,8 +562,10 @@ mod tests {
         // step 3), raised by S1's vector cache; 148 with `SMY-E416` and `SMY-W467` (step 4),
         // raised by `--seed-check` and by a rerun under another model; 149 with `SMY-E474`
         // (step 5), raised by `q --from-question`; 150 with `SMY-W448` (1.14.0), raised by a
-        // text ingest for a reply naming a message the expression does not hold.
-        assert_eq!(Code::ALL.len(), 150);
+        // text ingest for a reply naming a message the expression does not hold; 151 with
+        // `SMY-W454` (1.14.0, OQ-74), raised by a consensus run whose provider did not
+        // reproduce at temperature 0.
+        assert_eq!(Code::ALL.len(), 151);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
