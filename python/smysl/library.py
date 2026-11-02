@@ -221,6 +221,28 @@ def structure_hash(segments: bytes) -> bytes:
     return blake3(segments)
 
 
+#: The segment row keys that are the tree: start, end, level and locator (A-5 as amended by
+#: OQ-70, 1.14.0). The rest of a row — language, speaker, observed instant, ids, time zone,
+#: marks, and any later key — is the reading's, and the rdid covers it.
+TREE_KEYS = range(0, 4)
+
+
+def tree(segments: Any) -> Any:
+    """OQ-70: a segment table with each row cut to :data:`TREE_KEYS`, in document order.
+
+    A value that is not a table of maps is returned as it stands: it is not a table, and the
+    decoder that reads the reading is where that is reported.
+    """
+    if not isinstance(segments, list):
+        return segments
+    return [
+        {k: v for k, v in row.items() if isinstance(k, int) and k in TREE_KEYS}
+        if isinstance(row, dict)
+        else row
+        for row in segments
+    ]
+
+
 #: §2.1's alphabet, bit order and lengths, as ``uid.py`` has them: RFC 4648 base32, lowercase,
 #: no padding, most significant bit first.
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz234567"
@@ -431,8 +453,9 @@ class PartReading:
         return rdid(encode_one(self.body))
 
     def structure_hash(self) -> bytes:
-        """§3.1: BLAKE3-256 of the canonical CBOR of the segment table, with no domain byte."""
-        return structure_hash(encode_one(self.segments))
+        """§3.1: BLAKE3-256 of the canonical CBOR of the segment table's tree, with no domain
+        byte — each row cut to start, end, level and locator (OQ-70)."""
+        return structure_hash(encode_one(tree(self.segments)))
 
     def rows(self) -> list[dict[str, Any]]:
         """The segment table with its keys named. Unknown keys keep their integer (rule X)."""

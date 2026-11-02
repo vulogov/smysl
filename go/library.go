@@ -565,12 +565,44 @@ func (g *PartReading) Rdid() ([]byte, error) {
 // The table is re-encoded rather than sliced, which makes this a check of the encoder: a
 // segment row holds integers and text and no float, so there is nothing for a number type to
 // disagree about.
+//
+// Over the tree alone (A-5 as amended by OQ-70, 1.14.0): each row cut to its start, end, level
+// and locator, the keys TreeKeys names.
 func (g *PartReading) StructureHash() ([]byte, error) {
-	encoded, err := EncodeOne(g.Segments)
+	encoded, err := EncodeOne(Tree(g.Segments))
 	if err != nil {
 		return nil, err
 	}
 	return StructureHash(encoded), nil
+}
+
+// TreeKeys is how many of a segment row's keys are the tree: 0 to 3, start, end, level and
+// locator. Everything after is the reading's, and the rdid covers it.
+const TreeKeys = 4
+
+// Tree is a segment table with each row cut to its tree keys, in document order (OQ-70). A
+// value that is not a table of maps is returned as it stands.
+func Tree(segments any) any {
+	rows, ok := segments.([]any)
+	if !ok {
+		return segments
+	}
+	out := make([]any, 0, len(rows))
+	for _, r := range rows {
+		m, ok := r.(*Map)
+		if !ok {
+			out = append(out, r)
+			continue
+		}
+		kept := &Map{}
+		for _, p := range m.Entries {
+			if k, ok := p.Key.(uint64); ok && k < TreeKeys {
+				kept.Entries = append(kept.Entries, p)
+			}
+		}
+		out = append(out, kept)
+	}
+	return out
 }
 
 // Rows names a segment table's keys. Unknown keys keep their integer, per rule X.

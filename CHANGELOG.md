@@ -64,6 +64,33 @@ owed indefinitely, rather than the phase with it, because no independent coders 
 an exit that waits on them waits on nothing this repository can do. TX-P7 is complete. OQ-15,
 partial dependence between witnesses, stays open and no longer holds the exit.
 
+### The structure hash is the tree (OQ-70)
+
+A part entry's `structure` was BLAKE3 over the whole segment table, every key of every row, so it
+moved when a row's *metadata* moved — a speaker, an instant, an id — and not only when the
+segmentation did. Pseudonymising a chat re-identified every part entry, and `SMY-E401` said
+`structure` for a change that was not structural. SMYSL-2.4 recorded it as OQ-70 because the fix
+is an amendment to A-5 that moves structure hashes already computed; with compatibility not a
+constraint at this point, it is the cheapest it will ever be.
+
+The structure hash is now over the table **cut to its tree**: the same array in the same order,
+each row keeping keys 0 to 3 — start, end, level, locator — and still no domain byte. The rest of
+a row (language, speaker, observed, ids, time zone, reported-speech marks, unknown keys) is the
+reading's, and the rdid already covers it. One implementation in Rust,
+`smysl_core::types::library::structure_hash_of`, which copies the kept values as their encoded
+bytes rather than decoding them, so it cannot disagree with the encoder; `smysl-text`'s reading
+hashes through it, and each port (`tree` in Python, Go and JavaScript) cuts the decoded rows the
+same way. A-5 and the format spec say so.
+
+What moved, once: the chat fixtures (`fixtures/library/chat-wire/`, the Telegram, WhatsApp and
+Slack `.expected` files), the two marked scripture samples (`matt4-wj.usfm`, `matt5-q.osis`),
+and the chat manifests' mids in `fixtures/sq/library/` — regenerated with `SMYSL_BLESS=1`, the
+counts beside them unchanged. What did not: every reading whose rows carry nothing past key 3,
+which is all scripture without marks, so the five Bibles' rolls and their committed slice hold.
+The pseudonymising test, written expecting the structure to stand and amended to record that it
+did not, now asserts that it stands; the three ports, which recompute the chat fixture's
+identities, agree with it.
+
 ### A reply is an edge at last
 
 `x.text/v1` has declared `x.text/replies` since 1.10, rule E has named a reply constraint since

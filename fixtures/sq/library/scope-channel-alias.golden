@@ -7,7 +7,7 @@ plan sq/1
   2 resolution: no relation kinds named
   3 scope: channel:telegram-chat via library -> 1 store(s) library, 5 unit(s)
   4 partitions: 1, idf over collection
-      m3:n66m44qbb7ebkxbig4x3igebnpavm7jtain52wu3lm62hifit7pa [mul]: 5 unit(s), smysl/an/1
+      m3:64ajiuzht3vu4j2czbiv23gbvercansfq7bfmm5vwsoqzrpen52a [mul]: 5 unit(s), smysl/an/1
   - supersession: superseded units give way to their newest head
   9 shape: -> count
 count 5

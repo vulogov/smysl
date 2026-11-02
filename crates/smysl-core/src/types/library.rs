@@ -436,22 +436,77 @@ impl PartReading {
         Rdid::of(&crate::cbor::envelope::part_reading_bytes(self))
     }
 
-    /// BLAKE3-256 of the segment table, which is a manifest part entry's `structure`.
+    /// BLAKE3-256 of the segment table's **tree**, which is a manifest part entry's `structure`.
     ///
-    /// Over the table alone, not over the record: A-5 says the structure hash covers "the
-    /// canonical CBOR of the structure table carried in the reading's segments (record 18 key
-    /// 2)", so a reading that gains raw metadata keeps its structure hash and changes its
-    /// rdid. Both are in the part entry, and this is why they are not the same number.
+    /// Over the table alone, not over the record, so a reading that gains raw metadata keeps its
+    /// structure hash and changes its rdid. And over the tree alone, not the whole table
+    /// (SMYSL-2.3 A-5 as amended by OQ-70, 1.14.0): each row cut to its start, end, level and
+    /// locator — see [`structure_hash_of`]. Both identities are in the part entry, and this is
+    /// why they are not the same number.
     pub fn structure_hash(&self) -> [u8; 32] {
-        // Over the same bytes the encoder writes, which is why the empty case is spelled. A
-        // directly assigned empty field is still possible — `segments` is public — so the
-        // substitution is made here too rather than trusted to the constructor alone.
-        crate::hash::hash_bytes(if self.segments.is_empty() {
+        // The empty case is spelled because `segments` is public and a directly assigned empty
+        // field is still possible; the substitution is made here rather than trusted to the
+        // constructor alone.
+        structure_hash_of(if self.segments.is_empty() {
             PartReading::EMPTY_SEGMENTS
         } else {
             &self.segments
         })
     }
+}
+
+/// The segment row keys that are the **tree**: start, end, level and locator (A-5, keys 0 to 3).
+///
+/// Everything a row says beyond where it sits — its language, speaker, observed instant, ids,
+/// time zone, reported-speech marks, and any key a later build adds — is the reading's and not
+/// the structure's, and the rdid covers it.
+pub const TREE_KEYS: core::ops::RangeInclusive<u16> = 0..=3;
+
+/// The structure hash of a segment table: BLAKE3-256, **no domain byte**, of the table with
+/// every row cut to [`TREE_KEYS`] — still canonical CBOR, still in document order.
+///
+/// This is OQ-70's narrowing. Over the whole table, the hash moved when a row's metadata moved
+/// and not only when the segmentation did, so pseudonymising a chat re-identified every part
+/// entry and `SMY-E401` said `structure` for a change that was not structural. A table this
+/// cannot read as an array of maps with integer keys is hashed as it stands: it is not a
+/// table, and the decoder that reads the reading is where that is reported.
+pub fn structure_hash_of(segments: &[u8]) -> [u8; 32] {
+    match tree_of(segments) {
+        Ok(tree) => crate::hash::hash_bytes(&tree),
+        Err(_) => crate::hash::hash_bytes(segments),
+    }
+}
+
+/// The table with each row cut to [`TREE_KEYS`], re-encoded. Values are copied as their bytes,
+/// never decoded, so the projection cannot disagree with the encoder about any of them.
+pub fn tree_of(segments: &[u8]) -> Result<Vec<u8>, crate::error::CodecError> {
+    use crate::cbor::{major, Dec, Enc};
+    let mut d = Dec::new(segments);
+    let n = d.array_head()?;
+    let mut e = Enc::new();
+    e.array_head(n);
+    for _ in 0..n {
+        let len = d.map_head()?;
+        let mut kept: Vec<(u16, &[u8])> = Vec::with_capacity(4);
+        let mut prev = None;
+        for _ in 0..len {
+            let k = d.map_key(prev)?;
+            prev = Some(k);
+            let v = d.skip_item()?;
+            if TREE_KEYS.contains(&k) {
+                kept.push((k, v));
+            }
+        }
+        e.head(major::MAP, kept.len() as u64);
+        for (k, v) in kept {
+            e.uint(u64::from(k));
+            e.raw(v);
+        }
+    }
+    if d.position() != segments.len() {
+        return Err(crate::error::CodecError::MalformedEnvelope { at: d.position() });
+    }
+    Ok(e.into_bytes())
 }
 
 /// What a resolver found under an identity.
@@ -859,6 +914,65 @@ mod tests {
 
     /// Wire codes are permanent, so they are pinned rather than derived from the order of the
     /// variants. Renumbering `Carry` would silently turn every `text` manifest into a `ref`.
+    /// A segment row as a reader writes it: the four tree keys, and `extra` keys after them.
+    fn row(start: u64, end: u64, locator: &str, extra: &[(u16, &str)]) -> Vec<u8> {
+        use crate::cbor::writer::MapBuilder;
+        let mut m = MapBuilder::new();
+        m.put(0, |e| e.uint(start));
+        m.put(1, |e| e.uint(end));
+        m.put(2, |e| e.text("message"));
+        m.put(3, |e| e.text(locator));
+        for (k, v) in extra {
+            m.put(*k, |e| e.text(v));
+        }
+        m.into_bytes()
+    }
+
+    fn table(rows: Vec<Vec<u8>>) -> Vec<u8> {
+        crate::cbor::writer::enc(|e| e.array(rows))
+    }
+
+    #[test]
+    fn the_structure_hash_is_the_tree_and_not_the_rest_of_the_row() {
+        let plain = table(vec![row(0, 5, "m1", &[]), row(5, 9, "m2", &[])]);
+        let said = table(vec![
+            row(0, 5, "m1", &[(5, "spk:aaaa"), (7, "x")]),
+            row(
+                5,
+                9,
+                "m2",
+                &[(5, "spk:bbbb"), (40, "a key from a later release")],
+            ),
+        ]);
+        // A speaker, an id and an unknown key are the reading's: the tree is the same tree.
+        assert_eq!(structure_hash_of(&plain), structure_hash_of(&said));
+        // And a table with nothing past key 3 hashes as it always did, byte for byte.
+        assert_eq!(structure_hash_of(&plain), crate::hash::hash_bytes(&plain));
+        assert_eq!(tree_of(&said).unwrap(), plain);
+
+        // Whereas every tree key moves it: a range, a level, a locator, and the order of rows.
+        for moved in [
+            table(vec![row(0, 4, "m1", &[]), row(4, 9, "m2", &[])]),
+            table(vec![row(0, 5, "m1", &[]), row(5, 9, "m3", &[])]),
+            table(vec![row(5, 9, "m2", &[]), row(0, 5, "m1", &[])]),
+        ] {
+            assert_ne!(structure_hash_of(&plain), structure_hash_of(&moved));
+        }
+    }
+
+    #[test]
+    fn a_table_that_is_not_one_is_hashed_as_it_stands() {
+        for bytes in [vec![0xa0], vec![0x81, 0x01], vec![0x80, 0x00], vec![]] {
+            assert!(tree_of(&bytes).is_err(), "{bytes:02x?}");
+            assert_eq!(structure_hash_of(&bytes), crate::hash::hash_bytes(&bytes));
+        }
+        assert_eq!(
+            PartReading::new(Tid::of(b"x"), "txt/1", Vec::new()).structure_hash(),
+            crate::hash::hash_bytes(PartReading::EMPTY_SEGMENTS),
+            "the empty table is its own tree"
+        );
+    }
+
     #[test]
     fn carry_codes_are_pinned_to_the_amendment() {
         assert_eq!(Carry::None.as_u8(), 0);

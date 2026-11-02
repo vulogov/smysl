@@ -574,9 +574,10 @@ impl Reading {
         })
     }
 
-    /// BLAKE3-256 of the table alone, which is a part entry's `structure`.
+    /// The tree's hash, which is a part entry's `structure`: the table's rows cut to start, end,
+    /// level and locator ([`smysl_core::types::library::structure_hash_of`], OQ-70).
     pub fn structure_hash(&self) -> [u8; 32] {
-        smysl_core::hash::hash_bytes(&encode_table(&self.rows))
+        smysl_core::types::library::structure_hash_of(&encode_table(&self.rows))
     }
 
     /// `BLAKE3-256(0x12 ‖ canonical CBOR of the record body)`.

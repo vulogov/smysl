@@ -633,9 +633,16 @@ alias, and the grammar is checked where there is an author to tell.
 
 A **part entry** is `{0: tid, 1: length (unsigned), 2: structure hash (32 bytes), 3: rdid,
 4: lang (text, only when it differs from key 2)}`. The structure hash is BLAKE3-256 of the
-canonical CBOR of the segment table in the reading's key 2 — **over the table, with no domain
-byte**, because it names a table and not a record. So a reading that gains raw metadata keeps
-its structure hash and changes its rdid, which is why a part entry carries both.
+canonical CBOR of the segment table in the reading's key 2 **cut to its tree**: the same array in
+the same document order, each row keeping only keys 0 to 3 (start, end, level, locator) — **with
+no domain byte**, because it names a table and not a record. Everything else a row carries — its
+language, speaker, observed instant, ids, time zone, reported-speech marks, and any key a later
+release adds — is the reading's and not the structure's, and the rdid covers it. So a reading
+that gains raw metadata, or is pseudonymised, keeps its structure hash and changes its rdid,
+which is why a part entry carries both, and `SMY-E401`'s `structure` means the segmentation
+moved. *(Narrowed in 1.14.0, SMYSL-2.4 OQ-70; before, the hash covered every key of every row,
+so a pseudonym re-identified every part entry. A reading whose rows carry only keys 0 to 3 — any
+scripture reader without reported-speech marks — has the same structure hash under both.)*
 
 **Part text (15)** — `{0: tid (32 bytes), 1: text (bytes, the normalised text)}`, both required.
 It has no surface form: text is not written in surface syntax.
@@ -660,9 +667,8 @@ that the enclosed words are speech the text reports rather than asserts — USFM
 OSIS's `<q who="…">` — and belongs on the innermost row whose range contains it. `who` is the
 source's own label for the speaker, carried verbatim and not pseudonymised: it is a label an
 editor put on a public text, not a platform's identifier for a person. A mark key a consumer does not know is
-**kept verbatim**, as rule X requires of every other map in this format: the structure hash is
-taken over these bytes, so a consumer that dropped one would change a corpus's identity by
-reading it.
+**kept verbatim**, as rule X requires of every other map in this format: the rdid is taken over
+these bytes, so a consumer that dropped one would change a corpus's identity by reading it.
 
 **Dating (17)** — a statement about when something happened.
 
