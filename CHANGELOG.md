@@ -30,6 +30,40 @@ its own set, and one that reaches only the names someone wrote down.
 **And the ones only people can close.** TX-P7's exit wants human coders for OQ-44 and OQ-15, and
 GE-T10's gold is single-hand; they stay owed rather than planned.
 
+### Nine open questions decided as built, and TX-P7's exit restated
+
+Each of these had an answer in the code and none in the specification, so each is decided as
+built and the texts are made to say so (SMYSL-2.0 §4 and §6.2, SMYSL-2.4's tables):
+
+- **OQ-2**: stems only, with Russian type statistics labelled stem-level.
+- **OQ-8**: records 15 and 18 are objects beside the logs; a log refuses them (`E452`); a bundle
+  may carry them under `carry: text`.
+- **OQ-9**: the hand-rolled EDTF parser, levels 0 and 1, with `fixtures/library/edtf` as its
+  published suite.
+- **OQ-11**: effective time is one solve over the subjects any dating or constraint involves,
+  re-solved after an append that touches time. SMYSL-2.4 said *per connected component*, which
+  was never built and nothing measured a need for; the text now says what runs.
+- **OQ-30**, the rest of it: `status` and `lod` stay closed enumerations. Rules N, E and R
+  branch on status, so a status a reader did not know would have no defined behaviour.
+- **OQ-38**: fuel is enough. The wall-time watchdog SMYSL-2.4 §3.9 tabulated — `wall_time`,
+  30 minutes, `--timeout` — **does not exist**: nothing in `src/main.rs` reads a clock for a
+  reader's limits, and `limits.rs` said it lived there. The row and both mentions are struck.
+  A refusal that depended on the clock is the one refusal nobody could reproduce.
+- **OQ-44**: a `lexical` same-as proposal is never auto-accepted. It is staged at rung
+  `computed`, and a class is settled by agreement between engines, `attested:2`. GE-T5's
+  paraphrase set already measured why no threshold would do: precision 0.6724 at k=1, and every
+  planted near-miss proposed from k=2.
+- **OQ-71**: a dating's arithmetic reads as built — a qualifier does not widen a date, a season
+  is its year, and four Allen relations collapse to *at the same time*. Each is weaker than a
+  strict reading and none is unsound.
+- **OQ-72**: nothing dates a manifest. Target kind 2 dates the units drawn under one; a catalog
+  date changes by a new manifest version, so a dating meant for the units cannot contradict it.
+
+**TX-P7's exit is restated** as GE-T2's was: GE-T5's instrument is met and its coder sheet is
+owed indefinitely, rather than the phase with it, because no independent coders are planned and
+an exit that waits on them waits on nothing this repository can do. TX-P7 is complete. OQ-15,
+partial dependence between witnesses, stays open and no longer holds the exit.
+
 ### A reply is an edge at last
 
 `x.text/v1` has declared `x.text/replies` since 1.10, rule E has named a reply constraint since

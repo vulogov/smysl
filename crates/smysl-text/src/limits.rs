@@ -11,9 +11,9 @@
 //! both valid and invalid depending on who read it — and a format whose acceptance depends on
 //! the reader's hardware has no conformance to speak of. Fuel is charged per byte scanned,
 //! per node created and per archive entry opened, so it runs out at the same point on every
-//! machine. The wall-clock backstop exists for a bug that burns time without charging fuel,
-//! and it lives in the CLI (`src/main.rs`), outside this crate, which is why `--timeout` is
-//! not in [`Caps`].
+//! machine. There is no wall-clock backstop anywhere, in this crate or in the CLI: SMYSL-2.4
+//! described one, nothing built it, and OQ-38 decided (1.14.0) that fuel is enough, since a
+//! refusal that depended on the clock is the one refusal nobody could reproduce.
 //!
 //! # What is charged, and by whom
 //!

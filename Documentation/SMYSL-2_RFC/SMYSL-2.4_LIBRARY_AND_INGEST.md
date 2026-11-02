@@ -671,8 +671,8 @@ integer comparison.
 index, using the calendar of the manifest a unit names (`source.manifest`, key 18 of that
 manifest). Never written back.
 
-**Effective time.** `time::engine` computes, for a scope (a connected component of the constraint
-graph, OQ-11), what rule E specifies. Implementation:
+**Effective time.** `time::engine` computes, for a scope (the subjects any dating or constraint
+involves, solved together — OQ-11 as decided 2026-11-01), what rule E specifies. Implementation:
 
 1. **Seed.** Each dated subject (unit, or group via part/manifest/window targets) gets the
    as-recorded interval and its **time status** from the table of draft 3 §6.7 (`observed` from
@@ -1152,11 +1152,11 @@ only after the manifest is complete). There is no partial manifest and no silent
 | `part_bytes` | one part, hard ceiling (one node larger than the policy maximum becomes one part up to this) | 64 MiB | `--max-part` | `E440` |
 | `raw_bytes` | raw metadata kept per segment / per manifest | 1 MiB / 16 MiB | `--max-raw` | `E440` |
 | `fuel` | deterministic work units charged per byte scanned, node created and entry opened | 64 × input bytes + 10⁸ | `--max-fuel` | `E440` |
-| `wall_time` | whole `text add`, enforced by the CLI watchdog, never inside a reader | 30 min | `--timeout` | `E440` |
 
 - **Fuel, not time, inside the pure path.** A reader that measured wall time would fail on a slow
   machine and pass on a fast one; fuel fails at the same byte on every machine, so a refusal is
-  reproducible. The watchdog is the backstop for a bug that burns time without charging fuel.
+  reproducible. There is no wall-time backstop (OQ-38, decided 2026-11-01): a refusal that
+  depended on the clock could not be reproduced, which is the property fuel exists to keep.
 - **XML.** A `<!DOCTYPE` with an internal subset or entity declarations is refused (no entity
   expansion, no external fetch). `quick-xml` does not expand custom entities; the refusal makes
   that a stated property rather than a library default.
@@ -1800,8 +1800,8 @@ a later edit that made `reader-slack` a default feature has to be argued rather 
   runtime and socket crates are checked at `--all-features` as well, because an offline library
   is offline however it is configured; `serde_json` is checked at default features, where the
   claim is that the pure core carries no serde stack. `smysl-text` must also pass the
-  `FORBIDDEN_SYMBOLS` grep, which is why the wall-time watchdog lives in `src/main.rs`, not in
-  the crate.
+  `FORBIDDEN_SYMBOLS` grep, which is why no clock is read in the crate — and why none is read
+  anywhere for a reader's limits (OQ-38).
 - **`--no-default-features` facade tree** stays free of `serde_json`: `text` is not default for
   the library (only through `cli`). Enforced against both lists, since that tree is the library
   a consumer gets without asking for anything.
@@ -3732,7 +3732,9 @@ Precondition: **GE-T4** passed; SMYSL-2.2's spike result read.
    engines are at the ceiling, not whether the measures are publishable.
 
    **Built 2026-10-14. The instrument is met and the sheet is owed**, which is GE-T2's shape in
-   TX-P5 step 5 and for the same reason: what is missing is material. The harness is
+   TX-P5 step 5 and for the same reason: what is missing is material. *(2026-11-01: TX-P7's exit
+   is restated on that shape — the instrument met, the sheet owed indefinitely — since no
+   independent coders are planned; the phase is complete and the sheet stays the open half.)* The harness is
    `crates/smysl-text/tests/ge_t5.rs`, pure, on every `make test`.
 
    **What there was to measure, and what had to be made.** The `lexical` engine exists for two
@@ -3856,13 +3858,13 @@ nothing behind it.
 | id | status here |
 |---|---|
 | OQ-1 | decided by D-2; implemented in §4.3.1 |
-| OQ-2 | stems only; Russian type statistics labelled as stem-level |
+| ~~OQ-2~~ | **decided 2026-11-01**: stems only; Russian type statistics labelled as stem-level |
 | OQ-3 | open; a reader parameter `--param orthography=pre1918` is the cheaper path and keeps one manifest |
 | OQ-4 | open, and TX-P4 step 4 shipped without it: a map **installed in a library** is a mechanism and needed no answer, where a map **distributed with the crate** is a dataset with a provenance and a licence and still needs one. §4.1's `data/versification/` is empty |
-| OQ-8 | this RFC stores 15/18 as objects beside logs; bundles may carry them under `carry: text` |
-| OQ-9 | hand-rolled parser with `fixtures/library/edtf` as the published suite |
+| ~~OQ-8~~ | **decided 2026-11-01**: 15/18 are objects beside logs, a log refuses them (`E452`, OQ-39), and bundles may carry them under `carry: text` |
+| ~~OQ-9~~ | **decided 2026-11-01**: the hand-rolled parser, levels 0 and 1, with `fixtures/library/edtf` as the published suite |
 | OQ-10, OQ-12 | decided by D-3, D-4; implemented in §3.3 |
-| OQ-11 | per connected component of the constraint graph, recomputed on change; revisit at GE-T7 |
+| ~~OQ-11~~ | **decided 2026-11-01**, as GE-T7 left it: one solve over the subjects any dating or constraint involves, re-solved after an append that touches time (`findings_among`). The per-component split this row first proposed was never built and nothing measured a need for it |
 | OQ-13 | **decided 2026-10-29: no speaker or device target in SMYSL-2.** Window targets are the selector (§9) |
 | OQ-17 | decided by D-1; `provenance::stamp` writes exactly that set |
 | OQ-18, OQ-19, OQ-20 | open; the segment table keeps offsets, edit history and pointers so either answer is possible later |
@@ -3874,13 +3876,13 @@ nothing behind it.
 | OQ-35 | **Resolved in SMYSL-2.3 A-8.2:** `DetectionKind` is opened by SMYSL-2.1, and time contentions stay derived; kinds 4 and 5 are never written to record 6. |
 | ~~OQ-36~~ | **Answered 1.10.0: `create_new`, and the parenthesis is now measured.** `File::lock` is unstable at 1.88 and compiles at 1.92, so it would raise a pure-path floor above anything the dependencies need — an `EXCEEDS` entry argued for a lock — and `fs4` pays a dependency for the same thing. Independently of cost: an advisory lock cannot name its holder and `E445` must, and a lock the kernel drops on process death erases the only evidence that a writer died mid-append. §3.9.3 |
 | ~~OQ-37~~ | **Answered 1.10.0: `serde_json` behind `reader-json`, and the purity gate's list was the thing that needed fixing.** A strict mode of the HJSON parser is not a narrowing of what is there; measured against today's `parse_object`, it is five pieces of new code in the place untrusted bytes arrive. A surrogate pair `\uD83D\uDE00` is **refused** (`invalid code point`), which is how `json.dumps` writes every emoji by default. `9223372036854775808` becomes `Float(9.223372036854776e18)`, so a message id silently stops being an id. `1e400` becomes `Float(inf)`. A bare `nope` becomes `Str("nope")`. And `{ "t": 1 "u": 2 }` — malformed JSON — parses as `Str("1 \"u\": 2")`, the quoteless rule swallowing the rest of the line; a silent misparse where a reader owes an error is worse than the refusal. `serde_json` meanwhile is not what rule B is about: no runtime, no socket, no clock, deterministic, floor 1.71 — below this workspace's base, so it raises nothing. It was on `FORBIDDEN_DEPS` for a real reason (no serde stack in the pure core) that the list did not record, beside crates forbidden for a different one. `xtask/src/purity.rs` now holds two lists with their reasons, and checks the stronger one at `--all-features` as well — a hole the single list left, and one TX-P1 would have widened. §3.2, §4.5 |
-| OQ-38 | Is a deterministic fuel cap enough, so the wall-time watchdog can be dropped, or is the watchdog worth keeping as a backstop? |
+| ~~OQ-38~~ | Is a deterministic fuel cap enough, so the wall-time watchdog can be dropped, or is the watchdog worth keeping as a backstop? **decided 2026-11-01**: **fuel only.** The watchdog was never built — `src/main.rs` has no `--timeout` — and a wall-clock refusal is the one refusal that cannot be reproduced; §3.9's row and its two mentions are struck |
 | ~~OQ-39~~ | **Answered 1.10.0: refuse, and `rewrite_redacted` is never written.** An append-only log that can be rewritten is not append-only, and the rewrite is unauditable — the operation that honours the redaction resets the same hash chain that would have shown an edit, so the log can no longer tell the two apart. The capability given up is nearly empty: a plain `Store` holding carried text can neither resolve a locator nor check a span, so it can only hold the bytes. And nothing has to be migrated, because records 14, 15, 17, 18 and 19 do not exist in 1.10.0 — the record enum stops at 13 — so this is decided before any byte depends on it. `SMY-E452`; §3.1, §4.3.2 |
 | ~~OQ-40~~ | **Answered 1.10.0, and the question was wrong.** Neither: 1.79 was already false everywhere — the pure core cannot be *parsed* by a 1.79 Cargo, because `blake3` pulls an edition-2024 `constant_time_eq`. The measured floors (1.85 / 1.86 / 1.88) are declared per crate and gated by `make msrv`. `redb` 4.x's 1.90 is an ordinary bump in the release that ships it. §4.5 |
 | ~~OQ-41~~ | Removing `ingest:quote` from span-carrying text units changes their uids relative to prose ingest of the same text. Accept, or keep the quote and accept duplicate uids per span? **Decided 2026-10-29: accept, as built (TX-P5 step 3).** The premise does not hold: a text unit's `source` is written by `stamp` — part, locator, span, manifest, dates, language — and a prose unit's by the model, and `source` is in the core, so the two never shared a uid whatever the payload held. What removing the quote does decide is inside text ingest: two windows or passes quoting one span in different words give one uid, not two. A unit that gets no span keeps its quote, the only record of what was claimed. Pinned by `attach.rs`'s three tests. |
 | OQ-42 | **Resolved in SMYSL-2.3 A-12.2:** strata by status; a chain tightens at its weakest link's status. §3.3 implements exactly that. |
 | ~~OQ-43~~ | Should the digest-scoped reference check (`E442`) also admit units of the same expression not shown in the digest (a model that remembers an earlier window), or stay strict? **Decided 2026-10-29: strict, as built (TX-P5 step 4).** Each window is its own request, so a model has no earlier window to remember: what it was shown is the digest and the window, and a store uid it was not shown came from somewhere else — invented, or carried in the text, which is the injection `redteam.rs` stages. Admitting the expression's other units would let a window's bytes name any of them. A reference the digest's budget left out is repaired like `E060`, and a larger `--digest-budget` shows more. `--digest-budget 0` sends no digest and so leaves the check at its strictest; the manual said it turned the check off, and is corrected. No figure was taken of how often a model names an unshown unit. |
-| OQ-44 | `lexical` same-as proposals: auto-accept above a threshold at rung `computed`, or always require a judge (model or human)? |
+| ~~OQ-44~~ | `lexical` same-as proposals: auto-accept above a threshold at rung `computed`, or always require a judge (model or human)? **decided 2026-11-01**: **never auto-accept.** A proposal is staged at rung `computed` and a class is settled by agreement between engines (`attested:2`), as built; GE-T5's paraphrase set measures precision 0.6724 at k=1 and every planted near-miss proposed from k=2, so no threshold separates them |
 | ~~OQ-13~~ (draft 3) | Speaker and device selectors for datings, beside the window targets. **Decided 2026-10-29: neither in SMYSL-2.** A dating's target is inside its did and A-5 lists four kinds, which the decoder holds to (`dec_dating_target` refuses any other, since an unknown kind cannot be kept), so a fifth is a wire amendment every older reader refuses. A speaker target would also have to name a speaker the way the rows do, and a pseudonymised library holds `spk:` keys, not the platform ids a caller knows. And nothing records a device: no reader fills one and the segment row has no field for it. Dating what one speaker said is a selection followed by unit datings, which the format already carries. |
 | OQ-70 | **Found in TX-P2 step 2.** A part entry's `structure` is A-5's hash of the whole segment table, so it moves when a row's *metadata* moves — a speaker, a timestamp, an id — and not only when the segmentation does. `SMY-E401` then reports `which: "structure"` for a change that is not structural. Should A-5 narrow the hash to the tree (level, range, locator) and leave the rest to the rdid, which already covers it? It is an amendment to the normative document and it would move every structure hash ever computed, so it is a question for SMYSL-2.3 rather than for a reader's commit. The cost of leaving it: pseudonymising a corpus re-identifies every part *entry* — no part, no object, no tid. §3.2 |
 | OQ-74 | **Found in TX-P5 step 5, measuring GE-T2's corpus.** `Passes::admits` refuses two passes above temperature 0, on MS-8's measurement that two runs at T>0 cannot agree by `identical-span` except by accident. It checks the temperature a **caller configured**, and nothing checks whether the provider honours it. Measured against hosted `deepseek-chat` with `"temperature": 0.0` on the wire: three runs of five languages gave `identical-span` rates spread 0.333 to 0.637 *within* one language, which is the size of the spread *between* languages — the second pass bought much of what MS-8 says a T>0 run buys, at a configured T of 0. S0 had the same split from the other side (`J_class` 1.000 local, 0.327 hosted; MS-8's 145 bit-identical runs were the local arm). The consensus policy's premise is therefore a property of the *provider*, not of the configuration, and this build cannot tell the two apart. What would close it is a determinism probe — the same request twice at T=0 before the run, recorded beside the figure — which is cheap and is not a policy change; the alternative is to say in §3.4 that `identical-span` is defined for providers that are reproducible at T=0 and is a lower bound elsewhere. §3.4, §5.5 |
