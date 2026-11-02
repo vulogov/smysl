@@ -1960,6 +1960,13 @@ fn cli() -> Command {
                         .help("Document to ingest; `-` reads stdin"),
                 )
                 .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MS")
+                        .help("Wall clock the units are attested at, in milliseconds; defaults to now")
+                        .value_parser(clap::value_parser!(u64)),
+                )
+                .arg(
                     Arg::new("hop")
                         .long("hop")
                         .value_name("N")
@@ -4534,7 +4541,8 @@ fn persist(
                 Record::Relation(_) => true,
                 Record::Withdrawal(w) => smysl::surface::withdrawal_has_surface_form(w),
                 Record::Resolution(x) => smysl::surface::resolution_has_surface_form(x),
-                // A commitment always has one: it names a unit, and a uid can always be written.
+                // A commitment always has one: it names a unit, and a uid can always be written —
+                // or a dating, spelled by its did since the context below knows the store's (OQ-73).
                 Record::Commit(_) => true,
                 // A manifest usually has one (1.10); the predicate names the cases it does
                 // not, among them an alias the parser would not read back.
@@ -4547,6 +4555,11 @@ fn persist(
                 // unknown keys, and one whose relative target is a window: the parser cannot
                 // read any of the three back.
                 Record::Dating(d) => smysl::surface::dating_has_surface_form(d),
+                // A declaration usually has one: `@schema`, with `fields:` and `lenses:` since
+                // A-10 item 4. This arm was missing as the dating's once was, so `q --save` on a
+                // surface document was refused for the `x.query/v1` it declares with the first
+                // saved query, though the writer would have written it.
+                Record::SchemaDecl(d) => smysl::surface::schema_decl_has_surface_form(d),
                 _ => false,
             };
             if !expressible {
@@ -4557,7 +4570,9 @@ fn persist(
                 ));
             }
         }
-        let ctx = WriteContext::from_labels(labels).with_relations(store.relations());
+        let ctx = WriteContext::from_labels(labels)
+            .with_relations(store.relations())
+            .with_datings(store.library().datings().map(|(d, _)| d));
         let text = write_surface(None, records, &ctx);
         let separator = if bytes.ends_with(b"\n") { "\n" } else { "\n\n" };
         let mut f = std::fs::OpenOptions::new()
@@ -4713,6 +4728,19 @@ fn record_time(m: &ArgMatches) -> u64 {
     m.get_one::<u64>("at").copied().unwrap_or_else(now_millis)
 }
 
+/// The clock an ingest attests at: `--at`, or now.
+///
+/// `IngestOptions` defaults it to time zero, and both ingest commands took the default, so every
+/// unit they staged was attested at 1970. Rule E reads a unit's earliest attestation as a
+/// ceiling on when it was said (first seen), so each chat message ingested from the CLI was
+/// "said after it was first seen" and reported contested (`SMY-W413`). `model_options`, which
+/// the other model commands use, already set the clock this way.
+#[cfg(feature = "ingest")]
+fn attest_now(opts: smysl::IngestOptions, m: &ArgMatches) -> smysl::IngestOptions {
+    let agent = opts.agent.clone();
+    opts.with_now(smysl::Hlc::new(record_time(m), 0, agent))
+}
+
 /// How an edge reads in a report: `FROM --KIND--> TO`, with labels where the store has them.
 fn edge_text(labels: &std::collections::BTreeMap<smysl::Label, Uid>, r: &Relation) -> String {
     let name = |u: &Uid| {
@@ -4843,11 +4871,16 @@ fn cmd_commit(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             apply
         );
     } else {
-        let name = labels
-            .iter()
-            .find(|(_, u)| **u == unit)
-            .map(|(l, _)| l.as_str().to_string())
-            .unwrap_or_else(|| unit.short());
+        // A dating by its did, as the document now spells it (OQ-73): `b3:…` would name a unit.
+        let name = if raw.starts_with(smysl::Did::PREFIX) {
+            smysl::Did::from_bytes(*unit.as_bytes()).short()
+        } else {
+            labels
+                .iter()
+                .find(|(_, u)| **u == unit)
+                .map(|(l, _)| l.as_str().to_string())
+                .unwrap_or_else(|| unit.short())
+        };
         match before {
             Some(b) if b == level => println!("{path}: {name} is already {level}; nothing to do"),
             Some(b) => println!("{path}: {name}  {b} -> {level}"),
@@ -6292,6 +6325,7 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                     eprintln!("smysl q: {path}: {e}");
                     return ExitCode::Failure;
                 }
+                q_announce_saved(&records);
             }
             code
         }
@@ -6321,8 +6355,38 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 eprintln!("smysl q: {e}");
                 return ExitCode::Failure;
             }
+            q_announce_saved(&records);
         }
         code
+    }
+}
+
+/// Say what `--save` wrote, once it is written.
+///
+/// After the write and not when the records are built: a surface store could refuse a record
+/// `persist` found no spelling for, and `saved b3:…` printed before that refusal named a unit
+/// the store did not hold.
+fn q_announce_saved(records: &[Record]) {
+    let saved: Vec<Uid> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Unit(u) if u.schema.as_str() == smysl::schemas::query::SAVED => {
+                Some(smysl::canonical_uid(u))
+            }
+            _ => None,
+        })
+        .collect();
+    for uid in saved {
+        let replaced = records.iter().find_map(|r| match r {
+            Record::Relation(rel) if rel.kind == RelKind::Supersedes && rel.from == uid => {
+                Some(rel.to)
+            }
+            _ => None,
+        });
+        match replaced {
+            Some(old) => eprintln!("smysl q: saved {uid}, superseding {old}"),
+            None => eprintln!("smysl q: saved {uid}"),
+        }
     }
 }
 
@@ -9902,7 +9966,6 @@ fn q_run(
                             new,
                             uid,
                         )));
-                        eprintln!("smysl q: saved {new}, superseding {uid}");
                     }
                     Err(d) => {
                         eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
@@ -9987,13 +10050,11 @@ fn q_run(
                 // saved query a store receives, as `x.text/v1` goes with the first batch.
                 match smysl::query::to_records(&bound, &plan, &first, opts) {
                     Ok((unit, edges)) => {
-                        let uid = smysl::canonical_uid(&unit);
                         if !declares_query(env.store) {
                             records.push(Record::SchemaDecl(smysl::schemas::query::decl()));
                         }
                         records.push(Record::Unit(unit));
                         records.extend(edges.into_iter().map(Record::Relation));
-                        eprintln!("smysl q: saved {uid}");
                     }
                     Err(d) => {
                         eprintln!("smysl q: {}: {}", d.code.as_str(), d.message);
@@ -10786,6 +10847,7 @@ fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .and_then(|s| smysl::Rung::parse(s))
         .unwrap_or(smysl::Rung::Document);
     let mut opts = smysl::IngestOptions::at_rung(rung);
+    opts = attest_now(opts, m);
     // Two passes per window is the default here and nowhere else (§3.4), because the doubling
     // is `ingest --text`'s: `--single-pass` opts out and is recorded in the recipe.
     opts = opts.with_passes(if m.get_flag("single-pass") {
@@ -10901,8 +10963,8 @@ fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl ingest: {d}");
     }
     println!(
-        "{} window(s), {} skipped, {} call(s), {} unit(s), {} entit(ies)",
-        report.windows, report.skipped, report.calls, report.units, report.entities
+        "{} window(s), {} skipped, {} call(s), {} unit(s), {} entit(ies), {} repl(ies)",
+        report.windows, report.skipped, report.calls, report.units, report.entities, report.replies
     );
     println!(
         "spans        {} attached, {} without one{}",
@@ -10929,6 +10991,15 @@ fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             r, report.agreement.agreed, report.agreement.comparable, report.agreement.spanless,
         ),
         None => println!("stability    - (one pass, or nothing comparable)"),
+    }
+    // Beside the figure, because it decides how the figure reads (OQ-74): a provider that
+    // repeated itself makes the rate 1.0 by construction, and one that did not makes it a
+    // lower bound. Absent for one pass, which has nothing to repeat.
+    if report.agreement.reproduced().is_some() {
+        println!(
+            "reproduced   {} of {} window(s) answered identically by every pass",
+            report.agreement.reproduced, report.agreement.answered
+        );
     }
     // Printed only under the policy that runs it, so a `source` run's output is unchanged.
     if report.pivot_calls > 0 || report.pivoted > 0 || report.pivot_missing > 0 {
@@ -11141,6 +11212,7 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .unwrap_or(smysl::Rung::Document);
 
     let mut opts = smysl::IngestOptions::at_rung(rung);
+    opts = attest_now(opts, m);
     if let Some(hop) = m.get_one::<u32>("hop") {
         opts = opts.at_hop(*hop);
     }

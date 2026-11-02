@@ -476,6 +476,22 @@ registry! {
         W504 = "SMY-W504", Warn,  "The unit store is held by another process; read from the CBOR log instead";
         E505 = "SMY-E505", Error, "A primary shard and its export disagree on the record-set digest";
     }
+
+    // --- Added after 1.13, at the end so no code is renumbered ---------------------------------
+    //
+    // 1.14.0: a text ingest draws `x.text/replies` (`smysl_text::replies`) and reports a reply
+    // naming a message the expression does not hold. A library code in a trailing block, since
+    // `Store` is the last group and a code inserted beside `W447` renumbered every code after
+    // it — which `cargo-semver-checks` caught as a major break.
+    Library => {
+        W448 = "SMY-W448", Warn,  "A reply names a message the expression does not hold; no edge was drawn for it";
+    }
+
+    // 1.14.0, OQ-74: two passes at temperature 0 whose first answers differed. Ingest's, in a
+    // block of its own for the same reason as the one above.
+    Provider => {
+        W454 = "SMY-W454", Warn,  "The provider did not reproduce at temperature 0; the agreement figure is a lower bound";
+    }
 }
 
 impl fmt::Display for Code {
@@ -966,9 +982,18 @@ mod tests {
     /// under another model hash; 148 with `SMY-E416` and `SMY-W467` in step 4, raised by
     /// `--seed-check` on a model-dependent plan and by a rerun under another model; 149 with
     /// `SMY-E474` in step 5, raised by the natural-language front end.
+    ///
+    /// 150 with `SMY-W448` in 1.14.0, where something turns a chat's reply ids into
+    /// `x.text/replies` edges (`smysl_text::replies`): a reply naming a message the expression
+    /// does not hold. SMYSL-2.4 allocated it to the time engine, which would have reported the
+    /// same absence one step later; the producer is where the id is resolved, so it is where the
+    /// absence is seen.
+    ///
+    /// 151 with `SMY-W454` in 1.14.0 (OQ-74): two passes at temperature 0 whose first answers
+    /// to the same request differed, so the provider did not do what the configuration said.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 149);
+        assert_eq!(Code::ALL.len(), 151);
     }
 
     #[test]

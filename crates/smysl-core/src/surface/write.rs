@@ -7,9 +7,9 @@
 //!
 //! Hashes are computed over CBOR only, so reformatting never changes identity.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ids::{Label, Uid, ViewId};
+use crate::ids::{Did, Label, Uid, ViewId};
 use crate::surface::hjson::{HObject, HValue};
 use crate::surface::payload::payload_to_object;
 use crate::types::library::{Dating, DatingTarget, DatingValue};
@@ -37,6 +37,13 @@ pub struct WriteContext {
     /// `@resolve` whose edge is not among them can still be spelled `from --kind--> to` rather
     /// than as a bare rid. Relations in the records are always known.
     pub relations: BTreeMap<Uid, Relation>,
+    /// Datings known beyond the records being written (OQ-73), so a withdrawal or a commitment
+    /// whose key 0 is a did (A-6) is spelled `d3:…` rather than as the `b3:…` its 32 bytes would
+    /// otherwise print as, which claims to be a uid. Datings in the records are always known.
+    ///
+    /// Only legibility rides on it: the bytes are the same either way, so a writer that does not
+    /// know a dating still writes a document that reads back to the same record.
+    pub datings: BTreeSet<Did>,
 }
 
 impl WriteContext {
@@ -58,6 +65,7 @@ impl WriteContext {
             salience: BTreeMap::new(),
             format_version: crate::FORMAT_VERSION_DEFAULT.to_string(),
             relations: BTreeMap::new(),
+            datings: BTreeSet::new(),
         }
     }
 
@@ -69,6 +77,12 @@ impl WriteContext {
         for r in relations {
             self.relations.insert(r.uid(), r.clone());
         }
+        self
+    }
+
+    /// Make these dids spellable as dids where a withdrawal or a commitment names one.
+    pub fn with_datings<'a>(mut self, dids: impl IntoIterator<Item = &'a Did>) -> WriteContext {
+        self.datings.extend(dids.into_iter().copied());
         self
     }
 
@@ -94,6 +108,13 @@ impl WriteContext {
             None => u.canonical(),
         }
     }
+}
+
+/// Key 0 of a withdrawal or a commitment as a did, where those 32 bytes are a dating the writer
+/// knows (A-6, OQ-73). A label is never bound to a did, so a known dating wins over nothing.
+fn as_did(key: &Uid, datings: &BTreeSet<Did>) -> Option<String> {
+    let did = Did::from_bytes(*key.as_bytes());
+    datings.contains(&did).then(|| did.canonical())
 }
 
 /// Emit a document in canonical surface form.
@@ -122,9 +143,16 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
         }
     }
     let mut known = ctx.relations.clone();
+    let mut datings = ctx.datings.clone();
     for r in records {
-        if let Record::Relation(rel) = r {
-            known.insert(rel.uid(), rel.clone());
+        match r {
+            Record::Relation(rel) => {
+                known.insert(rel.uid(), rel.clone());
+            }
+            Record::Dating(d) => {
+                datings.insert(d.did());
+            }
+            _ => {}
         }
     }
     for r in records {
@@ -139,12 +167,14 @@ pub fn write_surface(view: Option<&View>, records: &[Record], ctx: &WriteContext
     for r in records {
         match r {
             Record::Withdrawal(w) if withdrawal_has_surface_form(w) => {
-                write_withdrawal(&mut out, w, &known, ctx)
+                write_withdrawal(&mut out, w, &known, &datings, ctx)
             }
             Record::Resolution(res) if resolution_has_surface_form(res) => {
                 write_resolution(&mut out, res, &known, ctx)
             }
-            Record::Commit(c) if commit_has_surface_form(c) => write_commit(&mut out, c, ctx),
+            Record::Commit(c) if commit_has_surface_form(c) => {
+                write_commit(&mut out, c, &datings, ctx)
+            }
             // Last of all, where the parser resolves them: a redaction's `reason` names a unit
             // the reader has met, and the writer's order has to be the parser's or the round
             // trip is not a fixed point.
@@ -421,11 +451,16 @@ fn write_withdrawal(
     out: &mut String,
     w: &Withdrawal,
     known: &BTreeMap<Uid, Relation>,
+    datings: &BTreeSet<Did>,
     ctx: &WriteContext,
 ) {
+    let target = match known.get(&w.relation) {
+        Some(_) => edge(&w.relation, known, ctx),
+        None => as_did(&w.relation, datings).unwrap_or_else(|| edge(&w.relation, known, ctx)),
+    };
     out.push_str(&format!(
         "@withdraw {} {{ agent: {}, ts: [{}, {}]",
-        edge(&w.relation, known, ctx),
+        target,
         quoteless_or_quoted(w.agent.as_str()),
         w.ts.wall_ms,
         w.ts.counter
@@ -463,11 +498,18 @@ fn write_resolution(
 ///
 /// Always has a surface form, unlike a withdrawal or a resolution: those name an edge or a
 /// contention, either of which may not be expressible without the relation it refers to, while a
-/// commitment names a unit and `ctx.reference` can always write a uid.
-fn write_commit(out: &mut String, c: &crate::types::lifecycle::Commit, ctx: &WriteContext) {
+/// commitment names a unit and `ctx.reference` can always write a uid. Or a dating (A-6), which
+/// is spelled `d3:…` when the writer knows it is one and as its bytes otherwise (OQ-73).
+fn write_commit(
+    out: &mut String,
+    c: &crate::types::lifecycle::Commit,
+    datings: &BTreeSet<Did>,
+    ctx: &WriteContext,
+) {
+    let target = as_did(&c.unit, datings).unwrap_or_else(|| ctx.reference(&c.unit));
     out.push_str(&format!(
         "@commit {} {{ level: {}, agent: {}, ts: [{}, {}]",
-        ctx.reference(&c.unit),
+        target,
         c.level,
         quoteless_or_quoted(c.agent.as_str()),
         c.ts.wall_ms,

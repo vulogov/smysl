@@ -584,6 +584,21 @@ pub enum OrderPlan {
     CompareBy {
         field: Field,
     },
+    /// `order by` with more than one key: lexicographic, each key under its own direction, a
+    /// later key consulted only where every earlier one ties, and the uid last (SMYSL-2.9
+    /// §4.6). A one-key stage stays [`OrderPlan::Salience`] or [`OrderPlan::Field`], so the
+    /// plans a single key always produced are unchanged.
+    Keys {
+        keys: Vec<KeyPlan>,
+    },
+}
+
+/// One key of a multi-key `order by`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum KeyPlan {
+    Salience { dir: Dir },
+    Field { field: Field, dir: Dir },
 }
 
 /// A shaping stage, lowered (phase 9).
@@ -1266,21 +1281,29 @@ fn lower_ordering(
         Ordering::OrderBy {
             keys, lens_none, ..
         } => {
-            // One key per stage in this build. A multi-key sort is a lexicographic comparator
-            // over several typed fields, and the second key only ever breaks a tie in the
-            // first — which `order by` already breaks by uid. Refusing the rest by name is
-            // better than silently honouring one of them.
+            // More than one key is a lexicographic comparator (`OrderPlan::Keys`): each key
+            // lowered as a one-key stage would be, so a field that does not resolve is the
+            // same diagnostic in either position, and every key is resolved even after one
+            // fails, so a stage with two bad keys says so twice.
             let first = keys.first()?;
             let dir = first.dir.unwrap_or(Dir::Ascending);
             if keys.len() > 1 {
-                diags.push(
-                    Diagnostic::at(Code::E461, o.span()).with_message(
-                        "`order by` with more than one key needs a lexicographic comparator over \
-                     typed fields; this build sorts by one key and breaks ties by uid"
-                            .to_string(),
-                    ),
-                );
-                return None;
+                let lowered: Vec<Option<KeyPlan>> = keys
+                    .iter()
+                    .map(|k| {
+                        let dir = k.dir.unwrap_or(Dir::Ascending);
+                        match &k.target {
+                            SortTarget::Salience => Some(KeyPlan::Salience { dir }),
+                            SortTarget::Field(f) => Some(KeyPlan::Field {
+                                field: field_of(f, *lens_none, diags)?,
+                                dir,
+                            }),
+                        }
+                    })
+                    .collect();
+                return Some(OrderPlan::Keys {
+                    keys: lowered.into_iter().collect::<Option<Vec<_>>>()?,
+                });
             }
             match &first.target {
                 SortTarget::Salience => Some(OrderPlan::Salience { dir }),
@@ -1410,6 +1433,14 @@ fn order_name(o: &OrderPlan) -> String {
         OrderPlan::Field { field, dir: d } => format!("{} {}", field.name(), dir(d)),
         OrderPlan::GroupBy { field } => format!("group by {}", field.name()),
         OrderPlan::CompareBy { field } => format!("compare by {}", field.name()),
+        OrderPlan::Keys { keys } => keys
+            .iter()
+            .map(|k| match k {
+                KeyPlan::Salience { dir: d } => format!("salience {}", dir(d)),
+                KeyPlan::Field { field, dir: d } => format!("{} {}", field.name(), dir(d)),
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
     }
 }
 
@@ -1682,6 +1713,17 @@ fn in_force(
         } = o
         {
             ids.insert(id.clone());
+        }
+        if let OrderPlan::Keys { keys } = o {
+            for k in keys {
+                if let KeyPlan::Field {
+                    field: Field::Declared { id, .. },
+                    ..
+                } = k
+                {
+                    ids.insert(id.clone());
+                }
+            }
         }
     }
     let mut revisions: Vec<Pin> = pins.to_vec();

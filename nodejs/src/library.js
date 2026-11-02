@@ -214,6 +214,24 @@ export function rdid(body) {
  * also what lets a reading gain raw metadata, keep its structure hash and change its rdid,
  * which is why a part entry carries both.
  */
+/** The segment row keys that are the tree: start, end, level, locator (A-5 as amended by
+ * OQ-70, 1.14.0). The rest of a row is the reading's, and the rdid covers it. */
+export const TREE_KEYS = 4;
+
+/** OQ-70: a segment table with each row cut to its tree keys, in document order. A value that
+ * is not a table of maps is returned as it stands. */
+export function tree(segments) {
+  if (!Array.isArray(segments)) return segments;
+  return segments.map((row) => {
+    if (!(row instanceof Map)) return row;
+    const kept = new Map();
+    for (const [k, v] of row) {
+      if ((typeof k === "number" || typeof k === "bigint") && Number(k) < TREE_KEYS) kept.set(k, v);
+    }
+    return kept;
+  });
+}
+
 export function structureHash(segments) {
   return blake3(segments);
 }
@@ -467,7 +485,7 @@ export class PartReading {
    * re-encoding is what makes this a check of the encoder rather than a copy of the input.
    */
   structureHash() {
-    return structureHash(encodeOne(this.segments));
+    return structureHash(encodeOne(tree(this.segments)));
   }
 
   /** The segment table with its keys named. Unknown keys keep their integer (rule X). */

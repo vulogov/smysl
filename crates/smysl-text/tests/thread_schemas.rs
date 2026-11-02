@@ -6,11 +6,11 @@
 //! is ordered by its replies, which a chat reader records as `reply` ids on reading rows.
 //!
 //! **One finding the chat half needed.** `x.text/replies` is declared by `x.text/v1` and read
-//! by rule E as a free constraint, and nothing in this build writes one: the readers record
-//! `reply` ids on rows, and no path turns a row's id into an edge between the units drawn from
-//! those rows. So the edges are drawn here, from the ids, the way an extraction would — which
-//! is what makes the test about derivation rather than about a producer that does not exist.
-//! The producer is owed and recorded in SMYSL-2.5 §6 step 2.
+//! by rule E as a free constraint, and when this test was written nothing wrote one: the readers
+//! recorded `reply` ids on rows, and no path turned a row's id into an edge between the units
+//! drawn from those rows. The producer is [`smysl_text::replies`] since 1.14.0, the function a
+//! text ingest calls once its windows are in, and the edges here are drawn by it from the units
+//! this test drew.
 
 #![cfg(all(feature = "reader-usfm", feature = "reader-telegram"))]
 
@@ -37,13 +37,16 @@ fn repo(rel: &str) -> PathBuf {
 /// A drawn unit: its uid, where its row starts, and the platform ids the row carried.
 struct Drawn {
     uid: Uid,
+    tid: smysl_core::Tid,
     start: u64,
-    ids: BTreeMap<String, String>,
+    end: u64,
 }
 
 struct Built {
     root: PathBuf,
     library: Library,
+    mid: smysl_core::Mid,
+    parts: Vec<smysl_core::Tid>,
     drawn: Vec<Drawn>,
 }
 
@@ -117,8 +120,9 @@ fn build(name: &str, file: &str, reader: &str, alias: &str, lang: &str, level: &
             .expect("a unit of a row");
             drawn.push(Drawn {
                 uid: canonical_uid(&unit),
+                tid: passage.tid,
                 start: passage.range.start,
-                ids: row.ids.clone(),
+                end: passage.range.end,
             });
             records.push(Record::Unit(unit));
         }
@@ -127,6 +131,8 @@ fn build(name: &str, file: &str, reader: &str, alias: &str, lang: &str, level: &
     Built {
         root,
         library,
+        mid: added.mid,
+        parts: added.parts.clone(),
         drawn,
     }
 }
@@ -222,20 +228,33 @@ fn a_dialogue_is_ordered_by_its_replies() {
     );
     assert_eq!(built.drawn.len(), 5, "the fixture has five messages");
 
-    // The edges no producer writes yet (see the module header): from each row's `reply` id to
-    // the row whose `msg` id it names.
-    let by_msg: BTreeMap<String, Uid> = built
+    // The edges, by the producer a text ingest runs (see the module header).
+    let parts: Vec<(smysl_core::Tid, Vec<smysl_text::Segment>)> = built
+        .parts
+        .iter()
+        .map(|tid| {
+            let reading = built
+                .library
+                .part_reading(&built.mid, tid)
+                .expect("a reading");
+            (*tid, reading.rows)
+        })
+        .collect();
+    let views: Vec<(smysl_core::Tid, &[smysl_text::Segment])> =
+        parts.iter().map(|(t, r)| (*t, r.as_slice())).collect();
+    let sited: Vec<smysl_text::replies::Sited> = built
         .drawn
         .iter()
-        .filter_map(|d| d.ids.get("msg").map(|m| (m.clone(), d.uid)))
+        .map(|d| smysl_text::replies::Sited {
+            uid: d.uid,
+            tid: d.tid,
+            span: (d.start, d.end),
+        })
         .collect();
+    let linked = smysl_text::replies::link(&views, &sited);
+    assert!(linked.unresolved.is_empty(), "{:?}", linked.unresolved);
+    let pairs = linked.pairs;
     let replies = RelKind::Extension(smysl_core::schemas::text::REPLIES.to_string());
-    let mut pairs: Vec<(Uid, Uid)> = Vec::new();
-    for d in &built.drawn {
-        if let Some(to) = d.ids.get("reply").and_then(|r| by_msg.get(r)) {
-            pairs.push((d.uid, *to));
-        }
-    }
     assert_eq!(pairs.len(), 2, "the fixture has two replies");
     let edges: Vec<Record> = pairs
         .iter()

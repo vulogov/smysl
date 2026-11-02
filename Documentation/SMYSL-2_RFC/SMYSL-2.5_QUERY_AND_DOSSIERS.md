@@ -1601,7 +1601,9 @@ Each step has an exit test. Steps within a phase are ordered.
    ends of that order are the first and last. *Nothing writes `x.text/replies`*: `x.text/v1`
    declares it and rule E reads it, and the readers record `reply` ids on rows that no path turns
    into edges; the dialogue test draws them from the ids, and **the producer is owed** — it
-   belongs with the converter that already turns rows into units. **The five existing schemas
+   belongs with the converter that already turns rows into units. *(Paid in 1.14.0:
+   `smysl_text::replies`, run by a text ingest after its windows; the test now draws its edges
+   with it.)* **The five existing schemas
    derive byte for byte what they did:** the H-18 golden is now pinned to those five by name,
    because a digest over `ThreadSchema::ALL` would have moved for the new schemas alone and hidden
    the answer, and it holds the digest recorded before H-18. The exit's tests are
@@ -2307,7 +2309,7 @@ E421, E422, E426, E427, W429, W430, W431. Existing: W036, E001.
 
 Draft 3 questions this RFC touches: ~~**OQ-14**~~ **answered** (IDF over the query's declared
 scope, default collection, recorded per query — §3.2 step 4 has the reasoning and the two
-defects that decided it), **OQ-15** (partial dependence; `Witnesses` trait leaves room), **OQ-16** (contentions
+defects that decided it), **OQ-15** (partial dependence; **deferred 2026-11-02** — nothing measured needs it, and the `Witnesses` trait leaves room), **OQ-16** (contentions
 across stores; computed by merge into the scratch store until SMYSL-2.8), ~~**OQ-21**~~ **decided
 2026-10-28: the name stays `sq`**, because it is no longer only a name — `using sq/1` is how a
 query states its version (`SMY-E427` for one this build does not support), the three ports

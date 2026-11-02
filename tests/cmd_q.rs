@@ -745,3 +745,30 @@ fn from_question_reads_the_configuration_beside_its_store() {
     q(&["attest", "--sample", "1", &store]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A save the store refuses is not reported as a save. `q --save` printed `saved b3:…` when it
+/// built the records, before `persist` refused one a surface document has no spelling for, so the
+/// run said it saved a unit the store did not hold and exited 1.
+#[test]
+fn a_refused_save_does_not_say_it_saved() {
+    let dir = scratch("refused-save");
+    let doc = dir.join("doc.smy");
+    std::fs::copy(f1(), &doc).expect("the fixture copies");
+    let doc = doc.to_string_lossy().to_string();
+    let o = run(&[
+        "q",
+        "--save",
+        "from store:doc\nfind \"connection pool\"",
+        &doc,
+    ]);
+    let err = stderr(&o);
+    if o.status.success() {
+        assert!(err.contains("smysl q: saved "), "{err}");
+    } else {
+        assert!(
+            !err.contains("smysl q: saved "),
+            "a refused save said it saved: {err}"
+        );
+        assert!(err.contains("no surface form"), "{err}");
+    }
+}

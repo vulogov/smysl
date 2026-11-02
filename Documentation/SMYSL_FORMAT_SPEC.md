@@ -633,9 +633,16 @@ alias, and the grammar is checked where there is an author to tell.
 
 A **part entry** is `{0: tid, 1: length (unsigned), 2: structure hash (32 bytes), 3: rdid,
 4: lang (text, only when it differs from key 2)}`. The structure hash is BLAKE3-256 of the
-canonical CBOR of the segment table in the reading's key 2 — **over the table, with no domain
-byte**, because it names a table and not a record. So a reading that gains raw metadata keeps
-its structure hash and changes its rdid, which is why a part entry carries both.
+canonical CBOR of the segment table in the reading's key 2 **cut to its tree**: the same array in
+the same document order, each row keeping only keys 0 to 3 (start, end, level, locator) — **with
+no domain byte**, because it names a table and not a record. Everything else a row carries — its
+language, speaker, observed instant, ids, time zone, reported-speech marks, and any key a later
+release adds — is the reading's and not the structure's, and the rdid covers it. So a reading
+that gains raw metadata, or is pseudonymised, keeps its structure hash and changes its rdid,
+which is why a part entry carries both, and `SMY-E401`'s `structure` means the segmentation
+moved. *(Narrowed in 1.14.0, SMYSL-2.4 OQ-70; before, the hash covered every key of every row,
+so a pseudonym re-identified every part entry. A reading whose rows carry only keys 0 to 3 — any
+scripture reader without reported-speech marks — has the same structure hash under both.)*
 
 **Part text (15)** — `{0: tid (32 bytes), 1: text (bytes, the normalised text)}`, both required.
 It has no surface form: text is not written in surface syntax.
@@ -660,9 +667,8 @@ that the enclosed words are speech the text reports rather than asserts — USFM
 OSIS's `<q who="…">` — and belongs on the innermost row whose range contains it. `who` is the
 source's own label for the speaker, carried verbatim and not pseudonymised: it is a label an
 editor put on a public text, not a platform's identifier for a person. A mark key a consumer does not know is
-**kept verbatim**, as rule X requires of every other map in this format: the structure hash is
-taken over these bytes, so a consumer that dropped one would change a corpus's identity by
-reading it.
+**kept verbatim**, as rule X requires of every other map in this format: the rdid is taken over
+these bytes, so a consumer that dropped one would change a corpus's identity by reading it.
 
 **Dating (17)** — a statement about when something happened.
 
@@ -882,6 +888,12 @@ Consequences that are easy to get wrong, each of which has been a real defect:
   `level` is one of the five names above. `commit` is a reserved word in the same way, and unlike a
   withdrawal or a resolution a commitment always has a surface form, because a uid can always be
   written.
+- **A did in key 0 is spelled `d3:…`** (1.14, SMYSL-2.3 A-6, OQ-73): `@commit d3:… { … }` and
+  `@withdraw d3:… { … }` name a dating, and key 0 holds the did's 32 bytes. `@resolve` does not
+  take one; its target is a contention or an edge. A writer that knows the 32 bytes are a dating —
+  one among the records it writes, or one its caller supplies from the store — MUST spell them
+  `d3:…`. One that cannot tell writes `b3:…`, which reads back to the same record, because the
+  bytes are the same: the cost is legibility, a reader looking for a unit, and not data.
 - **`@manifest` spells record 14** (1.10), naming the expression alias in its header:
   `@manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain, carry: text,
   part-policy: "top/64Ki-4Mi", parts: [{ tid: t3:…, length: 97, structure: b3:…, rdid: r3:… }] }`.
@@ -1191,6 +1203,7 @@ than read as a policy nobody exercised:
 | 1.10 | record type 17, dating; `@date` | new record type, new reserved word |
 | 1.10 | `source` key 4, `published` | new key above a sub-map's highest |
 | 1.10 | a did in withdrawal key 0 and commitment key 0 | a new value in an existing key, domain-separated from the kinds already there (§2.6) |
+| 1.14 | `d3:` after `@commit` and `@withdraw` | a new spelling of a value key 0 already held; an older reader rejects it as a malformed reference, as it would a new reserved word |
 
 Keeping this list is what RFC SMYSL-2.3 A-14 asks for, and it is cheap insurance: an addition
 nobody wrote down is an addition the next implementer rediscovers by decoding a fixture, which

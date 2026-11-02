@@ -80,9 +80,9 @@ test("every identity is recomputed from the records", () => {
 });
 
 test("a chat reading names who said what", () => {
-  // A row's speaker, timestamp and ids are inside the structure hash and therefore inside the
-  // rdid, so an implementation that dropped them would decode the record and disagree about the
-  // identity.
+  // A row's speaker, timestamp and ids are inside the rdid — not the structure hash, which since
+  // OQ-70 (1.14.0) covers the tree alone — so an implementation that dropped them would decode
+  // the record and disagree about the identity.
   let speakers = 0;
   let observed = 0;
   let ids = 0;

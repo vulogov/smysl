@@ -256,8 +256,9 @@ fn read_message(
     if let Some(id) = object.get("id").and_then(scalar) {
         ids.insert("msg".to_string(), id);
     }
-    // A reply is an edge, and the time engine (TX-P3) is what turns it into a constraint —
-    // `SMY-W448` is what it reports when the message a reply names is not there. Kept as the
+    // A reply is an edge — `crate::replies` draws it between the units of the two messages,
+    // and the time engine (TX-P3) reads it as a constraint; `SMY-W448` is what the drawing
+    // reports when the message a reply names is not there. Kept as the
     // source's own
     // number: this reader does not know which row that number names, and resolving it here
     // would mean a reader with an opinion about the whole file rather than about a message.

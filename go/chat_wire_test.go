@@ -192,9 +192,9 @@ func TestEveryChatIdentityIsRecomputedFromTheRecords(t *testing.T) {
 	}
 }
 
-// A row's speaker, timestamp and ids are inside the structure hash and therefore inside the
-// rdid, so an implementation that dropped them would decode the record and disagree about the
-// identity.
+// A row's speaker, timestamp and ids are inside the rdid — not the structure hash, which since
+// OQ-70 (1.14.0) covers the tree alone — so an implementation that dropped them would decode
+// the record and disagree about the identity.
 func TestAChatReadingNamesWhoSaidWhat(t *testing.T) {
 	_, records := chatFixtures(t)
 	var speakers, observed, ids int

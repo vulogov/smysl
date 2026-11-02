@@ -14,7 +14,7 @@
 
 ## Getting it
 
-**On crates.io.** Twelve crates: the facade, plus the eleven behind it that exist so the
+**On crates.io.** Seventeen crates: the facade, plus the sixteen behind it that exist so the
 compiler can check that the pure set stays pure. The evaluation harness stays unpublished — its
 tests read `fixtures/corpus` from outside its own package root, so a published copy would ship
 tests nobody could run.
@@ -28,58 +28,44 @@ As a library:
 
 ```toml
 [dependencies]
-smysl = "1.7"
+smysl = "1.14"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.8.0` and the format is `smysl/1.0`.** The crate version means the API is
-frozen: the facade's 276 names and every public item behind them move only with a 2.0, enforced
-per crate by `cargo-semver-checks` on every push.
-[`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise written down.
-The format version means nothing about the format changed: `smysl/0.1` held across fourteen
-releases and four independent implementations — the Rust, and Python, JavaScript and Go written
-from the specification alone — and `smysl/1.0` reports that record rather than a change.
+**The crate is `1.14.0` and the format is `smysl/1.0`.** The crate version means the API is
+frozen: every public item moves only with a 2.0, enforced per crate by `cargo-semver-checks` on
+every push. [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise
+written down. The format version means nothing about the format changed incompatibly:
+`smysl/0.1` held across fourteen releases and four independent implementations — the Rust, and
+Python, JavaScript and Go written from the specification alone — and `smysl/1.0` reports that
+record rather than a change. SMYSL-2's library records are additions a 1.0 reader skips.
 
-## Release 1.8.0
+## Release 1.14.0
 
-An observation now has a time, and `append` no longer charges for the size of the store.
-`captured` is a date — right for a document, useless for telemetry, where two readings a minute
-apart carry the same one. `observed` is the instrument's own millisecond. The full account is in
+The last of RFC SMYSL-2 that was owed in code, its open questions closed, and two examples that
+show it whole. The full account, with what each change cost, is in
 [`CHANGELOG.md`](CHANGELOG.md).
 
-**When a measurement was taken, and what reads it:**
+- **Reply edges.** A text ingest of a chat turns each reply id into an `x.text/replies` edge
+  between the units of the two messages, and rule E reads them as ordering constraints.
+- **`order by` on several keys**, `order by salience descending, published ascending`, compared
+  key by key.
+- **A smaller index.** The substrate index stores a dense document id: at 155k units the
+  file shrinks from 540 MB to 85 MB, and opening a view takes 1.5 ms instead of 17.5.
+- **The structure hash is the segment tree** (OQ-70). A speaker, an instant or a pseudonym no
+  longer re-identifies a chat's parts.
+- **Whether the provider reproduced** is recorded beside the consensus agreement figure, with
+  `SMY-W454` when a provider configured at temperature 0 did not (OQ-74).
+- **`@commit d3:…`** names a dating in surface text (OQ-73).
+- **Examples:**
+  - [`examples/simple_demo`](examples/simple_demo/), the format's basics in ten steps;
+  - [`examples/information_theory`](examples/information_theory/), every layer of SMYSL-2 over
+    one library.
 
-```sh
-smysl thread --derive narrative store.smy   # ordered by observation time, where units have one
-smysl find "pool wait" --source incident:41 fleet.smy   # one subject out of a shared store
-```
-
-- **`SourceRef.observed`**, epoch milliseconds, `source` body key 3, written only when present —
-  a source without one encodes to the bytes it always did. It does **not** reopen what closed
-  `Date`: the objection there was reading a wall clock inside a pure operation, and `observed` is
-  supplied by the instrument exactly as `Hlc::wall_ms` has been since 0.1.
-- **It is inside identity, deliberately.** `source` is inside `UnitCore`, so two readings of one
-  metric at different instants are two units. Collapsing them would lose the series, which is the
-  whole reason to record an instant.
-- **Readers, shipped with it.** `Store::units_in_observed_order` is the timeline — oldest first,
-  ties broken by uid, and units with no instant left out rather than sorted to an end. `thread
-  --derive` orders by observation time where a unit has one; a corpus carrying no instants
-  derives exactly what it derived before.
-- **`append` stopped costing the store.** Two `O(store)` terms went: the log fingerprint is now
-  rolled forward rather than recomputed from every record, and attestations are queued rather
-  than re-derived over the whole store. 20,000 single appends: 34.6s → 24.0s. Batched by a
-  hundred: **0.30s**, about 25 µs a record.
-- **`--source` on the command line.** `Store::units_with_source_prefix` has answered "which units
-  came from this thing" since 1.5 and was reachable only from Rust. `find --source` restricts
-  retrieval, `pack --source` scopes the pack, and a prefix nothing matches is refused rather than
-  silently treated as unrestricted.
-
-No format break, and no change to the public surface: one optional key inside an existing sub-map,
-which an older reader preserves. `make semver` is clean on all twelve crates, and the facade still
-exports 276 names at `--all-features`, 230 pure.
+  Both run offline. See [`examples/`](examples/).
 
 Building from source:
 
@@ -243,6 +229,49 @@ b3:cvhirtgs2mpvli2ethhyeo32uf (root)
 incident.smy: 2 unit(s) over 1 step(s)
 ```
 
+## Libraries of texts (SMYSL-2)
+
+Since 1.10, smysl also holds the texts that claims are drawn from: Bibles, books, notes, chat
+exports. A text goes into a **library** by a reader, and every byte keeps an identity:
+
+- a part's text is a **tid**;
+- the reader's segment table over it is an **rdid**;
+- the catalog entry is a **mid**.
+
+So a claim can cite the exact bytes it came from, and a reprint under another title is
+recognised as the same text.
+
+```bash
+$ smysl text add notes.md --reader md/1 --alias notes --lang en --licence CC0-1.0 -s lib
+manifest  m3:bm7kj77dhl7k4fbbuoudll5pmc7wj4yyx4rlxja45nbtfjbwa2rq
+alias     notes
+reader    md/1
+parts     1
+  part 0  t3:y2hmm7kwc4xlhqekmjufjyqkvug2ore3q55wodazon53nwt4wulq
+
+$ smysl text add telegram.json --reader telegram/1 --alias team-chat --lang en \
+      --licence CC0-1.0 --pseudonymise -s lib
+$ smysl measure T1 --scope 'from texts' --min-n 50 --allow-lossy lib
+T1 v2  b3:xtttcky3rharshgpuw6qwk4akg  new
+  T1 unigram entropy, Miller–Madow 6.1675 bits/token, over from texts
+```
+
+What the library layer adds:
+
+| | |
+|---|---|
+| **Readers** | `txt`, `md`, `usfm`, `osis`, `zefania`, `json`, `telegram`, `slack`, `whatsapp`; speakers pseudonymised under a key; parts cut by policy; `text append` for a grown chat |
+| **Ingest over texts** | `ingest --text`: windows over a reading, two consensus passes with their agreement recorded, quotes attached to byte spans, reply edges |
+| **Time** | `date set/order/show`: EDTF datings and Allen relations, effective time under rule E, locks and their review |
+| **Propositions** | `same-as` engines and strict classes; `link` for entails and contradicts; `summarise` |
+| **Queries** | `q`, sq/1: scopes (`from texts`, `from channel:…`), `find`, `about entity(…)`, time on said/observed axes, `expand … only`, sets, saved queries that rerun; `ask` for a dossier |
+| **Measures** | `measure`: text (entropy, compression, Zipf, n-gram surprisal, divergence), graph, channel and dialogue measures as reproducible `@data` units; `assess` |
+| **Exchange** | `lib export/import/verify`, with the P1 and P3 properties checked; `text redact` |
+| **Scale** | sharded libraries, the redb unit store, a persistent postings index |
+
+The design is RFC SMYSL-2, in [`Documentation/SMYSL-2_RFC/`](Documentation/SMYSL-2_RFC/):
+nine documents, an index and a roadmap whose phases TX-P0 to TX-P13 are complete.
+
 ## Getting content in
 
 Existing prose gets converted by a model — the one place a model is required:
@@ -284,6 +313,9 @@ rendering are pure functions — same input, same output, byte for byte, verifie
 | `retract` | Remove a claim and report the blast radius first |
 | `review` / `withdraw` / `resolve` | List open disagreements; withdraw an edge; record a review |
 | `ui` | Browse a store; watch the budget bind, live |
+| `text` / `lib` | Add, append, show and redact texts; export and import a library |
+| `q` / `measure` | Query with sq/1; compute measures as reproducible data units |
+| `date` / `same-as` | Date things and solve effective time; propose same-as classes |
 
 `smysl ui` is worth a minute if the packing rules seem abstract. Pin a claim with `f`,
 hold `-`, and watch which units survive and why — until the budget drops below the floor
@@ -333,8 +365,8 @@ unreachable from the library.
 
 ```toml
 [dependencies]
-smysl = { version = "1.7", default-features = false }                      # pure
-smysl = { version = "1.7", default-features = false, features = ["stage"] } # + staging, no model
+smysl = { version = "1.14", default-features = false }                      # pure
+smysl = { version = "1.14", default-features = false, features = ["stage"] } # + staging, no model
 ```
 
 With default features off you get a fully synchronous library — no async runtime, no HTTP
@@ -343,9 +375,13 @@ than merely intended. Determinism is part of the API: making `pack`, `merge`,
 `derive_thread`, `salience` or `render` non-reproducible is a breaking change whatever the
 signature says.
 
+Two runnable programs show the API in use: `cargo run --example simple_demo` for the format,
+and `cargo run --example information_theory` for the library layer. See
+[`examples/`](examples/).
+
 ## Status
 
-Crate `1.8.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.14.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 
@@ -364,6 +400,18 @@ decisions are folded into the spec, which is normative in its place.
 | SM-P11 – P12 | thread derivation, render IR, six backends | **done** |
 | SM-P13 – P14 | provider layer, ingest boundary, `attest` | **done** |
 | SM-P15 | corpus F1–F8, evaluation harness (both arms), TUI, `ui` | **done** |
+
+RFC SMYSL-2 — libraries of texts — is built in the same way: phases TX-P0 to TX-P13 are
+complete, every open question on the release path is decided, and the decisions are recorded
+in the RFC set beside the measurements that made them.
+
+| Phase | Delivers | State |
+|---|---|---|
+| TX-P0 – P2 | hardening, format amendment (records 14–19), parts, readings, manifests, readers, segmenter, pseudonyms, redaction, proposition classes | **done** |
+| TX-P3 – P4 | EDTF and datings, the rule E time engine and locks, the substrate index, `text` commands | **done** |
+| TX-P5 – P7 | ingest over texts with consensus extraction, sq/1, same-as engines, linker, summary tree | **done** |
+| TX-P8 – P9 | dossiers, saved queries, text, graph, channel and dialogue measures, `assess` | **done** |
+| TX-P10 – P13 | semantic retrieval, export and import, lenses and `migrate`, scale (shards, redb) | **done** |
 
 Model providers, and how far each has actually been proven — an untested mapper is a
 reading of a vendor's documentation, not a fact about their API:
@@ -398,8 +446,17 @@ crates/smysl-thread    thread schemas and deterministic derivation
 crates/smysl-render    render IR, profiles, backends
 crates/smysl-provider  the model boundary - the only crate linking a runtime
 crates/smysl-ingest    staging, repair, trust ceiling, recipes
+crates/smysl-retrieve  lexical retrieval: analyzers, BM25, postings
+crates/smysl-embed     semantic retrieval (feature `semantic`)
+crates/smysl-embed-candle  transformer embeddings (feature `semantic-candle`)
+crates/smysl-text      SMYSL-2 library: readers, parts, readings, time, substrate index
+crates/smysl-query     sq/1: parser, planner, executor, saved queries, dossiers
+crates/smysl-measure   text, graph, channel and dialogue measures; assessment
+crates/smysl-lib       library export, import and verify
 crates/smysl-tui       seven-pane terminal UI, with a live pack simulator
 crates/smysl-eval      evaluation harness E1-E9 (not published)
+examples/              simple_demo and information_theory
+python/ go/ nodejs/    independent implementations, written from the spec
 fixtures/              corpus, conformance suite, golden artifacts
 xtask/                 purity and determinism gates
 ```

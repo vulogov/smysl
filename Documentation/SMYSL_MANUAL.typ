@@ -47,6 +47,11 @@
   // ── Part IX — A Complete Walkthrough (opens partway through the file) ─
   include "manual/ch25-27-library-walkthrough.typ",
 
+  // ── Part X — Libraries of Texts (SMYSL-2) ─────────────────────────────
+  // Chapters 30-37: the library layer of RFC SMYSL-2, added in 1.14 — texts and their
+  // identities, ingest over texts, time, propositions, sq/1, measures, exchange, scale.
+  include "manual/ch30-37-texts.typ",
+
   // ── Appendices ─────────────────────────────────────────────────────────
   include "manual/appendices.typ",
 

@@ -354,6 +354,9 @@ rule: truncate, then a hash suffix), never rejected after the fact.
 A **part entry** is `{0: tid, 1: length (unsigned), 2: structure hash (32 bytes), 3: rdid,
 4: lang (text, only when it differs from key 2)}`. The structure hash is BLAKE3-256 of the
 canonical CBOR of the structure table carried in the reading's segments (record 18 key 2).
+*Amended 1.14.0 (SMYSL-2.4 OQ-70):* the table **cut to its tree** — each row keeping keys 0 to
+3, start, end, level and locator, in document order — so a row's speaker, instant, ids and marks
+move the rdid and not the structure hash.
 
 **Part text (15).** `{0: tid (32 bytes), 1: text (bytes, the normalised text)}`, both required.
 A reader MUST verify the tid against key 1 and reject a mismatch (`SMY-E446`). Record 15 has no surface form.
@@ -400,6 +403,11 @@ Append to the withdrawal (11) and commitment (13) definitions:
 > Readers that predate this amendment see a withdrawal of an edge they never receive (inert), and
 > a commitment on a unit they never receive. The latter may appear in their commitment listings.
 > That is a stated cost, not a corruption.
+
+*Amended 1.14.0 (SMYSL-2.4 OQ-73), the surface spelling:* `@commit d3:… { … }` and
+`@withdraw d3:… { … }` name a dating by its did, and key 0 holds its 32 bytes. A writer that knows
+the bytes are a dating's MUST spell them `d3:…`; one that cannot tell writes `b3:…`, which reads
+back to the same record. `@resolve` takes no did.
 
 ---
 

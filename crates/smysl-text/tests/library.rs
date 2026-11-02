@@ -585,22 +585,18 @@ fn pseudonymising_changes_the_reading_and_not_a_byte_of_the_text() {
         plain_manifest.parts[0].rdid, secret_manifest.parts[0].rdid,
         "the rdid is over the rows, and the rows changed"
     );
-    // And the **structure hash moves too**, which this test was written expecting it not to.
+    // And the **structure hash does not move**, which is what this test was first written
+    // expecting and could not assert until OQ-70 (1.14.0).
     //
-    // A-5 defines it as the hash of "the canonical CBOR of the structure table carried in the
-    // reading's segments", and that table is one row per node with every field a reader filled
-    // — including the speaker. So `structure` is a hash of the whole reading table rather than
-    // of the tree, and `SMY-E401`'s `which: "structure"` does not mean "the segmentation
-    // changed"; it means "the table changed", which a pseudonym does.
-    //
-    // Recorded rather than worked around. Narrowing A-5 to the tree alone would be an
-    // amendment to the normative document and would change every structure hash ever computed,
-    // so it is an open question for SMYSL-2.3 and not a decision for a reader's commit. What
-    // follows from it today: pseudonymising a corpus re-identifies every *part entry* and no
-    // part — the text, and therefore every tid and every object, is untouched.
-    assert_ne!(
+    // A-5 defined it as the hash of the whole segment table, one row per node with every field
+    // a reader filled — the speaker included — so pseudonymising a chat moved every part
+    // entry's `structure`, and `SMY-E401`'s `which: "structure"` meant "the table changed"
+    // rather than "the segmentation changed". The amendment narrows it to the tree: each row's
+    // start, end, level and locator. A pseudonym is none of those, so the structure stands and
+    // the rdid, which covers the rest of the row, is what moves.
+    assert_eq!(
         plain_manifest.parts[0].structure, secret_manifest.parts[0].structure,
-        "the table holds the speaker, so its hash moves with it"
+        "a pseudonym is not structure: the tree is the same tree"
     );
 
     let plain_reading = plain

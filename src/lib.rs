@@ -561,8 +561,11 @@ mod tests {
         // raised by `lib migrate` and `lib verify --primary`; 146 with `SMY-W476` (TX-P10
         // step 3), raised by S1's vector cache; 148 with `SMY-E416` and `SMY-W467` (step 4),
         // raised by `--seed-check` and by a rerun under another model; 149 with `SMY-E474`
-        // (step 5), raised by `q --from-question`.
-        assert_eq!(Code::ALL.len(), 149);
+        // (step 5), raised by `q --from-question`; 150 with `SMY-W448` (1.14.0), raised by a
+        // text ingest for a reply naming a message the expression does not hold; 151 with
+        // `SMY-W454` (1.14.0, OQ-74), raised by a consensus run whose provider did not
+        // reproduce at temperature 0.
+        assert_eq!(Code::ALL.len(), 151);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
@@ -623,7 +626,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "1.13.0");
+        assert_eq!(VERSION, "1.14.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

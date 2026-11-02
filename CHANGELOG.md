@@ -7,6 +7,348 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.14.0 — 2026-11-02
+
+What 1.13 leaves open, by what it blocks rather than the order it is easiest. A subject is
+found by any form of the name the store writes, its surname included; what is left is a subject
+the store does not name at all, and questions not yet read.
+
+**Questions still unread.** The sixth set reads 52 of 80. The yes-or-no forms declared out of
+reach stay so (Spanish `era`, `eran`, a Spanish question with no verb to read, French `-t-on`),
+and rule 32's price stands: *Was cholera spread by water?* is unread. The next rules want
+questions people ask; `ask --misses --recheck` collects them, and the rules wait for what it
+collects.
+
+**A subject by a name the store does not write.** Rule 34 was declared and not adopted: with
+`potion-multilingual-128M` no floor separates a synonym from its guards (lowest wanted 0.193,
+highest guard 0.645). Two ways stay open. A model that separates `calibrate.tsv`'s rows, which
+`tests/ge_t10_synonyms.rs` asks of whatever the variable names, is the occasion to declare the
+rule again on fresh rows. Or the store writes the other name itself, as an entity's declared
+alternative, and the spelled and stemmed passes find it with no model — a rule of its own, with
+its own set, and one that reaches only the names someone wrote down.
+
+**And the ones only people can close** — *no longer holding anything.* OQ-44 is decided as
+built (a `lexical` same-as is never auto-accepted), OQ-15 is deferred, and TX-P7's exit is
+restated so that it does not wait on coders, as GE-T2's was. GE-T5's coder sheet and GE-T10's
+second hand stay owed indefinitely, not planned.
+
+**What 1.14 is.** The last pieces of the RFC that were owed in code, then its open questions
+closed, then two examples to show it whole:
+
+- **Built:**
+  - reply edges, drawn by text ingest from a chat's reply ids (`x.text/replies`);
+  - `order by` on more than one key;
+  - the dense document id on disk, which shrinks `substrate.redb` from 540 MB to 85 MB at
+    155k units and opens a view in 1.5 ms instead of 17.5;
+  - the structure hash narrowed to the segment tree (OQ-70);
+  - a record, beside the agreement figure, of whether the provider reproduced at temperature 0
+    (OQ-74, `SMY-W454`);
+  - `d3:` for a dating in `@commit` and `@withdraw` (OQ-73).
+- **Decided:**
+  - nine questions decided as built;
+  - OQ-4: no versification map ships;
+  - OQ-18 to OQ-20 restated and decided;
+  - OQ-15 deferred and OQ-5 withdrawn.
+
+  Every question on the path to a release is now closed.
+- **Shown:** `examples/simple_demo`, the format's basics in ten steps, and
+  `examples/information_theory`, every layer of SMYSL-2 over one small library, both running
+  offline.
+- **Changed identities:** OQ-70 moves the structure hash, and with it the mid, of any reading
+  whose rows carry more than the tree: chats, and scripture with reported-speech marks. Its
+  section lists what was re-blessed. `substrate.redb` is version 2, and a version-1 file is
+  rebuilt on open.
+
+### `ingest` attests at a clock, not at 1970
+
+`IngestOptions` defaults its clock to time zero, and `smysl ingest` and `smysl ingest --text`
+both took the default, so every unit they staged was attested at 1970. Rule E reads a unit's
+earliest attestation as a ceiling on when it was said (first seen). So every chat message
+ingested from the CLI was "said after it was first seen", and `check` reported each one
+contested (`SMY-W413`): a chat's times, the reason to ingest one, were unusable from the CLI.
+`link`, `attest` and the other model commands already took `--at` or the wall clock;
+`ingest` now does the same. It gains `--at <MS>`, to make the attestations reproducible.
+
+Found while writing the manual's ingest chapter, where `examples/information_theory` showed the
+same thing through the library API until it called `IngestOptions::with_now`.
+`tests/cmd_ingest_clock.rs` ingests the fixture chat through the CLI, against a loopback stub
+speaking Ollama's protocol, and asserts no `SMY-W413`. At `--at 0`, the old default, it reports
+one for every message.
+
+### The manual covers SMYSL-2, and two things found writing it
+
+`Documentation/SMYSL_MANUAL.typ` gains **Part X, Libraries of Texts**, in eight chapters:
+
+30. libraries, parts, readings and identities;
+31. ingest over texts, consensus and replies;
+32. datings, effective time and locks;
+33. same-as, links and summaries;
+34. sq/1, saved queries and `ask`;
+35. measures;
+36. export, import and verify;
+37. scale, and the library from Rust.
+
+Every terminal block is the 1.14.0 binary's output, except where a step needs a model; those
+quote the offline `information_theory` example and say so. The README is brought up to 1.14,
+having still described 1.8, and `examples/README.md` indexes the two examples.
+
+Writing chapter 34 turned up two defects in `q`, both fixed:
+
+- **`q --save` said `saved b3:…` before the write**, so a store that refused the records still
+  printed a uid it did not hold, and exited 1. The line is now printed after the write succeeds.
+- **`persist` had no arm for a schema declaration**, as it once had none for a dating. The
+  `x.query/v1` that goes with a store's first saved query was refused by a surface document,
+  though the writer can write it.
+
+A saved query still needs a CBOR store, because its unit has no surface spelling; the manual
+says so.
+
+`smysl commit <did>` also printed the dating as `b3:…`, the slip OQ-73 fixed in the file. It
+now prints `d3:…`.
+
+### A first example: `examples/simple_demo`
+
+`cargo run --example simple_demo` takes one short surface document, about a CI build that got
+slow, through the basics in ten steps:
+
+1. parsing;
+2. identity as content;
+3. CBOR round trip;
+4. a store and `check`, plus a broken document's diagnostics;
+5. sq/1 queries;
+6. salience;
+7. packing to a budget;
+8. rendering a thread as Markdown;
+9. withdrawing an edge;
+10. canonical surface text.
+
+It is pure and needs no features, so it builds under `--no-default-features` too.
+
+### An example of all of SMYSL-2: `examples/information_theory`
+
+`cargo run --example information_theory` builds a small library about information theory and
+walks it through every layer, in fourteen numbered sections:
+
+- texts read into manifests, parts and readings;
+- pseudonymised speakers;
+- drawn units and an entity;
+- a consensus text ingest, with its agreement, whether the provider reproduced, and its reply
+  edges;
+- same-as classes;
+- datings, effective time, and a lock released by a review;
+- sq/1 queries, a saved query rerun, and a dossier;
+- the text and unit measures;
+- export, verify and import;
+- redaction and `check`;
+- with `--features store-redb`, the on-disk unit store.
+
+It runs offline against a scripted provider and ends with `check` clean. Its README maps each
+section to its RFC, and names the three steps a first program tends to miss: declaring
+`x.text/v1` and `x.query/v1`, giving ingest a clock, and giving a dating a basis. It requires
+`cli` and `ingest`, so a `--no-default-features` build skips it.
+
+### OQ-4 decided, OQ-15 deferred, OQ-5 withdrawn, OQ-18 to OQ-20 restated and decided
+
+- **OQ-4**: the crate ships no versification map. A map is installed in a library — the mechanism
+  TX-P4 step 4 built, which needs no licence of this repository's — and a shipped map would make
+  the crate the distributor of a dataset with a provenance and a licence to answer for, for
+  nothing measured. `data/versification/` stays empty, now by decision.
+- **OQ-15**, partial dependence between witnesses: deferred. Nothing measured needs it, it no
+  longer holds TX-P7's exit, and the `Witnesses` trait leaves room for it.
+- **OQ-5** is withdrawn. Its wording was in draft 3, which this repository does not hold, and
+  nothing recorded what it asked; its number is not reused.
+- **OQ-18 to OQ-20** are restated, because draft 3's wording is lost too, each from the one
+  subject SMYSL-2.4 kept for it, with options and a recommendation: a span's address (tid and
+  offsets, with a renormalised text as a new part), a message's edit history, and which
+  pointers between messages become edges. The row they replace said the segment table *keeps*
+  edit history; it does not: Telegram's and Slack's `edited` keys are dropped and the read is
+  marked lossy, and the restated OQ-19 says so.
+
+  All three are then **decided as recommended**: a renormalised text is a new part, with
+  `text align` relating the two; edit history stays dropped and marked lossy, and the
+  last-edit instant as a row key is the additive path if a measure ever needs it; and replies
+  are edges, forwards are dropped, quotations are marks — as built.
+
+### Nine open questions decided as built, and TX-P7's exit restated
+
+Each of these had an answer in the code and none in the specification, so each is decided as
+built and the texts are made to say so (SMYSL-2.0 §4 and §6.2, SMYSL-2.4's tables):
+
+- **OQ-2**: stems only, with Russian type statistics labelled stem-level.
+- **OQ-8**: records 15 and 18 are objects beside the logs; a log refuses them (`E452`); a bundle
+  may carry them under `carry: text`.
+- **OQ-9**: the hand-rolled EDTF parser, levels 0 and 1, with `fixtures/library/edtf` as its
+  published suite.
+- **OQ-11**: effective time is one solve over the subjects any dating or constraint involves,
+  re-solved after an append that touches time. SMYSL-2.4 said *per connected component*, which
+  was never built and nothing measured a need for; the text now says what runs.
+- **OQ-30**, the rest of it: `status` and `lod` stay closed enumerations. Rules N, E and R
+  branch on status, so a status a reader did not know would have no defined behaviour.
+- **OQ-38**: fuel is enough. The wall-time watchdog SMYSL-2.4 §3.9 tabulated — `wall_time`,
+  30 minutes, `--timeout` — **does not exist**: nothing in `src/main.rs` reads a clock for a
+  reader's limits, and `limits.rs` said it lived there. The row and both mentions are struck.
+  A refusal that depended on the clock is the one refusal nobody could reproduce.
+- **OQ-44**: a `lexical` same-as proposal is never auto-accepted. It is staged at rung
+  `computed`, and a class is settled by agreement between engines, `attested:2`. GE-T5's
+  paraphrase set already measured why no threshold would do: precision 0.6724 at k=1, and every
+  planted near-miss proposed from k=2.
+- **OQ-71**: a dating's arithmetic reads as built — a qualifier does not widen a date, a season
+  is its year, and four Allen relations collapse to *at the same time*. Each is weaker than a
+  strict reading and none is unsound.
+- **OQ-72**: nothing dates a manifest. Target kind 2 dates the units drawn under one; a catalog
+  date changes by a new manifest version, so a dating meant for the units cannot contradict it.
+
+**TX-P7's exit is restated** as GE-T2's was: GE-T5's instrument is met and its coder sheet is
+owed indefinitely, rather than the phase with it, because no independent coders are planned and
+an exit that waits on them waits on nothing this repository can do. TX-P7 is complete. OQ-15,
+partial dependence between witnesses, stays open and no longer holds the exit.
+
+### The structure hash is the tree (OQ-70)
+
+A part entry's `structure` was BLAKE3 over the whole segment table, every key of every row, so it
+moved when a row's *metadata* moved — a speaker, an instant, an id — and not only when the
+segmentation did. Pseudonymising a chat re-identified every part entry, and `SMY-E401` said
+`structure` for a change that was not structural. SMYSL-2.4 recorded it as OQ-70 because the fix
+is an amendment to A-5 that moves structure hashes already computed; with compatibility not a
+constraint at this point, it is the cheapest it will ever be.
+
+The structure hash is now over the table **cut to its tree**: the same array in the same order,
+each row keeping keys 0 to 3 — start, end, level, locator — and still no domain byte. The rest of
+a row (language, speaker, observed, ids, time zone, reported-speech marks, unknown keys) is the
+reading's, and the rdid already covers it. One implementation in Rust,
+`smysl_core::types::library::structure_hash_of`, which copies the kept values as their encoded
+bytes rather than decoding them, so it cannot disagree with the encoder; `smysl-text`'s reading
+hashes through it, and each port (`tree` in Python, Go and JavaScript) cuts the decoded rows the
+same way. A-5 and the format spec say so.
+
+What moved, once: the chat fixtures (`fixtures/library/chat-wire/`, the Telegram, WhatsApp and
+Slack `.expected` files), the two marked scripture samples (`matt4-wj.usfm`, `matt5-q.osis`),
+and the chat manifests' mids in `fixtures/sq/library/` — regenerated with `SMYSL_BLESS=1`, the
+counts beside them unchanged. What did not: every reading whose rows carry nothing past key 3,
+which is all scripture without marks, so the five Bibles' rolls and their committed slice hold.
+The pseudonymising test, written expecting the structure to stand and amended to record that it
+did not, now asserts that it stands; the three ports, which recompute the chat fixture's
+identities, agree with it.
+
+### Whether the provider reproduced, beside the figure (OQ-74)
+
+Two passes at temperature 0 were refused nothing and checked for nothing: `Passes::admits` reads
+the temperature a caller configured, and hosted `deepseek-chat`, sent `"temperature": 0.0`,
+answered the same window differently often enough that GE-T2's rates spread as far within one
+language as between languages. The configuration could not say which kind of provider a figure
+came from, and the figure means different things for the two.
+
+Now each input's **first** answer from each pass is compared byte for byte — the first only,
+since every pass sends that request unchanged and a repair turn's request carries the answer it
+repairs. `Agreement` carries `answered` and `reproduced`, summed by `merge` like the rest, and
+`Agreement::reproduced()` says which reading of the rate applies: every input reproduced, and
+the rate measures the extraction alone; any did not, and it measures the provider's variation as
+well and is a lower bound. A run at temperature 0 that did not reproduce says so once, with the
+new **`SMY-W454`**, and `ingest --text` prints `reproduced n of m window(s)` beside `stability`.
+Measured on the run's own windows rather than by a probe sent first: it costs no call, and it
+measures the requests the figure is about. The `drift` consensus fixture is exactly such a
+provider, and now carries the warning.
+
+### A dating is spelled by its did (OQ-73)
+
+A-6 lets a withdrawal and a commitment name a dating in key 0, and surface text could not say
+so: `@commit` and `@withdraw` took a uid, a label or an edge, so a lock on a dating could be
+written only into a CBOR store, and a store that held one wrote its 32 bytes back as `b3:…` — a
+uid, which sent a reader looking for a unit that was never there. The round trip was byte-exact;
+the document was wrong about what it said.
+
+Now `@commit d3:… { … }` and `@withdraw d3:… { … }` read key 0 as the did's bytes (`@resolve`
+takes none: it names a contention or an edge), and the writer spells those bytes `d3:…` whenever
+it knows them to be a dating — one among the records it writes, or one its caller supplies
+through the new `WriteContext::with_datings`, which `persist` and the surface export fill from
+the store. A writer told nothing still writes `b3:…`, which reads back to the same record. So
+`smysl commit <did>` on a surface document now appends `@commit d3:…`, and the scenario that
+had to use a CBOR store has a surface twin. A-6 and the format spec say so.
+
+### A reply is an edge at last
+
+`x.text/v1` has declared `x.text/replies` since 1.10, rule E has named a reply constraint since
+TX-P3, and `dialogue` derives by the edge since TX-P8 — and nothing wrote one. The chat readers
+record what a message answers as an id on its row (Telegram's `reply_to_message_id`, Slack's
+`thread_ts`), a row is not a unit, and SMYSL-2.5 §6 recorded the producer as owed, to live with
+the converter that turns rows into units. The dialogue test drew its edges by hand.
+
+`smysl_text::replies` draws them, as a function of the readings and of where units sit in them:
+
+1. A row's `reply` id, or failing that its `thread` id, names the message whose `msg` id it is,
+   within the expression. A Slack thread is flat, so a Slack reply answers the message that
+   opened it, which is what the export says and no more.
+2. A unit belongs to the message whose row holds its whole span. One with no span sits nowhere;
+   an entity has none, and a translation is left out because its source unit carries the edge.
+3. An edge goes from every unit of the answering message to every unit of the answered one. A
+   message with no units gives and takes none.
+4. A reply naming a message the expression does not hold is **`SMY-W448`** and draws nothing —
+   registered now, 150 codes, and raised where the id is resolved rather than by the time engine
+   one step later, which is where SMYSL-2.4 had allocated it.
+
+`ingest_text` runs it as a ninth step, after every window and over the whole expression, so a
+reply is linked whichever window drew it or the message it answers, and on whichever run. It is
+not journalled and needs not be: the edges are content-addressed and filtered against the store,
+so a rerun that skips every window adds none, and a library ingested before 1.14 gets its edges
+on its next run. `TextReport::replies` counts what a run added, and `ingest --text` prints it.
+
+Rule E reads each edge as the reply constraint SMYSL-2.4 §3.3 states — `cited`, the answered
+unit the earlier — and `Unbuilt::reply_needs_ingest` now says whether the store holds any edge
+rather than being true by construction. `crates/smysl-ingest/tests/replies.rs` ingests a chat of
+nine messages across several windows, with two replies crossing windows and one to a message the
+export lacks, and asserts the two edges by their units, the one `W448`, the two constraints, and
+a rerun that adds nothing; the dialogue test now draws its edges with the producer.
+
+### `order by` takes more than one key
+
+The grammar has always admitted `order by kind, status descending` (SMYSL-2.9 §4.6), and the
+planner refused the second key with `SMY-E461`, recorded at TX-P6's exit as owed. It is now
+`OrderPlan::Keys`: lexicographic, each key in its own direction (ascending unless it says
+otherwise), a later key read only where every earlier one ties, the uid last. A field key
+resolves as it does alone, so a bad field is the same diagnostic in either position, and a
+declared field in any position is pinned like a first one. Each key of each unit is computed
+once before the sort, and salience once per stage when any key asks for it.
+
+A one-key stage still lowers to `OrderPlan::Salience` or `OrderPlan::Field`, so no plan a single
+key produced has moved. `crates/smysl-query/tests/stages.rs` asserts the order against the
+one-key orders rather than against a sort written again: within a run of one kind, `order by
+kind, status descending` is `order by status descending` with the other kinds taken out. The
+control flips the second key's direction and requires the answer to move, and both new forms
+join the shuffled-log determinism list.
+
+### The dense document id, on disk
+
+A posting in `index/substrate.redb` was a 32-byte uid and a four-byte count, and a uid is a
+hash, so a list of them could not be delta-encoded. The dense id had been recorded as owed since
+TX-P4, refused for the *resident* table because a rank maintained incrementally re-ranks a
+partition per window and would cost the byte-for-byte rebuild gate. On disk that objection does
+not reach it: `Db::write` already rewrites the whole table in one transaction, so a rank
+assigned when the table is **encoded** costs nothing a write was not paying, and it is a
+function of the table, so two tables that agree still encode to the same bytes.
+
+The file is version 2. A partition's documents are one `docs` blob of `(uid, length)` in uid
+order, in place of a `doclen` row per document, and a document's id is its row's position. A
+postings list is its count, its block count, a fixed-width directory of `(first id, offset)` per
+block of 128, and then a varint id gap and a varint term frequency per posting — so `df` is a
+header read and `tf` a binary search over the directory and the decode of one block. The
+`Postings` seam, the in-memory table and the sidecar still speak uids; the ranks never leave the
+file. A file of another version is a cache in a format this build does not write, and
+`Db::open` now **replaces** it, where it used to refuse it and leave every later write refused.
+
+Measured against version 1 on one machine at 155,510 units (`tests/postings_timing.rs`): the
+file from 539.5 MB (327.4 MB allocated) to 84.5 MB (42.5 MB), a view opened in 1.5 ms instead of
+17.5 ms, the index written in about 405 ms instead of 646, and query p95 27.0 ms against
+27.2. The first form of the decoder cost 36.8 ms, decoding block by block into a vector each and
+re-sorting partitions' runs that were already in order; one pass and a stable merge bought it
+back, and the table above is after that. The codec has its own tests: lists across block
+boundaries and gaps of every width, every document's `tf` found or zero, a posting for a document
+with no length refused, documents out of order refused, and every truncation and every flipped
+byte of a list decoding to an error or a list rather than a panic.
+
+One figure corrected on the way: SMYSL-2.4 and this module said the uid table would be **7 GB**
+at 10⁶ units, beside the 1.1 KB a unit that 169 MB at 155k measures — which comes to about
+1.1 GB. The text now says so.
+
 ## 1.13.0 — 2026-11-01
 
 What 1.12 leaves open, by what it blocks rather than the order it is easiest. No question in any

@@ -494,38 +494,39 @@ compact    --shard
 compact    --seed-check
 compact    --help
 ingest     [FILE]
+ingest     --at
 ingest     --config
 ingest     --hop
+ingest     --store
+ingest     --output
 ingest     --rung
 ingest     [possible values: computed, document, web, model]
-ingest     --store
-ingest     --granularity
-ingest     [possible values: coarse, default, standard, fine]
-ingest     --output
-ingest     --estimator
 ingest     --format
 ingest     [possible values: surface, cbor, pack]
-ingest     --max-output
+ingest     --granularity
+ingest     [possible values: coarse, default, standard, fine]
+ingest     --estimator
 ingest     --strict
-ingest     --lang-policy
+ingest     --max-output
 ingest     --offline
+ingest     --lang-policy
 ingest     --no-color
+ingest     --noprogress
 ingest     --normaliser
 ingest     [possible values: v1, v2]
-ingest     --noprogress
-ingest     --temperature
 ingest     --json
+ingest     --temperature
 ingest     --path
 ingest     [possible values: auto, surface, json-ast]
 ingest     --quiet
 ingest     --repair
-ingest     --prompt
 ingest     --verbose
 ingest     --backend
 ingest     [possible values: memory, redb]
+ingest     --prompt
+ingest     --shard
 ingest     --yes
 ingest     --dry-run
-ingest     --shard
 ingest     --seed-check
 ingest     --text
 ingest     --window-level

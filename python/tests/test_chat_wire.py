@@ -90,9 +90,9 @@ def test_every_identity_is_recomputed_from_the_records():
 def test_a_chat_reading_names_who_said_what():
     """The thing scripture has none of, and the reason this fixture exists.
 
-    A segment row's speaker, timestamp and platform ids are inside the structure hash and
-    therefore inside the rdid — so a port that dropped them would still decode the record and
-    would disagree about the identity.
+    A segment row's speaker, timestamp and platform ids are inside the rdid — not the structure
+    hash, which since OQ-70 (1.14.0) covers the tree alone — so a port that dropped them would
+    still decode the record and would disagree about the identity.
     """
     speakers, observed, ids = 0, 0, 0
     for r in _records():

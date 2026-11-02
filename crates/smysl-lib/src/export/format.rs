@@ -55,7 +55,9 @@ pub(crate) fn surface(f: &ExportedFile, store: &Store) -> Surface {
             _ => None,
         })
         .collect();
-    let ctx = WriteContext::from_labels(&labels).with_relations(store.relations());
+    let ctx = WriteContext::from_labels(&labels)
+        .with_relations(store.relations())
+        .with_datings(store.datings().map(|(d, _)| d));
     let text = write_surface(Some(&view), &records, &ctx);
 
     let mut omitted: BTreeMap<&'static str, usize> = BTreeMap::new();
