@@ -110,6 +110,22 @@ Measured on the run's own windows rather than by a probe sent first: it costs no
 measures the requests the figure is about. The `drift` consensus fixture is exactly such a
 provider, and now carries the warning.
 
+### A dating is spelled by its did (OQ-73)
+
+A-6 lets a withdrawal and a commitment name a dating in key 0, and surface text could not say
+so: `@commit` and `@withdraw` took a uid, a label or an edge, so a lock on a dating could be
+written only into a CBOR store, and a store that held one wrote its 32 bytes back as `b3:…` — a
+uid, which sent a reader looking for a unit that was never there. The round trip was byte-exact;
+the document was wrong about what it said.
+
+Now `@commit d3:… { … }` and `@withdraw d3:… { … }` read key 0 as the did's bytes (`@resolve`
+takes none: it names a contention or an edge), and the writer spells those bytes `d3:…` whenever
+it knows them to be a dating — one among the records it writes, or one its caller supplies
+through the new `WriteContext::with_datings`, which `persist` and the surface export fill from
+the store. A writer told nothing still writes `b3:…`, which reads back to the same record. So
+`smysl commit <did>` on a surface document now appends `@commit d3:…`, and the scenario that
+had to use a CBOR store has a surface twin. A-6 and the format spec say so.
+
 ### A reply is an edge at last
 
 `x.text/v1` has declared `x.text/replies` since 1.10, rule E has named a reply constraint since

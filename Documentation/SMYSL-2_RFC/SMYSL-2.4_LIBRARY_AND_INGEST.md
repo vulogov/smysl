@@ -2663,7 +2663,8 @@ Each step lists its exit test. A phase's exit is the draft 3 §22 test plus the 
    held dating has no surface spelling on the way *in*, and on the way *out* the writer prints
    its 32 bytes as `b3:…`, which claims to be a uid. The round trip is byte-exact, so this is
    a legibility defect rather than a data one, and it is why the held-dating test builds its
-   store rather than parsing a document. Recorded as **OQ-73**.
+   store rather than parsing a document. Recorded as **OQ-73**. *(Decided and built 1.14.0: `@commit d3:…` and
+   `@withdraw d3:…` are read, and a writer that knows the dating spells it so; A-6 amended.)*
 4. ~~`date set/order/show`, `--why`. *Exit:* §19.2 scenario (§5.2).~~ **Done**, as the
    twenty-eighth command, with `tests/cmd_date.rs` as the scenario and `date show` registered
    with `xtask determinism`. The exit is met in full: a window-target dating with

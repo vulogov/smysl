@@ -404,6 +404,11 @@ Append to the withdrawal (11) and commitment (13) definitions:
 > a commitment on a unit they never receive. The latter may appear in their commitment listings.
 > That is a stated cost, not a corruption.
 
+*Amended 1.14.0 (SMYSL-2.4 OQ-73), the surface spelling:* `@commit d3:… { … }` and
+`@withdraw d3:… { … }` name a dating by its did, and key 0 holds its 32 bytes. A writer that knows
+the bytes are a dating's MUST spell them `d3:…`; one that cannot tell writes `b3:…`, which reads
+back to the same record. `@resolve` takes no did.
+
 ---
 
 ## A-7. Schema declaration keys 4 and 5 (spec §3.1)

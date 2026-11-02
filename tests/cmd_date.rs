@@ -243,13 +243,59 @@ fn order_is_sugar_for_a_relative_dating() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// **OQ-73.** A commitment on a dating, appended to a surface document, is written as
+/// `@commit d3:…` — the writer is handed the store's datings — and the document reads back with
+/// the lock in it.
+#[test]
+fn a_commitment_on_a_dating_is_written_into_a_document_by_its_did() {
+    let dir = scratch("hold-surface");
+    let doc = document(&dir);
+    let path = doc.to_str().unwrap();
+    let did = did_of(&run(&[
+        "date",
+        "set",
+        "c/m1",
+        "-s",
+        path,
+        "--value",
+        "1066",
+        "--as",
+        "human:vu",
+        "--at",
+        "1700001000000",
+        "--basis",
+        "c/m2",
+        "--json",
+    ]));
+    let o = run(&[
+        "commit",
+        &did,
+        path,
+        "--level",
+        "canonical",
+        "--as",
+        "human:vu",
+        "--at",
+        "1700002000000",
+    ]);
+    assert!(o.status.success(), "{}", out(&o));
+
+    let written = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        written.contains(&format!("@commit {did} {{ level: canonical")),
+        "the lock names the dating by its did: {written}"
+    );
+    let o = run(&["check", path]);
+    assert!(o.status.success(), "the document reads back: {}", out(&o));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_canonical_commitment_holds_a_dating_until_a_resolution_names_it() {
     let dir = scratch("hold");
     let doc = document(&dir);
-    // A CBOR store, because a commitment naming a **did** has no surface spelling: `@commit`
-    // takes a uid or a label, which is OQ-73. The refusal is correct and this is the way round
-    // it, not a workaround for a defect.
+    // A CBOR store. Until 1.14 a commitment naming a **did** had no surface spelling, which was
+    // OQ-73; the surface document's own test is the next one.
     let cbor = dir.join("store.cbor");
     let store = cbor.to_str().unwrap();
     let o = run(&["merge", doc.to_str().unwrap(), "-o", store]);

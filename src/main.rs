@@ -4534,7 +4534,8 @@ fn persist(
                 Record::Relation(_) => true,
                 Record::Withdrawal(w) => smysl::surface::withdrawal_has_surface_form(w),
                 Record::Resolution(x) => smysl::surface::resolution_has_surface_form(x),
-                // A commitment always has one: it names a unit, and a uid can always be written.
+                // A commitment always has one: it names a unit, and a uid can always be written —
+                // or a dating, spelled by its did since the context below knows the store's (OQ-73).
                 Record::Commit(_) => true,
                 // A manifest usually has one (1.10); the predicate names the cases it does
                 // not, among them an alias the parser would not read back.
@@ -4557,7 +4558,9 @@ fn persist(
                 ));
             }
         }
-        let ctx = WriteContext::from_labels(labels).with_relations(store.relations());
+        let ctx = WriteContext::from_labels(labels)
+            .with_relations(store.relations())
+            .with_datings(store.library().datings().map(|(d, _)| d));
         let text = write_surface(None, records, &ctx);
         let separator = if bytes.ends_with(b"\n") { "\n" } else { "\n\n" };
         let mut f = std::fs::OpenOptions::new()

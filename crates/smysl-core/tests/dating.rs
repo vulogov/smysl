@@ -334,3 +334,94 @@ fn an_allen_relation_knows_its_own_inverse() {
     assert_eq!(Allen::Equals.inverse(), Allen::Equals);
     assert_eq!(Allen::Meets.inverse(), Allen::Meets);
 }
+
+/// **OQ-73.** A withdrawal and a commitment may name a dating (A-6), and surface text spells
+/// one as its did. In: `@withdraw d3:…` and `@commit d3:…` read key 0 as the did's 32 bytes.
+/// Out: the writer spells those bytes `d3:…` when it knows them to be a dating — from the
+/// records it writes, or from `WriteContext::with_datings` — and as `b3:…` only when it cannot
+/// tell, which still reads back to the same record because the bytes are the same.
+#[test]
+fn a_dating_held_or_withdrawn_is_spelled_by_its_did_both_ways() {
+    let p1 = tid(1).canonical();
+    let dating = format!("@date {p1} {{ axis: said, when: 1611, agent: human:vu, ts: [1, 0] }}");
+    let did = datings_in(&dating)[0].did();
+    let src = format!(
+        "{dating}\n\n\
+         @commit {did} {{ level: canonical, agent: human:vu, ts: [2, 0] }}\n\n\
+         @withdraw {did} {{ agent: human:vu, ts: [3, 0] }}",
+        did = did.canonical()
+    );
+
+    let out = parse_surface(&src).expect("a document");
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let key0: Vec<Uid> = out
+        .records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Commit(c) => Some(c.unit),
+            Record::Withdrawal(w) => Some(w.relation),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(key0, vec![did.as_uid(), did.as_uid()], "key 0 is the did");
+
+    // With the dating among the records, the writer knows it, and the text names it.
+    let text = write_surface(None, &out.records, &WriteContext::default());
+    assert!(
+        text.contains(&format!("@commit {}", did.canonical())),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("@withdraw {}", did.canonical())),
+        "{text}"
+    );
+    assert!(!text.contains(&did.as_uid().canonical()), "{text}");
+    let again = parse_surface(&text).expect("the writer's own output");
+    assert_eq!(again.records, out.records);
+
+    // Without it — a commitment appended to a store whose dating the writer was not handed —
+    // the context is how it is told; and a writer told nothing still round-trips the bytes.
+    let lifecycle: Vec<Record> = out
+        .records
+        .iter()
+        .filter(|r| !matches!(r, Record::Dating(_)))
+        .cloned()
+        .collect();
+    let told = write_surface(
+        None,
+        &lifecycle,
+        &WriteContext::default().with_datings([&did]),
+    );
+    assert!(
+        told.contains(&format!("@commit {}", did.canonical())),
+        "{told}"
+    );
+    let blind = write_surface(None, &lifecycle, &WriteContext::default());
+    assert!(
+        blind.contains(&format!("@commit {}", did.as_uid().canonical())),
+        "{blind}"
+    );
+    for text in [told, blind] {
+        assert_eq!(parse_surface(&text).expect("a document").records, lifecycle);
+    }
+}
+
+/// A did is not a rid's spelling on `@resolve`, which names a contention or an edge, and a
+/// malformed did is a parse error rather than a label.
+#[test]
+fn a_did_is_read_only_where_a_dating_can_be_named() {
+    let did = Did::of(b"a dating body").canonical();
+    for src in [
+        format!("@resolve {did} {{ agent: human:vu, ts: [1, 0] }}"),
+        "@commit d3:abc { level: canonical, agent: human:vu, ts: [1, 0] }".to_string(),
+        "@withdraw d3:abc { agent: human:vu, ts: [1, 0] }".to_string(),
+    ] {
+        let out = parse_surface(&src).expect("a document");
+        assert!(
+            out.diagnostics.iter().any(|d| d.code == Code::E001),
+            "{src}: {:?}",
+            out.diagnostics
+        );
+        assert!(out.records.is_empty(), "{src}");
+    }
+}

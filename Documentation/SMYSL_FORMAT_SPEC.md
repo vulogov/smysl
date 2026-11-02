@@ -888,6 +888,12 @@ Consequences that are easy to get wrong, each of which has been a real defect:
   `level` is one of the five names above. `commit` is a reserved word in the same way, and unlike a
   withdrawal or a resolution a commitment always has a surface form, because a uid can always be
   written.
+- **A did in key 0 is spelled `d3:…`** (1.14, SMYSL-2.3 A-6, OQ-73): `@commit d3:… { … }` and
+  `@withdraw d3:… { … }` name a dating, and key 0 holds the did's 32 bytes. `@resolve` does not
+  take one; its target is a contention or an edge. A writer that knows the 32 bytes are a dating —
+  one among the records it writes, or one its caller supplies from the store — MUST spell them
+  `d3:…`. One that cannot tell writes `b3:…`, which reads back to the same record, because the
+  bytes are the same: the cost is legibility, a reader looking for a unit, and not data.
 - **`@manifest` spells record 14** (1.10), naming the expression alias in its header:
   `@manifest kjv/1769 { lang: en, reader: osis/1, licence: public-domain, carry: text,
   part-policy: "top/64Ki-4Mi", parts: [{ tid: t3:…, length: 97, structure: b3:…, rdid: r3:… }] }`.
@@ -1197,6 +1203,7 @@ than read as a policy nobody exercised:
 | 1.10 | record type 17, dating; `@date` | new record type, new reserved word |
 | 1.10 | `source` key 4, `published` | new key above a sub-map's highest |
 | 1.10 | a did in withdrawal key 0 and commitment key 0 | a new value in an existing key, domain-separated from the kinds already there (§2.6) |
+| 1.14 | `d3:` after `@commit` and `@withdraw` | a new spelling of a value key 0 already held; an older reader rejects it as a malformed reference, as it would a new reserved word |
 
 Keeping this list is what RFC SMYSL-2.3 A-14 asks for, and it is cheap insurance: an addition
 nobody wrote down is an addition the next implementer rediscovers by decoding a fixture, which

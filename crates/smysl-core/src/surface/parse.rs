@@ -19,7 +19,7 @@ use crate::diag::{Code, Diagnostic, Span, Subject};
 use crate::error::ParseError;
 use crate::hash::canonical_uid;
 use crate::ids::{
-    is_alias, AgentId, ContentionId, Label, LangTag, Mid, Rdid, SchemaId, ThreadId, Tid, Uid,
+    is_alias, AgentId, ContentionId, Did, Label, LangTag, Mid, Rdid, SchemaId, ThreadId, Tid, Uid,
     ViewId,
 };
 use crate::surface::hjson::{parse_object_prefix, HObject, HValue, Spanned};
@@ -181,7 +181,7 @@ enum RawTarget {
         from: Spanned<Ref>,
         to: Spanned<Ref>,
     },
-    /// A rid, written out.
+    /// A rid, written out — or a did on `@withdraw` (A-6), which is the same 32 bytes in key 0.
     Rid(Uid),
     /// A contention id (`@resolve` only).
     Contention(ContentionId),
@@ -556,7 +556,24 @@ impl<'a> Parser<'a> {
                 return None;
             }
         };
-        let Some(target) = self.reference(target_txt, l.span) else {
+        // A dating, by did (A-6, OQ-73): key 0 is its 32 bytes, as `smysl commit <did>` writes
+        // it. A did names no unit, so it is never a label and never resolved.
+        let target = if target_txt.starts_with(Did::PREFIX) {
+            match Did::parse(target_txt) {
+                Ok(d) => Some(Spanned::new(Ref::Uid(d.as_uid()), l.span)),
+                Err(_) => {
+                    self.err(
+                        Code::E001,
+                        l.span,
+                        format!("`{target_txt}` is not a full did"),
+                    );
+                    None
+                }
+            }
+        } else {
+            self.reference(target_txt, l.span)
+        };
+        let Some(target) = target else {
             self.recover();
             return None;
         };
@@ -681,11 +698,27 @@ impl<'a> Parser<'a> {
                     return None;
                 }
             }
+        } else if withdraw && target_txt.starts_with(Did::PREFIX) {
+            // A withdrawal of a dating (A-6, OQ-73): key 0 is the did's 32 bytes, which is what
+            // makes the dating not live. Not on `@resolve`, whose target is a contention or an
+            // edge and never a dating.
+            match Did::parse(target_txt) {
+                Ok(d) => RawTarget::Rid(d.as_uid()),
+                Err(_) => {
+                    self.err(
+                        Code::E001,
+                        l.span,
+                        format!("`{target_txt}` is not a full did"),
+                    );
+                    self.recover();
+                    return None;
+                }
+            }
         } else if let (false, Ok(id)) = (withdraw, ContentionId::new(target_txt)) {
             RawTarget::Contention(id)
         } else {
             let what = if withdraw {
-                "an edge, as `from --kind--> to` or its rid"
+                "an edge, as `from --kind--> to` or its rid, or a dating by its did"
             } else {
                 "a contention id, or an edge as `from --kind--> to` or its rid"
             };
