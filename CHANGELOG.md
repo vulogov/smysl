@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.14.0
+## 1.14.0 — 2026-11-02
 
 What 1.13 leaves open, by what it blocks rather than the order it is easiest. A subject is
 found by any form of the name the store writes, its surname included; what is left is a subject
