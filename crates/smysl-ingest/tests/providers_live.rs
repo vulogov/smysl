@@ -72,10 +72,10 @@ fn candidates() -> Vec<Candidate> {
             id: "anthropic",
             kind: "anthropic",
             endpoint: "https://api.anthropic.com",
-            model: "claude-sonnet-4-5",
+            model: "claude-opus-5-5",
             key_var: Some("ANTHROPIC_API_KEY"),
             structured: StructuredMode::ToolForce,
-            context_window: 200_000,
+            context_window: 1_000_000,
         },
         Candidate {
             id: "openai",

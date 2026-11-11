@@ -42,6 +42,49 @@ primary shards; GE-T7 on a real corpus of a thousand works stays owed, and the s
 human ceiling stay owed indefinitely, not planned, and OQ-15, partial dependence between
 witnesses, stays deferred until something measured needs it.
 
+### The Anthropic mapper verified live, and moved to the current models
+
+No key had ever been available for this provider, so the mapper was a reading of the
+documentation asserted against recorded fixtures — and the reading had gone stale. Run against
+`api.anthropic.com` for the first time, it worked only on the model its live test still named,
+`claude-sonnet-4-5`: on every current-generation model (Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable
+5.x) the forced tool choice it relied on is refused with a 400, and at the current API version
+the `temperature` it sent is refused on every model, the default value included.
+
+The mapper now speaks API version `2026-10-21` and sends:
+
+- **the tool under `auto`**, not forced. What forcing bought was never schema conformance —
+  a tool's input is a suggestion unless the tool is strict — only that a call happened, and
+  that is read from the response as before: `Completion::structured` says so. The system
+  prompt asks for the one call and nothing else, and `disable_parallel_tool_use` admits at
+  most one;
+- **the kernel schema unchanged, and not strict.** `strict: true` was tried first, through
+  the translation the OpenAI mapper has, and the endpoint refused it: strict mode closes every
+  object, and the kernel's `payload` is open by design — the model writes `ingest:node` into
+  it, the text ingest its attribution keys. Closing it would silence the one hint the model
+  gives, so conformance is decided by `check` on the way in, where it always was. The OpenAI
+  mapper's translation has the same open object and no key has ever tried it; it is noted,
+  not fixed;
+- **no sampling parameter**. `Request::temperature` stays, for the mappers whose endpoints
+  still take one;
+- **`output_config.effort: low`** on a schema-shaped request, where the schema does the work
+  and the reasoning a higher effort buys is spent from the caller's `max_tokens` — thinking is
+  always on at this version and shares the budget with the answer. A free-text request takes
+  the model's default;
+- **`fallbacks: "default"`** under its beta header: a policy decline is retried, within the
+  same call, on a model the API picks by the decline's category, and the response names the
+  model that answered.
+
+And reads: a `refusal` stop before the content, as an error rather than an empty answer, with
+the category in the message; `thinking` and `fallback` blocks as neither the text nor the
+payload; the `model` field as the model that answered, which after a fallback is not the one
+asked.
+
+Verified twice on `claude-opus-5-5`: the SM-P14 live gate stages 4 conformant units from the
+fixture in one call, none degraded, and `smysl ingest` through the CLI stages 3 from a short
+note with two relations, `check` clean. The README's provider table and the manual's sample
+configuration say so; OpenAI is the one mapper still unproven.
+
 ---
 
 ## 1.14.0 — 2026-11-02

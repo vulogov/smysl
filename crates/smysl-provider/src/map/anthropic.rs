@@ -1,25 +1,45 @@
 //! The Anthropic mapper (§21.2).
 //!
-//! `ToolForce` — declare a single tool whose input schema is the unit schema, and force its
-//! use. That is how this endpoint is made to produce structured output: there is no
-//! response-format field, and asking politely in the prompt is not enforcement.
+//! `ToolForce` — declare a single tool whose input schema is the unit schema, leave the
+//! choice to the model, and tell it in the system prompt to answer with that tool and nothing
+//! else. The forced choice (`tool_choice: tool`) this mapper was written with is refused by
+//! every current-generation model (Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.x: a 400,
+//! `tool_choice: type "tool" and "any" are not supported for this model`). What forcing
+//! bought was never schema conformance — a tool's input is a suggestion to the model unless
+//! the tool is strict — only that a call happened; that is now read from the response, and
+//! `Completion::structured` says so, as it always did.
+//!
+//! Not strict, deliberately. `strict: true` would make a call that happens match the schema,
+//! but strict mode takes a subset of JSON Schema in which every object is closed, and the
+//! kernel's `payload` is an open object by design: the model writes `ingest:node` into it to
+//! say which node it read a claim in, and the text ingest writes its attribution keys there.
+//! The endpoint refuses the schema outright (`For 'object' type, 'additionalProperties' must
+//! be explicitly set to false`), and closing `payload` would silence the one hint the model
+//! gives. So the schema is passed through unchanged, as it was, and conformance is decided by
+//! `check` on the way in, where it was always going to be decided.
 //!
 //! The response is a **block list**, not a string. Text blocks are concatenated for the
-//! surface path; the `tool_use` block carries the JSON-AST. A mapper that read only the
-//! first block would silently truncate a two-block answer.
+//! surface path; the `tool_use` block carries the JSON-AST; `thinking` blocks (always present
+//! on these models, empty by default) and `fallback` blocks are neither. A mapper that read
+//! only the first block would now read a thinking block.
+//!
+//! API version `2026-10-21`: no `temperature` (a 400 on every model at that version; the
+//! `Request` keeps its field for the other mappers), and thinking is always on, so the
+//! `max_tokens` a caller sizes covers the model's reasoning as well as its answer. A policy
+//! decline arrives as a successful response with `stop_reason: refusal` and is an error here,
+//! never an empty answer; `fallbacks: "default"` asks the API to retry such a decline on a
+//! model of its choosing within the same call, so the figure a caller sees is the answer that
+//! was given, by the model named in the response.
 //!
 //! | Path | Purpose |
 //! |---|---|
 //! | `POST /v1/messages` | completion, streaming or not |
 //! | `GET /v1/models` | model list; also the reachability probe |
 //!
-//! **Implemented, but not tested.** No key has been available, so every shape here is
-//! asserted against recorded fixtures rather than against the API - which means this file is
-//! a reading of the documentation, and a reading can be wrong in ways no fixture catches.
-//! The Gemini mapper was written the same way and had exactly that failure: its response
-//! schema was documented as a subset of draft 2020-12, is not one, and every structured call
-//! it made was refused until a live key proved it. The RFC's implementation note applies:
-//! verify before relying on this.
+//! **Verified live** on 1.15 against `api.anthropic.com`: the SM-P14 gate
+//! (`crates/smysl-ingest/tests/providers_live.rs`) and `smysl ingest` through the CLI, both
+//! staging conformant units. Before that, every shape here was a reading of the documentation
+//! asserted against recorded fixtures, and the Gemini mapper had shown what that is worth.
 
 use std::time::Duration;
 
@@ -36,8 +56,19 @@ use crate::{
     Usage,
 };
 
-/// The API version header. Anthropic requires one and dates its changes by it.
-const API_VERSION: &str = "2023-06-01";
+/// The API version header. Anthropic requires one and dates its changes by it. `2026-10-21`
+/// removed the sampling parameters; nothing here sends one.
+const API_VERSION: &str = "2026-10-21";
+
+/// The beta that admits `fallbacks` in the body. The scalar `"default"` form needs this
+/// value exactly; an earlier `server-side-fallback-*` is a 400 with it.
+const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
+
+/// What the system prompt says when a schema is requested: the steer that replaces the forced
+/// choice. Named here beside the tool it names, so that renaming one cannot leave the other
+/// asking for a tool that is not declared.
+const STEER: &str = "Answer by calling the `emit_smysl_units` tool exactly once, with every \
+                     unit in that one call, and write nothing else.";
 
 /// The name of the forced tool. Fixed, because the model never sees it as a choice.
 pub const TOOL_NAME: &str = "emit_smysl_units";
@@ -78,6 +109,7 @@ impl Anthropic {
         Ok(vec![
             ("x-api-key", self.key()?.expose().to_string()),
             ("anthropic-version", API_VERSION.to_string()),
+            ("anthropic-beta", FALLBACK_BETA.to_string()),
         ])
     }
 
@@ -95,15 +127,21 @@ impl Anthropic {
 
         let mut body = json!({
             "model": if req.model.is_empty() { self.cfg.model.as_str() } else { req.model.as_str() },
-            // The system prompt is a top-level field here, not a message with a role.
             "messages": messages,
+            // Thinking is always on at this version, and it is spent from the same budget as
+            // the answer: what the caller sized is what the model has for both.
             "max_tokens": req.max_output,
-            "temperature": req.temperature,
             "stream": stream,
+            // A policy decline is retried, within this call, on a model the API picks by the
+            // decline's category; the response names the model that answered. A decline that
+            // survives the chain still comes back as `refusal`, and `parse` refuses it.
+            "fallbacks": "default",
         });
-        if !req.system.is_empty() {
-            body["system"] = json!(req.system);
-        }
+        // No `temperature`: `req.temperature` is for the mappers whose endpoints still take
+        // one. Here it is a 400 at every value, the default included.
+
+        // The system prompt is a top-level field here, not a message with a role.
+        let mut system = req.system.clone();
 
         match req.structured {
             StructuredMode::None => {}
@@ -116,12 +154,26 @@ impl Anthropic {
                 body["tools"] = json!([{
                     "name": TOOL_NAME,
                     "description": "Emit smysl kernel units for the supplied text.",
+                    // Passed through unchanged: not strict, since strict closes every object
+                    // and `payload` is open by design (see the module comment).
                     "input_schema": schema,
                 }]);
-                // Forcing the tool is what makes this enforcement rather than a suggestion.
-                body["tool_choice"] = json!({"type": "tool", "name": TOOL_NAME});
+                // The choice is the model's — forcing it is refused — and the prompt makes
+                // the choice; at most one call, since the one call carries every unit.
+                body["tool_choice"] = json!({"type": "auto", "disable_parallel_tool_use": true});
+                // A schema-shaped extraction is the simple case: the schema does the work,
+                // and the reasoning a higher effort buys is spent from the caller's
+                // `max_tokens`. Free-text requests take the model's default.
+                body["output_config"] = json!({"effort": "low"});
+                if !system.is_empty() {
+                    system.push_str("\n\n");
+                }
+                system.push_str(STEER);
             }
             _ => return Err(ProviderError::StructuredUnsupported),
+        }
+        if !system.is_empty() {
+            body["system"] = json!(system);
         }
 
         Ok(body)
@@ -147,6 +199,20 @@ impl Anthropic {
 
         if let Some(e) = error_of(&v) {
             return Err(e);
+        }
+
+        // A policy decline is a successful response whose content is empty or partial. Read
+        // before the blocks, because an empty block list would otherwise be "empty response"
+        // and a partial one an answer. `stop_details` is informational and may be absent.
+        if v.get("stop_reason").and_then(Value::as_str) == Some("refusal") {
+            let category = v
+                .pointer("/stop_details/category")
+                .and_then(Value::as_str)
+                .unwrap_or("unspecified");
+            return Err(ProviderError::Upstream(
+                200,
+                format!("the provider declined the request (refusal, category: {category})"),
+            ));
         }
 
         let blocks = v
@@ -421,23 +487,94 @@ mod tests {
             );
         }
 
-        /// The forced choice must name the tool that was declared.
+        /// Nothing is forced, the tool is not strict, and at most one call is admitted.
         ///
-        /// This is the defect the envelope makes easy: rename the tool, forget the choice, and
-        /// the request asks the model to call something that is not in its list. It fails at
-        /// the endpoint, which is the one place nobody here can look.
+        /// `tool_choice: tool` and `any` are a 400 on every current-generation model, which
+        /// is the failure that moved this mapper off them: it fails at the endpoint, the one
+        /// place nobody here can look, on every call. `strict` is a 400 too, for the open
+        /// `payload` (module comment); the first live run against `claude-opus-5-5` found it.
         #[test]
-        fn the_forced_choice_names_the_declared_tool() {
+        fn nothing_is_forced_and_at_most_one_call_is_admitted() {
             let body = body_for(StructuredMode::ToolForce);
-            let declared = body["tools"][0]["name"]
-                .as_str()
-                .expect("a tool is declared");
-            assert_eq!(body["tool_choice"]["type"], "tool");
-            assert_eq!(
-                body["tool_choice"]["name"], declared,
-                "the forced choice names a tool that was not declared"
+            assert_eq!(body["tools"].as_array().map(Vec::len), Some(1));
+            assert_eq!(body["tools"][0]["name"], TOOL_NAME);
+            assert!(
+                body["tools"][0].get("strict").is_none(),
+                "strict closes every object, and payload is open"
+            );
+            assert_eq!(body["tool_choice"]["type"], "auto");
+            assert_eq!(body["tool_choice"]["disable_parallel_tool_use"], true);
+            assert!(
+                body["tool_choice"].get("name").is_none(),
+                "a named choice is a forced one"
+            );
+        }
+
+        /// The steer names the tool that was declared, after whatever the caller said.
+        ///
+        /// This is the defect the envelope makes easy now that nothing forces the call:
+        /// rename the tool, forget the prompt, and the model is asked for a tool that is
+        /// not in its list — and simply answers in prose, which `structured: false` reports
+        /// one call too late to be cheap.
+        #[test]
+        fn the_steer_names_the_declared_tool_after_the_callers_prompt() {
+            let mut cfg = ProviderConfig::new(ProviderId::new("a").unwrap(), "anthropic");
+            cfg.model = "claude-x".into();
+            cfg.endpoint = "http://127.0.0.1:1".into();
+            let m = Anthropic::new(cfg);
+            let req = Request::new("claude-x", "some text")
+                .with_system("be brief")
+                .with_schema(StructuredMode::ToolForce, schema());
+            let body = m.body(&req, false).expect("the body builds");
+            let system = body["system"].as_str().expect("a system prompt");
+            let declared = body["tools"][0]["name"].as_str().unwrap();
+            assert!(system.starts_with("be brief\n\n"), "{system:?}");
+            assert!(
+                system.contains(&format!("`{declared}`")),
+                "the steer does not name the declared tool: {system:?}"
             );
             assert_eq!(declared, TOOL_NAME);
+        }
+
+        /// No sampling parameter, whatever the request asked for.
+        ///
+        /// `2026-10-21` rejects `temperature`, `top_p` and `top_k` on every model, the default
+        /// value included, so a request that carried the ingest's `temperature: 0` would be a
+        /// 400 on every call.
+        #[test]
+        fn nothing_samples_the_model() {
+            for mode in [StructuredMode::None, StructuredMode::ToolForce] {
+                let mut cfg = ProviderConfig::new(ProviderId::new("a").unwrap(), "anthropic");
+                cfg.model = "claude-x".into();
+                cfg.endpoint = "http://127.0.0.1:1".into();
+                let m = Anthropic::new(cfg);
+                let mut req = Request::new("claude-x", "some text");
+                req.temperature = 0.7;
+                if mode == StructuredMode::ToolForce {
+                    req = req.with_schema(mode, schema());
+                }
+                let body = m.body(&req, false).expect("the body builds");
+                for key in ["temperature", "top_p", "top_k"] {
+                    assert!(body.get(key).is_none(), "{mode:?}: sent {key}");
+                }
+            }
+        }
+
+        /// A schema-shaped request runs at low effort; a free-text one takes the default.
+        #[test]
+        fn a_structured_request_runs_at_low_effort() {
+            let body = body_for(StructuredMode::ToolForce);
+            assert_eq!(body["output_config"]["effort"], "low");
+            let body = body_for(StructuredMode::None);
+            assert!(body.get("output_config").is_none(), "effort pinned unasked");
+        }
+
+        /// Both modes ask for the fallback chain: a decline is retried in the same call.
+        #[test]
+        fn fallbacks_are_requested_by_default() {
+            for mode in [StructuredMode::None, StructuredMode::ToolForce] {
+                assert_eq!(body_for(mode)["fallbacks"], "default", "{mode:?}");
+            }
         }
 
         /// Anthropic requires `input_schema` to be a JSON Schema *object*.
@@ -464,7 +601,8 @@ mod tests {
         /// This is the failure 0.14 found on the OpenAI side: the strict translation was
         /// tested against an inline copy with 2 of the 13 kernel types, while the code
         /// documented it as the full Appendix C. Here the schema is passed through, so the
-        /// equivalent check is that what goes into the body is what `smysl-ingest` generates.
+        /// equivalent check is that what goes into the body is what `smysl-ingest` generates
+        /// — `payload` still an open object, which is what strict mode would have closed.
         #[test]
         fn the_schema_sent_is_the_whole_kernel_schema() {
             let body = body_for(StructuredMode::ToolForce);
@@ -480,6 +618,12 @@ mod tests {
                 "only {} kernel types reach the endpoint; the format defines more",
                 types.len()
             );
+            assert!(
+                sent["properties"]["payload"]
+                    .get("additionalProperties")
+                    .is_none(),
+                "payload was closed on its way in"
+            );
         }
 
         /// No tool block at all when structure was not asked for.
@@ -490,7 +634,11 @@ mod tests {
         fn no_tool_is_declared_when_none_was_requested() {
             let body = body_for(StructuredMode::None);
             assert!(body.get("tools").is_none(), "declared a tool unasked");
-            assert!(body.get("tool_choice").is_none(), "forced a tool unasked");
+            assert!(body.get("tool_choice").is_none(), "chose a tool unasked");
+            assert!(
+                body.get("system").is_none(),
+                "steered toward a tool unasked"
+            );
         }
     }
 
@@ -498,8 +646,8 @@ mod tests {
 
     fn cfg() -> ProviderConfig {
         let mut c = ProviderConfig::new(ProviderId::new("anthropic").unwrap(), "anthropic");
-        c.model = "claude-sonnet-5".into();
-        c.context_window = 200_000;
+        c.model = "claude-opus-5-5".into();
+        c.context_window = 1_000_000;
         c.max_output = 8192;
         c.structured = StructuredMode::ToolForce;
         c.api_key_env = Some("SMYSL_TEST_ANTHROPIC_KEY".into());
@@ -520,17 +668,17 @@ mod tests {
         assert_eq!(b["messages"][0]["role"], "user");
     }
 
-    /// Forcing the tool is what makes this enforcement rather than a suggestion.
+    /// The prompt asks for the one tool; nothing forces it, since nothing can.
     #[test]
-    fn a_schema_becomes_a_single_forced_tool() {
+    fn a_schema_becomes_a_single_tool_the_prompt_asks_for() {
         let req =
             Request::new("m", "x").with_schema(StructuredMode::ToolForce, r#"{"type":"object"}"#);
         let b = provider().body(&req, false).unwrap();
         assert_eq!(b["tools"].as_array().unwrap().len(), 1);
         assert_eq!(b["tools"][0]["name"], TOOL_NAME);
         assert_eq!(b["tools"][0]["input_schema"]["type"], "object");
-        assert_eq!(b["tool_choice"]["type"], "tool");
-        assert_eq!(b["tool_choice"]["name"], TOOL_NAME);
+        assert_eq!(b["tool_choice"]["type"], "auto");
+        assert_eq!(b["system"], STEER);
     }
 
     #[test]
@@ -546,7 +694,7 @@ mod tests {
     /// shape when a model narrates before calling a tool.
     #[test]
     fn text_blocks_are_concatenated_not_truncated() {
-        let raw = r#"{"model":"claude-sonnet-5","stop_reason":"end_turn",
+        let raw = r#"{"model":"claude-opus-5-5","stop_reason":"end_turn",
             "content":[{"type":"text","text":"first "},{"type":"text","text":"second"}],
             "usage":{"input_tokens":10,"output_tokens":4}}"#;
         let c = provider().parse(raw, 0, cfg().max_output).unwrap();
@@ -556,7 +704,7 @@ mod tests {
 
     #[test]
     fn a_tool_use_block_supplies_the_json_ast() {
-        let raw = r#"{"model":"claude-sonnet-5","stop_reason":"tool_use",
+        let raw = r#"{"model":"claude-opus-5-5","stop_reason":"tool_use",
             "content":[{"type":"text","text":"here you go"},
                        {"type":"tool_use","name":"emit_smysl_units",
                         "input":{"units":[{"type":"claim","gist":"g","status":"speculative"}]}}],
@@ -568,6 +716,53 @@ mod tests {
             !c.text.contains("here you go"),
             "the narration is not the payload"
         );
+    }
+
+    /// Thinking blocks are always present on these models and empty by default; a fallback
+    /// block marks a model switch. Neither is the answer, and reading the first block would
+    /// now read a thinking block.
+    #[test]
+    fn thinking_and_fallback_blocks_are_not_the_answer() {
+        let raw = r#"{"model":"claude-opus-4-8","stop_reason":"tool_use",
+            "content":[{"type":"thinking","thinking":"","signature":"s"},
+                       {"type":"fallback","from":{"model":"claude-opus-5-5"},"to":{"model":"claude-opus-4-8"}},
+                       {"type":"tool_use","name":"emit_smysl_units","input":{"units":[]}}],
+            "usage":{"input_tokens":10,"output_tokens":20}}"#;
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
+        assert!(c.structured);
+        assert_eq!(c.text, r#"{"units":[]}"#);
+        assert_eq!(
+            c.model, "claude-opus-4-8",
+            "the model that answered, not the one asked"
+        );
+
+        let raw = r#"{"model":"claude-opus-5-5","stop_reason":"end_turn",
+            "content":[{"type":"thinking","thinking":"","signature":"s"},
+                       {"type":"text","text":"prose"}],
+            "usage":{"input_tokens":10,"output_tokens":4}}"#;
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
+        assert_eq!(c.text, "prose");
+        assert!(!c.structured);
+    }
+
+    /// A policy decline is a 200 with `refusal`, before any output or after some. It is an
+    /// error here, read before the blocks: an empty list would otherwise be "empty response"
+    /// and a partial one an answer.
+    #[test]
+    fn a_refusal_is_an_error_before_content_is_read() {
+        let empty = r#"{"model":"claude-opus-5-5","stop_reason":"refusal",
+            "stop_details":{"type":"refusal","category":"cyber"},
+            "content":[],"usage":{"input_tokens":10,"output_tokens":0}}"#;
+        let e = provider().parse(empty, 0, cfg().max_output).unwrap_err();
+        assert!(matches!(e, ProviderError::Upstream(200, _)), "{e}");
+        assert!(e.to_string().contains("cyber"), "{e}");
+        assert!(!e.is_fallback_eligible(), "a decline is not an outage");
+
+        let partial = r#"{"model":"claude-opus-5-5","stop_reason":"refusal","stop_details":null,
+            "content":[{"type":"text","text":"half an answer"}],
+            "usage":{"input_tokens":10,"output_tokens":3}}"#;
+        let e = provider().parse(partial, 0, cfg().max_output).unwrap_err();
+        assert!(e.to_string().contains("unspecified"), "{e}");
     }
 
     #[test]
@@ -643,7 +838,8 @@ mod tests {
         let h = provider().headers().unwrap();
         assert_eq!(h[0].0, "x-api-key");
         assert_eq!(h[0].1, "sk-ant-test");
-        assert_eq!(h[1], ("anthropic-version", API_VERSION.to_string()));
+        assert_eq!(h[1], ("anthropic-version", "2026-10-21".to_string()));
+        assert_eq!(h[2], ("anthropic-beta", FALLBACK_BETA.to_string()));
         std::env::remove_var("SMYSL_TEST_ANTHROPIC_KEY");
     }
 

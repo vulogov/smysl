@@ -421,13 +421,15 @@ reading of a vendor's documentation, not a fact about their API:
 | Ollama (local) | verified against a running server |
 | DeepSeek | verified against the live endpoint |
 | Gemini | verified against the live endpoint |
-| Anthropic | implemented, but not tested |
+| Anthropic | verified against the live endpoint |
 | OpenAI | implemented, but not tested |
 
 Anthropic and OpenAI were read against their vendor documentation — which found two real
-defects — but no key has been available to confirm the endpoints accept what we send. The
-concrete mappers are not part of the public API, so a wrong one is fixable without a 2.0. **If
-you have either key, running those live tests is the most useful contribution available.**
+defects — and then, in 1.15, a key confirmed the Anthropic endpoint accepts what we send, once
+the mapper had been moved to the current models (a forced tool choice is refused there; the
+tool is strict instead). No OpenAI key has been available. The concrete mappers are not part of
+the public API, so a wrong one is fixable without a 2.0. **If you have an OpenAI key, running
+that live test is the most useful contribution available.**
 
 That distinction has already earned its keep. Gemini's support was written from the
 documentation, which describes its response schema as a subset of JSON Schema draft

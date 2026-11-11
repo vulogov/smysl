@@ -524,7 +524,7 @@ but relation extraction to the hosted one, looks like this:
     remote: {
       kind: anthropic
       endpoint: "https://api.anthropic.com"
-      model: "claude-sonnet-5"
+      model: "claude-opus-5-5"
       api_key_env: ANTHROPIC_API_KEY
       structured: tool-force
     }
