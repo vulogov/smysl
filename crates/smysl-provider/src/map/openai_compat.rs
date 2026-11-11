@@ -228,6 +228,18 @@ pub fn parse(
         return Err(e);
     }
 
+    // `content_filter` is the endpoint's policy decline: a 200 with the answer withheld, so
+    // it is read before the content, which is null. Reported apart from a fault so a run can
+    // count it.
+    if v.pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+        == Some("content_filter")
+    {
+        return Err(ProviderError::Declined {
+            category: "content_filter".to_string(),
+        });
+    }
+
     let text = v
         .pointer("/choices/0/message/content")
         .and_then(Value::as_str)
@@ -480,6 +492,16 @@ mod tests {
         assert!(matches!(
             parse(raw, "m", 0, false),
             Err(ProviderError::Truncated { .. })
+        ));
+    }
+
+    /// A `content_filter` finish is a policy decline, under its own variant, never an answer.
+    #[test]
+    fn a_content_filter_stop_is_a_decline() {
+        let raw = r#"{"choices":[{"message":{"content":null},"finish_reason":"content_filter"}]}"#;
+        assert!(matches!(
+            parse(raw, "m", 0, false),
+            Err(ProviderError::Declined { category }) if category == "content_filter"
         ));
     }
 

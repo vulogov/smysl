@@ -26,8 +26,8 @@
 //! API version `2026-10-21`: no `temperature` (a 400 on every model at that version; the
 //! `Request` keeps its field for the other mappers), and thinking is always on, so the
 //! `max_tokens` a caller sizes covers the model's reasoning as well as its answer. A policy
-//! decline arrives as a successful response with `stop_reason: refusal` and is an error here,
-//! never an empty answer; `fallbacks: "default"` asks the API to retry such a decline on a
+//! decline arrives as a successful response with `stop_reason: refusal` and is
+//! `ProviderError::Declined` here, with its category, never an empty answer; `fallbacks: "default"` asks the API to retry such a decline on a
 //! model of its choosing within the same call, so the figure a caller sees is the answer that
 //! was given, by the model named in the response. A configuration that pins its model can
 //! decline the chain (`fallbacks: false`), and then a decline is a decline.
@@ -237,10 +237,9 @@ impl Anthropic {
                 .pointer("/stop_details/category")
                 .and_then(Value::as_str)
                 .unwrap_or("unspecified");
-            return Err(ProviderError::Upstream(
-                200,
-                format!("the provider declined the request (refusal, category: {category})"),
-            ));
+            return Err(ProviderError::Declined {
+                category: category.to_string(),
+            });
         }
 
         let blocks = v
@@ -620,8 +619,10 @@ mod tests {
             cfg.model = "claude-x".into();
             cfg.endpoint = "http://127.0.0.1:1".into();
             cfg.fallbacks = false;
-            cfg.api_key_env = Some("SMYSL_TEST_ANTHROPIC_KEY".into());
-            std::env::set_var("SMYSL_TEST_ANTHROPIC_KEY", "sk-ant-test");
+            // A variable of its own: the header test below sets and removes the shared one,
+            // and tests run in parallel.
+            cfg.api_key_env = Some("SMYSL_TEST_ANTHROPIC_PINNED_KEY".into());
+            std::env::set_var("SMYSL_TEST_ANTHROPIC_PINNED_KEY", "sk-ant-test");
             let m = Anthropic::new(cfg);
             let body = m
                 .body(&Request::new("claude-x", "some text"), false)
@@ -841,7 +842,10 @@ mod tests {
             "stop_details":{"type":"refusal","category":"cyber"},
             "content":[],"usage":{"input_tokens":10,"output_tokens":0}}"#;
         let e = provider().parse(empty, 0, cfg().max_output).unwrap_err();
-        assert!(matches!(e, ProviderError::Upstream(200, _)), "{e}");
+        assert!(
+            matches!(&e, ProviderError::Declined { category } if category == "cyber"),
+            "{e}"
+        );
         assert!(e.to_string().contains("cyber"), "{e}");
         assert!(!e.is_fallback_eligible(), "a decline is not an outage");
 

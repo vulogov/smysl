@@ -606,6 +606,14 @@ pub enum ProviderError {
         limit: Option<usize>,
         used: Option<usize>,
     },
+    /// The provider declined the request as a matter of policy: a successful response with
+    /// no answer, or a partial one. Since 1.15; until then an `Upstream(200, ..)`, which ingest
+    /// degraded like any failure and nothing could count or query. `category` is the
+    /// provider's own word for why (`cyber`, `SAFETY`, `content_filter`), or `unspecified`
+    /// where it gave none.
+    Declined {
+        category: String,
+    },
 }
 
 impl ProviderError {
@@ -615,6 +623,7 @@ impl ProviderError {
             ProviderError::OfflineViolation => Some(Code::E301),
             ProviderError::ContextExceeded { .. } => Some(Code::E302),
             ProviderError::StructuredUnsupported => Some(Code::W303),
+            ProviderError::Declined { .. } => Some(Code::W438),
             _ => None,
         }
     }
@@ -663,6 +672,12 @@ impl fmt::Display for ProviderError {
             ProviderError::Malformed(m) => write!(f, "malformed provider response: {m}"),
             ProviderError::Upstream(status, m) => write!(f, "upstream {status}: {m}"),
             ProviderError::Config(m) => write!(f, "provider configuration: {m}"),
+            ProviderError::Declined { category } => {
+                write!(
+                    f,
+                    "the provider declined the request (refusal, category: {category})"
+                )
+            }
             ProviderError::Truncated { limit, used } => {
                 f.write_str("answer cut off at the output limit")?;
                 if let Some(l) = limit {
@@ -1231,6 +1246,22 @@ mod tests {
             requested: 0,
         };
         assert_eq!(c.to_string(), "context window exceeded");
+    }
+
+    /// A decline is a policy outcome with a code of its own, so a run can count it apart from
+    /// a fault; it names the provider's category, and it is not an outage to fall back from.
+    #[test]
+    fn a_decline_names_its_category_and_is_not_an_outage() {
+        let d = ProviderError::Declined {
+            category: "cyber".to_string(),
+        };
+        assert_eq!(
+            d.to_string(),
+            "the provider declined the request (refusal, category: cyber)"
+        );
+        assert_eq!(d.code(), Some(Code::W438));
+        assert!(!d.is_fallback_eligible());
+        assert_eq!(d.exit_code(), ExitCode::Provider);
     }
 
     #[test]

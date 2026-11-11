@@ -124,6 +124,8 @@ pub struct TextReport {
     pub spanned: usize,
     pub spanless: usize,
     pub degraded: usize,
+    /// Of `degraded`, the windows the model declined as a matter of policy (`SMY-W438`).
+    pub declined: usize,
     pub repaired: usize,
     /// Repair turns, over the whole run: `calls - windows * passes` where nothing was skipped.
     ///
@@ -433,6 +435,7 @@ impl Ingestor<'_> {
                 firsts.push(out.first.take());
                 report.calls += out.calls;
                 report.degraded += out.degraded;
+                report.declined += out.declined;
                 report.repaired += out.repaired;
                 report.diagnostics.extend(out.diagnostics);
                 relations.extend(out.relations);

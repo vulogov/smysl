@@ -195,6 +195,13 @@ impl Gemini {
             .and_then(Value::as_u64)
             .map(|o| o + thoughts.unwrap_or(0));
 
+        // A candidate the safety filter blocked is a policy decline, not a malformed answer,
+        // and is reported apart so a run can count what the model would not say.
+        if text.is_empty() && matches!(reason, "SAFETY" | "PROHIBITED_CONTENT" | "BLOCKLIST") {
+            return Err(ProviderError::Declined {
+                category: reason.to_string(),
+            });
+        }
         if text.is_empty() {
             return Err(ProviderError::Malformed(match reason {
                 "" => "no candidate content in response".to_string(),
@@ -650,7 +657,16 @@ mod tests {
     fn a_blocked_candidate_is_an_error_naming_the_reason() {
         let raw = r#"{"candidates":[{"finishReason":"SAFETY"}]}"#;
         let e = provider().parse(raw, 0, cfg().max_output).unwrap_err();
+        assert!(
+            matches!(&e, ProviderError::Declined { category } if category == "SAFETY"),
+            "{e}"
+        );
         assert!(e.to_string().contains("SAFETY"), "{e}");
+
+        // A candidate with no parts for another reason is still a malformed answer.
+        let raw = r#"{"candidates":[{"finishReason":"OTHER"}]}"#;
+        let e = provider().parse(raw, 0, cfg().max_output).unwrap_err();
+        assert!(matches!(e, ProviderError::Malformed(_)), "{e}");
     }
 
     #[test]

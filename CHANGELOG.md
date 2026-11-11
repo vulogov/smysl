@@ -131,6 +131,20 @@ And a provider can decline the chain: `fallbacks: false` in its configuration, o
 drops the field and its beta header, so the answer is by the model the recipe names or by
 nobody. Providers whose APIs have no such chain ignore the key.
 
+### A refusal is a decline, counted apart from a fault
+
+A model that declines a span as a matter of policy says so in a successful response —
+Anthropic's `stop_reason: refusal`, Gemini's `SAFETY` finish, an OpenAI-compatible
+`content_filter` — and every one became `Upstream(200, ..)`: degraded like any failure, and
+indistinguishable from one. Nothing could count what the model would not structure apart
+from what it could not, and for a tool whose point is to say where a unit came from that is
+a gap. `ProviderError::Declined { category }` is the variant now, carrying the provider's
+own word for why; the span still degrades to opaque prose under rule I, but as `SMY-W438`
+rather than `SMY-W304`, the report's `declined` counts it, and the ingest summary says
+`3 degraded (2 declined by the model)` when there are any. The registry is 153. A decline
+is not an outage and never triggers a fallback, and it exits 6 like any provider error
+where a command cannot degrade.
+
 ---
 
 ## 1.14.0 — 2026-11-02

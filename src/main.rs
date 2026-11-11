@@ -11423,13 +11423,19 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         );
     }
     eprintln!(
-        "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} weakened, {} degraded, \
+        "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} weakened, {} degraded{}, \
          {} repaired, {} token(s){}",
         report.chunks,
         report.calls,
         staged.len(),
         staged.weakened.len(),
         report.degraded,
+        // A decline is a degrade with a different remedy, so it is said when there is one.
+        if report.declined > 0 {
+            format!(" ({} declined by the model)", report.declined)
+        } else {
+            String::new()
+        },
         report.repaired,
         report.usage.total(),
         // The cache's share of the input, where the provider has one: a reader of the total

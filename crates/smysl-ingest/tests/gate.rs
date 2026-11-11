@@ -317,6 +317,36 @@ fn an_error_the_provider_returned_is_a_call_and_says_which_limit() {
     assert_eq!(report.calls, 0, "nothing reached a provider");
 }
 
+/// A refusal is a policy outcome, not a fault: the span degrades under `SMY-W438` rather than
+/// `SMY-W304`, the report counts it apart, and the message carries the provider's category.
+#[test]
+fn a_decline_degrades_under_its_own_code_and_is_counted_apart() {
+    let declined = ProviderError::Declined {
+        category: "cyber".to_string(),
+    };
+    let (r, _) = registry(Scripted::new(vec![Err(declined); 8]));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("rule I: a decline does not fail the run");
+    assert!(
+        !staged.is_empty(),
+        "the text is still recorded as opaque prose"
+    );
+    assert_eq!(report.calls, 1, "a decline is a call made");
+    assert_eq!(report.degraded, 1);
+    assert_eq!(report.declined, 1);
+    let w438 = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == Code::W438)
+        .expect("declined");
+    assert!(w438.message.contains("cyber"), "{}", w438.message);
+    assert!(
+        report.diagnostics.iter().all(|d| d.code != Code::W304),
+        "a decline is not a repair failure"
+    );
+}
+
 /// The repair loop is a loop: an answer that fixes itself on the second turn is accepted,
 /// and the budget is not spent needlessly.
 #[test]

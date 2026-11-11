@@ -598,6 +598,17 @@ the model asked for, so every chunk answered by another is reported as
 then by the one the recipe names, or by nobody. Providers without such a chain
 ignore the key.
 
+A model can also decline a span outright, as a matter of policy, and say so
+in a successful response: Anthropic's `stop_reason: refusal`, Gemini's
+`SAFETY` finish, an OpenAI-compatible `content_filter`. From 1.15 each is
+`ProviderError::Declined`, with the provider's own category, rather than an
+upstream error indistinguishable from a fault. Rule I still applies — the
+span degrades to opaque prose, the run goes on — but the warning is
+`SMY-W438` rather than `SMY-W304`, and the ingest summary counts declines
+apart from the degrades. The distinction is the remedy: a fault is retried or
+reconfigured, a decline is read, because the text is what the model would
+not structure, not what it could not.
+
 #term("Provider")[
   One configured endpoint: an id, which mapper drives it (`ollama`,
   `anthropic`, and so on), an endpoint URL, a model name, its context window

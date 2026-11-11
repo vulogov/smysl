@@ -299,6 +299,7 @@ registry! {
     }
     Provider => {
         W437 = "SMY-W437", Warn,  "The model that answered is not the one the request named (a provider fallback)";
+        W438 = "SMY-W438", Warn,  "The model declined the span; degraded to opaque prose (a refusal, not a fault)";
     }
     // --- The library (RFC SMYSL-2.4), in the order `smysl-text` raises them -------------------
     //
@@ -999,9 +1000,12 @@ mod tests {
     /// named. A provider that falls back server-side answers under another name, and the
     /// recipe, computed before the call, names the one asked for; this is how a reader hears
     /// that the two differ.
+    ///
+    /// 153 with `SMY-W438` in 1.15.0: a span the model declined as a matter of policy. It
+    /// degrades under rule I like a fault, but is not one, and a run counts it apart.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 152);
+        assert_eq!(Code::ALL.len(), 153);
     }
 
     #[test]

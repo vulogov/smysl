@@ -669,6 +669,10 @@ pub struct IngestReport {
     /// defects were single units' own (`repair::UNIT_LOCAL`) degrades those units, each
     /// counted here, and keeps the rest.
     pub degraded: usize,
+    /// Of `degraded`, the chunks the model declined as a matter of policy (`SMY-W438`): a
+    /// refusal, not a fault. Counted apart because the two call for different remedies — a
+    /// fault is retried or reconfigured, a decline is read.
+    pub declined: usize,
     /// Chunks that failed at least one attempt and then succeeded (`SMY-W435`).
     ///
     /// `degraded` counts the repairs that did not work. This counts the ones that did, which
@@ -840,6 +844,7 @@ impl<'a> Ingestor<'a> {
                 firsts[i].push(out.first.take());
                 report.calls += out.calls;
                 report.degraded += out.degraded;
+                report.declined += out.declined;
                 report.repaired += out.repaired;
                 report.diagnostics.extend(out.diagnostics);
                 pass_units.extend(out.units);
@@ -1008,13 +1013,24 @@ impl<'a> Ingestor<'a> {
                         usage.output_tokens += n as u64;
                         usage.estimated = true;
                     }
+                    let declined = matches!(e, ProviderError::Declined { .. });
                     let (core, d) = repair::degrade(text, self.opts.rung, &e.to_string());
+                    // A refusal is neither a fault of the transport nor a mistake of the
+                    // model: it is a policy outcome, under its own code so a run can count
+                    // what the model would not structure apart from what it could not.
+                    let d = if declined {
+                        Diagnostic::on(smysl_core::Code::W438, smysl_core::canonical_uid(&core))
+                            .with_message(format!("span degraded to opaque prose: {e}"))
+                    } else {
+                        d
+                    };
                     return ChunkOutcome {
                         units: vec![core],
                         relations: Vec::new(),
                         labels: BTreeMap::new(),
                         calls,
                         degraded: 1,
+                        declined: usize::from(declined),
                         repaired: 0,
                         diagnostics: vec![d],
                         first,
@@ -1103,6 +1119,7 @@ impl<'a> Ingestor<'a> {
                     labels,
                     calls,
                     degraded: 0,
+                    declined: 0,
                     repaired: usize::from(!history.is_empty()),
                     diagnostics,
                     first,
@@ -1167,6 +1184,7 @@ impl<'a> Ingestor<'a> {
                     labels: s.labels,
                     calls,
                     degraded: s.degraded,
+                    declined: 0,
                     repaired: 0,
                     diagnostics: history,
                     first,
@@ -1183,6 +1201,7 @@ impl<'a> Ingestor<'a> {
             labels: BTreeMap::new(),
             calls,
             degraded: 1,
+            declined: 0,
             repaired: 0,
             diagnostics: history,
             first,
@@ -1312,6 +1331,8 @@ struct ChunkOutcome {
     calls: usize,
     /// Spans degraded: the whole chunk counts one, a salvaged answer one per unit.
     degraded: usize,
+    /// 1 when the chunk degraded because the model declined it (`SMY-W438`).
+    declined: usize,
     /// 1 when this chunk succeeded after an attempt that did not.
     repaired: usize,
     diagnostics: Vec<Diagnostic>,

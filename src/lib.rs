@@ -565,8 +565,9 @@ mod tests {
         // text ingest for a reply naming a message the expression does not hold; 151 with
         // `SMY-W454` (1.14.0, OQ-74), raised by a consensus run whose provider did not
         // reproduce at temperature 0; 152 with `SMY-W437` (1.15.0), raised by a chunk whose
-        // answer came from a model other than the one its recipe names.
-        assert_eq!(Code::ALL.len(), 152);
+        // answer came from a model other than the one its recipe names; 153 with `SMY-W438`
+        // (1.15.0), raised by a span the model declined as a matter of policy.
+        assert_eq!(Code::ALL.len(), 153);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
