@@ -29,7 +29,18 @@
 //! decline arrives as a successful response with `stop_reason: refusal` and is an error here,
 //! never an empty answer; `fallbacks: "default"` asks the API to retry such a decline on a
 //! model of its choosing within the same call, so the figure a caller sees is the answer that
-//! was given, by the model named in the response.
+//! was given, by the model named in the response. A configuration that pins its model can
+//! decline the chain (`fallbacks: false`), and then a decline is a decline.
+//!
+//! **The system prompt is a cache breakpoint.** An ingest sends the same system prompt and
+//! the same kernel schema on every chunk and every repair turn, and only the passage changes;
+//! the request renders `tools` then `system` then `messages`, so one `cache_control` marker
+//! on the system block caches the schema and the prompt together. The first call writes the
+//! entry and every call within five minutes of the last reads it, at a fraction of the input
+//! price. A prompt below the model's minimum (512 tokens on the current models) is simply not
+//! cached, with no error, and the kernel schema alone is past that. `Usage` says what
+//! happened: `input_tokens` is still every token the model read, and the cache's share of it
+//! is reported apart, so a ledger can show a run that wrote and never read.
 //!
 //! | Path | Purpose |
 //! |---|---|
@@ -106,11 +117,16 @@ impl Anthropic {
 
     /// `x-api-key`, not `Authorization: Bearer` - this endpoint is the odd one out.
     fn headers(&self) -> Result<Vec<(&'static str, String)>, ProviderError> {
-        Ok(vec![
+        let mut h = vec![
             ("x-api-key", self.key()?.expose().to_string()),
             ("anthropic-version", API_VERSION.to_string()),
-            ("anthropic-beta", FALLBACK_BETA.to_string()),
-        ])
+        ];
+        // The beta header admits the `fallbacks` field; a configuration that declined the
+        // chain does not send either.
+        if self.cfg.fallbacks {
+            h.push(("anthropic-beta", FALLBACK_BETA.to_string()));
+        }
+        Ok(h)
     }
 
     pub fn body(&self, req: &Request, stream: bool) -> Result<Value, ProviderError> {
@@ -132,11 +148,15 @@ impl Anthropic {
             // the answer: what the caller sized is what the model has for both.
             "max_tokens": req.max_output,
             "stream": stream,
-            // A policy decline is retried, within this call, on a model the API picks by the
-            // decline's category; the response names the model that answered. A decline that
-            // survives the chain still comes back as `refusal`, and `parse` refuses it.
-            "fallbacks": "default",
         });
+        // A policy decline is retried, within this call, on a model the API picks by the
+        // decline's category; the response names the model that answered. A decline that
+        // survives the chain still comes back as `refusal`, and `parse` refuses it. Off when
+        // the configuration pinned its model: the answer is then by that model or by nobody,
+        // and the recipe stays true.
+        if self.cfg.fallbacks {
+            body["fallbacks"] = json!("default");
+        }
         // No `temperature`: `req.temperature` is for the mappers whose endpoints still take
         // one. Here it is a 400 at every value, the default included.
 
@@ -173,7 +193,15 @@ impl Anthropic {
             _ => return Err(ProviderError::StructuredUnsupported),
         }
         if !system.is_empty() {
-            body["system"] = json!(system);
+            // One text block with a cache breakpoint. `tools` renders before `system`, so the
+            // marker covers the schema as well as the prompt — the two things every chunk of
+            // an ingest sends unchanged. The passage is in `messages`, after it, and is not
+            // cached, which is right: no two chunks share one.
+            body["system"] = json!([{
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }]);
         }
 
         Ok(body)
@@ -254,22 +282,29 @@ impl Anthropic {
             });
         }
 
+        // `input_tokens` on the wire is the *uncached* input: the tokens read from the cache
+        // and the tokens written to it are reported beside it, not inside it. `Usage` wants
+        // every token the model read, so the three are summed, and the cache's two are kept
+        // apart as its share.
+        let cache_read = v
+            .pointer("/usage/cache_read_input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let cache_write = v
+            .pointer("/usage/cache_creation_input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         let input = v.pointer("/usage/input_tokens").and_then(Value::as_u64);
         let output = v.pointer("/usage/output_tokens").and_then(Value::as_u64);
         let usage = match (input, output) {
-            (Some(i), Some(o)) => Usage {
-                input_tokens: i,
-                output_tokens: o,
-                estimated: false,
-                retries,
-            },
-            _ => Usage {
-                input_tokens: input.unwrap_or(0),
-                output_tokens: output.unwrap_or(smysl_core::tokens(&text) as u64),
-                estimated: true,
-                retries,
-            },
-        };
+            (Some(i), Some(o)) => Usage::reported(i + cache_read + cache_write, o),
+            _ => Usage::estimated(
+                input.unwrap_or(0) + cache_read + cache_write,
+                output.unwrap_or(smysl_core::tokens(&text) as u64),
+            ),
+        }
+        .after_retries(retries)
+        .with_cache(cache_read, cache_write);
 
         Ok(Completion {
             text,
@@ -526,7 +561,7 @@ mod tests {
                 .with_system("be brief")
                 .with_schema(StructuredMode::ToolForce, schema());
             let body = m.body(&req, false).expect("the body builds");
-            let system = body["system"].as_str().expect("a system prompt");
+            let system = body["system"][0]["text"].as_str().expect("a system prompt");
             let declared = body["tools"][0]["name"].as_str().unwrap();
             assert!(system.starts_with("be brief\n\n"), "{system:?}");
             assert!(
@@ -575,6 +610,58 @@ mod tests {
             for mode in [StructuredMode::None, StructuredMode::ToolForce] {
                 assert_eq!(body_for(mode)["fallbacks"], "default", "{mode:?}");
             }
+        }
+
+        /// A configuration that pinned its model declines the chain, field and header both:
+        /// the answer is then by that model or by nobody, and the recipe's name holds.
+        #[test]
+        fn a_pinned_model_declines_the_fallback_chain() {
+            let mut cfg = ProviderConfig::new(ProviderId::new("a").unwrap(), "anthropic");
+            cfg.model = "claude-x".into();
+            cfg.endpoint = "http://127.0.0.1:1".into();
+            cfg.fallbacks = false;
+            cfg.api_key_env = Some("SMYSL_TEST_ANTHROPIC_KEY".into());
+            std::env::set_var("SMYSL_TEST_ANTHROPIC_KEY", "sk-ant-test");
+            let m = Anthropic::new(cfg);
+            let body = m
+                .body(&Request::new("claude-x", "some text"), false)
+                .unwrap();
+            assert!(body.get("fallbacks").is_none(), "{body}");
+            let h = m.headers().unwrap();
+            assert!(h.iter().all(|(k, _)| *k != "anthropic-beta"), "{h:?}");
+        }
+
+        /// The system prompt is one text block carrying the cache marker, in both modes.
+        /// `tools` renders before `system`, so the one marker covers the schema too; the
+        /// passage is in `messages`, after it, and no two chunks share one.
+        #[test]
+        fn the_system_prompt_is_a_cache_breakpoint() {
+            for mode in [StructuredMode::None, StructuredMode::ToolForce] {
+                let mut cfg = ProviderConfig::new(ProviderId::new("a").unwrap(), "anthropic");
+                cfg.model = "claude-x".into();
+                cfg.structured = mode;
+                let m = Anthropic::new(cfg);
+                let mut req = Request::new("claude-x", "some text").with_system("be brief");
+                if mode == StructuredMode::ToolForce {
+                    req = req.with_schema(mode, schema());
+                }
+                let body = m.body(&req, false).unwrap();
+                let blocks = body["system"].as_array().expect("a block list");
+                assert_eq!(blocks.len(), 1, "{mode:?}: one block, one breakpoint");
+                assert_eq!(blocks[0]["type"], "text");
+                assert_eq!(blocks[0]["cache_control"]["type"], "ephemeral");
+                assert!(
+                    body["messages"][0].get("cache_control").is_none(),
+                    "{mode:?}: the passage is not cached"
+                );
+            }
+            // No system prompt, no block — and nothing to cache.
+            let mut cfg = ProviderConfig::new(ProviderId::new("a").unwrap(), "anthropic");
+            cfg.model = "claude-x".into();
+            let body = Anthropic::new(cfg)
+                .body(&Request::new("claude-x", "some text"), false)
+                .unwrap();
+            assert!(body.get("system").is_none());
         }
 
         /// Anthropic requires `input_schema` to be a JSON Schema *object*.
@@ -663,7 +750,7 @@ mod tests {
     fn the_system_prompt_is_a_field_not_a_message() {
         let req = Request::new("m", "hello").with_system("be brief");
         let b = provider().body(&req, false).unwrap();
-        assert_eq!(b["system"], "be brief");
+        assert_eq!(b["system"][0]["text"], "be brief");
         assert_eq!(b["messages"].as_array().unwrap().len(), 1);
         assert_eq!(b["messages"][0]["role"], "user");
     }
@@ -678,7 +765,7 @@ mod tests {
         assert_eq!(b["tools"][0]["name"], TOOL_NAME);
         assert_eq!(b["tools"][0]["input_schema"]["type"], "object");
         assert_eq!(b["tool_choice"]["type"], "auto");
-        assert_eq!(b["system"], STEER);
+        assert_eq!(b["system"][0]["text"], STEER);
     }
 
     #[test]
@@ -785,8 +872,34 @@ mod tests {
         let c = provider().parse(raw, 2, cfg().max_output).unwrap();
         assert_eq!(c.usage.input_tokens, 31);
         assert_eq!(c.usage.output_tokens, 7);
+        assert_eq!(c.usage.cache_read_tokens, 0);
+        assert_eq!(c.usage.cache_write_tokens, 0);
         assert!(!c.usage.estimated);
         assert_eq!(c.usage.retries, 2);
+    }
+
+    /// The wire's `input_tokens` is the uncached input alone; the cache's reads and writes
+    /// are reported beside it. Every token the model read is the sum, and the cache's share
+    /// is kept apart — so a ledger row still says how much context the call used, and also
+    /// how much of it was a read at a fraction of the price.
+    #[test]
+    fn cache_tokens_are_input_tokens_and_are_reported_apart() {
+        let raw = r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"x"}],
+                      "usage":{"input_tokens":31,"output_tokens":7,
+                               "cache_read_input_tokens":2900,"cache_creation_input_tokens":0}}"#;
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
+        assert_eq!(c.usage.input_tokens, 2931);
+        assert_eq!(c.usage.cache_read_tokens, 2900);
+        assert_eq!(c.usage.cache_write_tokens, 0);
+        assert!(!c.usage.estimated);
+
+        let raw = r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"x"}],
+                      "usage":{"input_tokens":31,"output_tokens":7,
+                               "cache_read_input_tokens":0,"cache_creation_input_tokens":2900}}"#;
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
+        assert_eq!(c.usage.input_tokens, 2931);
+        assert_eq!(c.usage.cache_write_tokens, 2900);
+        assert_eq!(c.usage.retries, 0);
     }
 
     #[test]
@@ -840,6 +953,7 @@ mod tests {
         assert_eq!(h[0].1, "sk-ant-test");
         assert_eq!(h[1], ("anthropic-version", "2026-10-21".to_string()));
         assert_eq!(h[2], ("anthropic-beta", FALLBACK_BETA.to_string()));
+        assert_eq!(h.len(), 3);
         std::env::remove_var("SMYSL_TEST_ANTHROPIC_KEY");
     }
 

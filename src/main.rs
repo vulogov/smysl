@@ -11424,14 +11424,24 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
     eprintln!(
         "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} weakened, {} degraded, \
-         {} repaired, {} token(s)",
+         {} repaired, {} token(s){}",
         report.chunks,
         report.calls,
         staged.len(),
         staged.weakened.len(),
         report.degraded,
         report.repaired,
-        report.usage.total()
+        report.usage.total(),
+        // The cache's share of the input, where the provider has one: a reader of the total
+        // should know how much of it was read at a fraction of the price.
+        if report.usage.cache_read_tokens > 0 || report.usage.cache_write_tokens > 0 {
+            format!(
+                " ({} read from cache, {} written)",
+                report.usage.cache_read_tokens, report.usage.cache_write_tokens
+            )
+        } else {
+            String::new()
+        }
     );
 
     // The ledger records counts, models, task and recipe - never content (§29).

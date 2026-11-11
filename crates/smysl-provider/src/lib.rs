@@ -338,6 +338,15 @@ pub struct Usage {
     /// Retries are recorded here and never in provenance: a retry is not a distinct model
     /// call for recipe purposes (§21.4).
     pub retries: u32,
+    /// Of `input_tokens`, how many the provider served from its prompt cache. A part of the
+    /// input, not an addition to it: `input_tokens` is every token the model read, so the
+    /// totals mean what they meant, and this says how much of that was a cache read, which
+    /// is billed at a fraction. Zero where the provider has no cache or reported none.
+    pub cache_read_tokens: u64,
+    /// Of `input_tokens`, how many the provider wrote into its prompt cache on this call.
+    /// Billed at a premium, so a run that writes on every call and reads on none is paying
+    /// for a cache it never uses - which is what this field is here to show.
+    pub cache_write_tokens: u64,
 }
 
 impl Usage {
@@ -348,6 +357,8 @@ impl Usage {
             output_tokens,
             estimated: false,
             retries: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
         }
     }
 
@@ -358,11 +369,21 @@ impl Usage {
             output_tokens,
             estimated: true,
             retries: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
         }
     }
 
     pub const fn after_retries(mut self, retries: u32) -> Usage {
         self.retries = retries;
+        self
+    }
+
+    /// The cache's share of the input: `read` tokens served from it and `write` tokens put
+    /// into it, both already counted in `input_tokens`.
+    pub const fn with_cache(mut self, read: u64, write: u64) -> Usage {
+        self.cache_read_tokens = read;
+        self.cache_write_tokens = write;
         self
     }
 

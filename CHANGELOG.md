@@ -85,6 +85,52 @@ fixture in one call, none degraded, and `smysl ingest` through the CLI stages 3 
 note with two relations, `check` clean. The README's provider table and the manual's sample
 configuration say so; OpenAI is the one mapper still unproven.
 
+### A chunk is never wider than the answer it can get
+
+`Window::for_context` sized a chunk from the context alone: what was left after the prompt
+reserve and the output reserve. With a million-token window that is a chunk of ~490k tokens,
+whose answer — about the size of its passage — cannot fit an 8,192-token `max_output`; the
+call would stop at the limit, be reported as a truncation, and the whole chunk would degrade
+to opaque prose under rule I. The window is now the tighter of two bounds, the context's and
+`max_output` itself. On a 4k or 8k context the two coincide and nothing chunks differently;
+a provider with a 32k context and an 8k output, SMYSL-2.2 §4's measured pair, chunks at 8,192
+rather than 15,360. The 256-token floor still holds.
+
+### The prompt cache, and the ledger that shows it
+
+An ingest sends the same system prompt and the same kernel schema on every chunk and every
+repair turn; only the passage changes. The Anthropic mapper now marks its system prompt as a
+cache breakpoint — `tools` renders before `system`, so the one marker covers the schema too —
+and the first call writes the entry while every call within five minutes of the last reads
+it, at a fraction of the input price. A prompt below the model's minimum (512 tokens on the
+current models) is simply not cached; the schema alone is past it.
+
+`Usage` gained `cache_read_tokens` and `cache_write_tokens`, both *within* `input_tokens`
+rather than beside it — `input_tokens` is still every token the model read, so the totals
+mean what they meant — and `Usage::with_cache` sets them. The ledger writes `cache_read` and
+`cache_write` only when they are not zero, so a provider without a cache writes the line it
+always wrote and a ledger from 1.14 reads back unchanged; `usage` shows the share beside a
+row's totals, and `ingest`'s summary line names it when there is one.
+
+Verified live on `claude-opus-5-5`: the same short note ingested twice, four seconds apart.
+The first call read 2,096 input tokens and wrote 1,888 of them into the cache — the prompt
+and the schema — and the second read those 1,888 back, with the passage the only tokens
+paid at full price.
+
+### The model that answered is the one the recipe names, or a warning says which
+
+Anthropic's server-side fallback answers under another model when the one asked for declines,
+and the response names it. The recipe is computed before the call and names the model asked
+for — so the units of a chunk answered by another carried a provenance wrong about the one
+thing a recipe exists to pin, and nothing said so. `SMY-W437` now does, per chunk, with both
+names; the registry is 152. A snapshot suffix (`gpt-x` answered by `gpt-x-2026-05-01`) is the
+same model named more precisely and is not reported; an empty name on either side is not a
+difference.
+
+And a provider can decline the chain: `fallbacks: false` in its configuration, on by default,
+drops the field and its beta header, so the answer is by the model the recipe names or by
+nobody. Providers whose APIs have no such chain ignore the key.
+
 ---
 
 ## 1.14.0 — 2026-11-02

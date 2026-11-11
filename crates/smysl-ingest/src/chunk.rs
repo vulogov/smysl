@@ -1,7 +1,15 @@
 //! Chunking (§22.2).
 //!
-//! Window to `context_window − prompt_reserve − output_reserve`, split at paragraph
-//! boundaries, overlap one paragraph.
+//! Window to `context_window − prompt_reserve − output_reserve`, and never wider than the
+//! answer the call can carry (`max_output`); split at paragraph boundaries, overlap one
+//! paragraph.
+//!
+//! **The cap is the output's, not the context's.** Ingest output is roughly the size of its
+//! input, so a chunk wider than `max_output` tokens asks for an answer that cannot fit the
+//! call: the model stops at the limit, the call is a truncation, and the whole chunk degrades
+//! to opaque prose under rule I. On a 4k or 8k context the two bounds coincide and nothing
+//! changes; on a million-token window the context alone would make a chunk of a whole book
+//! and lose it.
 //!
 //! **Chunk-boundary duplication self-heals.** Two chunks that independently produce the
 //! same claim produce the same uid and merge to one unit with two attestations - that is
@@ -57,13 +65,22 @@ pub struct Window {
 }
 
 impl Window {
-    /// The window a provider's context leaves for input text (§22.2).
+    /// The window a provider's context leaves for input text (§22.2), capped at the output
+    /// the call can carry.
+    ///
+    /// Two bounds, and the tighter one wins. The context bound is what is left after the
+    /// prompt and the output reserve. The output bound is `max_output` itself: the answer
+    /// for a chunk is about the chunk's size, so a chunk the answer cannot describe within
+    /// the call's limit is a chunk that will be truncated and degraded whole. Before 1.15
+    /// only the first bound existed, and a provider with a million-token context chunked a
+    /// book into one piece whose 8,192-token answer could not hold it.
     pub fn for_context(context_window: usize, max_output: usize) -> Window {
         let output_reserve =
             max_output.max(((context_window as f32) * OUTPUT_RESERVE_RATIO) as usize);
         let budget = context_window
             .saturating_sub(PROMPT_RESERVE)
-            .saturating_sub(output_reserve);
+            .saturating_sub(output_reserve)
+            .min(max_output);
         Window {
             // A window that reserved itself out of existence would chunk into nothing, so
             // there is a floor: one paragraph has to fit somewhere.
@@ -480,6 +497,22 @@ mod tests {
     fn the_output_reserve_is_at_least_half_the_context() {
         let w = Window::for_context(10_000, 100);
         assert!(w.budget <= 10_000 - 5_000, "budget {}", w.budget);
+    }
+
+    /// A chunk is never wider than the answer it can get. With a million-token context and
+    /// an 8,192-token output, the context bound alone would allow a chunk of ~490k tokens,
+    /// whose answer could not fit the call; the output bound holds it to 8,192.
+    #[test]
+    fn a_chunk_is_never_wider_than_the_answer_the_call_can_carry() {
+        let w = Window::for_context(1_000_000, 8192);
+        assert_eq!(w.budget, 8192);
+        // Where the context is the tighter bound, the cap changes nothing: 4096 − 1024 −
+        // max(1024, 2048) is 1024, and so is `max_output`.
+        let w = Window::for_context(4096, 1024);
+        assert_eq!(w.budget, 1024);
+        // The floor still applies when `max_output` is below it.
+        let w = Window::for_context(100_000, 100);
+        assert_eq!(w.budget, 256);
     }
 
     /// A window that reserved itself out of existence would chunk into nothing.

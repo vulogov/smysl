@@ -1029,9 +1029,31 @@ impl<'a> Ingestor<'a> {
             usage.output_tokens += completion.usage.output_tokens;
             usage.estimated |= completion.usage.estimated;
             usage.retries += completion.usage.retries;
+            usage.cache_read_tokens += completion.usage.cache_read_tokens;
+            usage.cache_write_tokens += completion.usage.cache_write_tokens;
 
             let (units, relations, mut diagnostics, labels) =
                 repair::convert_scoped(&completion.text, path, self.opts.rung, source, scope);
+
+            // The recipe was computed before the call and names the model the request asked
+            // for. A provider that falls back server-side answers under another name, and
+            // the units it staged would otherwise carry a provenance that is wrong about the
+            // one thing a recipe exists to pin. A warning, not an error: the answer is
+            // real, and a repair turn cannot change who gives it.
+            if let Some(answered) = answered_by_another(&request.model, &completion.model) {
+                diagnostics.push(
+                    Diagnostic::new(smysl_core::Code::W437)
+                        .with_message(format!(
+                            "asked `{}`, answered by `{answered}`; the recipe names the \
+                             model asked for",
+                            request.model
+                        ))
+                        .with_suggestion(
+                            "set `fallbacks: false` on the provider to pin the model, or \
+                             accept the answer knowing its provenance",
+                        ),
+                );
+            }
 
             // Check every attributed quote against the text this chunk was drawn from.
             // A quote that is not in the source is a fabricated attribution, and an error -
@@ -1261,6 +1283,27 @@ impl<'a> Ingestor<'a> {
     }
 }
 
+/// The model that answered, where it is not the one asked for.
+///
+/// A provider's name for the model that ran may carry a snapshot the request did not spell
+/// (`gpt-x` answered by `gpt-x-2026-05-01`), which is the same model named more precisely,
+/// not another; so the test is a prefix at a dash boundary, and only a name that fails it is
+/// another model. An empty name on either side says nothing and is not a difference: mock
+/// providers name no model in their capabilities, and a mapper that did not read one back
+/// reports the one it asked for.
+#[cfg(feature = "model")]
+fn answered_by_another<'a>(asked: &str, answered: &'a str) -> Option<&'a str> {
+    if asked.is_empty() || answered.is_empty() || answered == asked {
+        return None;
+    }
+    match answered.strip_prefix(asked) {
+        Some(rest) if rest.starts_with('-') || rest.starts_with(':') || rest.starts_with('@') => {
+            None
+        }
+        _ => Some(answered),
+    }
+}
+
 #[cfg(feature = "model")]
 struct ChunkOutcome {
     units: Vec<UnitCore>,
@@ -1279,6 +1322,28 @@ struct ChunkOutcome {
 #[cfg(all(test, feature = "model"))]
 mod tests {
     use super::*;
+
+    /// `SMY-W437` fires for another model, not for the same model named more precisely, and
+    /// never on a name that is missing — a mock names none, and that is not a fallback.
+    #[test]
+    fn another_model_is_a_different_name_not_a_longer_one() {
+        assert_eq!(
+            answered_by_another("claude-opus-5-5", "claude-opus-5-5"),
+            None
+        );
+        assert_eq!(
+            answered_by_another("claude-opus-5-5", "claude-opus-4-8"),
+            Some("claude-opus-4-8")
+        );
+        // A snapshot suffix is the same model, dated.
+        assert_eq!(answered_by_another("gpt-x", "gpt-x-2026-05-01"), None);
+        assert_eq!(answered_by_another("llama3.2", "llama3.2:latest"), None);
+        // But a longer name that is not a suffix at a boundary is another model.
+        assert_eq!(answered_by_another("gpt-4", "gpt-4o"), Some("gpt-4o"));
+        // Nothing to compare, nothing to say.
+        assert_eq!(answered_by_another("", "scripted"), None);
+        assert_eq!(answered_by_another("claude-opus-5-5", ""), None);
+    }
 
     #[test]
     fn repair_budget_is_two_attempts() {

@@ -297,6 +297,9 @@ registry! {
     Provider => {
         W436 = "SMY-W436", Warn,  "A unit is not in the script of the passage it came from (language policy)";
     }
+    Provider => {
+        W437 = "SMY-W437", Warn,  "The model that answered is not the one the request named (a provider fallback)";
+    }
     // --- The library (RFC SMYSL-2.4), in the order `smysl-text` raises them -------------------
     //
     // Registered with the code that raises them, not with the RFC that allocated them. A code
@@ -991,9 +994,14 @@ mod tests {
     ///
     /// 151 with `SMY-W454` in 1.14.0 (OQ-74): two passes at temperature 0 whose first answers
     /// to the same request differed, so the provider did not do what the configuration said.
+    ///
+    /// 152 with `SMY-W437` in 1.15.0: a completion by a model other than the one the request
+    /// named. A provider that falls back server-side answers under another name, and the
+    /// recipe, computed before the call, names the one asked for; this is how a reader hears
+    /// that the two differ.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 151);
+        assert_eq!(Code::ALL.len(), 152);
     }
 
     #[test]

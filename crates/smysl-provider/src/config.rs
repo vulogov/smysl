@@ -33,6 +33,12 @@ pub struct ProviderConfig {
     pub api_key_cmd: Option<String>,
     /// Request timeout in seconds.
     pub timeout_secs: u64,
+    /// Whether the provider may answer with a model other than the one named, where its API
+    /// offers that (Anthropic's server-side fallback on a policy decline). On by default: an
+    /// answer is better than a refusal. Off pins the model — the answer is by the model the
+    /// recipe names or by nobody — for a run whose provenance has to be exact. Mappers whose
+    /// endpoints have no such chain ignore it.
+    pub fallbacks: bool,
 }
 
 impl ProviderConfig {
@@ -48,6 +54,7 @@ impl ProviderConfig {
             api_key_env: None,
             api_key_cmd: None,
             timeout_secs: 120,
+            fallbacks: true,
         }
     }
 
@@ -166,6 +173,13 @@ impl Config {
                 }
                 if let Some(v) = o.get("timeout_secs").and_then(|v| v.value.as_int()) {
                     p.timeout_secs = v.max(1) as u64;
+                }
+                if let Some(v) = o.get("fallbacks") {
+                    p.fallbacks = v.value.as_bool().ok_or_else(|| {
+                        ProviderError::Config(format!(
+                            "provider {id}: `fallbacks` must be true or false"
+                        ))
+                    })?;
                 }
                 if let Some(v) = o.get("structured").and_then(|v| v.value.as_str()) {
                     p.structured = structured(v).ok_or_else(|| {
@@ -378,6 +392,27 @@ mod tests {
   }
   fallback: [ollama]
 }"#;
+
+    /// `fallbacks` is on unless the file says otherwise, and it has to say so with a boolean.
+    #[test]
+    fn fallbacks_default_on_and_can_be_declined() {
+        let c = Config::load(SAMPLE).unwrap();
+        assert!(c.providers[&ProviderId::new("remote").unwrap()].fallbacks);
+
+        let pinned = SAMPLE.replace(
+            "structured: tool-force",
+            "structured: tool-force\n      fallbacks: false",
+        );
+        let c = Config::load(&pinned).unwrap();
+        assert!(!c.providers[&ProviderId::new("remote").unwrap()].fallbacks);
+
+        let wrong = SAMPLE.replace(
+            "structured: tool-force",
+            "structured: tool-force\n      fallbacks: never",
+        );
+        let e = Config::load(&wrong).unwrap_err().to_string();
+        assert!(e.contains("`fallbacks` must be true or false"), "{e}");
+    }
 
     #[test]
     fn a_configuration_round_trips_its_fields() {

@@ -220,12 +220,16 @@ impl Gemini {
                 output_tokens: o,
                 estimated: false,
                 retries,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
             },
             _ => Usage {
                 input_tokens: input.unwrap_or(0),
                 output_tokens: output.unwrap_or(smysl_core::tokens(&text) as u64),
                 estimated: true,
                 retries,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
             },
         };
 

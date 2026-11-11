@@ -686,6 +686,8 @@ impl Ingestor<'_> {
                 usage.output_tokens += c.usage.output_tokens;
                 usage.estimated |= c.usage.estimated;
                 usage.retries += c.usage.retries;
+                usage.cache_read_tokens += c.usage.cache_read_tokens;
+                usage.cache_write_tokens += c.usage.cache_write_tokens;
                 let answer = super::pivot::parse_answer(&c.text, sources.len());
                 (super::pivot::units(&sources, &answer, lang.as_str()), 1)
             }

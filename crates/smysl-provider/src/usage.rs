@@ -34,6 +34,11 @@ pub struct LedgerEntry {
     pub output_tokens: u64,
     pub estimated: bool,
     pub retries: u32,
+    /// Of `input_tokens`, served from the provider's prompt cache. Zero where there is no
+    /// cache; written to the line only when it is not.
+    pub cache_read_tokens: u64,
+    /// Of `input_tokens`, written into the provider's prompt cache on this call.
+    pub cache_write_tokens: u64,
     /// The recipe hash, when the caller has one (D-8). Short form.
     pub recipe: Option<String>,
     /// A run identifier, so `usage --by run` can group one command's calls.
@@ -57,6 +62,8 @@ impl LedgerEntry {
             output_tokens: u.output_tokens,
             estimated: u.estimated,
             retries: u.retries,
+            cache_read_tokens: u.cache_read_tokens,
+            cache_write_tokens: u.cache_write_tokens,
             recipe: None,
             run: None,
         }
@@ -92,6 +99,14 @@ impl LedgerEntry {
         s.push_str(&format!(",\"out\":{}", self.output_tokens));
         s.push_str(&format!(",\"estimated\":{}", self.estimated));
         s.push_str(&format!(",\"retries\":{}", self.retries));
+        // The cache's share, only where there is one: a provider without a cache writes the
+        // line it always wrote, and a ledger from before 1.15 reads back unchanged.
+        if self.cache_read_tokens > 0 {
+            s.push_str(&format!(",\"cache_read\":{}", self.cache_read_tokens));
+        }
+        if self.cache_write_tokens > 0 {
+            s.push_str(&format!(",\"cache_write\":{}", self.cache_write_tokens));
+        }
         if let Some(r) = &self.recipe {
             s.push_str(&format!(",\"recipe\":{}", json_escape(r)));
         }
@@ -122,6 +137,14 @@ impl LedgerEntry {
                 .unwrap_or(false),
             retries: fields
                 .get("retries")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+            cache_read_tokens: fields
+                .get("cache_read")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+            cache_write_tokens: fields
+                .get("cache_write")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0),
             recipe: fields.get("recipe").cloned(),
@@ -259,6 +282,10 @@ pub struct Totals {
     /// True when any call in the group had estimated counts, so a reader knows the total
     /// is not authoritative.
     pub estimated: bool,
+    /// Of `input_tokens`, how many were read from a prompt cache, and how many written to
+    /// one. Shown only where either is not zero.
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
 }
 
 impl Totals {
@@ -277,7 +304,15 @@ impl fmt::Display for Totals {
             self.input_tokens,
             self.output_tokens,
             if self.estimated { "  (estimated)" } else { "" }
-        )
+        )?;
+        if self.cache_read_tokens > 0 || self.cache_write_tokens > 0 {
+            write!(
+                f,
+                "  ({} of the input read from cache, {} written)",
+                self.cache_read_tokens, self.cache_write_tokens
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -362,12 +397,16 @@ impl Ledger {
                 output_tokens: 0,
                 retries: 0,
                 estimated: false,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
             });
             row.calls += 1;
             row.input_tokens += e.input_tokens;
             row.output_tokens += e.output_tokens;
             row.retries += e.retries as u64;
             row.estimated |= e.estimated;
+            row.cache_read_tokens += e.cache_read_tokens;
+            row.cache_write_tokens += e.cache_write_tokens;
         }
         acc.into_values().collect()
     }
@@ -442,6 +481,36 @@ mod tests {
             ],
             "the ledger grew a field; is it content?"
         );
+    }
+
+    /// The cache's share rides on the line only when there is one, so a provider without a
+    /// cache writes the line it always wrote, and both fields read back.
+    #[test]
+    fn the_cache_share_round_trips_and_is_absent_when_zero() {
+        let plain = entry(1, "ollama", Task::ContentIngest, 30, 12);
+        assert!(!plain.to_line().contains("cache"), "{}", plain.to_line());
+
+        let mut e = entry(2, "anthropic", Task::ContentIngest, 3000, 12);
+        e.cache_read_tokens = 2900;
+        e.cache_write_tokens = 0;
+        let line = e.to_line();
+        assert!(line.contains("\"cache_read\":2900"), "{line}");
+        assert!(!line.contains("cache_write"), "{line}");
+        assert_eq!(LedgerEntry::from_line(&line), Some(e.clone()));
+
+        // And a total shows the share, where there is one.
+        let mut l = Ledger::new();
+        l.record(plain).unwrap();
+        l.record(e).unwrap();
+        let rows = l.totals(GroupBy::Provider, None);
+        let a = rows.iter().find(|r| r.key == "anthropic").unwrap();
+        assert_eq!((a.input_tokens, a.cache_read_tokens), (3000, 2900));
+        assert!(
+            a.to_string().contains("2900 of the input read from cache"),
+            "{a}"
+        );
+        let o = rows.iter().find(|r| r.key == "ollama").unwrap();
+        assert!(!o.to_string().contains("cache"), "{o}");
     }
 
     #[test]

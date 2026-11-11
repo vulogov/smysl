@@ -548,6 +548,14 @@ provider that never set it (and reads 1024) is not asked for less.
 whatever this said, and an answer of a dozen units could be cut off at the
 limit — which is now reported as that, and counted as the call it was.
 
+From 1.15 it is also the ceiling on a chunk. An answer is about the size of
+the passage it describes, so a chunk wider than `max_output` tokens asks for
+an answer the call cannot carry, and what came back would be a truncation
+degraded whole. The window is therefore the tighter of two bounds: what the
+context leaves after the prompt and the output reserve, and `max_output`
+itself. On an 8k context the two coincide; on a million-token one the first
+alone would make a chunk of a whole book, and lose it.
+
 An `ingest` block holds the defaults that are facts about the project rather
 than things to type on every invocation: `prompt`, a prompt override file;
 `path`, the ingest path to prefer; and, from 1.9, `temperature`, from 0.0 to
@@ -579,6 +587,16 @@ chunk planned for a large window could be truncated by the server and answered
 as if whole. It is the configured value that is sent, never one a `--probe`
 measured: a 128k architecture window is routinely more than the machine will
 allocate.
+
+`fallbacks`, from 1.15, is for a provider whose API can answer with a model
+other than the one named. Anthropic's does: a request its policy declines is
+retried, within the same call, on a model the API picks, and the response
+names the one that answered. That is on by default, because an answer is
+better than a refusal — but the recipe is computed before the call and names
+the model asked for, so every chunk answered by another is reported as
+`SMY-W437`, with both names. `fallbacks: false` pins the model: the answer is
+then by the one the recipe names, or by nobody. Providers without such a chain
+ignore the key.
 
 #term("Provider")[
   One configured endpoint: an id, which mapper drives it (`ollama`,
@@ -691,6 +709,17 @@ model actually answered — no tokens were spent because no model ever
 received the request. That is the ledger doing exactly what it promises:
 counts, never content, and it errs toward recording an attempt rather than
 silently discarding one.
+
+A provider with a prompt cache adds two keys, from 1.15: `cache_read`, how
+many of the call's input tokens were served from the cache, and
+`cache_write`, how many were written into it. Both are part of `in`, not
+additions to it — `in` is still every token the model read — and both are
+written only when they are not zero, so a provider without a cache writes the
+line it always wrote. The Anthropic mapper marks its system prompt as a cache
+breakpoint, which covers the kernel schema sent with it, so an ingest of many
+chunks reads the two from the cache on every chunk after the first, at a
+fraction of the input price; `usage` shows the share beside each row's total,
+and `ingest`'s summary line names it when there is one.
 
 Read this honestly rather than generalising it: in this build, `ingest` is
 the command that writes the ledger from the CLI. `attest`'s own report
