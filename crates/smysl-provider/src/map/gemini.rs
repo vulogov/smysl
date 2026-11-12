@@ -202,6 +202,15 @@ impl Gemini {
                 category: reason.to_string(),
             });
         }
+        // No answer at the cap: the thoughts spent it, and the remedy is the cap, not the
+        // response. Read before the empty check, which would call it malformed.
+        if text.is_empty() && reason == "MAX_TOKENS" {
+            return Err(ProviderError::Unanswered {
+                limit: Some(cap),
+                used: output.map(|o| o as usize),
+                thinking: thoughts.map(|t| t as usize),
+            });
+        }
         if text.is_empty() {
             return Err(ProviderError::Malformed(match reason {
                 "" => "no candidate content in response".to_string(),
@@ -229,6 +238,7 @@ impl Gemini {
                 retries,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
+                thinking_tokens: thoughts.unwrap_or(0),
             },
             _ => Usage {
                 input_tokens: input.unwrap_or(0),
@@ -237,6 +247,7 @@ impl Gemini {
                 retries,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
+                thinking_tokens: thoughts.unwrap_or(0),
             },
         };
 
@@ -421,6 +432,9 @@ impl Provider for Gemini {
             streaming: false,
             usage_reporting: true,
             offline: self.cfg.is_local(),
+            // The thoughts are spent against `maxOutputTokens` (see `parse`).
+            reasoning_in_output: true,
+            temperature: true,
         }
     }
 

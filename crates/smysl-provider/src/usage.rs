@@ -39,6 +39,9 @@ pub struct LedgerEntry {
     pub cache_read_tokens: u64,
     /// Of `input_tokens`, written into the provider's prompt cache on this call.
     pub cache_write_tokens: u64,
+    /// Of `output_tokens`, spent on reasoning rather than the answer, where reported. Zero
+    /// elsewhere; written to the line only when it is not.
+    pub thinking_tokens: u64,
     /// The recipe hash, when the caller has one (D-8). Short form.
     pub recipe: Option<String>,
     /// A run identifier, so `usage --by run` can group one command's calls.
@@ -64,6 +67,7 @@ impl LedgerEntry {
             retries: u.retries,
             cache_read_tokens: u.cache_read_tokens,
             cache_write_tokens: u.cache_write_tokens,
+            thinking_tokens: u.thinking_tokens,
             recipe: None,
             run: None,
         }
@@ -107,6 +111,9 @@ impl LedgerEntry {
         if self.cache_write_tokens > 0 {
             s.push_str(&format!(",\"cache_write\":{}", self.cache_write_tokens));
         }
+        if self.thinking_tokens > 0 {
+            s.push_str(&format!(",\"thinking\":{}", self.thinking_tokens));
+        }
         if let Some(r) = &self.recipe {
             s.push_str(&format!(",\"recipe\":{}", json_escape(r)));
         }
@@ -145,6 +152,10 @@ impl LedgerEntry {
                 .unwrap_or(0),
             cache_write_tokens: fields
                 .get("cache_write")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+            thinking_tokens: fields
+                .get("thinking")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0),
             recipe: fields.get("recipe").cloned(),
@@ -286,6 +297,8 @@ pub struct Totals {
     /// one. Shown only where either is not zero.
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
+    /// Of `output_tokens`, how many went on reasoning. Shown only where not zero.
+    pub thinking_tokens: u64,
 }
 
 impl Totals {
@@ -310,6 +323,13 @@ impl fmt::Display for Totals {
                 f,
                 "  ({} of the input read from cache, {} written)",
                 self.cache_read_tokens, self.cache_write_tokens
+            )?;
+        }
+        if self.thinking_tokens > 0 {
+            write!(
+                f,
+                "  ({} of the output spent thinking)",
+                self.thinking_tokens
             )?;
         }
         Ok(())
@@ -399,6 +419,7 @@ impl Ledger {
                 estimated: false,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
+                thinking_tokens: 0,
             });
             row.calls += 1;
             row.input_tokens += e.input_tokens;
@@ -407,6 +428,7 @@ impl Ledger {
             row.estimated |= e.estimated;
             row.cache_read_tokens += e.cache_read_tokens;
             row.cache_write_tokens += e.cache_write_tokens;
+            row.thinking_tokens += e.thinking_tokens;
         }
         acc.into_values().collect()
     }
@@ -508,6 +530,23 @@ mod tests {
         assert!(
             a.to_string().contains("2900 of the input read from cache"),
             "{a}"
+        );
+
+        // The reasoning's share of the output, the same way.
+        let mut t = entry(3, "anthropic", Task::ContentIngest, 100, 800);
+        t.thinking_tokens = 650;
+        let line = t.to_line();
+        assert!(line.contains("\"thinking\":650"), "{line}");
+        assert_eq!(LedgerEntry::from_line(&line), Some(t.clone()));
+        let mut thought = Ledger::new();
+        thought.record(t).unwrap();
+        let thinking_rows = thought.totals(GroupBy::Provider, None);
+        assert!(
+            thinking_rows[0]
+                .to_string()
+                .contains("650 of the output spent thinking"),
+            "{}",
+            thinking_rows[0]
         );
         let o = rows.iter().find(|r| r.key == "ollama").unwrap();
         assert!(!o.to_string().contains("cache"), "{o}");

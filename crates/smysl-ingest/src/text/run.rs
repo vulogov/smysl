@@ -228,9 +228,12 @@ impl Ingestor<'_> {
 
         let provider = self.registry.for_task(Task::ContentIngest)?;
         let caps = provider.caps();
-        let budget =
-            crate::chunk::Window::for_context(caps.context_window, self.opts.output_budget(&caps))
-                .budget;
+        let budget = crate::chunk::Window::for_context(
+            caps.context_window,
+            self.opts.output_budget(&caps),
+            caps.reasoning_in_output,
+        )
+        .budget;
 
         let mut report = TextReport {
             alias: alias.clone(),
@@ -691,6 +694,7 @@ impl Ingestor<'_> {
                 usage.retries += c.usage.retries;
                 usage.cache_read_tokens += c.usage.cache_read_tokens;
                 usage.cache_write_tokens += c.usage.cache_write_tokens;
+                usage.thinking_tokens += c.usage.thinking_tokens;
                 let answer = super::pivot::parse_answer(&c.text, sources.len());
                 (super::pivot::units(&sources, &answer, lang.as_str()), 1)
             }

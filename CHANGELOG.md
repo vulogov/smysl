@@ -145,6 +145,117 @@ rather than `SMY-W304`, the report's `declined` counts it, and the ingest summar
 is not an outage and never triggers a fallback, and it exits 6 like any provider error
 where a command cannot degrade.
 
+### The limit the reasoning spends: headroom, a warning, and the share in the ledger
+
+On Anthropic's current models and Gemini's thinking models the reasoning is spent from the
+same `max_output` as the answer, and a chunk sized to the whole limit could end before its
+answer began — reported, until now, as `Malformed("empty response")`, because the empty
+content was judged before the stop reason. `Capabilities::reasoning_in_output` says which
+providers do this; ingest keeps a quarter of the limit back when it sizes their chunks
+(`REASONING_HEADROOM_RATIO`); and a limit spent before the answer is
+`ProviderError::Unanswered { limit, used, thinking }`, which degrades under rule I as
+`SMY-W455` with the limit, the reasoning's share where the provider reports one (Anthropic's
+`output_tokens_details.thinking_tokens`, Gemini's `thoughtsTokenCount`), and the remedy.
+`Usage::thinking_tokens` carries that share on every call, the ledger writes it as `thinking`
+when it is not zero, `smysl usage` shows it, and the ingest summary prints it beside the
+cache's share.
+
+### `effort` is a setting, and the default is the one that measured best
+
+The Anthropic mapper sent `output_config.effort: low` on every schema request and nothing
+else could be asked for. `effort: low | medium | high` on the provider is now the caller's
+say, applied to every request; unset, a schema request is still `low` and a free-text request
+takes the model's default. Measured on the SM-P14 fixture, three models at each setting, one
+call each with repairs counted:
+
+| model | `low` | `medium` | `high` |
+|---|---|---|---|
+| claude-haiku-5-5 | 5 units, 2 490 tokens, 0 thinking | 5 units, 2 513 tokens, 0 thinking | **0 units**: 800 of 800 tokens thinking, degraded under `SMY-W455` |
+| claude-sonnet-5-5 | 5 units, 2 615 tokens, 0 thinking | 5 units, 2 652 tokens, 0 thinking | 5 units, 2 686 tokens, 0 thinking |
+| claude-opus-5-5 | 4 units, 2 613 tokens, 0 thinking | 4 units, 2 619 tokens, 0 thinking | 5 units, 2 736 tokens, 0 thinking |
+
+Each cell is one call with no repair turn. `low` and `medium` are the same answer at the same
+price; `high` buys one more unit on Opus and nothing at all on Haiku, which spent the whole
+800-token limit thinking and answered nothing — the first live `SMY-W455`, and the case the
+headroom and the warning exist for. `low` stays the default.
+
+### The probe reads the model's lifecycle
+
+`providers --probe` on an Anthropic provider now reads the model list's `deprecated_at` and
+`retires_at` and says, after the count, whether the configured model is listed, deprecated
+and from when, retiring and when, or not listed at all. A list is a catalogue rather than an
+entitlement, but "not listed" is what would have caught the stale `claude-sonnet-4-5` pin a
+release earlier than paying for a 404 did.
+
+### A temperature a provider will not take is said to be a no-op
+
+`ingest.temperature` and `--temperature` still parsed, range-checked and did nothing on a
+provider whose endpoint refuses the field — Anthropic at `2026-10-21`, at every value.
+`Capabilities::temperature` says whether the endpoint takes one, and a run with a temperature
+above zero on a provider that does not reports `SMY-W456` once, before the first call.
+
+### An open payload is sent unstrict to an OpenAI-compatible endpoint
+
+OpenAI's strict mode takes a subset of JSON Schema in which every object is closed, and the
+kernel's `payload` is open by design; the translation closed every object that had properties
+and left `payload`, which has none, open — a schema the endpoint refuses outright, the same
+way Anthropic's did before 1.15 moved off strict there. Now a schema is sent `strict: true`
+only where it translates closed; the kernel schema is sent as it is, not strict, and the
+answer is checked on the way in like a json-mode one, with `Completion::structured` false so
+nothing claims enforcement that did not happen. A closed schema is sent strict and enforced
+as before. Asserted against the request shape, not live: nobody here holds an OpenAI key.
+
+### Anthropic streams, and waits longer
+
+`Provider::stream` is implemented for the Anthropic mapper: the event stream is read whole
+and replayed event by event, as the other mappers do — `message_start` for the input side,
+the deltas for the text or the tool input's JSON, `message_delta` for the output side and
+the stop, with a refusal or an error event failing the stream the way `parse` fails a
+completion. `Capabilities::streaming` is true again, and true this time. Because the body is
+read whole, a timeout still covers the whole answer, so an Anthropic provider that names no
+`timeout_secs` now gets 600 rather than 120: thinking is always on, and a long chunk at a
+high effort ran past two minutes.
+
+### The live gate runs the cheap model, and a matrix runs them all
+
+`providers_live.rs` named only `claude-opus-5-5`. The Anthropic candidate is now
+`claude-haiku-5-5` unless `SMYSL_ANTHROPIC_MODEL` says otherwise, so the gate is affordable
+to run routinely, and `SMYSL_ANTHROPIC_MATRIX=1` runs the fixture on Haiku, Sonnet and Opus
+5.5 in turn, each required to stage conformant units. On 1.15, at the default effort:
+
+| model | units | calls | degraded | tokens |
+|---|---|---|---|---|
+| claude-haiku-5-5 | 5 | 1 | 0 | 2 490 |
+| claude-sonnet-5-5 | 5 | 1 | 0 | 2 615 |
+| claude-opus-5-5 | 4 | 1 | 0 | 2 613 |
+
+Every model stages conformant units in one call; Haiku does what Opus does on this fixture at
+a fraction of the price, which is why it is the gate's default.
+
+### The estimator against the tokeniser
+
+`smysl_core::tokens` is `ceil(bytes / 4)` by design: a chunking has to be pure (rule D), and
+no tokeniser is available offline. How far that is from the tokeniser was never measured.
+`Anthropic::count_tokens_remote` asks `POST /v1/messages/count_tokens`, which is free, and
+`SMYSL_ANTHROPIC_CALIBRATE=1` runs four samples through it against the estimator, with the
+empty-message overhead subtracted:
+
+| sample | bytes | estimated | counted | estimated / counted |
+|---|---|---|---|---|
+| the SM-P14 fixture (English prose with numbers) | 257 | 65 | 91 | 0.71 |
+| English prose | 304 | 76 | 84 | 0.90 |
+| Rust source | 256 | 64 | 127 | 0.50 |
+| Russian prose | 322 | 81 | 71 | 1.14 |
+
+So `bytes / 4` under-counts English prose by a tenth to a third, under-counts code by half,
+and over-counts Cyrillic by a seventh — the two-byte letters cost fewer tokens than their
+bytes. A chunk sized by the estimator is therefore up to twice its estimate in the
+tokeniser's terms on code, and about a fifth over on prose.
+
+Recorded, not acted on: the estimator stays what it is, because its purity is the point, and
+the chunk cap has the output limit's slack to absorb the error. A caller who needs the
+tokeniser's number has the method.
+
 ---
 
 ## 1.14.0 — 2026-11-02

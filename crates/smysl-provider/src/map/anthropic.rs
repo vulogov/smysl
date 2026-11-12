@@ -42,10 +42,17 @@
 //! happened: `input_tokens` is still every token the model read, and the cache's share of it
 //! is reported apart, so a ledger can show a run that wrote and never read.
 //!
+//! **The reasoning is spent from `max_tokens`**, and the response says how much:
+//! `usage.output_tokens_details.thinking_tokens` is carried as `Usage::thinking_tokens`, and a
+//! `max_tokens` stop with no answer at all is `ProviderError::Unanswered` with that share,
+//! rather than an empty response. `effort` on the provider's configuration is sent as
+//! `output_config.effort` on every request; unset, a schema request is `low`.
+//!
 //! | Path | Purpose |
 //! |---|---|
-//! | `POST /v1/messages` | completion, streaming or not |
-//! | `GET /v1/models` | model list; also the reachability probe |
+//! | `POST /v1/messages` | completion, streaming or not (`read_stream` replays the events) |
+//! | `POST /v1/messages/count_tokens` | the tokeniser's count, for calibrating the estimator |
+//! | `GET /v1/models` | model list with each model's lifecycle; also the reachability probe |
 //!
 //! **Verified live** on 1.15 against `api.anthropic.com`: the SM-P14 gate
 //! (`crates/smysl-ingest/tests/providers_live.rs`) and `smysl ingest` through the CLI, both
@@ -62,6 +69,7 @@ use super::StatusMapping;
 use super::auth::{self, Secret};
 use crate::config::ProviderConfig;
 use crate::http;
+use crate::stream::{Emitter, StreamMsg};
 use crate::{
     Capabilities, Completion, Probe, Provider, ProviderId, Request, StructuredMode, TokenCount,
     Usage,
@@ -183,7 +191,8 @@ impl Anthropic {
                 body["tool_choice"] = json!({"type": "auto", "disable_parallel_tool_use": true});
                 // A schema-shaped extraction is the simple case: the schema does the work,
                 // and the reasoning a higher effort buys is spent from the caller's
-                // `max_tokens`. Free-text requests take the model's default.
+                // `max_tokens`. Free-text requests take the model's default. A configured
+                // `effort` overrides both, below.
                 body["output_config"] = json!({"effort": "low"});
                 if !system.is_empty() {
                     system.push_str("\n\n");
@@ -191,6 +200,12 @@ impl Anthropic {
                 system.push_str(STEER);
             }
             _ => return Err(ProviderError::StructuredUnsupported),
+        }
+        // The configured effort, on every request. Measured on 1.15 (see the changelog):
+        // the setting is the caller's to make, and the default above is what measured best
+        // for a schema request.
+        if let Some(e) = &self.cfg.effort {
+            body["output_config"] = json!({"effort": e});
         }
         if !system.is_empty() {
             // One text block with a cache breakpoint. `tools` renders before `system`, so the
@@ -264,21 +279,34 @@ impl Anthropic {
                 .join(""),
         };
 
-        if text.is_empty() {
-            return Err(ProviderError::Malformed("empty response".into()));
-        }
+        let output = v.pointer("/usage/output_tokens").and_then(Value::as_u64);
+        // The reasoning's share of the output, which the model spends from the same
+        // `max_tokens` as the answer.
+        let thinking = v
+            .pointer("/usage/output_tokens_details/thinking_tokens")
+            .and_then(Value::as_u64);
 
         // `max_tokens` means the answer was cut off, which the caller must not parse as a
-        // whole one.
+        // whole one. Read before the empty check: an answer that never began because the
+        // reasoning spent the limit is not a malformed response, and the remedy is the
+        // limit. Until 1.15 it was reported as "empty response".
         if v.get("stop_reason").and_then(Value::as_str) == Some("max_tokens") {
+            if text.is_empty() {
+                return Err(ProviderError::Unanswered {
+                    limit: Some(cap),
+                    used: output.map(|o| o as usize),
+                    thinking: thinking.map(|t| t as usize),
+                });
+            }
             // `requested` was `text.len()`, bytes against a token cap.
             return Err(ProviderError::Truncated {
                 limit: Some(cap),
-                used: v
-                    .pointer("/usage/output_tokens")
-                    .and_then(Value::as_u64)
-                    .map(|o| o as usize),
+                used: output.map(|o| o as usize),
             });
+        }
+
+        if text.is_empty() {
+            return Err(ProviderError::Malformed("empty response".into()));
         }
 
         // `input_tokens` on the wire is the *uncached* input: the tokens read from the cache
@@ -294,7 +322,6 @@ impl Anthropic {
             .and_then(Value::as_u64)
             .unwrap_or(0);
         let input = v.pointer("/usage/input_tokens").and_then(Value::as_u64);
-        let output = v.pointer("/usage/output_tokens").and_then(Value::as_u64);
         let usage = match (input, output) {
             (Some(i), Some(o)) => Usage::reported(i + cache_read + cache_write, o),
             _ => Usage::estimated(
@@ -303,7 +330,8 @@ impl Anthropic {
             ),
         }
         .after_retries(retries)
-        .with_cache(cache_read, cache_write);
+        .with_cache(cache_read, cache_write)
+        .with_thinking(thinking.unwrap_or(0));
 
         Ok(Completion {
             text,
@@ -318,22 +346,181 @@ impl Anthropic {
     }
 
     pub fn parse_models(raw: &str) -> Result<Vec<String>, ProviderError> {
-        let v: Value = serde_json::from_str(raw)
-            .map_err(|e| ProviderError::Malformed(format!("models: {e}")))?;
-        let mut out: Vec<String> = v
-            .get("data")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|m| m.get("id").and_then(Value::as_str))
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut out: Vec<String> = Anthropic::parse_models_meta(raw)?
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
         out.sort();
         out.dedup();
         Ok(out)
     }
+
+    /// The model list with each model's lifecycle, as the endpoint reports it.
+    pub fn parse_models_meta(raw: &str) -> Result<Vec<ModelMeta>, ProviderError> {
+        let v: Value = serde_json::from_str(raw)
+            .map_err(|e| ProviderError::Malformed(format!("models: {e}")))?;
+        let date = |m: &Value, k: &str| m.get(k).and_then(Value::as_str).map(str::to_string);
+        Ok(v.get("data")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|m| {
+                        Some(ModelMeta {
+                            id: m.get("id")?.as_str()?.to_string(),
+                            deprecated_at: date(m, "deprecated_at"),
+                            retires_at: date(m, "retires_at"),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// What the probe says about the configured model: listed, listed and deprecated, or
+    /// not listed at all. A list is a catalogue rather than an entitlement, so "listed" is
+    /// not "can call" — but "not listed" caught the stale `claude-sonnet-4-5` pin that 1.15
+    /// otherwise found by paying for a 404, and "deprecated" is the date to plan around.
+    pub fn model_note(configured: &str, models: &[ModelMeta]) -> String {
+        match models.iter().find(|m| m.id == configured) {
+            None => format!("`{configured}` is not listed by the endpoint"),
+            Some(m) => match (&m.deprecated_at, &m.retires_at) {
+                (Some(d), Some(r)) => format!("`{configured}` deprecated since {d}, retires {r}"),
+                (Some(d), None) => format!("`{configured}` deprecated since {d}"),
+                (None, Some(r)) => format!("`{configured}` retires {r}"),
+                (None, None) => format!("`{configured}` listed"),
+            },
+        }
+    }
+
+    /// The endpoint's own count for `text` as one user message of the configured model
+    /// (`POST /v1/messages/count_tokens`, which is free and *does* send the text). Not
+    /// `Provider::count_tokens`, which stays the bundled estimator so a chunking is pure
+    /// (rule D); this is for calibrating the estimator against the tokeniser, by a live test,
+    /// once.
+    pub fn count_tokens_remote(&self, text: &str) -> Result<u64, ProviderError> {
+        let headers = self.headers()?;
+        let body = json!({
+            "model": self.cfg.model,
+            "messages": [{"role": "user", "content": text}],
+        })
+        .to_string();
+        let url = self.url("/v1/messages/count_tokens");
+        let timeout = Duration::from_secs(self.cfg.timeout_secs);
+        let resp = crate::runtime::run(move || {
+            http::post_json(
+                &url,
+                &headers,
+                &body,
+                timeout,
+                std::thread::sleep,
+                super::jitter,
+            )
+        })?;
+        if resp.status >= 400 {
+            return Err(self.status_error(resp.status, &resp.body));
+        }
+        let v: Value = serde_json::from_str(&resp.body)
+            .map_err(|e| ProviderError::Malformed(format!("count_tokens: {e}")))?;
+        v.get("input_tokens")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| ProviderError::Malformed("count_tokens: no input_tokens".into()))
+    }
+}
+
+/// One model as `GET /v1/models` lists it: its id and, where the endpoint says, when it was
+/// deprecated and when it retires.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ModelMeta {
+    pub id: String,
+    pub deprecated_at: Option<String>,
+    pub retires_at: Option<String>,
+}
+
+/// One server-sent event's payload, or `None` for an `event:` line, a blank, or a ping.
+pub fn sse_event(line: &str) -> Option<Value> {
+    let payload = line.strip_prefix("data:")?.trim();
+    if payload.is_empty() {
+        return None;
+    }
+    serde_json::from_str(payload).ok()
+}
+
+/// Read a streamed response, event by event, into the emitter.
+///
+/// `message_start` carries the input side of the usage, `content_block_delta` the text (or
+/// the tool input's JSON, piece by piece), `message_delta` the output side and the stop
+/// reason. A decline or an error event fails the stream the way `parse` would fail the
+/// completion.
+pub(crate) fn read_stream(
+    body: &str,
+    retries: u32,
+    emitter: &mut Emitter,
+) -> Result<Usage, ProviderError> {
+    let mut usage = Usage {
+        estimated: true,
+        retries,
+        ..Usage::default()
+    };
+    for line in body.lines() {
+        let Some(ev) = sse_event(line) else { continue };
+        match ev.get("type").and_then(Value::as_str) {
+            Some("message_start") => {
+                let u = ev.pointer("/message/usage");
+                let n = |k: &str| {
+                    u.and_then(|u| u.get(k))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0)
+                };
+                let (read, write) = (
+                    n("cache_read_input_tokens"),
+                    n("cache_creation_input_tokens"),
+                );
+                usage.input_tokens = n("input_tokens") + read + write;
+                usage.cache_read_tokens = read;
+                usage.cache_write_tokens = write;
+            }
+            Some("content_block_delta") => {
+                let piece = ev
+                    .pointer("/delta/text")
+                    .or_else(|| ev.pointer("/delta/partial_json"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !piece.is_empty() && !emitter.token(piece) {
+                    break;
+                }
+            }
+            Some("message_delta") => {
+                if let Some(o) = ev.pointer("/usage/output_tokens").and_then(Value::as_u64) {
+                    usage.output_tokens = o;
+                    usage.estimated = false;
+                }
+                usage.thinking_tokens = ev
+                    .pointer("/usage/output_tokens_details/thinking_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                if ev.pointer("/delta/stop_reason").and_then(Value::as_str) == Some("refusal") {
+                    return Err(ProviderError::Declined {
+                        category: ev
+                            .pointer("/delta/stop_details/category")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unspecified")
+                            .to_string(),
+                    });
+                }
+            }
+            Some("error") => {
+                if let Some(e) = error_of(&ev) {
+                    return Err(e);
+                }
+            }
+            _ => {}
+        }
+    }
+    if usage.estimated {
+        usage.output_tokens = (emitter.output_chars() as u64).div_ceil(4);
+    }
+    Ok(usage)
 }
 
 /// Anthropic's error envelope: `{"type":"error","error":{"type":…,"message":…}}`.
@@ -376,15 +563,15 @@ impl Provider for Anthropic {
                 StructuredMode::None => StructuredMode::None,
                 _ => StructuredMode::ToolForce,
             },
-            // False, because this mapper does not implement `Provider::stream` and so
-            // inherits the trait default, which refuses. The trait's own documentation says
-            // `caps` describes what a provider *does*, "which is not always the same thing" —
-            // and this said `true` for as long as the mapper has existed. Nothing in the
-            // library reads the field yet, which is why nothing noticed; `Capabilities` is
-            // public API, so a consumer could.
-            streaming: false,
+            // Since 1.15: `Provider::stream` reads the event stream (`read_stream`). It said
+            // `true` for as long as the mapper existed while inheriting the trait default,
+            // which refuses; from 1.11 to 1.14 it said `false`, which was at least true.
+            streaming: true,
             usage_reporting: true,
             offline: self.cfg.is_local(),
+            // Thinking is always on and spent from `max_tokens`; `temperature` is a 400.
+            reasoning_in_output: true,
+            temperature: false,
         }
     }
 
@@ -409,6 +596,48 @@ impl Provider for Anthropic {
             return Err(self.status_error(resp.status, &resp.body));
         }
         self.parse(&resp.body, resp.retries, req.max_output)
+    }
+
+    fn stream(
+        &self,
+        req: &Request,
+        tx: std::sync::mpsc::Sender<StreamMsg>,
+    ) -> Result<Usage, ProviderError> {
+        let headers = self.headers()?;
+        let body = self.body(req, true)?.to_string();
+        let url = self.url("/v1/messages");
+        let timeout = Duration::from_secs(self.cfg.timeout_secs);
+
+        // The body is read whole and then replayed event by event, as the other mappers do:
+        // `http::post_json` returns a complete response. So the timeout covers the whole
+        // answer here too, which is why an Anthropic provider's default is the longer one.
+        crate::runtime::run(move || {
+            let mut emitter = Emitter::new(tx);
+            let resp = match http::post_json(
+                &url,
+                &headers,
+                &body,
+                timeout,
+                std::thread::sleep,
+                super::jitter,
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    emitter.fail(e.clone());
+                    return Err(e);
+                }
+            };
+            match read_stream(&resp.body, resp.retries, &mut emitter) {
+                Ok(usage) => {
+                    emitter.done(usage);
+                    Ok(usage)
+                }
+                Err(e) => {
+                    emitter.fail(e.clone());
+                    Err(e)
+                }
+            }
+        })
     }
 
     fn count_tokens(&self, text: &str) -> TokenCount {
@@ -441,9 +670,11 @@ impl Provider for Anthropic {
             return Err(self.status_error(resp.status, &resp.body));
         }
 
+        let meta = Anthropic::parse_models_meta(&resp.body)?;
+        let note = Anthropic::model_note(&self.cfg.model, &meta);
         let models = Anthropic::parse_models(&resp.body)?;
         Ok(Probe {
-            detail: format!("{} model(s)", models.len()),
+            detail: format!("{} model(s); {note}", models.len()),
             reachable: true,
             models,
             caps: Some(self.caps()),
@@ -854,6 +1085,134 @@ mod tests {
             "usage":{"input_tokens":10,"output_tokens":3}}"#;
         let e = provider().parse(partial, 0, cfg().max_output).unwrap_err();
         assert!(e.to_string().contains("unspecified"), "{e}");
+    }
+
+    /// A limit spent on reasoning before any answer is `Unanswered`, with the share, not
+    /// "empty response": the stop reason is read before the content is judged.
+    #[test]
+    fn no_answer_at_the_cap_is_unanswered_with_the_thinking_share() {
+        let raw = r#"{"model":"claude-opus-5-5","stop_reason":"max_tokens",
+            "content":[{"type":"thinking","thinking":"..."}],
+            "usage":{"input_tokens":10,"output_tokens":800,
+                     "output_tokens_details":{"thinking_tokens":791}}}"#;
+        let e = provider().parse(raw, 0, 800).unwrap_err();
+        assert_eq!(
+            e,
+            ProviderError::Unanswered {
+                limit: Some(800),
+                used: Some(800),
+                thinking: Some(791),
+            },
+            "{e}"
+        );
+        assert_eq!(e.code(), Some(smysl_core::Code::W455));
+    }
+
+    /// The reasoning's share of the output rides on the usage, apart from the total.
+    #[test]
+    fn the_thinking_share_is_reported_apart() {
+        let raw = r#"{"model":"claude-opus-5-5","stop_reason":"end_turn",
+            "content":[{"type":"text","text":"x"}],
+            "usage":{"input_tokens":10,"output_tokens":40,
+                     "output_tokens_details":{"thinking_tokens":31}}}"#;
+        let c = provider().parse(raw, 0, 800).unwrap();
+        assert_eq!((c.usage.output_tokens, c.usage.thinking_tokens), (40, 31));
+    }
+
+    /// A configured effort is sent on every request; without one a schema request is `low`
+    /// and a free-text request takes the model's default.
+    #[test]
+    fn the_configured_effort_is_sent_and_the_default_is_the_measured_one() {
+        let free = Request::new("m", "hello");
+        let schema =
+            Request::new("m", "x").with_schema(StructuredMode::ToolForce, r#"{"type":"object"}"#);
+        let p = provider();
+        assert!(p.body(&free, false).unwrap().get("output_config").is_none());
+        assert_eq!(
+            p.body(&schema, false).unwrap()["output_config"]["effort"],
+            "low"
+        );
+
+        let mut c = cfg();
+        c.effort = Some("high".into());
+        let p = Anthropic::new(c);
+        assert_eq!(
+            p.body(&free, false).unwrap()["output_config"]["effort"],
+            "high"
+        );
+        assert_eq!(
+            p.body(&schema, false).unwrap()["output_config"]["effort"],
+            "high"
+        );
+    }
+
+    /// The probe says whether the configured model is listed, and when it goes.
+    #[test]
+    fn the_probe_reads_the_configured_models_lifecycle() {
+        let raw = r#"{"data":[
+            {"id":"claude-opus-5-5","deprecated_at":null,"retires_at":null},
+            {"id":"claude-sonnet-4-5-20250929","deprecated_at":"2026-09-01T00:00:00Z",
+             "retires_at":"2027-03-01T00:00:00Z"}]}"#;
+        let meta = Anthropic::parse_models_meta(raw).unwrap();
+        assert_eq!(meta.len(), 2);
+        assert_eq!(
+            Anthropic::model_note("claude-opus-5-5", &meta),
+            "`claude-opus-5-5` listed"
+        );
+        assert_eq!(
+            Anthropic::model_note("claude-sonnet-4-5-20250929", &meta),
+            "`claude-sonnet-4-5-20250929` deprecated since 2026-09-01T00:00:00Z, retires \
+             2027-03-01T00:00:00Z"
+        );
+        assert_eq!(
+            Anthropic::model_note("claude-sonnet-4-5", &meta),
+            "`claude-sonnet-4-5` is not listed by the endpoint"
+        );
+        assert_eq!(
+            Anthropic::parse_models(raw).unwrap(),
+            vec!["claude-opus-5-5", "claude-sonnet-4-5-20250929"]
+        );
+    }
+
+    /// A stream is read event by event: the input side from `message_start`, the text from
+    /// the deltas, the output side and the stop from `message_delta`.
+    #[test]
+    fn a_stream_is_read_event_by_event() {
+        let body = "event: message_start\n\
+            data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5,\
+            \"cache_read_input_tokens\":20,\"cache_creation_input_tokens\":0}}}\n\n\
+            event: content_block_delta\n\
+            data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hel\"}}\n\n\
+            event: ping\n\
+            data: {\"type\":\"ping\"}\n\n\
+            data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"lo\"}}\n\n\
+            data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\
+            \"usage\":{\"output_tokens\":7,\"output_tokens_details\":{\"thinking_tokens\":3}}}\n";
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut emitter = Emitter::new(tx);
+        let usage = read_stream(body, 1, &mut emitter).unwrap();
+        emitter.done(usage);
+        let text: String = rx
+            .iter()
+            .filter_map(|m| match m {
+                StreamMsg::Token(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "hello");
+        assert_eq!((usage.input_tokens, usage.cache_read_tokens), (25, 20));
+        assert_eq!((usage.output_tokens, usage.thinking_tokens), (7, 3));
+        assert!(!usage.estimated);
+        assert_eq!(usage.retries, 1);
+
+        let refused = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\
+            \"stop_details\":{\"category\":\"cyber\"}},\"usage\":{\"output_tokens\":0}}\n";
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut emitter = Emitter::new(tx);
+        assert!(matches!(
+            read_stream(refused, 0, &mut emitter),
+            Err(ProviderError::Declined { category }) if category == "cyber"
+        ));
     }
 
     #[test]

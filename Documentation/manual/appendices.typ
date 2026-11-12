@@ -1118,7 +1118,7 @@ Every diagnostic `smysl` can emit has a stable code, declared once in the `regis
 macro invocation in `crates/smysl-core/src/diag.rs` and never reused. The registry is
 single-sourced: wire string, severity, group, and one-line meaning all come from that one
 place, and two tests (`the_registry_is_the_size_it_is_meant_to_be` in `smysl-core`, and
-`facade_reexports_the_diagnostic_registry` in the facade) assert the count below stays at 153. Codes are grouped exactly as the source groups them; group membership is
+`facade_reexports_the_diagnostic_registry` in the facade) assert the count below stays at 155. Codes are grouped exactly as the source groups them; group membership is
 reporting structure only; it carries no weight on the wire.
 
 #dtable(
@@ -1270,6 +1270,8 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W436`], [warning], [A unit is not in the script of the passage it came from, naming the field and the share. The `source` language policy says a gist is written in the language of its passage; this is the only thing that checks it.]),
     ([`SMY-W437`], [warning], [The model that answered a chunk is not the one the request named, with both names. A provider that falls back server-side answers under another model, and the recipe — computed before the call — names the one asked for. `fallbacks: false` on the provider pins the model instead.]),
     ([`SMY-W438`], [warning], [The model declined the span as a matter of policy, and it degraded to opaque prose under rule I. Not a fault: the provider's own category is in the message, and the report counts declines apart from `SMY-W304`, because a fault is retried or reconfigured and a decline is read.]),
+    ([`SMY-W455`], [warning], [The output limit was spent on the model's reasoning before any answer began, on a provider whose reasoning is spent from the same limit as its answer; the span degraded to opaque prose under rule I. The message names the limit, the reasoning's share where the provider reports one, and the remedy, which is `max_output`.]),
+    ([`SMY-W456`], [warning], [A sampling temperature was set for a provider whose endpoint takes none; the run sampled at the model's default. Said once per run, before the first call.]),
   ),
 )
 

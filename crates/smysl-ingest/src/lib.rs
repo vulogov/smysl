@@ -773,8 +773,11 @@ impl<'a> Ingestor<'a> {
         let caps = provider.caps();
 
         let choice = path::choose(&caps, Task::ContentIngest, input.len(), requested);
-        let window =
-            chunk::Window::for_context(caps.context_window, self.opts.output_budget(&caps));
+        let window = chunk::Window::for_context(
+            caps.context_window,
+            self.opts.output_budget(&caps),
+            caps.reasoning_in_output,
+        );
         let chunks = chunk::chunk(input, window);
 
         // D-10. The fence is derived from the input, so a document carrying a marker cannot
@@ -824,6 +827,21 @@ impl<'a> Ingestor<'a> {
             model: Some(self.model_for(&caps).to_string()),
             ..IngestReport::default()
         };
+        // A temperature the endpoint will not take is a configuration that reads as a
+        // setting and is not one; said once per run, before the first call.
+        if self.opts.temperature > 0.0 && !caps.temperature {
+            report.diagnostics.push(
+                Diagnostic::new(smysl_core::Code::W456)
+                    .with_message(format!(
+                        "temperature {} was set, and the provider takes none: the run sampled \
+                         at the model's default",
+                        self.opts.temperature
+                    ))
+                    .with_suggestion(
+                        "drop `ingest.temperature` or `--temperature` for this provider",
+                    ),
+            );
+        }
 
         report.diagnostics.append(&mut marker_notes);
 
@@ -1009,11 +1027,20 @@ impl<'a> Ingestor<'a> {
                     ) {
                         calls += 1;
                     }
-                    if let ProviderError::Truncated { used: Some(n), .. } = e {
+                    if let ProviderError::Truncated { used: Some(n), .. }
+                    | ProviderError::Unanswered { used: Some(n), .. } = e
+                    {
                         usage.output_tokens += n as u64;
                         usage.estimated = true;
                     }
+                    if let ProviderError::Unanswered {
+                        thinking: Some(t), ..
+                    } = e
+                    {
+                        usage.thinking_tokens += t as u64;
+                    }
                     let declined = matches!(e, ProviderError::Declined { .. });
+                    let unanswered = matches!(e, ProviderError::Unanswered { .. });
                     let (core, d) = repair::degrade(text, self.opts.rung, &e.to_string());
                     // A refusal is neither a fault of the transport nor a mistake of the
                     // model: it is a policy outcome, under its own code so a run can count
@@ -1021,6 +1048,15 @@ impl<'a> Ingestor<'a> {
                     let d = if declined {
                         Diagnostic::on(smysl_core::Code::W438, smysl_core::canonical_uid(&core))
                             .with_message(format!("span degraded to opaque prose: {e}"))
+                    } else if unanswered {
+                        // The budget went on reasoning before the answer began: not a
+                        // repair failure, and the remedy is the cap, which the message names.
+                        Diagnostic::on(smysl_core::Code::W455, smysl_core::canonical_uid(&core))
+                            .with_message(format!("span degraded to opaque prose: {e}"))
+                            .with_suggestion(
+                                "raise max_output: on this provider the model's reasoning is \
+                                 spent from it before the answer",
+                            )
                     } else {
                         d
                     };
@@ -1047,6 +1083,7 @@ impl<'a> Ingestor<'a> {
             usage.retries += completion.usage.retries;
             usage.cache_read_tokens += completion.usage.cache_read_tokens;
             usage.cache_write_tokens += completion.usage.cache_write_tokens;
+            usage.thinking_tokens += completion.usage.thinking_tokens;
 
             let (units, relations, mut diagnostics, labels) =
                 repair::convert_scoped(&completion.text, path, self.opts.rung, source, scope);

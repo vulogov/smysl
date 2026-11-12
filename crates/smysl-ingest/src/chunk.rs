@@ -28,6 +28,13 @@ pub const PROMPT_RESERVE: usize = 1024;
 /// How much to keep back for the model's answer. Ingest output is roughly the size of its
 /// input, so this is not a small fraction.
 pub const OUTPUT_RESERVE_RATIO: f32 = 0.5;
+/// How much of `max_output` to leave for the model's reasoning, on a provider whose reasoning
+/// is spent from it. A quarter. Measured on the SM-P14 fixture for 1.15: at the `low` effort
+/// a schema request is sent with, the three current Anthropic models reported no thinking
+/// tokens at all; at `high` the smallest spent the whole 800-token limit thinking and
+/// answered nothing (`SMY-W455`). The headroom is for the default, where it is generous, not
+/// a promise about `high`, where no fraction would do — that is what the warning is for.
+pub const REASONING_HEADROOM_RATIO: f32 = 0.25;
 
 /// One piece of input, with enough context to say where it came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,13 +81,26 @@ impl Window {
     /// the call's limit is a chunk that will be truncated and degraded whole. Before 1.15
     /// only the first bound existed, and a provider with a million-token context chunked a
     /// book into one piece whose 8,192-token answer could not hold it.
-    pub fn for_context(context_window: usize, max_output: usize) -> Window {
+    ///
+    /// `reasoning_in_output` is the provider's `Capabilities` field of that name: where the
+    /// model's reasoning is spent from `max_output` too, the answer gets what is left after
+    /// [`REASONING_HEADROOM_RATIO`], and the chunk is sized to that.
+    pub fn for_context(
+        context_window: usize,
+        max_output: usize,
+        reasoning_in_output: bool,
+    ) -> Window {
+        let answer = if reasoning_in_output {
+            max_output - ((max_output as f32) * REASONING_HEADROOM_RATIO) as usize
+        } else {
+            max_output
+        };
         let output_reserve =
             max_output.max(((context_window as f32) * OUTPUT_RESERVE_RATIO) as usize);
         let budget = context_window
             .saturating_sub(PROMPT_RESERVE)
             .saturating_sub(output_reserve)
-            .min(max_output);
+            .min(answer);
         Window {
             // A window that reserved itself out of existence would chunk into nothing, so
             // there is a floor: one paragraph has to fit somewhere.
@@ -486,7 +506,7 @@ mod tests {
 
     #[test]
     fn the_window_reserves_room_for_the_prompt_and_the_answer() {
-        let w = Window::for_context(8192, 2048);
+        let w = Window::for_context(8192, 2048, false);
         assert!(w.budget < 8192 - PROMPT_RESERVE as u32);
         assert!(w.budget > 0);
     }
@@ -495,7 +515,7 @@ mod tests {
     /// fraction - a window that ignored it would produce chunks whose answers cannot fit.
     #[test]
     fn the_output_reserve_is_at_least_half_the_context() {
-        let w = Window::for_context(10_000, 100);
+        let w = Window::for_context(10_000, 100, false);
         assert!(w.budget <= 10_000 - 5_000, "budget {}", w.budget);
     }
 
@@ -504,21 +524,31 @@ mod tests {
     /// whose answer could not fit the call; the output bound holds it to 8,192.
     #[test]
     fn a_chunk_is_never_wider_than_the_answer_the_call_can_carry() {
-        let w = Window::for_context(1_000_000, 8192);
+        let w = Window::for_context(1_000_000, 8192, false);
         assert_eq!(w.budget, 8192);
         // Where the context is the tighter bound, the cap changes nothing: 4096 − 1024 −
         // max(1024, 2048) is 1024, and so is `max_output`.
-        let w = Window::for_context(4096, 1024);
+        let w = Window::for_context(4096, 1024, false);
         assert_eq!(w.budget, 1024);
         // The floor still applies when `max_output` is below it.
-        let w = Window::for_context(100_000, 100);
+        let w = Window::for_context(100_000, 100, false);
         assert_eq!(w.budget, 256);
+    }
+
+    /// Where the reasoning is spent from the same limit, the answer gets what the headroom
+    /// leaves, and the chunk is sized to that.
+    #[test]
+    fn a_provider_that_thinks_from_the_output_gets_a_narrower_chunk() {
+        assert_eq!(Window::for_context(1_000_000, 8192, false).budget, 8192);
+        assert_eq!(Window::for_context(1_000_000, 8192, true).budget, 6144);
+        // The floor still holds.
+        assert_eq!(Window::for_context(100_000, 100, true).budget, 256);
     }
 
     /// A window that reserved itself out of existence would chunk into nothing.
     #[test]
     fn a_tiny_context_still_leaves_a_usable_window() {
-        let w = Window::for_context(512, 512);
+        let w = Window::for_context(512, 512, false);
         assert!(w.budget >= 256);
         assert!(!chunk(&para(3), w).is_empty());
     }

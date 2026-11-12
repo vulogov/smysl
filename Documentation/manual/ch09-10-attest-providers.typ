@@ -609,6 +609,49 @@ apart from the degrades. The distinction is the remedy: a fault is retried or
 reconfigured, a decline is read, because the text is what the model would
 not structure, not what it could not.
 
+`effort`, from 1.15, is how hard the model is asked to think, where the API
+takes a setting: `low`, `medium` or `high`. Left unset, the Anthropic mapper
+sends `low` on a schema request — the schema does the work, and the reasoning
+a higher effort buys is spent from `max_output` — and leaves a free-text
+request at the model's default. The three settings were measured on the
+SM-P14 fixture for 1.15 (the changelog has the figures); the setting is the
+caller's, and the default is the one that measured best. Providers without
+such a setting ignore the key.
+
+`timeout_secs` is the request timeout, 120 by default — except for an
+Anthropic provider that names none, which gets 600. Thinking is always on at
+the API version the mapper speaks, the mapper reads a streamed answer whole
+rather than token by token, and a long chunk at a high effort can run past
+two minutes.
+
+On a provider whose reasoning is spent from `max_output` along with its
+answer — Anthropic's current models, Gemini's thinking models; the mapper
+says so in its capabilities — ingest keeps a quarter of the limit back when
+it sizes a chunk, so the answer has room after the thinking. A limit spent
+before the answer began is `SMY-W455`, not an empty response: the span
+degrades under rule I, and the warning names the limit, the reasoning's share
+where the provider reports one, and the remedy, which is `max_output`. The
+ledger records the reasoning's share of each call as `thinking`, and the
+ingest summary shows it beside the cache's.
+
+A sampling temperature set for a provider whose endpoint takes none —
+Anthropic at API version `2026-10-21` refuses the field at every value — is
+`SMY-W456`, once per run and before the first call: the setting read as a
+setting and was not one.
+
+`providers --probe` says whether the configured model is in the list the
+endpoint returns and, where the endpoint says, when it was deprecated and
+when it retires. A list is a catalogue rather than an entitlement, so
+"listed" is not "can call"; but "not listed" is the stale pin found before a
+call is paid for, which is how 1.15 found its own.
+
+An OpenAI-compatible provider is sent a schema strict only where every
+object in it is closed, which strict mode requires. The kernel's `payload` is
+open by design, so the kernel schema is sent unstrict, as it is, and the
+answer is checked on the way in like a json-mode one — `Completion::structured`
+says so, and the provenance is honest about it. A schema that translates
+closed is sent strict and enforced, as before.
+
 #term("Provider")[
   One configured endpoint: an id, which mapper drives it (`ollama`,
   `anthropic`, and so on), an endpoint URL, a model name, its context window

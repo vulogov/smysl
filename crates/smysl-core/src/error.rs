@@ -614,6 +614,16 @@ pub enum ProviderError {
     Declined {
         category: String,
     },
+    /// The output limit was reached before any answer began: on a provider whose reasoning
+    /// is spent from the same limit as its answer, the reasoning spent all of it. Since 1.15;
+    /// it was `Malformed("empty response")`, read before the stop reason, so a run whose
+    /// budget went on thinking reported a malformed answer and nothing said what to raise.
+    /// `thinking` is the reasoning's share of `used`, where the provider reports one.
+    Unanswered {
+        limit: Option<usize>,
+        used: Option<usize>,
+        thinking: Option<usize>,
+    },
 }
 
 impl ProviderError {
@@ -624,6 +634,7 @@ impl ProviderError {
             ProviderError::ContextExceeded { .. } => Some(Code::E302),
             ProviderError::StructuredUnsupported => Some(Code::W303),
             ProviderError::Declined { .. } => Some(Code::W438),
+            ProviderError::Unanswered { .. } => Some(Code::W455),
             _ => None,
         }
     }
@@ -677,6 +688,23 @@ impl fmt::Display for ProviderError {
                     f,
                     "the provider declined the request (refusal, category: {category})"
                 )
+            }
+            ProviderError::Unanswered {
+                limit,
+                used,
+                thinking,
+            } => {
+                f.write_str("no answer within the output limit")?;
+                if let Some(l) = limit {
+                    write!(f, " of {l} token(s)")?;
+                }
+                f.write_str(": the model's reasoning spent it")?;
+                match (thinking, used) {
+                    (Some(t), Some(u)) => write!(f, " ({t} thinking of {u} reported)")?,
+                    (None, Some(u)) => write!(f, " ({u} reported)")?,
+                    _ => {}
+                }
+                f.write_str("; raise max_output")
             }
             ProviderError::Truncated { limit, used } => {
                 f.write_str("answer cut off at the output limit")?;
@@ -1262,6 +1290,33 @@ mod tests {
         assert_eq!(d.code(), Some(Code::W438));
         assert!(!d.is_fallback_eligible());
         assert_eq!(d.exit_code(), ExitCode::Provider);
+    }
+
+    /// An answer that never began is not a malformed one: the message names the limit, the
+    /// reasoning's share where it is known, and the remedy.
+    #[test]
+    fn a_budget_spent_thinking_says_so_and_what_to_raise() {
+        let u = ProviderError::Unanswered {
+            limit: Some(800),
+            used: Some(800),
+            thinking: Some(791),
+        };
+        assert_eq!(
+            u.to_string(),
+            "no answer within the output limit of 800 token(s): the model's reasoning spent it \
+             (791 thinking of 800 reported); raise max_output"
+        );
+        assert_eq!(u.code(), Some(Code::W455));
+        assert!(!u.is_fallback_eligible());
+        let bare = ProviderError::Unanswered {
+            limit: None,
+            used: None,
+            thinking: None,
+        };
+        assert_eq!(
+            bare.to_string(),
+            "no answer within the output limit: the model's reasoning spent it; raise max_output"
+        );
     }
 
     #[test]

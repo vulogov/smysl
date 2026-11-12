@@ -66,6 +66,12 @@ impl Scripted {
         self.caps.context_window = n;
         self
     }
+
+    /// A provider whose endpoint takes no sampling temperature.
+    fn without_temperature(mut self) -> Scripted {
+        self.caps.temperature = false;
+        self
+    }
 }
 
 impl Provider for Scripted {
@@ -345,6 +351,76 @@ fn a_decline_degrades_under_its_own_code_and_is_counted_apart() {
         report.diagnostics.iter().all(|d| d.code != Code::W304),
         "a decline is not a repair failure"
     );
+}
+
+/// A limit spent on reasoning before the answer began is a call, its tokens count, the
+/// thinking share is kept apart, and the span degrades under `SMY-W455` naming the remedy.
+#[test]
+fn a_budget_spent_thinking_degrades_under_its_own_code_and_names_the_cap() {
+    let unanswered = ProviderError::Unanswered {
+        limit: Some(800),
+        used: Some(800),
+        thinking: Some(791),
+    };
+    let (r, _) = registry(Scripted::new(vec![Err(unanswered); 8]));
+    let (staged, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("rule I");
+    assert!(!staged.is_empty());
+    assert_eq!(report.calls, 1);
+    assert_eq!(report.degraded, 1);
+    assert_eq!(report.usage.output_tokens, 800);
+    assert_eq!(report.usage.thinking_tokens, 791);
+    let w455 = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == Code::W455)
+        .expect("unanswered");
+    assert!(
+        w455.message.contains("791 thinking of 800"),
+        "{}",
+        w455.message
+    );
+    assert!(
+        w455.suggestion
+            .as_deref()
+            .unwrap_or_default()
+            .contains("max_output"),
+        "{:?}",
+        w455.suggestion
+    );
+    assert!(report.diagnostics.iter().all(|d| d.code != Code::W304));
+}
+
+/// A temperature set for a provider that takes none is said once, before the first call,
+/// and not at all at zero or for a provider that takes one.
+#[test]
+fn a_temperature_the_provider_will_not_take_is_reported_as_a_no_op() {
+    let answer =
+        r#"{"units":[{"type":"claim","gist":"the pool saturated","status":"speculative"}]}"#;
+    let (r, _) = registry(Scripted::new(vec![Ok(answer.to_string())]).without_temperature());
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document).with_temperature(0.7))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("rule I");
+    let w456: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == Code::W456)
+        .collect();
+    assert_eq!(w456.len(), 1, "{:?}", report.diagnostics);
+    assert!(w456[0].message.contains("0.7"), "{}", w456[0].message);
+
+    let (r, _) = registry(Scripted::new(vec![Ok(answer.to_string())]).without_temperature());
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("rule I");
+    assert!(report.diagnostics.iter().all(|d| d.code != Code::W456));
+
+    let (r, _) = registry(Scripted::new(vec![Ok(answer.to_string())]));
+    let (_, report) = Ingestor::new(&r, opts(Rung::Document).with_temperature(0.7))
+        .ingest(&Store::new(), "one paragraph")
+        .expect("rule I");
+    assert!(report.diagnostics.iter().all(|d| d.code != Code::W456));
 }
 
 /// The repair loop is a loop: an answer that fixes itself on the second turn is accepted,

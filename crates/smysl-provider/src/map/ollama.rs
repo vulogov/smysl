@@ -142,6 +142,7 @@ impl Ollama {
                 retries,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
+                thinking_tokens: 0,
             },
             _ => Usage {
                 input_tokens: input.unwrap_or(0),
@@ -150,6 +151,7 @@ impl Ollama {
                 retries,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
+                thinking_tokens: 0,
             },
         };
 
@@ -228,6 +230,8 @@ impl Ollama {
             streaming: reported.contains(&"completion") || reported.is_empty(),
             usage_reporting: true,
             offline: self.cfg.is_local(),
+            reasoning_in_output: false,
+            temperature: true,
         })
     }
 }
@@ -265,6 +269,8 @@ impl Provider for Ollama {
             // From the endpoint, so `--offline` rests on a fact rather than on a claim the
             // configuration makes about itself.
             offline: self.cfg.is_local(),
+            reasoning_in_output: false,
+            temperature: true,
         }
     }
 
@@ -333,6 +339,7 @@ impl Provider for Ollama {
                         retries: resp.retries,
                         cache_read_tokens: 0,
                         cache_write_tokens: 0,
+                        thinking_tokens: 0,
                     };
                 }
             }

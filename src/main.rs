@@ -11440,13 +11440,23 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         report.usage.total(),
         // The cache's share of the input, where the provider has one: a reader of the total
         // should know how much of it was read at a fraction of the price.
-        if report.usage.cache_read_tokens > 0 || report.usage.cache_write_tokens > 0 {
-            format!(
-                " ({} read from cache, {} written)",
-                report.usage.cache_read_tokens, report.usage.cache_write_tokens
-            )
-        } else {
-            String::new()
+        {
+            let mut shares = Vec::new();
+            if report.usage.cache_read_tokens > 0 || report.usage.cache_write_tokens > 0 {
+                shares.push(format!(
+                    "{} read from cache, {} written",
+                    report.usage.cache_read_tokens, report.usage.cache_write_tokens
+                ));
+            }
+            // And the reasoning's share of the output, where the provider reports one.
+            if report.usage.thinking_tokens > 0 {
+                shares.push(format!("{} spent thinking", report.usage.thinking_tokens));
+            }
+            if shares.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", shares.join("; "))
+            }
         }
     );
 
