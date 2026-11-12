@@ -297,10 +297,6 @@ registry! {
     Provider => {
         W436 = "SMY-W436", Warn,  "A unit is not in the script of the passage it came from (language policy)";
     }
-    Provider => {
-        W437 = "SMY-W437", Warn,  "The model that answered is not the one the request named (a provider fallback)";
-        W438 = "SMY-W438", Warn,  "The model declined the span; degraded to opaque prose (a refusal, not a fault)";
-    }
     // --- The library (RFC SMYSL-2.4), in the order `smysl-text` raises them -------------------
     //
     // Registered with the code that raises them, not with the RFC that allocated them. A code
@@ -495,6 +491,14 @@ registry! {
     // block of its own for the same reason as the one above.
     Provider => {
         W454 = "SMY-W454", Warn,  "The provider did not reproduce at temperature 0; the agreement figure is a lower bound";
+    }
+
+    // 1.15. Last, not beside the other provider groups: `Code` has no `repr`, so its
+    // discriminants are its declaration order, and a group inserted before the library's
+    // renumbered every code after it against the published baseline — `make semver` said so.
+    Provider => {
+        W437 = "SMY-W437", Warn,  "The model that answered is not the one the request named (a provider fallback)";
+        W438 = "SMY-W438", Warn,  "The model declined the span; degraded to opaque prose (a refusal, not a fault)";
     }
 }
 
