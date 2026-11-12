@@ -7,7 +7,13 @@
 //! The channel is the contract. What produces the messages - a blocking read loop today,
 //! a future tomorrow - is behind it.
 
-#[cfg(any(feature = "ollama", feature = "openai", feature = "deepseek", test))]
+#[cfg(any(
+    feature = "ollama",
+    feature = "openai",
+    feature = "deepseek",
+    feature = "anthropic",
+    test
+))]
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
@@ -133,13 +139,25 @@ impl Stream {
 /// streaming mapper — `--no-default-features --features ingest`, which a crate that builds its
 /// own units and never calls a model wants — failed under `-D warnings` on dead code here, and
 /// CI never built that combination to see it.
-#[cfg(any(feature = "ollama", feature = "openai", feature = "deepseek", test))]
+#[cfg(any(
+    feature = "ollama",
+    feature = "openai",
+    feature = "deepseek",
+    feature = "anthropic",
+    test
+))]
 pub(crate) struct Emitter {
     tx: Sender<StreamMsg>,
     output_chars: usize,
 }
 
-#[cfg(any(feature = "ollama", feature = "openai", feature = "deepseek", test))]
+#[cfg(any(
+    feature = "ollama",
+    feature = "openai",
+    feature = "deepseek",
+    feature = "anthropic",
+    test
+))]
 impl Emitter {
     pub fn new(tx: Sender<StreamMsg>) -> Emitter {
         Emitter {
