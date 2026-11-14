@@ -4,12 +4,15 @@
 //! answer the call can carry (`max_output`); split at paragraph boundaries, overlap one
 //! paragraph.
 //!
-//! **The cap is the output's, not the context's.** Ingest output is roughly the size of its
-//! input, so a chunk wider than `max_output` tokens asks for an answer that cannot fit the
-//! call: the model stops at the limit, the call is a truncation, and the whole chunk degrades
-//! to opaque prose under rule I. On a 4k or 8k context the two bounds coincide and nothing
-//! changes; on a million-token window the context alone would make a chunk of a whole book
-//! and lose it.
+//! **The cap is the output's, not the context's.** A chunk's answer has to fit `max_output`,
+//! or the model stops at the limit, the call is a truncation, and the whole chunk degrades to
+//! opaque prose under rule I. 1.15 capped the chunk at `max_output` on the premise that an
+//! answer is about the size of its passage. 1.16 measured the answer: three to seven times
+//! the passage's tokens on the three current Anthropic models, because a staged unit carries
+//! its gist, its kind, its span and its provenance, and a short passage pays that per unit.
+//! The chunk is therefore sized to `max_output`, less the reasoning headroom, divided by
+//! [`ANSWER_PER_INPUT_TOKEN`]. On a million-token window the context alone would still make a
+//! chunk of a whole book and lose it.
 //!
 //! **Chunk-boundary duplication self-heals.** Two chunks that independently produce the
 //! same claim produce the same uid and merge to one unit with two attestations - that is
@@ -20,20 +23,125 @@
 //! alternative - refusing - would mean one runaway paragraph could fail an ingest, which
 //! rule I forbids.
 
-use smysl_core::tokens;
+/// The estimate a chunk is sized by: bytes per token, one divisor per class of character.
+///
+/// `smysl_core::tokens` is `ceil(bytes / 4)` and stays so: it is the format's own count, pure
+/// by rule D and the same in every implementation. It is also a third out, in the wrong
+/// direction for sizing. Measured against `count_tokens` on 48 samples for 1.16 — prose,
+/// markup, Rust, TOML, SMYSL surface and passages in fourteen scripts — it under-counted 45 of
+/// them, by up to 57%: a chunk sized by it is up to twice its estimate in the tokeniser's
+/// terms, and a chunk twice its size is one whose answer the call cannot carry. A
+/// least-squares fit of one divisor per class had a mean error of 8% against 34%.
+///
+/// The divisors here sit on the safe side of that fit, since over-estimating costs a call and
+/// under-estimating costs the chunk:
+///
+/// | class | bytes per token | the fit said |
+/// |---|---|---|
+/// | ASCII letters and spaces | 3.0 | 3.5 |
+/// | other ASCII: digits, punctuation, newlines | 1.0 | 1.1 |
+/// | Cyrillic | 4.0 | 5.1 |
+/// | other two-byte scripts: Latin accents, Greek, Arabic, Hebrew | 2.0 | 2.5 |
+/// | three- and four-byte: CJK, Devanagari, emoji | 2.5 | 2.9 |
+///
+/// On the 48 samples this under-estimates 8, by at most 25% (German, whose compounds the
+/// tokeniser splits), and over-estimates the rest by up to 41%; the mean error is 16%. It is
+/// a sizing estimate and nothing else: the ledger, the gist limits and the pack budgets keep
+/// the format's count.
+pub fn sizing_tokens(text: &str) -> u32 {
+    let mut tally = Sizing::default();
+    for ch in text.chars() {
+        tally.add(ch);
+    }
+    tally.tokens()
+}
+
+/// The per-class byte tally behind [`sizing_tokens`], so a splitter can add one character at
+/// a time and ask after each.
+#[derive(Debug, Default, Clone, Copy)]
+struct Sizing {
+    alpha: u32,
+    other: u32,
+    cyrillic: u32,
+    two: u32,
+    wide: u32,
+}
+
+impl Sizing {
+    fn add(&mut self, ch: char) {
+        let code = ch as u32;
+        if code < 0x80 {
+            if ch.is_ascii_alphabetic() || ch == ' ' {
+                self.alpha += 1;
+            } else {
+                self.other += 1;
+            }
+        } else if code < 0x800 {
+            if (0x400..=0x4ff).contains(&code) {
+                self.cyrillic += 2;
+            } else {
+                self.two += 2;
+            }
+        } else if code < 0x10000 {
+            self.wide += 3;
+        } else {
+            self.wide += 4;
+        }
+    }
+
+    /// Each class rounds up on its own, so a text of one class never estimates to zero and
+    /// the sum never falls below the fit's figure for any class.
+    fn tokens(self) -> u32 {
+        self.alpha.div_ceil(3)
+            + self.other
+            + self.cyrillic.div_ceil(4)
+            + self.two.div_ceil(2)
+            + (self.wide * 2).div_ceil(5)
+    }
+}
+
+/// The estimate chunking works in; see [`sizing_tokens`].
+fn tokens(text: &str) -> u32 {
+    sizing_tokens(text)
+}
 
 /// How much of the window to keep back for the prompt itself.
 pub const PROMPT_RESERVE: usize = 1024;
 
-/// How much to keep back for the model's answer. Ingest output is roughly the size of its
-/// input, so this is not a small fraction.
+/// How much of the context to keep back for the model's answer. Not a small fraction: the
+/// answer is several times the passage (see [`ANSWER_PER_INPUT_TOKEN`]).
 pub const OUTPUT_RESERVE_RATIO: f32 = 0.5;
+
+/// How many answer tokens a token of passage costs: the chunk is sized to the answer the call
+/// can carry, divided by this.
+///
+/// Measured for 1.16 on the three current Anthropic models, from the calls that were answered
+/// whole (`output_tokens` less the thinking, over the passage's `count_tokens`):
+///
+/// | passage | passage tokens | model, effort | answer tokens | ratio |
+/// |---|---|---|---|---|
+/// | the SM-P14 fixture, three sentences | 91 | Haiku `low` | 419 | 4.6 |
+/// | | | Sonnet `low` / `medium` / `high` | 516 / 618 / 647 | 5.7 / 6.8 / 7.1 |
+/// | | | Opus `low` / `medium` / `high` | 542 / 548 / 607 | 6.0 / 6.0 / 6.7 |
+/// | an incident report, five paragraphs | 380 | Sonnet `high` | 1 229 | 3.2 |
+/// | a Rust function with a comment | 324 | Sonnet `low` / `medium` / `high` | 993 / 1 015 / 1 508 | 3.1 / 3.1 / 4.7 |
+/// | Russian prose, four paragraphs | 259 | Sonnet `high` | 2 101 | 8.1 |
+///
+/// Four: the long passages, which are what a chunk is, sit at three to five; the fixture's
+/// seven is the per-unit overhead on a passage of three sentences, and the 256-token floor is
+/// what carries those. The Russian answer, at eight with its repair turns, is the residual —
+/// Cyrillic is dear in the output as it is cheap in the input.
+pub const ANSWER_PER_INPUT_TOKEN: usize = 4;
 /// How much of `max_output` to leave for the model's reasoning, on a provider whose reasoning
-/// is spent from it. A quarter. Measured on the SM-P14 fixture for 1.15: at the `low` effort
-/// a schema request is sent with, the three current Anthropic models reported no thinking
-/// tokens at all; at `high` the smallest spent the whole 800-token limit thinking and
-/// answered nothing (`SMY-W455`). The headroom is for the default, where it is generous, not
-/// a promise about `high`, where no fraction would do — that is what the warning is for.
+/// is spent from it. A quarter. Measured across the matrix for 1.16 — three models, three
+/// efforts, four passages, at 800 and at 2,048 — on the calls whose limit held the answer:
+/// Sonnet and Opus spent nothing at `low` and `medium` and 11% to 16% at `high`; Haiku spent
+/// 59% at `high`. The quarter holds for two of the three models at every effort and is too
+/// small only for the smallest at `high`, where no fraction would do — that is what
+/// `SMY-W455` is for. Where the limit could not hold the answer at all, Haiku spent all of it
+/// thinking at every effort, so an unanswered call on Haiku is first a sign of an undersized
+/// limit, and the chunk is sized to the answer ([`ANSWER_PER_INPUT_TOKEN`]) before the
+/// headroom is a question.
 pub const REASONING_HEADROOM_RATIO: f32 = 0.25;
 
 /// One piece of input, with enough context to say where it came from.
@@ -72,15 +180,17 @@ pub struct Window {
 }
 
 impl Window {
-    /// The window a provider's context leaves for input text (§22.2), capped at the output
-    /// the call can carry.
+    /// The window a provider's context leaves for input text (§22.2), capped at the passage
+    /// whose answer the call can carry.
     ///
     /// Two bounds, and the tighter one wins. The context bound is what is left after the
-    /// prompt and the output reserve. The output bound is `max_output` itself: the answer
-    /// for a chunk is about the chunk's size, so a chunk the answer cannot describe within
-    /// the call's limit is a chunk that will be truncated and degraded whole. Before 1.15
-    /// only the first bound existed, and a provider with a million-token context chunked a
-    /// book into one piece whose 8,192-token answer could not hold it.
+    /// prompt and the output reserve. The output bound is the answer the call can carry —
+    /// `max_output`, less the reasoning headroom where that applies — divided by
+    /// [`ANSWER_PER_INPUT_TOKEN`], since a chunk whose answer the limit cannot hold is a
+    /// chunk truncated and degraded whole. Before 1.15 only the first bound existed, and a
+    /// provider with a million-token context chunked a book into one piece whose 8,192-token
+    /// answer could not hold it; 1.15 capped the chunk at `max_output` itself, as if an
+    /// answer were the size of its passage, and 1.16 measured that it is four times the size.
     ///
     /// `reasoning_in_output` is the provider's `Capabilities` field of that name: where the
     /// model's reasoning is spent from `max_output` too, the answer gets what is left after
@@ -100,7 +210,7 @@ impl Window {
         let budget = context_window
             .saturating_sub(PROMPT_RESERVE)
             .saturating_sub(output_reserve)
-            .min(answer);
+            .min(answer / ANSWER_PER_INPUT_TOKEN);
         Window {
             // A window that reserved itself out of existence would chunk into nothing, so
             // there is a floor: one paragraph has to fit somewhere.
@@ -156,19 +266,26 @@ pub fn chunk(input: &str, w: Window) -> Vec<Chunk> {
         })
         .collect();
 
-    // Group paragraphs greedily into windows.
+    // Group paragraphs greedily into windows. The separator the group is rejoined with costs
+    // tokens too — two, in the sizing estimate, where `ceil(bytes / 4)`'s slack used to hide
+    // it — so it is counted with every paragraph after the first, and a chunk measures no
+    // more than its budget.
+    let separator = tokens("\n\n");
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut current: Vec<usize> = Vec::new();
     let mut used = 0u32;
 
     for (i, (_, _, text)) in paragraphs.iter().enumerate() {
         let cost = tokens(text);
-        if !current.is_empty() && used + cost > w.budget {
+        if current.is_empty() {
+            used = cost;
+        } else if used + separator + cost > w.budget {
             groups.push(std::mem::take(&mut current));
-            used = 0;
+            used = cost;
+        } else {
+            used += separator + cost;
         }
         current.push(i);
-        used += cost;
     }
     if !current.is_empty() {
         groups.push(current);
@@ -248,17 +365,27 @@ pub fn split_oversized(text: &str, budget: u32, start: usize) -> Vec<(usize, usi
             buf_start = cursor;
         }
         // A single line over budget is split on character boundaries; there is nothing
-        // finer to split on, and progress matters more than a tidy boundary.
+        // finer to split on, and progress matters more than a tidy boundary. The cut is
+        // where the sizing estimate says the budget is, a character at a time — until 1.16
+        // it was `budget * 4` bytes, the format count's premise, and a line of letters at
+        // three bytes a token came out a third over.
         if tokens(line) > budget {
-            let per = (budget as usize).saturating_mul(4).max(1);
             let mut at = 0usize;
-            while at < line.len() {
-                let mut to = (at + per).min(line.len());
-                while to < line.len() && !line.is_char_boundary(to) {
-                    to += 1;
+            let mut tally = Sizing::default();
+            for (i, ch) in line.char_indices() {
+                let mut next = tally;
+                next.add(ch);
+                if i > at && next.tokens() > budget {
+                    out.push((cursor + at, cursor + i, line[at..i].to_string()));
+                    at = i;
+                    tally = Sizing::default();
+                    tally.add(ch);
+                } else {
+                    tally = next;
                 }
-                out.push((cursor + at, cursor + to, line[at..to].to_string()));
-                at = to;
+            }
+            if at < line.len() {
+                out.push((cursor + at, cursor + line.len(), line[at..].to_string()));
             }
             cursor += line.len();
             buf_start = cursor;
@@ -313,12 +440,12 @@ mod tests {
         }
 
         // With overlap on it must still be bounded, just not by one budget. Two windows, plus
-        // the `\n\n` the pieces are rejoined with — which costs a token, and is why this is
-        // not exactly `2 * budget`.
+        // the `\n\n` the pieces are rejoined with — which costs what the sizing estimate says
+        // it does, and is why this is not exactly `2 * budget`.
         let with_overlap = Window::of(50);
         for c in chunk(&para, with_overlap) {
             assert!(
-                c.tokens() <= 2 * with_overlap.budget + 1,
+                c.tokens() <= 2 * with_overlap.budget + tokens("\n\n"),
                 "chunk {} carries {} tokens; overlap doubles the budget, it does not lift it",
                 c.index,
                 c.tokens()
@@ -525,11 +652,12 @@ mod tests {
     #[test]
     fn a_chunk_is_never_wider_than_the_answer_the_call_can_carry() {
         let w = Window::for_context(1_000_000, 8192, false);
-        assert_eq!(w.budget, 8192);
+        assert_eq!(w.budget, 8192 / ANSWER_PER_INPUT_TOKEN as u32);
         // Where the context is the tighter bound, the cap changes nothing: 4096 − 1024 −
         // max(1024, 2048) is 1024, and so is `max_output`.
+        // 1,024 of answer carries 256 of passage, which is the floor exactly.
         let w = Window::for_context(4096, 1024, false);
-        assert_eq!(w.budget, 1024);
+        assert_eq!(w.budget, 256);
         // The floor still applies when `max_output` is below it.
         let w = Window::for_context(100_000, 100, false);
         assert_eq!(w.budget, 256);
@@ -539,8 +667,8 @@ mod tests {
     /// leaves, and the chunk is sized to that.
     #[test]
     fn a_provider_that_thinks_from_the_output_gets_a_narrower_chunk() {
-        assert_eq!(Window::for_context(1_000_000, 8192, false).budget, 8192);
-        assert_eq!(Window::for_context(1_000_000, 8192, true).budget, 6144);
+        assert_eq!(Window::for_context(1_000_000, 8192, false).budget, 2048);
+        assert_eq!(Window::for_context(1_000_000, 8192, true).budget, 1536);
         // The floor still holds.
         assert_eq!(Window::for_context(100_000, 100, true).budget, 256);
     }
@@ -557,5 +685,32 @@ mod tests {
     fn a_zero_budget_is_clamped_rather_than_dividing_by_zero() {
         assert!(Window::of(0).budget >= 1);
         assert!(!chunk("text", Window::of(0)).is_empty());
+    }
+
+    #[test]
+    fn the_sizing_estimate_counts_punctuation_dearer_than_letters() {
+        // 30 letters at three per token are 10; 30 marks at one per token are 30.
+        assert_eq!(sizing_tokens("abcdefghijklmnopqrstuvwxyzabcd"), 10);
+        assert_eq!(sizing_tokens("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"), 30);
+        assert_eq!(sizing_tokens("1234567890"), 10);
+    }
+
+    #[test]
+    fn the_sizing_estimate_knows_cyrillic_from_other_two_byte_scripts() {
+        // Eight two-byte letters: Cyrillic at four bytes per token is 4; Greek at two is 8.
+        assert_eq!(sizing_tokens("абвгдежз"), 4);
+        assert_eq!(sizing_tokens("αβγδεζηθ"), 8);
+        // Five three-byte characters, 15 bytes at two and a half per token: 6.
+        assert_eq!(sizing_tokens("中文分词器"), 6);
+    }
+
+    #[test]
+    fn the_sizing_estimate_is_above_the_format_count_on_latin_prose() {
+        // The format's count is ceil(bytes / 4); on prose the tokeniser is nearer three
+        // bytes a token, and the sizing estimate sits above the count, never below it.
+        let prose = "On Thursday the eu-west shard slowed: p95 request latency rose from 180ms \
+                     to 410ms. Connection pool wait time rose alongside it.";
+        assert!(sizing_tokens(prose) > smysl_core::tokens(prose));
+        assert_eq!(sizing_tokens(""), 0);
     }
 }

@@ -13,6 +13,7 @@
 //! SMYSL_ANTHROPIC_MODEL   the Anthropic model the gate runs (default claude-haiku-5-5)
 //! SMYSL_ANTHROPIC_MATRIX=1  the fixture on every current Anthropic model, in turn
 //! SMYSL_ANTHROPIC_EFFORT   low, medium or high, for the Anthropic candidate (default: the mapper's)
+//! SMYSL_ANTHROPIC_HEADROOM=1 every model at every effort over four passages; the thinking share
 //! ```
 //!
 //! The Anthropic default is the cheap model, so the gate is affordable to run routinely; the
@@ -350,6 +351,201 @@ fn every_current_anthropic_model_stages_conformant_units() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// A longer passage for the headroom measurement: the fixture's incident told in full, so the
+/// answer has more to say and the reasoning more to weigh.
+const REPORT: &str = "\
+On Thursday at 09:12 UTC the eu-west shard slowed. The p95 request latency rose from 180ms to \
+410ms over eleven minutes and stayed there until 10:40, when it fell back without anyone \
+changing anything.
+
+Connection pool wait time rose alongside the latency, from under a millisecond to 90ms at the \
+peak. The pool was at its configured ceiling of 64 connections for the whole window, which \
+suggests saturation as the cause: requests queued for a connection before they could run.
+
+The canary shard, which runs the same build against a replica of the same database with a \
+pool of the same size, stayed clean throughout. Its latency did not move and its pool never \
+filled. The pool theory does not explain that, since the canary took the same traffic shape \
+at a tenth of the volume.
+
+A second reading is that the database itself was slow: a vacuum ran on the orders table from \
+09:10 to 10:38 on the primary, and the canary reads from a replica that was not vacuuming. \
+That would put the pool saturation downstream of the cause rather than at it.
+
+Nobody has yet compared the vacuum's timing against the latency curve minute by minute, and \
+until that is done neither reading is more than a suggestion.";
+
+/// Source code, for the headroom measurement: a provider's reading of this is a different
+/// shape of answer, and the tokeniser counts it differently.
+const CODE: &str = "\
+/// Waits for a connection, or gives up after `wait` and reports the pool as saturated.
+pub fn acquire(pool: &Pool, wait: Duration) -> Result<Conn, PoolError> {
+    let start = Instant::now();
+    loop {
+        if let Some(conn) = pool.try_take() {
+            pool.metrics.record_wait(start.elapsed());
+            return Ok(conn);
+        }
+        if start.elapsed() >= wait {
+            pool.metrics.saturated.fetch_add(1, Ordering::Relaxed);
+            return Err(PoolError::Saturated { size: pool.size(), waited: wait });
+        }
+        // The canary never reaches this branch: its pool is the same size but its traffic is
+        // a tenth of the shard's, so a connection is always free. The shard reached it 2,140
+        // times on Thursday between 09:12 and 10:40.
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}";
+
+/// Cyrillic prose, for the headroom measurement: two-byte letters, which the estimator
+/// over-counts and the model answers in its own script.
+const RUSSIAN: &str = "\
+В четверг сегмент eu-west замедлился: задержка p95 выросла со 180 до 410 миллисекунд за \
+одиннадцать минут и держалась до 10:40, после чего вернулась к норме сама.
+
+Время ожидания соединения из пула росло вместе с задержкой, и пул весь этот час был заполнен \
+до предела в 64 соединения. Это указывает на насыщение пула как на причину.
+
+Канареечный сегмент, который работает на той же сборке с пулом того же размера, оставался \
+чистым всё время. Теория насыщения пула этого не объясняет.
+
+Второе прочтение: медленной была сама база. С 09:10 до 10:38 на основном узле шла очистка \
+таблицы заказов, а канарейка читает с реплики, где очистки не было.";
+
+/// The passages the headroom measurement runs, by name.
+const HEADROOM_PASSAGES: &[(&str, &str)] = &[
+    ("fixture", FIXTURE),
+    ("report", REPORT),
+    ("code", CODE),
+    ("russian", RUSSIAN),
+];
+
+/// What one call did with one passage, for the headroom record.
+struct HeadroomCell {
+    units: usize,
+    output: u64,
+    thinking: u64,
+    degraded: usize,
+    unanswered: bool,
+    truncated: bool,
+}
+
+/// One ingest of `text` on `model` at `effort` with `max_output`, and what the ledger saw.
+fn run_passage(
+    base: &Candidate,
+    model: &str,
+    effort: &str,
+    max_output: usize,
+    text: &str,
+) -> Result<HeadroomCell, String> {
+    let c = Candidate {
+        id: base.id,
+        kind: base.kind,
+        endpoint: base.endpoint,
+        model: model.to_string(),
+        key_var: base.key_var,
+        structured: base.structured,
+        context_window: base.context_window,
+    };
+    let mut cfg = config(&c);
+    cfg.effort = Some(effort.to_string());
+    cfg.max_output = max_output;
+    cfg.timeout_secs = 300;
+    let provider = smysl_provider::map::build(&cfg).map_err(|e| e.to_string())?;
+    let id = provider.id();
+    let registry = Registry::new()
+        .with_provider(provider)
+        .route(Task::ContentIngest, id);
+    let opts = IngestOptions::at_rung(Rung::Document)
+        .with_model(model)
+        .with_max_output(max_output);
+    let (staged, report) = Ingestor::new(&registry, opts)
+        .ingest(&Store::new(), text)
+        .map_err(|e| format!("ingest failed: {e}"))?;
+    let has = |suffix: &str| {
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code.as_str().ends_with(suffix))
+    };
+    Ok(HeadroomCell {
+        units: staged.len(),
+        output: report.usage.output_tokens,
+        thinking: report.usage.thinking_tokens,
+        degraded: report.degraded,
+        unanswered: has("W455"),
+        truncated: has("W304"),
+    })
+}
+
+/// **The reasoning headroom across the matrix.** [`REASONING_HEADROOM_RATIO`] is a quarter
+/// of `max_output` on the strength of one case, Haiku at `high` on the fixture. This runs
+/// every current model at every effort over four passages — the fixture, a longer report,
+/// source code and Cyrillic prose — at the gate's 800-token limit, and the `high` effort
+/// again at 2,048, and prints what each call spent thinking as a share of its limit. The
+/// record, not an assertion, is the product; the one assertion is that every call was
+/// answered by the endpoint, since a transport failure would be a hole in the table. Opt-in
+/// with `SMYSL_ANTHROPIC_HEADROOM=1`: it is 48 paid calls.
+///
+/// [`REASONING_HEADROOM_RATIO`]: smysl_ingest::chunk::REASONING_HEADROOM_RATIO
+#[test]
+fn the_reasoning_headroom_is_measured_across_the_matrix() {
+    if std::env::var("SMYSL_ANTHROPIC_HEADROOM")
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        eprintln!("anthropic headroom skipped: set SMYSL_ANTHROPIC_HEADROOM=1");
+        return;
+    }
+    let base = candidates()
+        .into_iter()
+        .find(|c| c.kind == "anthropic")
+        .expect("the anthropic candidate");
+    if let Err(why) = usable(&base) {
+        eprintln!("anthropic headroom skipped: {why}");
+        return;
+    }
+    let mut cells: Vec<(&str, usize)> = Vec::new();
+    for effort in ["low", "medium", "high"] {
+        cells.push((effort, 800));
+    }
+    cells.push(("high", 2048));
+    let mut failures = Vec::new();
+    eprintln!("--- Anthropic reasoning headroom (thinking as a share of max_output) ---");
+    eprintln!("  model            effort   max passage  units output  think share  note");
+    for model in ANTHROPIC_MATRIX {
+        for (effort, max_output) in &cells {
+            for (name, text) in HEADROOM_PASSAGES {
+                match run_passage(&base, model, effort, *max_output, text) {
+                    Ok(cell) => {
+                        let share = cell.thinking as f64 / *max_output as f64;
+                        let note = if cell.unanswered {
+                            "W455 unanswered"
+                        } else if cell.truncated {
+                            "W304 truncated"
+                        } else if cell.degraded > 0 {
+                            "degraded"
+                        } else {
+                            ""
+                        };
+                        eprintln!(
+                            "  {model:<16} {effort:<6} {max_output:>5} {name:<8} {:>5} {:>6} {:>6} {share:>5.2}  {note}",
+                            cell.units, cell.output, cell.thinking
+                        );
+                    }
+                    Err(why) => {
+                        eprintln!(
+                            "  {model:<16} {effort:<6} {max_output:>5} {name:<8} FAILED {why}"
+                        );
+                        failures.push(format!("{model} {effort} {max_output} {name}: {why}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// **The estimator against the tokeniser.** `smysl_core::tokens` is `ceil(bytes / 4)` by
 /// design (rule D: a chunking is pure, and no tokeniser is available offline); this says how
 /// far from the endpoint's own count that is on prose, so the chunk sizing knows its error.
@@ -402,8 +598,11 @@ fn the_estimator_is_calibrated_against_the_count_tokens_endpoint() {
              восточного канала.",
         ),
     ];
-    eprintln!("--- estimator calibration (ceil(bytes/4) against count_tokens) ---");
+    eprintln!(
+        "--- estimator calibration (ceil(bytes/4) and the sizing estimate against count_tokens) ---"
+    );
     let mut worst = 0.0f64;
+    let mut worst_sizing = 0.0f64;
     for (name, text) in samples {
         let counted = anthropic
             .count_tokens_remote(text)
@@ -411,12 +610,19 @@ fn the_estimator_is_calibrated_against_the_count_tokens_endpoint() {
             .saturating_sub(baseline)
             .max(1);
         let estimated = smysl_core::tokens(text) as u64;
+        let sizing = smysl_ingest::sizing_tokens(text) as u64;
         let ratio = estimated as f64 / counted as f64;
+        let sizing_ratio = sizing as f64 / counted as f64;
         worst = worst.max((ratio - 1.0).abs());
+        worst_sizing = worst_sizing.max((sizing_ratio - 1.0).abs());
         eprintln!(
-            "  {name:<9} bytes {:>5}  estimated {estimated:>5}  counted {counted:>5}  ratio {ratio:.2}",
+            "  {name:<9} bytes {:>5}  estimated {estimated:>5}  counted {counted:>5}  ratio {ratio:.2}  sizing {sizing:>5} ({sizing_ratio:.2})",
             text.len()
         );
     }
-    eprintln!("  worst deviation {:.0}%", worst * 100.0);
+    eprintln!(
+        "  worst deviation: format count {:.0}%, sizing estimate {:.0}%",
+        worst * 100.0,
+        worst_sizing * 100.0
+    );
 }

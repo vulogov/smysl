@@ -32,7 +32,7 @@ smysl-render     997
 smysl-retrieve   403
 smysl-embed      72
 smysl-provider   802
-smysl-ingest     1996
+smysl-ingest     1997
 smysl-tui        232
 smysl-text       4195
 smysl-query      4029

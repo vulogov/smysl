@@ -556,6 +556,29 @@ context leaves after the prompt and the output reserve, and `max_output`
 itself. On an 8k context the two coincide; on a million-token one the first
 alone would make a chunk of a whole book, and lose it.
 
+1.16 measured the premise and replaced it. An answer is not the size of its
+passage: on the three current Anthropic models a staged unit carries its gist,
+its kind, its span and its provenance, and the answer came to three to five
+times the passage's tokens on paragraphs of prose and code, seven on a passage
+of three sentences, eight on Russian. A chunk is now sized to the answer the
+call can carry — `max_output`, less a quarter where the model's reasoning is
+spent from it — divided by four. A provider with an 8k output takes passages of
+about 2,000 tokens; one with 2k, passages of 512; the floor of 256 holds below
+that. More calls, each carrying the prompt, and on a provider with a prompt
+cache the prompt is read from it after the first.
+
+From 1.16 the chunk is measured in a sizing estimate rather than the format's
+own count. The format counts `ceil(bytes / 4)`, and stays so: it is pure, and
+the same in every implementation. Against the tokeniser it is also a third
+short on almost everything — prose, code, markup, most scripts — and short is
+the wrong side for a chunk, whose answer then does not fit. The sizing estimate
+counts bytes per token by class of character: three for letters, one for
+digits and punctuation, four for Cyrillic, two for the other two-byte scripts
+and two and a half for the wide ones, each on the safe side of what 48 samples
+measured. It over-estimates most text by a tenth to a third and under-estimates
+German by a quarter, and it is used for nothing else: the ledger, the gist
+limits and `pack` budgets keep the format's count.
+
 An `ingest` block holds the defaults that are facts about the project rather
 than things to type on every invocation: `prompt`, a prompt override file;
 `path`, the ingest path to prefer; and, from 1.9, `temperature`, from 0.0 to

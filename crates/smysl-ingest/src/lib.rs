@@ -23,6 +23,7 @@ pub mod consensus;
 // chunks as part of the path a caller actually takes.
 #[cfg(feature = "model")]
 pub(crate) mod chunk;
+pub use chunk::sizing_tokens;
 pub mod import;
 /// Reachable for `smysl-eval`'s `quoting_live.rs`, which drives real models against the
 /// batch shape and needs to parse what comes back the way the ingest path does.

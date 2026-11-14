@@ -13,16 +13,9 @@ What 1.15 leaves open, by what it blocks rather than the order it is easiest. 1.
 hosted-provider path against a real key for the first time and shipped to crates.io for the
 first time since 1.11.0; what it recorded and did not act on is where 1.16 starts.
 
-**The estimator is a quarter out, and knows it.** `bytes / 4` under-counts English prose by a
-tenth to a third, code by half, and over-counts Cyrillic by a seventh, measured against
-`count_tokens` and recorded. The estimator stays pure by design (rule D); what is open is
-whether a chunk should be sized by a per-script factor the calibration already gives, or
-whether the output cap's slack is enough. One run on a corpus of mixed scripts decides it.
-
-**The headroom is one fixture's number.** `REASONING_HEADROOM_RATIO` is a quarter of the
-output because Haiku at `high` spent 800 of 800 tokens thinking on the SM-P14 fixture. One
-model, one effort, one passage. The ratio is owed a measurement across the matrix at each
-effort before it is more than a floor that happened to hold.
+**What 1.15 recorded, 1.16 acted on first.** The estimator's distance from the tokeniser
+and the headroom's single measurement are the first two entries below; both turned out to be
+about chunk sizing, and the second found the premise under it wrong.
 
 **Strict only when closed.** An OpenAI-compatible endpoint takes strict mode only for a
 closed schema, and an open payload goes unstrict, validated after the fact. Whether the
@@ -30,6 +23,103 @@ repair rate differs between the two paths on the same fixture has not been measu
 
 **The published check runs weekly against 1.15.0** for the first time with a grep that can
 match. What it finds in the registry copy, if anything, is the first item here.
+
+### The headroom measured across the matrix, and the answer that is four times the passage
+
+`REASONING_HEADROOM_RATIO` was a quarter on the strength of one case. `SMYSL_ANTHROPIC_HEADROOM=1`
+now runs every current model at every effort over four passages — the SM-P14 fixture (91
+tokens), an incident report of five paragraphs (380), a Rust function (324) and Russian prose
+(259) — at the gate's 800-token limit, and `high` again at 2,048. 48 calls; each cell is the
+units staged, or the warning the call ended in, with the thinking share where it was not zero:
+
+| model, effort, limit | fixture | report | code | russian |
+|---|---|---|---|---|
+| Haiku `low` 800 | 5 | W304 | W455 | W455 |
+| Haiku `medium` 800 | 5 | W455 | W455 | W455 |
+| Haiku `high` 800 | W455 | W455 | W455 | W455 |
+| Haiku `high` 2048 | 5 (59%) | W455 | W304 | W304 |
+| Sonnet `low` 800 | 4 | W304 | 3 | W304 |
+| Sonnet `medium` 800 | 5 | W304 | 3 (13%) | W304 |
+| Sonnet `high` 800 | 5 | W304 | W304 | W304 |
+| Sonnet `high` 2048 | 5 | 7 | 3 (15%) | 6 (16%) |
+| Opus `low` 800 | 4 | W304 | W304 | W304 |
+| Opus `medium` 800 | 4 | W304 | W304 | W304 |
+| Opus `high` 800 | 4 | W455 | W304 | W455 |
+| Opus `high` 2048 | 4 (11%) | W304 | W304 | W304 |
+
+Three things the table says.
+
+**The limit, not the reasoning, is what the long passages ran out of.** At 800 every passage
+but the three-sentence fixture ended in `SMY-W304` or `SMY-W455` on every model at every
+effort: the answer did not fit. 1.15 capped a chunk at `max_output` on the premise that an
+answer is about the size of its passage. Measured on the calls that were answered whole,
+`output_tokens` less the thinking over the passage's `count_tokens` is 3.1 to 4.7 on the
+report and the code, 4.6 to 7.4 on the fixture, whose three units each pay for a gist, a
+kind, a span and provenance, and 8.1 on the Russian, with its repair turns. The chunk is now
+sized to the answer the call can carry divided by `ANSWER_PER_INPUT_TOKEN`, which is four:
+a provider with an 8,192-token output takes 2,048-token chunks where 1.15 gave it 8,192; one
+with 2,048 takes 512; the gate's 800 sits on the 256 floor as before. More calls, each with
+the prompt, and the prompt cache 1.15 turned on is what carries that.
+
+**The quarter holds, for two models of three.** Where the limit held the answer, Sonnet and
+Opus spent nothing thinking at `low` and `medium` and 11% to 16% at `high`. Haiku spent 59%
+at `high`, and at `low` and `medium` spent all 800 on the passages the limit could not hold
+anyway. `REASONING_HEADROOM_RATIO` stays a quarter; it is generous for Sonnet and Opus at
+every effort, and too small only for Haiku at `high`, which is the case `SMY-W455` exists
+for and the reason the default effort is `low`.
+
+**An unanswered call on Haiku is first a sign of an undersized limit.** Sonnet and Opus
+truncate when the answer does not fit; Haiku thinks until the limit is gone and answers
+nothing. With the chunk sized to the answer, the three `W455` columns above are the cells
+the new sizing takes away.
+
+The sizing estimate's own test found a second thing: the `\n\n` a chunk's paragraphs are
+rejoined with was never counted against the budget, and `ceil(bytes / 4)`'s slack hid it.
+It is counted now.
+
+### A chunk is sized by an estimate that has met the tokeniser
+
+1.15 measured `smysl_core::tokens`, which is `ceil(bytes / 4)`, against `count_tokens` on
+four samples and recorded the distance without acting on it. 1.16 measured it on 48 — prose
+from the README, the manual and this file, Rust from three crates, TOML, SMYSL surface, and
+passages in Russian, Ukrainian, Spanish, French, German, Greek, Arabic, Hebrew, Chinese,
+Japanese, Korean, Hindi, a line of emoji and a block of JSON — and fitted one divisor per class
+of character by least squares:
+
+| class | bytes per token, fitted | bytes per token, used for sizing |
+|---|---|---|
+| ASCII letters and spaces | 3.5 | 3.0 |
+| other ASCII: digits, punctuation, newlines | 1.1 | 1.0 |
+| Cyrillic | 5.1 | 4.0 |
+| other two-byte scripts | 2.5 | 2.0 |
+| three- and four-byte: CJK, Devanagari, emoji | 2.9 | 2.5 |
+
+| estimate | mean error | worst | under-estimates |
+|---|---|---|---|
+| `ceil(bytes / 4)` | 34% | 57% | 45 of 48, by up to 57% |
+| the fit, on the 24 samples it was not fitted on | 10% | 39% | 10 of 24 |
+| the sizing divisors | 16% | 41% | 8 of 48, by at most 25% |
+
+The format's count under-counts almost everything, and under is the wrong side for a chunk:
+a chunk the estimator calls 600 tokens is 1,200 to the tokeniser on code or JSON, and its
+answer does not fit the limit the chunk was sized to. The one place it over-counts is
+Cyrillic, which the 1.15 sample happened to be.
+
+`smysl_ingest::sizing_tokens` is the five-class estimate, with each divisor rounded to the
+safe side of the fit, since over-estimating costs a call and under-estimating costs the
+chunk. Chunking works in it from 1.16: paragraphs are grouped and oversized ones split by the
+sizing estimate against the same `max_output`-derived budget as before. Nothing else moves.
+The format's count stays `ceil(bytes / 4)` — it is pure by rule D, every implementation
+agrees on it, and the ledger's estimated figures, the gist limits of the granularity profile
+and `pack` budgets keep it. German is the residual: its compounds split into more tokens
+than any byte class predicts, and the sizing estimate is a quarter short on it.
+
+The text path is not moved. `text::window::windows` fills a window by the estimator the
+caller named — `--estimator`, the one that also bounds a gist — and that is a public
+signature and a deliberate choice: the GE-T2 finding was that a window measured in bytes sent
+Russian down a different path from English, and a count the caller can name was the answer.
+Whether its windows should be sized by the tokeniser's estimate as well is a question for a
+text the size of a Bible, and it is open.
 
 **And what 1.14 left.** Questions still unread (the sixth set at 52 of 80), a subject by a
 name the store does not write, a saved query and a pinned traversal waiting on a store that
