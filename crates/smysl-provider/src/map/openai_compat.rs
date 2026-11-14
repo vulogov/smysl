@@ -129,6 +129,51 @@ pub(crate) fn strict_schema(schema: &Value) -> Value {
     Value::Object(out)
 }
 
+/// Whether every object in a translated schema is closed, which is what strict mode requires.
+///
+/// An object with `properties` was closed by `strict_schema`; an object without any — the
+/// kernel's `payload` — has nothing to close it and is open unless it says
+/// `additionalProperties: false` itself.
+pub(crate) fn is_closed(schema: &Value) -> bool {
+    let Some(obj) = schema.as_object() else {
+        return true;
+    };
+    let is_object = match obj.get("type") {
+        Some(Value::String(t)) => t == "object",
+        Some(Value::Array(ts)) => ts.iter().any(|t| t == "object"),
+        _ => obj.contains_key("properties"),
+    };
+    if is_object && obj.get("additionalProperties") != Some(&Value::Bool(false)) {
+        return false;
+    }
+    let props_closed = obj
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|p| p.values().all(is_closed))
+        .unwrap_or(true);
+    let items_closed = obj.get("items").map(is_closed).unwrap_or(true);
+    let branches_closed = obj
+        .get("anyOf")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().all(is_closed))
+        .unwrap_or(true);
+    props_closed && items_closed && branches_closed
+}
+
+/// Whether a request's structure will be enforced by the endpoint: a schema was asked for,
+/// the dialect takes one, and it translates closed. A mapper decides `Completion::structured`
+/// by this rather than by its configuration alone, so a schema sent without `strict` is not
+/// reported as a guarantee.
+pub fn enforced_for(req: &Request, dialect: Dialect) -> bool {
+    if req.structured != StructuredMode::JsonSchema || !dialect.json_schema {
+        return false;
+    }
+    match req.schema.as_deref().map(serde_json::from_str::<Value>) {
+        Some(Ok(v)) => is_closed(&strict_schema(&v)),
+        _ => false,
+    }
+}
+
 /// Make a translated subschema accept `null` as well.
 ///
 /// `{"type": "string"}` becomes `{"type": ["string", "null"]}`. An `enum` gains a `null`
@@ -193,14 +238,34 @@ pub fn body(
             })?;
             let schema: Value = serde_json::from_str(raw)
                 .map_err(|e| ProviderError::Malformed(format!("schema is not JSON: {e}")))?;
-            body["response_format"] = json!({
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "smysl_unit",
-                    "strict": true,
-                    "schema": strict_schema(&schema),
-                },
-            });
+            // Strict mode takes a subset of JSON Schema in which every object is closed, and
+            // the kernel's `payload` is an open object by design (the model writes
+            // `ingest:node` into it; the text ingest its attribution keys). The endpoint
+            // refuses an open object under `strict: true` outright, and closing `payload`
+            // would silence the one hint the model gives — the same decision the Anthropic
+            // mapper made, verified live there. So a schema that translates closed is sent
+            // strict and enforced; one that does not is sent as it is, not strict, and the
+            // answer is checked on the way in like a json-mode one (`enforced_for`).
+            let translated = strict_schema(&schema);
+            body["response_format"] = if is_closed(&translated) {
+                json!({
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "smysl_unit",
+                        "strict": true,
+                        "schema": translated,
+                    },
+                })
+            } else {
+                json!({
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "smysl_unit",
+                        "strict": false,
+                        "schema": schema,
+                    },
+                })
+            };
         }
         StructuredMode::JsonMode => {
             body["response_format"] = json!({"type": "json_object"});
@@ -226,6 +291,18 @@ pub fn parse(
 
     if let Some(e) = error_of(&v) {
         return Err(e);
+    }
+
+    // `content_filter` is the endpoint's policy decline: a 200 with the answer withheld, so
+    // it is read before the content, which is null. Reported apart from a fault so a run can
+    // count it.
+    if v.pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+        == Some("content_filter")
+    {
+        return Err(ProviderError::Declined {
+            category: "content_filter".to_string(),
+        });
     }
 
     let text = v
@@ -262,12 +339,18 @@ pub fn parse(
             output_tokens: o,
             estimated: false,
             retries,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            thinking_tokens: 0,
         },
         _ => Usage {
             input_tokens: input.unwrap_or(0),
             output_tokens: output.unwrap_or(smysl_core::tokens(&text) as u64),
             estimated: true,
             retries,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            thinking_tokens: 0,
         },
     };
 
@@ -351,6 +434,9 @@ pub fn sse_usage(line: &str, retries: u32) -> Option<Usage> {
             .unwrap_or(0),
         estimated: false,
         retries,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        thinking_tokens: 0,
     })
 }
 
@@ -429,8 +515,10 @@ mod tests {
 
     #[test]
     fn a_schema_becomes_a_strict_response_format() {
-        let req =
-            Request::new("m", "x").with_schema(StructuredMode::JsonSchema, r#"{"type":"object"}"#);
+        let req = Request::new("m", "x").with_schema(
+            StructuredMode::JsonSchema,
+            r#"{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}"#,
+        );
         let b = body(&req, "d", SCHEMA_DIALECT, false).unwrap();
         assert_eq!(b["response_format"]["type"], "json_schema");
         assert_eq!(b["response_format"]["json_schema"]["strict"], true);
@@ -438,6 +526,32 @@ mod tests {
             b["response_format"]["json_schema"]["schema"]["type"],
             "object"
         );
+    }
+
+    /// The kernel's `payload` is an open object, which strict mode refuses outright. Such a
+    /// schema is sent as it is, not strict, and the answer is not reported as enforced; a
+    /// schema that translates closed is sent strict as before.
+    #[test]
+    fn an_open_payload_is_sent_unstrict_and_not_reported_as_enforced() {
+        let open = r#"{"type":"object","properties":{"gist":{"type":"string"},
+                       "payload":{"type":"object"}},"required":["gist"]}"#;
+        let req = Request::new("m", "x").with_schema(StructuredMode::JsonSchema, open);
+        let b = body(&req, "d", SCHEMA_DIALECT, false).unwrap();
+        assert_eq!(b["response_format"]["json_schema"]["strict"], false);
+        assert!(
+            b["response_format"]["json_schema"]["schema"]["properties"]["payload"]
+                .get("additionalProperties")
+                .is_none(),
+            "the open payload is passed through as it is"
+        );
+        assert!(!enforced_for(&req, SCHEMA_DIALECT));
+
+        let closed = r#"{"type":"object","properties":{"gist":{"type":"string"}},
+                         "required":["gist"]}"#;
+        let req = Request::new("m", "x").with_schema(StructuredMode::JsonSchema, closed);
+        let b = body(&req, "d", SCHEMA_DIALECT, false).unwrap();
+        assert_eq!(b["response_format"]["json_schema"]["strict"], true);
+        assert!(enforced_for(&req, SCHEMA_DIALECT));
     }
 
     #[test]
@@ -474,6 +588,16 @@ mod tests {
         assert!(matches!(
             parse(raw, "m", 0, false),
             Err(ProviderError::Truncated { .. })
+        ));
+    }
+
+    /// A `content_filter` finish is a policy decline, under its own variant, never an answer.
+    #[test]
+    fn a_content_filter_stop_is_a_decline() {
+        let raw = r#"{"choices":[{"message":{"content":null},"finish_reason":"content_filter"}]}"#;
+        assert!(matches!(
+            parse(raw, "m", 0, false),
+            Err(ProviderError::Declined { category }) if category == "content_filter"
         ));
     }
 

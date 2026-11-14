@@ -121,6 +121,8 @@ impl Provider for DeepSeek {
             streaming: true,
             usage_reporting: true,
             offline: self.cfg.is_local(),
+            reasoning_in_output: false,
+            temperature: true,
         }
     }
 

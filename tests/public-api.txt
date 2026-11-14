@@ -24,6 +24,11 @@
 # re-exports. `tests/public-api-counts.txt` covers the third case neither sees: a public item
 # added to a library crate by accident, which is nobody's break and so nobody's failure.
 #
+# The auto-trait lines (`Freeze`, `Send`, `Forget`, `Move`, ...) are rustdoc's, not this crate's,
+# and they move when nightly's set of auto traits does: `Forget` and `Move` appeared in November
+# 2026 and failed every push until they were recorded. A diff made of nothing but such lines is
+# the toolchain's decision, not an API one, and is recorded as it arrives.
+#
 # Regenerate with `make api`. Check with `make api-check`.
 pub mod smysl
 pub use smysl::ABSENT_PERCENT
@@ -382,7 +387,9 @@ pub fn smysl::translate::ProviderTranslator<'p>::new(&'p dyn smysl_provider::Pro
 impl smysl_query::nl::Translator for smysl::translate::ProviderTranslator<'_>
 pub fn smysl::translate::ProviderTranslator<'_>::model_hash(&self) -> [u8; 32]
 pub fn smysl::translate::ProviderTranslator<'_>::translate(&self, &str, &smysl_query::nl::TranslateContext) -> core::result::Result<alloc::string::String, smysl_query::nl::TranslateError>
+impl<'p> core::marker::Forget for smysl::translate::ProviderTranslator<'p>
 impl<'p> core::marker::Freeze for smysl::translate::ProviderTranslator<'p>
+impl<'p> core::marker::Move for smysl::translate::ProviderTranslator<'p>
 impl<'p> core::marker::Send for smysl::translate::ProviderTranslator<'p>
 impl<'p> core::marker::Sync for smysl::translate::ProviderTranslator<'p>
 impl<'p> core::marker::Unpin for smysl::translate::ProviderTranslator<'p>

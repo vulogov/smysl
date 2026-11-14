@@ -140,12 +140,18 @@ impl Ollama {
                 output_tokens: o,
                 estimated: false,
                 retries,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                thinking_tokens: 0,
             },
             _ => Usage {
                 input_tokens: input.unwrap_or(0),
                 output_tokens: output.unwrap_or(smysl_core::tokens(&text) as u64),
                 estimated: true,
                 retries,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                thinking_tokens: 0,
             },
         };
 
@@ -224,6 +230,8 @@ impl Ollama {
             streaming: reported.contains(&"completion") || reported.is_empty(),
             usage_reporting: true,
             offline: self.cfg.is_local(),
+            reasoning_in_output: false,
+            temperature: true,
         })
     }
 }
@@ -261,6 +269,8 @@ impl Provider for Ollama {
             // From the endpoint, so `--offline` rests on a fact rather than on a claim the
             // configuration makes about itself.
             offline: self.cfg.is_local(),
+            reasoning_in_output: false,
+            temperature: true,
         }
     }
 
@@ -327,6 +337,9 @@ impl Provider for Ollama {
                         output_tokens: o.unwrap_or((emitter.output_chars() as u64).div_ceil(4)),
                         estimated: i.is_none() || o.is_none(),
                         retries: resp.retries,
+                        cache_read_tokens: 0,
+                        cache_write_tokens: 0,
+                        thinking_tokens: 0,
                     };
                 }
             }

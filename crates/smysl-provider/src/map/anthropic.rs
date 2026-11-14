@@ -1,25 +1,63 @@
 //! The Anthropic mapper (§21.2).
 //!
-//! `ToolForce` — declare a single tool whose input schema is the unit schema, and force its
-//! use. That is how this endpoint is made to produce structured output: there is no
-//! response-format field, and asking politely in the prompt is not enforcement.
+//! `ToolForce` — declare a single tool whose input schema is the unit schema, leave the
+//! choice to the model, and tell it in the system prompt to answer with that tool and nothing
+//! else. The forced choice (`tool_choice: tool`) this mapper was written with is refused by
+//! every current-generation model (Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.x: a 400,
+//! `tool_choice: type "tool" and "any" are not supported for this model`). What forcing
+//! bought was never schema conformance — a tool's input is a suggestion to the model unless
+//! the tool is strict — only that a call happened; that is now read from the response, and
+//! `Completion::structured` says so, as it always did.
+//!
+//! Not strict, deliberately. `strict: true` would make a call that happens match the schema,
+//! but strict mode takes a subset of JSON Schema in which every object is closed, and the
+//! kernel's `payload` is an open object by design: the model writes `ingest:node` into it to
+//! say which node it read a claim in, and the text ingest writes its attribution keys there.
+//! The endpoint refuses the schema outright (`For 'object' type, 'additionalProperties' must
+//! be explicitly set to false`), and closing `payload` would silence the one hint the model
+//! gives. So the schema is passed through unchanged, as it was, and conformance is decided by
+//! `check` on the way in, where it was always going to be decided.
 //!
 //! The response is a **block list**, not a string. Text blocks are concatenated for the
-//! surface path; the `tool_use` block carries the JSON-AST. A mapper that read only the
-//! first block would silently truncate a two-block answer.
+//! surface path; the `tool_use` block carries the JSON-AST; `thinking` blocks (always present
+//! on these models, empty by default) and `fallback` blocks are neither. A mapper that read
+//! only the first block would now read a thinking block.
+//!
+//! API version `2026-10-21`: no `temperature` (a 400 on every model at that version; the
+//! `Request` keeps its field for the other mappers), and thinking is always on, so the
+//! `max_tokens` a caller sizes covers the model's reasoning as well as its answer. A policy
+//! decline arrives as a successful response with `stop_reason: refusal` and is
+//! `ProviderError::Declined` here, with its category, never an empty answer; `fallbacks: "default"` asks the API to retry such a decline on a
+//! model of its choosing within the same call, so the figure a caller sees is the answer that
+//! was given, by the model named in the response. A configuration that pins its model can
+//! decline the chain (`fallbacks: false`), and then a decline is a decline.
+//!
+//! **The system prompt is a cache breakpoint.** An ingest sends the same system prompt and
+//! the same kernel schema on every chunk and every repair turn, and only the passage changes;
+//! the request renders `tools` then `system` then `messages`, so one `cache_control` marker
+//! on the system block caches the schema and the prompt together. The first call writes the
+//! entry and every call within five minutes of the last reads it, at a fraction of the input
+//! price. A prompt below the model's minimum (512 tokens on the current models) is simply not
+//! cached, with no error, and the kernel schema alone is past that. `Usage` says what
+//! happened: `input_tokens` is still every token the model read, and the cache's share of it
+//! is reported apart, so a ledger can show a run that wrote and never read.
+//!
+//! **The reasoning is spent from `max_tokens`**, and the response says how much:
+//! `usage.output_tokens_details.thinking_tokens` is carried as `Usage::thinking_tokens`, and a
+//! `max_tokens` stop with no answer at all is `ProviderError::Unanswered` with that share,
+//! rather than an empty response. `effort` on the provider's configuration is sent as
+//! `output_config.effort` on every request; unset, a schema request is `low`.
 //!
 //! | Path | Purpose |
 //! |---|---|
-//! | `POST /v1/messages` | completion, streaming or not |
-//! | `GET /v1/models` | model list; also the reachability probe |
+//! | `POST /v1/messages` | completion, streaming or not (`read_stream` replays the events) |
+//! | `POST /v1/messages/count_tokens` | the tokeniser's count, for calibrating the estimator |
+//! | `GET /v1/models` | model list with each model's lifecycle; also the reachability probe |
 //!
-//! **Implemented, but not tested.** No key has been available, so every shape here is
-//! asserted against recorded fixtures rather than against the API - which means this file is
-//! a reading of the documentation, and a reading can be wrong in ways no fixture catches.
-//! The Gemini mapper was written the same way and had exactly that failure: its response
-//! schema was documented as a subset of draft 2020-12, is not one, and every structured call
-//! it made was refused until a live key proved it. The RFC's implementation note applies:
-//! verify before relying on this.
+//! **Verified live** on 1.15 against `api.anthropic.com`: the SM-P14 gate
+//! (`crates/smysl-ingest/tests/providers_live.rs`) and `smysl ingest` through the CLI, both
+//! staging conformant units. Before that, every shape here was a reading of the documentation
+//! asserted against recorded fixtures, and the Gemini mapper had shown what that is worth.
 
 use std::time::Duration;
 
@@ -31,13 +69,25 @@ use super::StatusMapping;
 use super::auth::{self, Secret};
 use crate::config::ProviderConfig;
 use crate::http;
+use crate::stream::{Emitter, StreamMsg};
 use crate::{
     Capabilities, Completion, Probe, Provider, ProviderId, Request, StructuredMode, TokenCount,
     Usage,
 };
 
-/// The API version header. Anthropic requires one and dates its changes by it.
-const API_VERSION: &str = "2023-06-01";
+/// The API version header. Anthropic requires one and dates its changes by it. `2026-10-21`
+/// removed the sampling parameters; nothing here sends one.
+const API_VERSION: &str = "2026-10-21";
+
+/// The beta that admits `fallbacks` in the body. The scalar `"default"` form needs this
+/// value exactly; an earlier `server-side-fallback-*` is a 400 with it.
+const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
+
+/// What the system prompt says when a schema is requested: the steer that replaces the forced
+/// choice. Named here beside the tool it names, so that renaming one cannot leave the other
+/// asking for a tool that is not declared.
+const STEER: &str = "Answer by calling the `emit_smysl_units` tool exactly once, with every \
+                     unit in that one call, and write nothing else.";
 
 /// The name of the forced tool. Fixed, because the model never sees it as a choice.
 pub const TOOL_NAME: &str = "emit_smysl_units";
@@ -75,10 +125,16 @@ impl Anthropic {
 
     /// `x-api-key`, not `Authorization: Bearer` - this endpoint is the odd one out.
     fn headers(&self) -> Result<Vec<(&'static str, String)>, ProviderError> {
-        Ok(vec![
+        let mut h = vec![
             ("x-api-key", self.key()?.expose().to_string()),
             ("anthropic-version", API_VERSION.to_string()),
-        ])
+        ];
+        // The beta header admits the `fallbacks` field; a configuration that declined the
+        // chain does not send either.
+        if self.cfg.fallbacks {
+            h.push(("anthropic-beta", FALLBACK_BETA.to_string()));
+        }
+        Ok(h)
     }
 
     pub fn body(&self, req: &Request, stream: bool) -> Result<Value, ProviderError> {
@@ -95,15 +151,25 @@ impl Anthropic {
 
         let mut body = json!({
             "model": if req.model.is_empty() { self.cfg.model.as_str() } else { req.model.as_str() },
-            // The system prompt is a top-level field here, not a message with a role.
             "messages": messages,
+            // Thinking is always on at this version, and it is spent from the same budget as
+            // the answer: what the caller sized is what the model has for both.
             "max_tokens": req.max_output,
-            "temperature": req.temperature,
             "stream": stream,
         });
-        if !req.system.is_empty() {
-            body["system"] = json!(req.system);
+        // A policy decline is retried, within this call, on a model the API picks by the
+        // decline's category; the response names the model that answered. A decline that
+        // survives the chain still comes back as `refusal`, and `parse` refuses it. Off when
+        // the configuration pinned its model: the answer is then by that model or by nobody,
+        // and the recipe stays true.
+        if self.cfg.fallbacks {
+            body["fallbacks"] = json!("default");
         }
+        // No `temperature`: `req.temperature` is for the mappers whose endpoints still take
+        // one. Here it is a 400 at every value, the default included.
+
+        // The system prompt is a top-level field here, not a message with a role.
+        let mut system = req.system.clone();
 
         match req.structured {
             StructuredMode::None => {}
@@ -116,12 +182,41 @@ impl Anthropic {
                 body["tools"] = json!([{
                     "name": TOOL_NAME,
                     "description": "Emit smysl kernel units for the supplied text.",
+                    // Passed through unchanged: not strict, since strict closes every object
+                    // and `payload` is open by design (see the module comment).
                     "input_schema": schema,
                 }]);
-                // Forcing the tool is what makes this enforcement rather than a suggestion.
-                body["tool_choice"] = json!({"type": "tool", "name": TOOL_NAME});
+                // The choice is the model's — forcing it is refused — and the prompt makes
+                // the choice; at most one call, since the one call carries every unit.
+                body["tool_choice"] = json!({"type": "auto", "disable_parallel_tool_use": true});
+                // A schema-shaped extraction is the simple case: the schema does the work,
+                // and the reasoning a higher effort buys is spent from the caller's
+                // `max_tokens`. Free-text requests take the model's default. A configured
+                // `effort` overrides both, below.
+                body["output_config"] = json!({"effort": "low"});
+                if !system.is_empty() {
+                    system.push_str("\n\n");
+                }
+                system.push_str(STEER);
             }
             _ => return Err(ProviderError::StructuredUnsupported),
+        }
+        // The configured effort, on every request. Measured on 1.15 (see the changelog):
+        // the setting is the caller's to make, and the default above is what measured best
+        // for a schema request.
+        if let Some(e) = &self.cfg.effort {
+            body["output_config"] = json!({"effort": e});
+        }
+        if !system.is_empty() {
+            // One text block with a cache breakpoint. `tools` renders before `system`, so the
+            // marker covers the schema as well as the prompt — the two things every chunk of
+            // an ingest sends unchanged. The passage is in `messages`, after it, and is not
+            // cached, which is right: no two chunks share one.
+            body["system"] = json!([{
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }]);
         }
 
         Ok(body)
@@ -149,6 +244,19 @@ impl Anthropic {
             return Err(e);
         }
 
+        // A policy decline is a successful response whose content is empty or partial. Read
+        // before the blocks, because an empty block list would otherwise be "empty response"
+        // and a partial one an answer. `stop_details` is informational and may be absent.
+        if v.get("stop_reason").and_then(Value::as_str) == Some("refusal") {
+            let category = v
+                .pointer("/stop_details/category")
+                .and_then(Value::as_str)
+                .unwrap_or("unspecified");
+            return Err(ProviderError::Declined {
+                category: category.to_string(),
+            });
+        }
+
         let blocks = v
             .get("content")
             .and_then(Value::as_array)
@@ -171,39 +279,59 @@ impl Anthropic {
                 .join(""),
         };
 
+        let output = v.pointer("/usage/output_tokens").and_then(Value::as_u64);
+        // The reasoning's share of the output, which the model spends from the same
+        // `max_tokens` as the answer.
+        let thinking = v
+            .pointer("/usage/output_tokens_details/thinking_tokens")
+            .and_then(Value::as_u64);
+
+        // `max_tokens` means the answer was cut off, which the caller must not parse as a
+        // whole one. Read before the empty check: an answer that never began because the
+        // reasoning spent the limit is not a malformed response, and the remedy is the
+        // limit. Until 1.15 it was reported as "empty response".
+        if v.get("stop_reason").and_then(Value::as_str) == Some("max_tokens") {
+            if text.is_empty() {
+                return Err(ProviderError::Unanswered {
+                    limit: Some(cap),
+                    used: output.map(|o| o as usize),
+                    thinking: thinking.map(|t| t as usize),
+                });
+            }
+            // `requested` was `text.len()`, bytes against a token cap.
+            return Err(ProviderError::Truncated {
+                limit: Some(cap),
+                used: output.map(|o| o as usize),
+            });
+        }
+
         if text.is_empty() {
             return Err(ProviderError::Malformed("empty response".into()));
         }
 
-        // `max_tokens` means the answer was cut off, which the caller must not parse as a
-        // whole one.
-        if v.get("stop_reason").and_then(Value::as_str) == Some("max_tokens") {
-            // `requested` was `text.len()`, bytes against a token cap.
-            return Err(ProviderError::Truncated {
-                limit: Some(cap),
-                used: v
-                    .pointer("/usage/output_tokens")
-                    .and_then(Value::as_u64)
-                    .map(|o| o as usize),
-            });
-        }
-
+        // `input_tokens` on the wire is the *uncached* input: the tokens read from the cache
+        // and the tokens written to it are reported beside it, not inside it. `Usage` wants
+        // every token the model read, so the three are summed, and the cache's two are kept
+        // apart as its share.
+        let cache_read = v
+            .pointer("/usage/cache_read_input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let cache_write = v
+            .pointer("/usage/cache_creation_input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         let input = v.pointer("/usage/input_tokens").and_then(Value::as_u64);
-        let output = v.pointer("/usage/output_tokens").and_then(Value::as_u64);
         let usage = match (input, output) {
-            (Some(i), Some(o)) => Usage {
-                input_tokens: i,
-                output_tokens: o,
-                estimated: false,
-                retries,
-            },
-            _ => Usage {
-                input_tokens: input.unwrap_or(0),
-                output_tokens: output.unwrap_or(smysl_core::tokens(&text) as u64),
-                estimated: true,
-                retries,
-            },
-        };
+            (Some(i), Some(o)) => Usage::reported(i + cache_read + cache_write, o),
+            _ => Usage::estimated(
+                input.unwrap_or(0) + cache_read + cache_write,
+                output.unwrap_or(smysl_core::tokens(&text) as u64),
+            ),
+        }
+        .after_retries(retries)
+        .with_cache(cache_read, cache_write)
+        .with_thinking(thinking.unwrap_or(0));
 
         Ok(Completion {
             text,
@@ -218,22 +346,181 @@ impl Anthropic {
     }
 
     pub fn parse_models(raw: &str) -> Result<Vec<String>, ProviderError> {
-        let v: Value = serde_json::from_str(raw)
-            .map_err(|e| ProviderError::Malformed(format!("models: {e}")))?;
-        let mut out: Vec<String> = v
-            .get("data")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|m| m.get("id").and_then(Value::as_str))
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut out: Vec<String> = Anthropic::parse_models_meta(raw)?
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
         out.sort();
         out.dedup();
         Ok(out)
     }
+
+    /// The model list with each model's lifecycle, as the endpoint reports it.
+    pub fn parse_models_meta(raw: &str) -> Result<Vec<ModelMeta>, ProviderError> {
+        let v: Value = serde_json::from_str(raw)
+            .map_err(|e| ProviderError::Malformed(format!("models: {e}")))?;
+        let date = |m: &Value, k: &str| m.get(k).and_then(Value::as_str).map(str::to_string);
+        Ok(v.get("data")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|m| {
+                        Some(ModelMeta {
+                            id: m.get("id")?.as_str()?.to_string(),
+                            deprecated_at: date(m, "deprecated_at"),
+                            retires_at: date(m, "retires_at"),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// What the probe says about the configured model: listed, listed and deprecated, or
+    /// not listed at all. A list is a catalogue rather than an entitlement, so "listed" is
+    /// not "can call" — but "not listed" caught the stale `claude-sonnet-4-5` pin that 1.15
+    /// otherwise found by paying for a 404, and "deprecated" is the date to plan around.
+    pub fn model_note(configured: &str, models: &[ModelMeta]) -> String {
+        match models.iter().find(|m| m.id == configured) {
+            None => format!("`{configured}` is not listed by the endpoint"),
+            Some(m) => match (&m.deprecated_at, &m.retires_at) {
+                (Some(d), Some(r)) => format!("`{configured}` deprecated since {d}, retires {r}"),
+                (Some(d), None) => format!("`{configured}` deprecated since {d}"),
+                (None, Some(r)) => format!("`{configured}` retires {r}"),
+                (None, None) => format!("`{configured}` listed"),
+            },
+        }
+    }
+
+    /// The endpoint's own count for `text` as one user message of the configured model
+    /// (`POST /v1/messages/count_tokens`, which is free and *does* send the text). Not
+    /// `Provider::count_tokens`, which stays the bundled estimator so a chunking is pure
+    /// (rule D); this is for calibrating the estimator against the tokeniser, by a live test,
+    /// once.
+    pub fn count_tokens_remote(&self, text: &str) -> Result<u64, ProviderError> {
+        let headers = self.headers()?;
+        let body = json!({
+            "model": self.cfg.model,
+            "messages": [{"role": "user", "content": text}],
+        })
+        .to_string();
+        let url = self.url("/v1/messages/count_tokens");
+        let timeout = Duration::from_secs(self.cfg.timeout_secs);
+        let resp = crate::runtime::run(move || {
+            http::post_json(
+                &url,
+                &headers,
+                &body,
+                timeout,
+                std::thread::sleep,
+                super::jitter,
+            )
+        })?;
+        if resp.status >= 400 {
+            return Err(self.status_error(resp.status, &resp.body));
+        }
+        let v: Value = serde_json::from_str(&resp.body)
+            .map_err(|e| ProviderError::Malformed(format!("count_tokens: {e}")))?;
+        v.get("input_tokens")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| ProviderError::Malformed("count_tokens: no input_tokens".into()))
+    }
+}
+
+/// One model as `GET /v1/models` lists it: its id and, where the endpoint says, when it was
+/// deprecated and when it retires.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ModelMeta {
+    pub id: String,
+    pub deprecated_at: Option<String>,
+    pub retires_at: Option<String>,
+}
+
+/// One server-sent event's payload, or `None` for an `event:` line, a blank, or a ping.
+pub fn sse_event(line: &str) -> Option<Value> {
+    let payload = line.strip_prefix("data:")?.trim();
+    if payload.is_empty() {
+        return None;
+    }
+    serde_json::from_str(payload).ok()
+}
+
+/// Read a streamed response, event by event, into the emitter.
+///
+/// `message_start` carries the input side of the usage, `content_block_delta` the text (or
+/// the tool input's JSON, piece by piece), `message_delta` the output side and the stop
+/// reason. A decline or an error event fails the stream the way `parse` would fail the
+/// completion.
+pub(crate) fn read_stream(
+    body: &str,
+    retries: u32,
+    emitter: &mut Emitter,
+) -> Result<Usage, ProviderError> {
+    let mut usage = Usage {
+        estimated: true,
+        retries,
+        ..Usage::default()
+    };
+    for line in body.lines() {
+        let Some(ev) = sse_event(line) else { continue };
+        match ev.get("type").and_then(Value::as_str) {
+            Some("message_start") => {
+                let u = ev.pointer("/message/usage");
+                let n = |k: &str| {
+                    u.and_then(|u| u.get(k))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0)
+                };
+                let (read, write) = (
+                    n("cache_read_input_tokens"),
+                    n("cache_creation_input_tokens"),
+                );
+                usage.input_tokens = n("input_tokens") + read + write;
+                usage.cache_read_tokens = read;
+                usage.cache_write_tokens = write;
+            }
+            Some("content_block_delta") => {
+                let piece = ev
+                    .pointer("/delta/text")
+                    .or_else(|| ev.pointer("/delta/partial_json"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !piece.is_empty() && !emitter.token(piece) {
+                    break;
+                }
+            }
+            Some("message_delta") => {
+                if let Some(o) = ev.pointer("/usage/output_tokens").and_then(Value::as_u64) {
+                    usage.output_tokens = o;
+                    usage.estimated = false;
+                }
+                usage.thinking_tokens = ev
+                    .pointer("/usage/output_tokens_details/thinking_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                if ev.pointer("/delta/stop_reason").and_then(Value::as_str) == Some("refusal") {
+                    return Err(ProviderError::Declined {
+                        category: ev
+                            .pointer("/delta/stop_details/category")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unspecified")
+                            .to_string(),
+                    });
+                }
+            }
+            Some("error") => {
+                if let Some(e) = error_of(&ev) {
+                    return Err(e);
+                }
+            }
+            _ => {}
+        }
+    }
+    if usage.estimated {
+        usage.output_tokens = (emitter.output_chars() as u64).div_ceil(4);
+    }
+    Ok(usage)
 }
 
 /// Anthropic's error envelope: `{"type":"error","error":{"type":…,"message":…}}`.
@@ -276,15 +563,15 @@ impl Provider for Anthropic {
                 StructuredMode::None => StructuredMode::None,
                 _ => StructuredMode::ToolForce,
             },
-            // False, because this mapper does not implement `Provider::stream` and so
-            // inherits the trait default, which refuses. The trait's own documentation says
-            // `caps` describes what a provider *does*, "which is not always the same thing" —
-            // and this said `true` for as long as the mapper has existed. Nothing in the
-            // library reads the field yet, which is why nothing noticed; `Capabilities` is
-            // public API, so a consumer could.
-            streaming: false,
+            // Since 1.15: `Provider::stream` reads the event stream (`read_stream`). It said
+            // `true` for as long as the mapper existed while inheriting the trait default,
+            // which refuses; from 1.11 to 1.14 it said `false`, which was at least true.
+            streaming: true,
             usage_reporting: true,
             offline: self.cfg.is_local(),
+            // Thinking is always on and spent from `max_tokens`; `temperature` is a 400.
+            reasoning_in_output: true,
+            temperature: false,
         }
     }
 
@@ -309,6 +596,48 @@ impl Provider for Anthropic {
             return Err(self.status_error(resp.status, &resp.body));
         }
         self.parse(&resp.body, resp.retries, req.max_output)
+    }
+
+    fn stream(
+        &self,
+        req: &Request,
+        tx: std::sync::mpsc::Sender<StreamMsg>,
+    ) -> Result<Usage, ProviderError> {
+        let headers = self.headers()?;
+        let body = self.body(req, true)?.to_string();
+        let url = self.url("/v1/messages");
+        let timeout = Duration::from_secs(self.cfg.timeout_secs);
+
+        // The body is read whole and then replayed event by event, as the other mappers do:
+        // `http::post_json` returns a complete response. So the timeout covers the whole
+        // answer here too, which is why an Anthropic provider's default is the longer one.
+        crate::runtime::run(move || {
+            let mut emitter = Emitter::new(tx);
+            let resp = match http::post_json(
+                &url,
+                &headers,
+                &body,
+                timeout,
+                std::thread::sleep,
+                super::jitter,
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    emitter.fail(e.clone());
+                    return Err(e);
+                }
+            };
+            match read_stream(&resp.body, resp.retries, &mut emitter) {
+                Ok(usage) => {
+                    emitter.done(usage);
+                    Ok(usage)
+                }
+                Err(e) => {
+                    emitter.fail(e.clone());
+                    Err(e)
+                }
+            }
+        })
     }
 
     fn count_tokens(&self, text: &str) -> TokenCount {
@@ -341,9 +670,11 @@ impl Provider for Anthropic {
             return Err(self.status_error(resp.status, &resp.body));
         }
 
+        let meta = Anthropic::parse_models_meta(&resp.body)?;
+        let note = Anthropic::model_note(&self.cfg.model, &meta);
         let models = Anthropic::parse_models(&resp.body)?;
         Ok(Probe {
-            detail: format!("{} model(s)", models.len()),
+            detail: format!("{} model(s); {note}", models.len()),
             reachable: true,
             models,
             caps: Some(self.caps()),
@@ -421,23 +752,148 @@ mod tests {
             );
         }
 
-        /// The forced choice must name the tool that was declared.
+        /// Nothing is forced, the tool is not strict, and at most one call is admitted.
         ///
-        /// This is the defect the envelope makes easy: rename the tool, forget the choice, and
-        /// the request asks the model to call something that is not in its list. It fails at
-        /// the endpoint, which is the one place nobody here can look.
+        /// `tool_choice: tool` and `any` are a 400 on every current-generation model, which
+        /// is the failure that moved this mapper off them: it fails at the endpoint, the one
+        /// place nobody here can look, on every call. `strict` is a 400 too, for the open
+        /// `payload` (module comment); the first live run against `claude-opus-5-5` found it.
         #[test]
-        fn the_forced_choice_names_the_declared_tool() {
+        fn nothing_is_forced_and_at_most_one_call_is_admitted() {
             let body = body_for(StructuredMode::ToolForce);
-            let declared = body["tools"][0]["name"]
-                .as_str()
-                .expect("a tool is declared");
-            assert_eq!(body["tool_choice"]["type"], "tool");
-            assert_eq!(
-                body["tool_choice"]["name"], declared,
-                "the forced choice names a tool that was not declared"
+            assert_eq!(body["tools"].as_array().map(Vec::len), Some(1));
+            assert_eq!(body["tools"][0]["name"], TOOL_NAME);
+            assert!(
+                body["tools"][0].get("strict").is_none(),
+                "strict closes every object, and payload is open"
+            );
+            assert_eq!(body["tool_choice"]["type"], "auto");
+            assert_eq!(body["tool_choice"]["disable_parallel_tool_use"], true);
+            assert!(
+                body["tool_choice"].get("name").is_none(),
+                "a named choice is a forced one"
+            );
+        }
+
+        /// The steer names the tool that was declared, after whatever the caller said.
+        ///
+        /// This is the defect the envelope makes easy now that nothing forces the call:
+        /// rename the tool, forget the prompt, and the model is asked for a tool that is
+        /// not in its list — and simply answers in prose, which `structured: false` reports
+        /// one call too late to be cheap.
+        #[test]
+        fn the_steer_names_the_declared_tool_after_the_callers_prompt() {
+            let mut cfg = ProviderConfig::new(ProviderId::new("a").unwrap(), "anthropic");
+            cfg.model = "claude-x".into();
+            cfg.endpoint = "http://127.0.0.1:1".into();
+            let m = Anthropic::new(cfg);
+            let req = Request::new("claude-x", "some text")
+                .with_system("be brief")
+                .with_schema(StructuredMode::ToolForce, schema());
+            let body = m.body(&req, false).expect("the body builds");
+            let system = body["system"][0]["text"].as_str().expect("a system prompt");
+            let declared = body["tools"][0]["name"].as_str().unwrap();
+            assert!(system.starts_with("be brief\n\n"), "{system:?}");
+            assert!(
+                system.contains(&format!("`{declared}`")),
+                "the steer does not name the declared tool: {system:?}"
             );
             assert_eq!(declared, TOOL_NAME);
+        }
+
+        /// No sampling parameter, whatever the request asked for.
+        ///
+        /// `2026-10-21` rejects `temperature`, `top_p` and `top_k` on every model, the default
+        /// value included, so a request that carried the ingest's `temperature: 0` would be a
+        /// 400 on every call.
+        #[test]
+        fn nothing_samples_the_model() {
+            for mode in [StructuredMode::None, StructuredMode::ToolForce] {
+                let mut cfg = ProviderConfig::new(ProviderId::new("a").unwrap(), "anthropic");
+                cfg.model = "claude-x".into();
+                cfg.endpoint = "http://127.0.0.1:1".into();
+                let m = Anthropic::new(cfg);
+                let mut req = Request::new("claude-x", "some text");
+                req.temperature = 0.7;
+                if mode == StructuredMode::ToolForce {
+                    req = req.with_schema(mode, schema());
+                }
+                let body = m.body(&req, false).expect("the body builds");
+                for key in ["temperature", "top_p", "top_k"] {
+                    assert!(body.get(key).is_none(), "{mode:?}: sent {key}");
+                }
+            }
+        }
+
+        /// A schema-shaped request runs at low effort; a free-text one takes the default.
+        #[test]
+        fn a_structured_request_runs_at_low_effort() {
+            let body = body_for(StructuredMode::ToolForce);
+            assert_eq!(body["output_config"]["effort"], "low");
+            let body = body_for(StructuredMode::None);
+            assert!(body.get("output_config").is_none(), "effort pinned unasked");
+        }
+
+        /// Both modes ask for the fallback chain: a decline is retried in the same call.
+        #[test]
+        fn fallbacks_are_requested_by_default() {
+            for mode in [StructuredMode::None, StructuredMode::ToolForce] {
+                assert_eq!(body_for(mode)["fallbacks"], "default", "{mode:?}");
+            }
+        }
+
+        /// A configuration that pinned its model declines the chain, field and header both:
+        /// the answer is then by that model or by nobody, and the recipe's name holds.
+        #[test]
+        fn a_pinned_model_declines_the_fallback_chain() {
+            let mut cfg = ProviderConfig::new(ProviderId::new("a").unwrap(), "anthropic");
+            cfg.model = "claude-x".into();
+            cfg.endpoint = "http://127.0.0.1:1".into();
+            cfg.fallbacks = false;
+            // A variable of its own: the header test below sets and removes the shared one,
+            // and tests run in parallel.
+            cfg.api_key_env = Some("SMYSL_TEST_ANTHROPIC_PINNED_KEY".into());
+            std::env::set_var("SMYSL_TEST_ANTHROPIC_PINNED_KEY", "sk-ant-test");
+            let m = Anthropic::new(cfg);
+            let body = m
+                .body(&Request::new("claude-x", "some text"), false)
+                .unwrap();
+            assert!(body.get("fallbacks").is_none(), "{body}");
+            let h = m.headers().unwrap();
+            assert!(h.iter().all(|(k, _)| *k != "anthropic-beta"), "{h:?}");
+        }
+
+        /// The system prompt is one text block carrying the cache marker, in both modes.
+        /// `tools` renders before `system`, so the one marker covers the schema too; the
+        /// passage is in `messages`, after it, and no two chunks share one.
+        #[test]
+        fn the_system_prompt_is_a_cache_breakpoint() {
+            for mode in [StructuredMode::None, StructuredMode::ToolForce] {
+                let mut cfg = ProviderConfig::new(ProviderId::new("a").unwrap(), "anthropic");
+                cfg.model = "claude-x".into();
+                cfg.structured = mode;
+                let m = Anthropic::new(cfg);
+                let mut req = Request::new("claude-x", "some text").with_system("be brief");
+                if mode == StructuredMode::ToolForce {
+                    req = req.with_schema(mode, schema());
+                }
+                let body = m.body(&req, false).unwrap();
+                let blocks = body["system"].as_array().expect("a block list");
+                assert_eq!(blocks.len(), 1, "{mode:?}: one block, one breakpoint");
+                assert_eq!(blocks[0]["type"], "text");
+                assert_eq!(blocks[0]["cache_control"]["type"], "ephemeral");
+                assert!(
+                    body["messages"][0].get("cache_control").is_none(),
+                    "{mode:?}: the passage is not cached"
+                );
+            }
+            // No system prompt, no block — and nothing to cache.
+            let mut cfg = ProviderConfig::new(ProviderId::new("a").unwrap(), "anthropic");
+            cfg.model = "claude-x".into();
+            let body = Anthropic::new(cfg)
+                .body(&Request::new("claude-x", "some text"), false)
+                .unwrap();
+            assert!(body.get("system").is_none());
         }
 
         /// Anthropic requires `input_schema` to be a JSON Schema *object*.
@@ -464,7 +920,8 @@ mod tests {
         /// This is the failure 0.14 found on the OpenAI side: the strict translation was
         /// tested against an inline copy with 2 of the 13 kernel types, while the code
         /// documented it as the full Appendix C. Here the schema is passed through, so the
-        /// equivalent check is that what goes into the body is what `smysl-ingest` generates.
+        /// equivalent check is that what goes into the body is what `smysl-ingest` generates
+        /// — `payload` still an open object, which is what strict mode would have closed.
         #[test]
         fn the_schema_sent_is_the_whole_kernel_schema() {
             let body = body_for(StructuredMode::ToolForce);
@@ -480,6 +937,12 @@ mod tests {
                 "only {} kernel types reach the endpoint; the format defines more",
                 types.len()
             );
+            assert!(
+                sent["properties"]["payload"]
+                    .get("additionalProperties")
+                    .is_none(),
+                "payload was closed on its way in"
+            );
         }
 
         /// No tool block at all when structure was not asked for.
@@ -490,7 +953,11 @@ mod tests {
         fn no_tool_is_declared_when_none_was_requested() {
             let body = body_for(StructuredMode::None);
             assert!(body.get("tools").is_none(), "declared a tool unasked");
-            assert!(body.get("tool_choice").is_none(), "forced a tool unasked");
+            assert!(body.get("tool_choice").is_none(), "chose a tool unasked");
+            assert!(
+                body.get("system").is_none(),
+                "steered toward a tool unasked"
+            );
         }
     }
 
@@ -498,8 +965,8 @@ mod tests {
 
     fn cfg() -> ProviderConfig {
         let mut c = ProviderConfig::new(ProviderId::new("anthropic").unwrap(), "anthropic");
-        c.model = "claude-sonnet-5".into();
-        c.context_window = 200_000;
+        c.model = "claude-opus-5-5".into();
+        c.context_window = 1_000_000;
         c.max_output = 8192;
         c.structured = StructuredMode::ToolForce;
         c.api_key_env = Some("SMYSL_TEST_ANTHROPIC_KEY".into());
@@ -515,22 +982,22 @@ mod tests {
     fn the_system_prompt_is_a_field_not_a_message() {
         let req = Request::new("m", "hello").with_system("be brief");
         let b = provider().body(&req, false).unwrap();
-        assert_eq!(b["system"], "be brief");
+        assert_eq!(b["system"][0]["text"], "be brief");
         assert_eq!(b["messages"].as_array().unwrap().len(), 1);
         assert_eq!(b["messages"][0]["role"], "user");
     }
 
-    /// Forcing the tool is what makes this enforcement rather than a suggestion.
+    /// The prompt asks for the one tool; nothing forces it, since nothing can.
     #[test]
-    fn a_schema_becomes_a_single_forced_tool() {
+    fn a_schema_becomes_a_single_tool_the_prompt_asks_for() {
         let req =
             Request::new("m", "x").with_schema(StructuredMode::ToolForce, r#"{"type":"object"}"#);
         let b = provider().body(&req, false).unwrap();
         assert_eq!(b["tools"].as_array().unwrap().len(), 1);
         assert_eq!(b["tools"][0]["name"], TOOL_NAME);
         assert_eq!(b["tools"][0]["input_schema"]["type"], "object");
-        assert_eq!(b["tool_choice"]["type"], "tool");
-        assert_eq!(b["tool_choice"]["name"], TOOL_NAME);
+        assert_eq!(b["tool_choice"]["type"], "auto");
+        assert_eq!(b["system"][0]["text"], STEER);
     }
 
     #[test]
@@ -546,7 +1013,7 @@ mod tests {
     /// shape when a model narrates before calling a tool.
     #[test]
     fn text_blocks_are_concatenated_not_truncated() {
-        let raw = r#"{"model":"claude-sonnet-5","stop_reason":"end_turn",
+        let raw = r#"{"model":"claude-opus-5-5","stop_reason":"end_turn",
             "content":[{"type":"text","text":"first "},{"type":"text","text":"second"}],
             "usage":{"input_tokens":10,"output_tokens":4}}"#;
         let c = provider().parse(raw, 0, cfg().max_output).unwrap();
@@ -556,7 +1023,7 @@ mod tests {
 
     #[test]
     fn a_tool_use_block_supplies_the_json_ast() {
-        let raw = r#"{"model":"claude-sonnet-5","stop_reason":"tool_use",
+        let raw = r#"{"model":"claude-opus-5-5","stop_reason":"tool_use",
             "content":[{"type":"text","text":"here you go"},
                        {"type":"tool_use","name":"emit_smysl_units",
                         "input":{"units":[{"type":"claim","gist":"g","status":"speculative"}]}}],
@@ -568,6 +1035,184 @@ mod tests {
             !c.text.contains("here you go"),
             "the narration is not the payload"
         );
+    }
+
+    /// Thinking blocks are always present on these models and empty by default; a fallback
+    /// block marks a model switch. Neither is the answer, and reading the first block would
+    /// now read a thinking block.
+    #[test]
+    fn thinking_and_fallback_blocks_are_not_the_answer() {
+        let raw = r#"{"model":"claude-opus-4-8","stop_reason":"tool_use",
+            "content":[{"type":"thinking","thinking":"","signature":"s"},
+                       {"type":"fallback","from":{"model":"claude-opus-5-5"},"to":{"model":"claude-opus-4-8"}},
+                       {"type":"tool_use","name":"emit_smysl_units","input":{"units":[]}}],
+            "usage":{"input_tokens":10,"output_tokens":20}}"#;
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
+        assert!(c.structured);
+        assert_eq!(c.text, r#"{"units":[]}"#);
+        assert_eq!(
+            c.model, "claude-opus-4-8",
+            "the model that answered, not the one asked"
+        );
+
+        let raw = r#"{"model":"claude-opus-5-5","stop_reason":"end_turn",
+            "content":[{"type":"thinking","thinking":"","signature":"s"},
+                       {"type":"text","text":"prose"}],
+            "usage":{"input_tokens":10,"output_tokens":4}}"#;
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
+        assert_eq!(c.text, "prose");
+        assert!(!c.structured);
+    }
+
+    /// A policy decline is a 200 with `refusal`, before any output or after some. It is an
+    /// error here, read before the blocks: an empty list would otherwise be "empty response"
+    /// and a partial one an answer.
+    #[test]
+    fn a_refusal_is_an_error_before_content_is_read() {
+        let empty = r#"{"model":"claude-opus-5-5","stop_reason":"refusal",
+            "stop_details":{"type":"refusal","category":"cyber"},
+            "content":[],"usage":{"input_tokens":10,"output_tokens":0}}"#;
+        let e = provider().parse(empty, 0, cfg().max_output).unwrap_err();
+        assert!(
+            matches!(&e, ProviderError::Declined { category } if category == "cyber"),
+            "{e}"
+        );
+        assert!(e.to_string().contains("cyber"), "{e}");
+        assert!(!e.is_fallback_eligible(), "a decline is not an outage");
+
+        let partial = r#"{"model":"claude-opus-5-5","stop_reason":"refusal","stop_details":null,
+            "content":[{"type":"text","text":"half an answer"}],
+            "usage":{"input_tokens":10,"output_tokens":3}}"#;
+        let e = provider().parse(partial, 0, cfg().max_output).unwrap_err();
+        assert!(e.to_string().contains("unspecified"), "{e}");
+    }
+
+    /// A limit spent on reasoning before any answer is `Unanswered`, with the share, not
+    /// "empty response": the stop reason is read before the content is judged.
+    #[test]
+    fn no_answer_at_the_cap_is_unanswered_with_the_thinking_share() {
+        let raw = r#"{"model":"claude-opus-5-5","stop_reason":"max_tokens",
+            "content":[{"type":"thinking","thinking":"..."}],
+            "usage":{"input_tokens":10,"output_tokens":800,
+                     "output_tokens_details":{"thinking_tokens":791}}}"#;
+        let e = provider().parse(raw, 0, 800).unwrap_err();
+        assert_eq!(
+            e,
+            ProviderError::Unanswered {
+                limit: Some(800),
+                used: Some(800),
+                thinking: Some(791),
+            },
+            "{e}"
+        );
+        assert_eq!(e.code(), Some(smysl_core::Code::W455));
+    }
+
+    /// The reasoning's share of the output rides on the usage, apart from the total.
+    #[test]
+    fn the_thinking_share_is_reported_apart() {
+        let raw = r#"{"model":"claude-opus-5-5","stop_reason":"end_turn",
+            "content":[{"type":"text","text":"x"}],
+            "usage":{"input_tokens":10,"output_tokens":40,
+                     "output_tokens_details":{"thinking_tokens":31}}}"#;
+        let c = provider().parse(raw, 0, 800).unwrap();
+        assert_eq!((c.usage.output_tokens, c.usage.thinking_tokens), (40, 31));
+    }
+
+    /// A configured effort is sent on every request; without one a schema request is `low`
+    /// and a free-text request takes the model's default.
+    #[test]
+    fn the_configured_effort_is_sent_and_the_default_is_the_measured_one() {
+        let free = Request::new("m", "hello");
+        let schema =
+            Request::new("m", "x").with_schema(StructuredMode::ToolForce, r#"{"type":"object"}"#);
+        let p = provider();
+        assert!(p.body(&free, false).unwrap().get("output_config").is_none());
+        assert_eq!(
+            p.body(&schema, false).unwrap()["output_config"]["effort"],
+            "low"
+        );
+
+        let mut c = cfg();
+        c.effort = Some("high".into());
+        let p = Anthropic::new(c);
+        assert_eq!(
+            p.body(&free, false).unwrap()["output_config"]["effort"],
+            "high"
+        );
+        assert_eq!(
+            p.body(&schema, false).unwrap()["output_config"]["effort"],
+            "high"
+        );
+    }
+
+    /// The probe says whether the configured model is listed, and when it goes.
+    #[test]
+    fn the_probe_reads_the_configured_models_lifecycle() {
+        let raw = r#"{"data":[
+            {"id":"claude-opus-5-5","deprecated_at":null,"retires_at":null},
+            {"id":"claude-sonnet-4-5-20250929","deprecated_at":"2026-09-01T00:00:00Z",
+             "retires_at":"2027-03-01T00:00:00Z"}]}"#;
+        let meta = Anthropic::parse_models_meta(raw).unwrap();
+        assert_eq!(meta.len(), 2);
+        assert_eq!(
+            Anthropic::model_note("claude-opus-5-5", &meta),
+            "`claude-opus-5-5` listed"
+        );
+        assert_eq!(
+            Anthropic::model_note("claude-sonnet-4-5-20250929", &meta),
+            "`claude-sonnet-4-5-20250929` deprecated since 2026-09-01T00:00:00Z, retires \
+             2027-03-01T00:00:00Z"
+        );
+        assert_eq!(
+            Anthropic::model_note("claude-sonnet-4-5", &meta),
+            "`claude-sonnet-4-5` is not listed by the endpoint"
+        );
+        assert_eq!(
+            Anthropic::parse_models(raw).unwrap(),
+            vec!["claude-opus-5-5", "claude-sonnet-4-5-20250929"]
+        );
+    }
+
+    /// A stream is read event by event: the input side from `message_start`, the text from
+    /// the deltas, the output side and the stop from `message_delta`.
+    #[test]
+    fn a_stream_is_read_event_by_event() {
+        let body = "event: message_start\n\
+            data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5,\
+            \"cache_read_input_tokens\":20,\"cache_creation_input_tokens\":0}}}\n\n\
+            event: content_block_delta\n\
+            data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hel\"}}\n\n\
+            event: ping\n\
+            data: {\"type\":\"ping\"}\n\n\
+            data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"lo\"}}\n\n\
+            data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\
+            \"usage\":{\"output_tokens\":7,\"output_tokens_details\":{\"thinking_tokens\":3}}}\n";
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut emitter = Emitter::new(tx);
+        let usage = read_stream(body, 1, &mut emitter).unwrap();
+        emitter.done(usage);
+        let text: String = rx
+            .iter()
+            .filter_map(|m| match m {
+                StreamMsg::Token(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "hello");
+        assert_eq!((usage.input_tokens, usage.cache_read_tokens), (25, 20));
+        assert_eq!((usage.output_tokens, usage.thinking_tokens), (7, 3));
+        assert!(!usage.estimated);
+        assert_eq!(usage.retries, 1);
+
+        let refused = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\
+            \"stop_details\":{\"category\":\"cyber\"}},\"usage\":{\"output_tokens\":0}}\n";
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut emitter = Emitter::new(tx);
+        assert!(matches!(
+            read_stream(refused, 0, &mut emitter),
+            Err(ProviderError::Declined { category }) if category == "cyber"
+        ));
     }
 
     #[test]
@@ -590,8 +1235,34 @@ mod tests {
         let c = provider().parse(raw, 2, cfg().max_output).unwrap();
         assert_eq!(c.usage.input_tokens, 31);
         assert_eq!(c.usage.output_tokens, 7);
+        assert_eq!(c.usage.cache_read_tokens, 0);
+        assert_eq!(c.usage.cache_write_tokens, 0);
         assert!(!c.usage.estimated);
         assert_eq!(c.usage.retries, 2);
+    }
+
+    /// The wire's `input_tokens` is the uncached input alone; the cache's reads and writes
+    /// are reported beside it. Every token the model read is the sum, and the cache's share
+    /// is kept apart — so a ledger row still says how much context the call used, and also
+    /// how much of it was a read at a fraction of the price.
+    #[test]
+    fn cache_tokens_are_input_tokens_and_are_reported_apart() {
+        let raw = r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"x"}],
+                      "usage":{"input_tokens":31,"output_tokens":7,
+                               "cache_read_input_tokens":2900,"cache_creation_input_tokens":0}}"#;
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
+        assert_eq!(c.usage.input_tokens, 2931);
+        assert_eq!(c.usage.cache_read_tokens, 2900);
+        assert_eq!(c.usage.cache_write_tokens, 0);
+        assert!(!c.usage.estimated);
+
+        let raw = r#"{"stop_reason":"end_turn","content":[{"type":"text","text":"x"}],
+                      "usage":{"input_tokens":31,"output_tokens":7,
+                               "cache_read_input_tokens":0,"cache_creation_input_tokens":2900}}"#;
+        let c = provider().parse(raw, 0, cfg().max_output).unwrap();
+        assert_eq!(c.usage.input_tokens, 2931);
+        assert_eq!(c.usage.cache_write_tokens, 2900);
+        assert_eq!(c.usage.retries, 0);
     }
 
     #[test]
@@ -643,7 +1314,9 @@ mod tests {
         let h = provider().headers().unwrap();
         assert_eq!(h[0].0, "x-api-key");
         assert_eq!(h[0].1, "sk-ant-test");
-        assert_eq!(h[1], ("anthropic-version", API_VERSION.to_string()));
+        assert_eq!(h[1], ("anthropic-version", "2026-10-21".to_string()));
+        assert_eq!(h[2], ("anthropic-beta", FALLBACK_BETA.to_string()));
+        assert_eq!(h.len(), 3);
         std::env::remove_var("SMYSL_TEST_ANTHROPIC_KEY");
     }
 

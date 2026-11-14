@@ -126,6 +126,8 @@ impl Provider for OpenAi {
             streaming: true,
             usage_reporting: true,
             offline: self.cfg.is_local(),
+            reasoning_in_output: false,
+            temperature: true,
         }
     }
 
@@ -149,7 +151,9 @@ impl Provider for OpenAi {
         if resp.status >= 400 {
             return Err(self.status_error(resp.status, &resp.body));
         }
-        self.parse(&resp.body, resp.retries)
+        // Enforced only where the schema was sent strict: an open `payload` is not.
+        let enforced = openai_compat::enforced_for(req, DIALECT);
+        openai_compat::parse(&resp.body, &self.cfg.model, resp.retries, enforced)
     }
 
     fn stream(
@@ -289,8 +293,11 @@ mod tests {
 
     #[test]
     fn strict_structured_output_is_the_mechanism() {
-        let req =
-            Request::new("m", "x").with_schema(StructuredMode::JsonSchema, r#"{"type":"object"}"#);
+        // A closed schema; an open one is sent unstrict (`openai_compat`'s tests).
+        let req = Request::new("m", "x").with_schema(
+            StructuredMode::JsonSchema,
+            r#"{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}"#,
+        );
         let b = provider().body(&req, false).unwrap();
         assert_eq!(b["response_format"]["type"], "json_schema");
         assert_eq!(b["response_format"]["json_schema"]["strict"], true);

@@ -524,7 +524,7 @@ but relation extraction to the hosted one, looks like this:
     remote: {
       kind: anthropic
       endpoint: "https://api.anthropic.com"
-      model: "claude-sonnet-5"
+      model: "claude-opus-5-5"
       api_key_env: ANTHROPIC_API_KEY
       structured: tool-force
     }
@@ -547,6 +547,14 @@ provider that never set it (and reads 1024) is not asked for less.
 `ingest --max-output N` overrides both. Until 1.3 every ingest asked for 2048
 whatever this said, and an answer of a dozen units could be cut off at the
 limit — which is now reported as that, and counted as the call it was.
+
+From 1.15 it is also the ceiling on a chunk. An answer is about the size of
+the passage it describes, so a chunk wider than `max_output` tokens asks for
+an answer the call cannot carry, and what came back would be a truncation
+degraded whole. The window is therefore the tighter of two bounds: what the
+context leaves after the prompt and the output reserve, and `max_output`
+itself. On an 8k context the two coincide; on a million-token one the first
+alone would make a chunk of a whole book, and lose it.
 
 An `ingest` block holds the defaults that are facts about the project rather
 than things to type on every invocation: `prompt`, a prompt override file;
@@ -579,6 +587,70 @@ chunk planned for a large window could be truncated by the server and answered
 as if whole. It is the configured value that is sent, never one a `--probe`
 measured: a 128k architecture window is routinely more than the machine will
 allocate.
+
+`fallbacks`, from 1.15, is for a provider whose API can answer with a model
+other than the one named. Anthropic's does: a request its policy declines is
+retried, within the same call, on a model the API picks, and the response
+names the one that answered. That is on by default, because an answer is
+better than a refusal — but the recipe is computed before the call and names
+the model asked for, so every chunk answered by another is reported as
+`SMY-W437`, with both names. `fallbacks: false` pins the model: the answer is
+then by the one the recipe names, or by nobody. Providers without such a chain
+ignore the key.
+
+A model can also decline a span outright, as a matter of policy, and say so
+in a successful response: Anthropic's `stop_reason: refusal`, Gemini's
+`SAFETY` finish, an OpenAI-compatible `content_filter`. From 1.15 each is
+`ProviderError::Declined`, with the provider's own category, rather than an
+upstream error indistinguishable from a fault. Rule I still applies — the
+span degrades to opaque prose, the run goes on — but the warning is
+`SMY-W438` rather than `SMY-W304`, and the ingest summary counts declines
+apart from the degrades. The distinction is the remedy: a fault is retried or
+reconfigured, a decline is read, because the text is what the model would
+not structure, not what it could not.
+
+`effort`, from 1.15, is how hard the model is asked to think, where the API
+takes a setting: `low`, `medium` or `high`. Left unset, the Anthropic mapper
+sends `low` on a schema request — the schema does the work, and the reasoning
+a higher effort buys is spent from `max_output` — and leaves a free-text
+request at the model's default. The three settings were measured on the
+SM-P14 fixture for 1.15 (the changelog has the figures); the setting is the
+caller's, and the default is the one that measured best. Providers without
+such a setting ignore the key.
+
+`timeout_secs` is the request timeout, 120 by default — except for an
+Anthropic provider that names none, which gets 600. Thinking is always on at
+the API version the mapper speaks, the mapper reads a streamed answer whole
+rather than token by token, and a long chunk at a high effort can run past
+two minutes.
+
+On a provider whose reasoning is spent from `max_output` along with its
+answer — Anthropic's current models, Gemini's thinking models; the mapper
+says so in its capabilities — ingest keeps a quarter of the limit back when
+it sizes a chunk, so the answer has room after the thinking. A limit spent
+before the answer began is `SMY-W455`, not an empty response: the span
+degrades under rule I, and the warning names the limit, the reasoning's share
+where the provider reports one, and the remedy, which is `max_output`. The
+ledger records the reasoning's share of each call as `thinking`, and the
+ingest summary shows it beside the cache's.
+
+A sampling temperature set for a provider whose endpoint takes none —
+Anthropic at API version `2026-10-21` refuses the field at every value — is
+`SMY-W456`, once per run and before the first call: the setting read as a
+setting and was not one.
+
+`providers --probe` says whether the configured model is in the list the
+endpoint returns and, where the endpoint says, when it was deprecated and
+when it retires. A list is a catalogue rather than an entitlement, so
+"listed" is not "can call"; but "not listed" is the stale pin found before a
+call is paid for, which is how 1.15 found its own.
+
+An OpenAI-compatible provider is sent a schema strict only where every
+object in it is closed, which strict mode requires. The kernel's `payload` is
+open by design, so the kernel schema is sent unstrict, as it is, and the
+answer is checked on the way in like a json-mode one — `Completion::structured`
+says so, and the provenance is honest about it. A schema that translates
+closed is sent strict and enforced, as before.
 
 #term("Provider")[
   One configured endpoint: an id, which mapper drives it (`ollama`,
@@ -691,6 +763,17 @@ model actually answered — no tokens were spent because no model ever
 received the request. That is the ledger doing exactly what it promises:
 counts, never content, and it errs toward recording an attempt rather than
 silently discarding one.
+
+A provider with a prompt cache adds two keys, from 1.15: `cache_read`, how
+many of the call's input tokens were served from the cache, and
+`cache_write`, how many were written into it. Both are part of `in`, not
+additions to it — `in` is still every token the model read — and both are
+written only when they are not zero, so a provider without a cache writes the
+line it always wrote. The Anthropic mapper marks its system prompt as a cache
+breakpoint, which covers the kernel schema sent with it, so an ingest of many
+chunks reads the two from the cache on every chunk after the first, at a
+fraction of the input price; `usage` shows the share beside each row's total,
+and `ingest`'s summary line names it when there is one.
 
 Read this honestly rather than generalising it: in this build, `ingest` is
 the command that writes the ledger from the CLI. `attest`'s own report

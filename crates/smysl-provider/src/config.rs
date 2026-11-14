@@ -33,7 +33,26 @@ pub struct ProviderConfig {
     pub api_key_cmd: Option<String>,
     /// Request timeout in seconds.
     pub timeout_secs: u64,
+    /// Whether the provider may answer with a model other than the one named, where its API
+    /// offers that (Anthropic's server-side fallback on a policy decline). On by default: an
+    /// answer is better than a refusal. Off pins the model — the answer is by the model the
+    /// recipe names or by nobody — for a run whose provenance has to be exact. Mappers whose
+    /// endpoints have no such chain ignore it.
+    pub fallbacks: bool,
+    /// How hard the model is asked to think, where the API takes a setting: `low`, `medium`
+    /// or `high`. `None` leaves it to the mapper — Anthropic sends `low` on a schema request,
+    /// since the schema does the work and the reasoning a higher effort buys is spent from
+    /// `max_output`, and leaves a free-text request at the model's default. Mappers whose
+    /// endpoints have no such setting ignore it. Since 1.15.
+    pub effort: Option<String>,
 }
+
+/// The request timeout an Anthropic provider gets when its configuration names none.
+///
+/// Thinking is always on at the API version the mapper speaks, and a long chunk at a high
+/// effort can run past the two minutes every other provider defaults to. The mapper does not
+/// stream, so the whole answer has to arrive inside one timeout.
+pub const ANTHROPIC_TIMEOUT_SECS: u64 = 600;
 
 impl ProviderConfig {
     pub fn new(id: ProviderId, kind: impl Into<String>) -> ProviderConfig {
@@ -48,6 +67,8 @@ impl ProviderConfig {
             api_key_env: None,
             api_key_cmd: None,
             timeout_secs: 120,
+            fallbacks: true,
+            effort: None,
         }
     }
 
@@ -166,6 +187,29 @@ impl Config {
                 }
                 if let Some(v) = o.get("timeout_secs").and_then(|v| v.value.as_int()) {
                     p.timeout_secs = v.max(1) as u64;
+                } else if p.kind == "anthropic" {
+                    p.timeout_secs = ANTHROPIC_TIMEOUT_SECS;
+                }
+                if let Some(v) = o.get("effort") {
+                    let e = v
+                        .value
+                        .as_str()
+                        .filter(|e| matches!(*e, "low" | "medium" | "high"));
+                    p.effort = Some(
+                        e.ok_or_else(|| {
+                            ProviderError::Config(format!(
+                                "provider {id}: `effort` must be low, medium or high"
+                            ))
+                        })?
+                        .to_string(),
+                    );
+                }
+                if let Some(v) = o.get("fallbacks") {
+                    p.fallbacks = v.value.as_bool().ok_or_else(|| {
+                        ProviderError::Config(format!(
+                            "provider {id}: `fallbacks` must be true or false"
+                        ))
+                    })?;
                 }
                 if let Some(v) = o.get("structured").and_then(|v| v.value.as_str()) {
                     p.structured = structured(v).ok_or_else(|| {
@@ -367,7 +411,7 @@ mod tests {
     remote: {
       kind: anthropic
       endpoint: "https://api.anthropic.com"
-      model: "claude-sonnet-5"
+      model: "claude-opus-5-5"
       api_key_env: ANTHROPIC_API_KEY
       structured: tool-force
     }
@@ -378,6 +422,78 @@ mod tests {
   }
   fallback: [ollama]
 }"#;
+
+    /// `effort` is the caller's, one of three words; absent, the mapper decides.
+    #[test]
+    fn effort_is_one_of_three_words_or_absent() {
+        let c = Config::load(SAMPLE).unwrap();
+        assert_eq!(
+            c.providers[&ProviderId::new("remote").unwrap()].effort,
+            None
+        );
+        let set = SAMPLE.replace(
+            "structured: tool-force",
+            "structured: tool-force\n      effort: high",
+        );
+        let c = Config::load(&set).unwrap();
+        assert_eq!(
+            c.providers[&ProviderId::new("remote").unwrap()]
+                .effort
+                .as_deref(),
+            Some("high")
+        );
+        let wrong = SAMPLE.replace(
+            "structured: tool-force",
+            "structured: tool-force\n      effort: max",
+        );
+        let e = Config::load(&wrong).unwrap_err().to_string();
+        assert!(e.contains("`effort` must be low, medium or high"), "{e}");
+    }
+
+    /// An Anthropic provider that names no timeout gets the long one; every other provider,
+    /// and an Anthropic one that names its own, gets what it says.
+    #[test]
+    fn an_anthropic_provider_defaults_to_the_long_timeout() {
+        let c = Config::load(SAMPLE).unwrap();
+        assert_eq!(
+            c.providers[&ProviderId::new("remote").unwrap()].timeout_secs,
+            ANTHROPIC_TIMEOUT_SECS
+        );
+        assert_eq!(
+            c.providers[&ProviderId::new("ollama").unwrap()].timeout_secs,
+            120
+        );
+        let own = SAMPLE.replace(
+            "structured: tool-force",
+            "structured: tool-force\n      timeout_secs: 90",
+        );
+        let c = Config::load(&own).unwrap();
+        assert_eq!(
+            c.providers[&ProviderId::new("remote").unwrap()].timeout_secs,
+            90
+        );
+    }
+
+    /// `fallbacks` is on unless the file says otherwise, and it has to say so with a boolean.
+    #[test]
+    fn fallbacks_default_on_and_can_be_declined() {
+        let c = Config::load(SAMPLE).unwrap();
+        assert!(c.providers[&ProviderId::new("remote").unwrap()].fallbacks);
+
+        let pinned = SAMPLE.replace(
+            "structured: tool-force",
+            "structured: tool-force\n      fallbacks: false",
+        );
+        let c = Config::load(&pinned).unwrap();
+        assert!(!c.providers[&ProviderId::new("remote").unwrap()].fallbacks);
+
+        let wrong = SAMPLE.replace(
+            "structured: tool-force",
+            "structured: tool-force\n      fallbacks: never",
+        );
+        let e = Config::load(&wrong).unwrap_err().to_string();
+        assert!(e.contains("`fallbacks` must be true or false"), "{e}");
+    }
 
     #[test]
     fn a_configuration_round_trips_its_fields() {

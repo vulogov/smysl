@@ -14,14 +14,14 @@
 //! | `ollama` | verified | local server, `llama3.2` |
 //! | `deepseek` | verified | live endpoint, `deepseek-chat` |
 //! | `gemini` | verified | live endpoint, `gemini-3.5-flash-lite` / `-flash` (2026-07-27) |
-//! | `anthropic` | **implemented, but not tested** | recorded fixtures only |
+//! | `anthropic` | verified | live endpoint, `claude-opus-5-5` (2026-11-10) |
 //! | `openai` | **implemented, but not tested** | recorded fixtures only |
 //!
-//! An untested mapper is a reading of the documentation, and this crate has already had one
-//! reading turn out wrong: Gemini's response schema was written as a subset of draft 2020-12
-//! and is not one, which no fixture could have caught. Treat the two above the same way -
-//! verify before relying on them. Endpoints change without notice; the mapper contract does
-//! not.
+//! An untested mapper is a reading of the documentation, and this crate has already had two
+//! readings turn out wrong: Gemini's response schema was written as a subset of draft 2020-12
+//! and is not one, and Anthropic's forced tool choice was refused by every model it was first
+//! run against, which no fixture could have caught. Treat the one above the same way - verify
+//! before relying on it. Endpoints change without notice; the mapper contract does not.
 
 // Credential handling for the mappers. Internal since 0.13 (§1.2 S4): a consumer supplies a
 // key through `ProviderConfig` and never assembles a header itself.

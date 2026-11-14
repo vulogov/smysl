@@ -124,6 +124,8 @@ pub struct TextReport {
     pub spanned: usize,
     pub spanless: usize,
     pub degraded: usize,
+    /// Of `degraded`, the windows the model declined as a matter of policy (`SMY-W438`).
+    pub declined: usize,
     pub repaired: usize,
     /// Repair turns, over the whole run: `calls - windows * passes` where nothing was skipped.
     ///
@@ -226,9 +228,12 @@ impl Ingestor<'_> {
 
         let provider = self.registry.for_task(Task::ContentIngest)?;
         let caps = provider.caps();
-        let budget =
-            crate::chunk::Window::for_context(caps.context_window, self.opts.output_budget(&caps))
-                .budget;
+        let budget = crate::chunk::Window::for_context(
+            caps.context_window,
+            self.opts.output_budget(&caps),
+            caps.reasoning_in_output,
+        )
+        .budget;
 
         let mut report = TextReport {
             alias: alias.clone(),
@@ -433,6 +438,7 @@ impl Ingestor<'_> {
                 firsts.push(out.first.take());
                 report.calls += out.calls;
                 report.degraded += out.degraded;
+                report.declined += out.declined;
                 report.repaired += out.repaired;
                 report.diagnostics.extend(out.diagnostics);
                 relations.extend(out.relations);
@@ -686,6 +692,9 @@ impl Ingestor<'_> {
                 usage.output_tokens += c.usage.output_tokens;
                 usage.estimated |= c.usage.estimated;
                 usage.retries += c.usage.retries;
+                usage.cache_read_tokens += c.usage.cache_read_tokens;
+                usage.cache_write_tokens += c.usage.cache_write_tokens;
+                usage.thinking_tokens += c.usage.thinking_tokens;
                 let answer = super::pivot::parse_answer(&c.text, sources.len());
                 (super::pivot::units(&sources, &answer, lang.as_str()), 1)
             }

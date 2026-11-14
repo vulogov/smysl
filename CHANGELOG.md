@@ -7,6 +7,260 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.15.0 — 2026-11-14
+
+The hosted-provider path run against a real Anthropic key for the first time, and what that
+run found, each item below measured. What 1.15 leaves open is what 1.14 left open, by what it
+blocks rather than the order it is easiest: every question on the path to a release is closed,
+the last of RFC SMYSL-2 that was owed in code is built, and what is left is what a decision
+deferred, what a store does not yet hold, and questions not yet read. None of it was taken up
+this cycle, and none of it moved.
+
+**Questions still unread.** The sixth set reads 52 of 80. The yes-or-no forms declared out of
+reach stay so (Spanish `era`, `eran`, a Spanish question with no verb to read, French `-t-on`),
+and rule 32's price stands: *Was cholera spread by water?* is unread. The next rules want
+questions people ask; `ask --misses --recheck` collects them, and the rules wait for what it
+collects. The subject-finder fixes measured in-sample on the sixth set are owed a run on fresh
+questions before any of them counts.
+
+**A subject by a name the store does not write.** Rule 34 was declared and not adopted: with
+`potion-multilingual-128M` no floor separates a synonym from its guards (lowest wanted 0.193,
+highest guard 0.645). Two ways stay open. A model that separates `calibrate.tsv`'s rows, which
+`tests/ge_t10_synonyms.rs` asks of whatever the variable names, is the occasion to declare the
+rule again on fresh rows. Or the store writes the other name itself, as an entity's declared
+alternative, and the spelled and stemmed passes find it with no model — a rule of its own, with
+its own set, and one that reaches only the names someone wrote down.
+
+**What waits on a store that does not exist yet.** A saved query still needs a CBOR store,
+because its unit has no surface spelling. A pinned traversal is not renamed: edges are followed
+by the kind they were written with, and SMYSL-2.5 §3.9's lazy rename waits for a store whose
+relations carry a schema revision. Neither blocks anything measured, and each is additive when
+it comes.
+
+**A thousand real works.** Every threshold of GE-T7 is met on the stand-in, in index mode and on
+primary shards; GE-T7 on a real corpus of a thousand works stays owed, and the stand-in's
+12 MB is not a thousand books.
+
+**And the ones only people can close.** GE-T5's coder sheet, GE-T10's second hand and GE-T9's
+human ceiling stay owed indefinitely, not planned, and OQ-15, partial dependence between
+witnesses, stays deferred until something measured needs it.
+
+### The Anthropic mapper verified live, and moved to the current models
+
+No key had ever been available for this provider, so the mapper was a reading of the
+documentation asserted against recorded fixtures — and the reading had gone stale. Run against
+`api.anthropic.com` for the first time, it worked only on the model its live test still named,
+`claude-sonnet-4-5`: on every current-generation model (Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable
+5.x) the forced tool choice it relied on is refused with a 400, and at the current API version
+the `temperature` it sent is refused on every model, the default value included.
+
+The mapper now speaks API version `2026-10-21` and sends:
+
+- **the tool under `auto`**, not forced. What forcing bought was never schema conformance —
+  a tool's input is a suggestion unless the tool is strict — only that a call happened, and
+  that is read from the response as before: `Completion::structured` says so. The system
+  prompt asks for the one call and nothing else, and `disable_parallel_tool_use` admits at
+  most one;
+- **the kernel schema unchanged, and not strict.** `strict: true` was tried first, through
+  the translation the OpenAI mapper has, and the endpoint refused it: strict mode closes every
+  object, and the kernel's `payload` is open by design — the model writes `ingest:node` into
+  it, the text ingest its attribution keys. Closing it would silence the one hint the model
+  gives, so conformance is decided by `check` on the way in, where it always was. The OpenAI
+  mapper's translation has the same open object and no key has ever tried it; it is noted,
+  not fixed;
+- **no sampling parameter**. `Request::temperature` stays, for the mappers whose endpoints
+  still take one;
+- **`output_config.effort: low`** on a schema-shaped request, where the schema does the work
+  and the reasoning a higher effort buys is spent from the caller's `max_tokens` — thinking is
+  always on at this version and shares the budget with the answer. A free-text request takes
+  the model's default;
+- **`fallbacks: "default"`** under its beta header: a policy decline is retried, within the
+  same call, on a model the API picks by the decline's category, and the response names the
+  model that answered.
+
+And reads: a `refusal` stop before the content, as an error rather than an empty answer, with
+the category in the message; `thinking` and `fallback` blocks as neither the text nor the
+payload; the `model` field as the model that answered, which after a fallback is not the one
+asked.
+
+Verified twice on `claude-opus-5-5`: the SM-P14 live gate stages 4 conformant units from the
+fixture in one call, none degraded, and `smysl ingest` through the CLI stages 3 from a short
+note with two relations, `check` clean. The README's provider table and the manual's sample
+configuration say so; OpenAI is the one mapper still unproven.
+
+### A chunk is never wider than the answer it can get
+
+`Window::for_context` sized a chunk from the context alone: what was left after the prompt
+reserve and the output reserve. With a million-token window that is a chunk of ~490k tokens,
+whose answer — about the size of its passage — cannot fit an 8,192-token `max_output`; the
+call would stop at the limit, be reported as a truncation, and the whole chunk would degrade
+to opaque prose under rule I. The window is now the tighter of two bounds, the context's and
+`max_output` itself. On a 4k or 8k context the two coincide and nothing chunks differently;
+a provider with a 32k context and an 8k output, SMYSL-2.2 §4's measured pair, chunks at 8,192
+rather than 15,360. The 256-token floor still holds.
+
+### The prompt cache, and the ledger that shows it
+
+An ingest sends the same system prompt and the same kernel schema on every chunk and every
+repair turn; only the passage changes. The Anthropic mapper now marks its system prompt as a
+cache breakpoint — `tools` renders before `system`, so the one marker covers the schema too —
+and the first call writes the entry while every call within five minutes of the last reads
+it, at a fraction of the input price. A prompt below the model's minimum (512 tokens on the
+current models) is simply not cached; the schema alone is past it.
+
+`Usage` gained `cache_read_tokens` and `cache_write_tokens`, both *within* `input_tokens`
+rather than beside it — `input_tokens` is still every token the model read, so the totals
+mean what they meant — and `Usage::with_cache` sets them. The ledger writes `cache_read` and
+`cache_write` only when they are not zero, so a provider without a cache writes the line it
+always wrote and a ledger from 1.14 reads back unchanged; `usage` shows the share beside a
+row's totals, and `ingest`'s summary line names it when there is one.
+
+Verified live on `claude-opus-5-5`: the same short note ingested twice, four seconds apart.
+The first call read 2,096 input tokens and wrote 1,888 of them into the cache — the prompt
+and the schema — and the second read those 1,888 back, with the passage the only tokens
+paid at full price.
+
+### The model that answered is the one the recipe names, or a warning says which
+
+Anthropic's server-side fallback answers under another model when the one asked for declines,
+and the response names it. The recipe is computed before the call and names the model asked
+for — so the units of a chunk answered by another carried a provenance wrong about the one
+thing a recipe exists to pin, and nothing said so. `SMY-W437` now does, per chunk, with both
+names; the registry is 152. A snapshot suffix (`gpt-x` answered by `gpt-x-2026-05-01`) is the
+same model named more precisely and is not reported; an empty name on either side is not a
+difference.
+
+And a provider can decline the chain: `fallbacks: false` in its configuration, on by default,
+drops the field and its beta header, so the answer is by the model the recipe names or by
+nobody. Providers whose APIs have no such chain ignore the key.
+
+### A refusal is a decline, counted apart from a fault
+
+A model that declines a span as a matter of policy says so in a successful response —
+Anthropic's `stop_reason: refusal`, Gemini's `SAFETY` finish, an OpenAI-compatible
+`content_filter` — and every one became `Upstream(200, ..)`: degraded like any failure, and
+indistinguishable from one. Nothing could count what the model would not structure apart
+from what it could not, and for a tool whose point is to say where a unit came from that is
+a gap. `ProviderError::Declined { category }` is the variant now, carrying the provider's
+own word for why; the span still degrades to opaque prose under rule I, but as `SMY-W438`
+rather than `SMY-W304`, the report's `declined` counts it, and the ingest summary says
+`3 degraded (2 declined by the model)` when there are any. The registry is 153. A decline
+is not an outage and never triggers a fallback, and it exits 6 like any provider error
+where a command cannot degrade.
+
+### The limit the reasoning spends: headroom, a warning, and the share in the ledger
+
+On Anthropic's current models and Gemini's thinking models the reasoning is spent from the
+same `max_output` as the answer, and a chunk sized to the whole limit could end before its
+answer began — reported, until now, as `Malformed("empty response")`, because the empty
+content was judged before the stop reason. `Capabilities::reasoning_in_output` says which
+providers do this; ingest keeps a quarter of the limit back when it sizes their chunks
+(`REASONING_HEADROOM_RATIO`); and a limit spent before the answer is
+`ProviderError::Unanswered { limit, used, thinking }`, which degrades under rule I as
+`SMY-W455` with the limit, the reasoning's share where the provider reports one (Anthropic's
+`output_tokens_details.thinking_tokens`, Gemini's `thoughtsTokenCount`), and the remedy.
+`Usage::thinking_tokens` carries that share on every call, the ledger writes it as `thinking`
+when it is not zero, `smysl usage` shows it, and the ingest summary prints it beside the
+cache's share.
+
+### `effort` is a setting, and the default is the one that measured best
+
+The Anthropic mapper sent `output_config.effort: low` on every schema request and nothing
+else could be asked for. `effort: low | medium | high` on the provider is now the caller's
+say, applied to every request; unset, a schema request is still `low` and a free-text request
+takes the model's default. Measured on the SM-P14 fixture, three models at each setting, one
+call each with repairs counted:
+
+| model | `low` | `medium` | `high` |
+|---|---|---|---|
+| claude-haiku-5-5 | 5 units, 2 490 tokens, 0 thinking | 5 units, 2 513 tokens, 0 thinking | **0 units**: 800 of 800 tokens thinking, degraded under `SMY-W455` |
+| claude-sonnet-5-5 | 5 units, 2 615 tokens, 0 thinking | 5 units, 2 652 tokens, 0 thinking | 5 units, 2 686 tokens, 0 thinking |
+| claude-opus-5-5 | 4 units, 2 613 tokens, 0 thinking | 4 units, 2 619 tokens, 0 thinking | 5 units, 2 736 tokens, 0 thinking |
+
+Each cell is one call with no repair turn. `low` and `medium` are the same answer at the same
+price; `high` buys one more unit on Opus and nothing at all on Haiku, which spent the whole
+800-token limit thinking and answered nothing — the first live `SMY-W455`, and the case the
+headroom and the warning exist for. `low` stays the default.
+
+### The probe reads the model's lifecycle
+
+`providers --probe` on an Anthropic provider now reads the model list's `deprecated_at` and
+`retires_at` and says, after the count, whether the configured model is listed, deprecated
+and from when, retiring and when, or not listed at all. A list is a catalogue rather than an
+entitlement, but "not listed" is what would have caught the stale `claude-sonnet-4-5` pin a
+release earlier than paying for a 404 did.
+
+### A temperature a provider will not take is said to be a no-op
+
+`ingest.temperature` and `--temperature` still parsed, range-checked and did nothing on a
+provider whose endpoint refuses the field — Anthropic at `2026-10-21`, at every value.
+`Capabilities::temperature` says whether the endpoint takes one, and a run with a temperature
+above zero on a provider that does not reports `SMY-W456` once, before the first call.
+
+### An open payload is sent unstrict to an OpenAI-compatible endpoint
+
+OpenAI's strict mode takes a subset of JSON Schema in which every object is closed, and the
+kernel's `payload` is open by design; the translation closed every object that had properties
+and left `payload`, which has none, open — a schema the endpoint refuses outright, the same
+way Anthropic's did before 1.15 moved off strict there. Now a schema is sent `strict: true`
+only where it translates closed; the kernel schema is sent as it is, not strict, and the
+answer is checked on the way in like a json-mode one, with `Completion::structured` false so
+nothing claims enforcement that did not happen. A closed schema is sent strict and enforced
+as before. Asserted against the request shape, not live: nobody here holds an OpenAI key.
+
+### Anthropic streams, and waits longer
+
+`Provider::stream` is implemented for the Anthropic mapper: the event stream is read whole
+and replayed event by event, as the other mappers do — `message_start` for the input side,
+the deltas for the text or the tool input's JSON, `message_delta` for the output side and
+the stop, with a refusal or an error event failing the stream the way `parse` fails a
+completion. `Capabilities::streaming` is true again, and true this time. Because the body is
+read whole, a timeout still covers the whole answer, so an Anthropic provider that names no
+`timeout_secs` now gets 600 rather than 120: thinking is always on, and a long chunk at a
+high effort ran past two minutes.
+
+### The live gate runs the cheap model, and a matrix runs them all
+
+`providers_live.rs` named only `claude-opus-5-5`. The Anthropic candidate is now
+`claude-haiku-5-5` unless `SMYSL_ANTHROPIC_MODEL` says otherwise, so the gate is affordable
+to run routinely, and `SMYSL_ANTHROPIC_MATRIX=1` runs the fixture on Haiku, Sonnet and Opus
+5.5 in turn, each required to stage conformant units. On 1.15, at the default effort:
+
+| model | units | calls | degraded | tokens |
+|---|---|---|---|---|
+| claude-haiku-5-5 | 5 | 1 | 0 | 2 490 |
+| claude-sonnet-5-5 | 5 | 1 | 0 | 2 615 |
+| claude-opus-5-5 | 4 | 1 | 0 | 2 613 |
+
+Every model stages conformant units in one call; Haiku does what Opus does on this fixture at
+a fraction of the price, which is why it is the gate's default.
+
+### The estimator against the tokeniser
+
+`smysl_core::tokens` is `ceil(bytes / 4)` by design: a chunking has to be pure (rule D), and
+no tokeniser is available offline. How far that is from the tokeniser was never measured.
+`Anthropic::count_tokens_remote` asks `POST /v1/messages/count_tokens`, which is free, and
+`SMYSL_ANTHROPIC_CALIBRATE=1` runs four samples through it against the estimator, with the
+empty-message overhead subtracted:
+
+| sample | bytes | estimated | counted | estimated / counted |
+|---|---|---|---|---|
+| the SM-P14 fixture (English prose with numbers) | 257 | 65 | 91 | 0.71 |
+| English prose | 304 | 76 | 84 | 0.90 |
+| Rust source | 256 | 64 | 127 | 0.50 |
+| Russian prose | 322 | 81 | 71 | 1.14 |
+
+So `bytes / 4` under-counts English prose by a tenth to a third, under-counts code by half,
+and over-counts Cyrillic by a seventh — the two-byte letters cost fewer tokens than their
+bytes. A chunk sized by the estimator is therefore up to twice its estimate in the
+tokeniser's terms on code, and about a fifth over on prose.
+
+Recorded, not acted on: the estimator stays what it is, because its purity is the point, and
+the chunk cap has the output limit's slack to absorb the error. A caller who needs the
+tokeniser's number has the method.
+
+---
+
 ## 1.14.0 — 2026-11-02
 
 What 1.13 leaves open, by what it blocks rather than the order it is easiest. A subject is

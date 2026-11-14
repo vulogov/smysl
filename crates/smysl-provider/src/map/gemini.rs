@@ -195,6 +195,22 @@ impl Gemini {
             .and_then(Value::as_u64)
             .map(|o| o + thoughts.unwrap_or(0));
 
+        // A candidate the safety filter blocked is a policy decline, not a malformed answer,
+        // and is reported apart so a run can count what the model would not say.
+        if text.is_empty() && matches!(reason, "SAFETY" | "PROHIBITED_CONTENT" | "BLOCKLIST") {
+            return Err(ProviderError::Declined {
+                category: reason.to_string(),
+            });
+        }
+        // No answer at the cap: the thoughts spent it, and the remedy is the cap, not the
+        // response. Read before the empty check, which would call it malformed.
+        if text.is_empty() && reason == "MAX_TOKENS" {
+            return Err(ProviderError::Unanswered {
+                limit: Some(cap),
+                used: output.map(|o| o as usize),
+                thinking: thoughts.map(|t| t as usize),
+            });
+        }
         if text.is_empty() {
             return Err(ProviderError::Malformed(match reason {
                 "" => "no candidate content in response".to_string(),
@@ -220,12 +236,18 @@ impl Gemini {
                 output_tokens: o,
                 estimated: false,
                 retries,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                thinking_tokens: thoughts.unwrap_or(0),
             },
             _ => Usage {
                 input_tokens: input.unwrap_or(0),
                 output_tokens: output.unwrap_or(smysl_core::tokens(&text) as u64),
                 estimated: true,
                 retries,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                thinking_tokens: thoughts.unwrap_or(0),
             },
         };
 
@@ -410,6 +432,9 @@ impl Provider for Gemini {
             streaming: false,
             usage_reporting: true,
             offline: self.cfg.is_local(),
+            // The thoughts are spent against `maxOutputTokens` (see `parse`).
+            reasoning_in_output: true,
+            temperature: true,
         }
     }
 
@@ -646,7 +671,16 @@ mod tests {
     fn a_blocked_candidate_is_an_error_naming_the_reason() {
         let raw = r#"{"candidates":[{"finishReason":"SAFETY"}]}"#;
         let e = provider().parse(raw, 0, cfg().max_output).unwrap_err();
+        assert!(
+            matches!(&e, ProviderError::Declined { category } if category == "SAFETY"),
+            "{e}"
+        );
         assert!(e.to_string().contains("SAFETY"), "{e}");
+
+        // A candidate with no parts for another reason is still a malformed answer.
+        let raw = r#"{"candidates":[{"finishReason":"OTHER"}]}"#;
+        let e = provider().parse(raw, 0, cfg().max_output).unwrap_err();
+        assert!(matches!(e, ProviderError::Malformed(_)), "{e}");
     }
 
     #[test]

@@ -492,6 +492,16 @@ registry! {
     Provider => {
         W454 = "SMY-W454", Warn,  "The provider did not reproduce at temperature 0; the agreement figure is a lower bound";
     }
+
+    // 1.15. Last, not beside the other provider groups: `Code` has no `repr`, so its
+    // discriminants are its declaration order, and a group inserted before the library's
+    // renumbered every code after it against the published baseline — `make semver` said so.
+    Provider => {
+        W437 = "SMY-W437", Warn,  "The model that answered is not the one the request named (a provider fallback)";
+        W438 = "SMY-W438", Warn,  "The model declined the span; degraded to opaque prose (a refusal, not a fault)";
+        W455 = "SMY-W455", Warn,  "The output limit was spent on reasoning before any answer began; degraded to opaque prose";
+        W456 = "SMY-W456", Warn,  "A sampling temperature was set for a provider that takes none; it had no effect";
+    }
 }
 
 impl fmt::Display for Code {
@@ -991,9 +1001,21 @@ mod tests {
     ///
     /// 151 with `SMY-W454` in 1.14.0 (OQ-74): two passes at temperature 0 whose first answers
     /// to the same request differed, so the provider did not do what the configuration said.
+    ///
+    /// 152 with `SMY-W437` in 1.15.0: a completion by a model other than the one the request
+    /// named. A provider that falls back server-side answers under another name, and the
+    /// recipe, computed before the call, names the one asked for; this is how a reader hears
+    /// that the two differ.
+    ///
+    /// 153 with `SMY-W438` in 1.15.0: a span the model declined as a matter of policy. It
+    /// degrades under rule I like a fault, but is not one, and a run counts it apart.
+    ///
+    /// 155 with `SMY-W455` and `SMY-W456` in 1.15.0: an output limit spent on reasoning
+    /// before any answer, on a provider whose reasoning shares it; and a temperature set for a
+    /// provider whose endpoint takes none.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 151);
+        assert_eq!(Code::ALL.len(), 155);
     }
 
     #[test]

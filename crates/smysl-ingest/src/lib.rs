@@ -669,6 +669,10 @@ pub struct IngestReport {
     /// defects were single units' own (`repair::UNIT_LOCAL`) degrades those units, each
     /// counted here, and keeps the rest.
     pub degraded: usize,
+    /// Of `degraded`, the chunks the model declined as a matter of policy (`SMY-W438`): a
+    /// refusal, not a fault. Counted apart because the two call for different remedies — a
+    /// fault is retried or reconfigured, a decline is read.
+    pub declined: usize,
     /// Chunks that failed at least one attempt and then succeeded (`SMY-W435`).
     ///
     /// `degraded` counts the repairs that did not work. This counts the ones that did, which
@@ -769,8 +773,11 @@ impl<'a> Ingestor<'a> {
         let caps = provider.caps();
 
         let choice = path::choose(&caps, Task::ContentIngest, input.len(), requested);
-        let window =
-            chunk::Window::for_context(caps.context_window, self.opts.output_budget(&caps));
+        let window = chunk::Window::for_context(
+            caps.context_window,
+            self.opts.output_budget(&caps),
+            caps.reasoning_in_output,
+        );
         let chunks = chunk::chunk(input, window);
 
         // D-10. The fence is derived from the input, so a document carrying a marker cannot
@@ -820,6 +827,21 @@ impl<'a> Ingestor<'a> {
             model: Some(self.model_for(&caps).to_string()),
             ..IngestReport::default()
         };
+        // A temperature the endpoint will not take is a configuration that reads as a
+        // setting and is not one; said once per run, before the first call.
+        if self.opts.temperature > 0.0 && !caps.temperature {
+            report.diagnostics.push(
+                Diagnostic::new(smysl_core::Code::W456)
+                    .with_message(format!(
+                        "temperature {} was set, and the provider takes none: the run sampled \
+                         at the model's default",
+                        self.opts.temperature
+                    ))
+                    .with_suggestion(
+                        "drop `ingest.temperature` or `--temperature` for this provider",
+                    ),
+            );
+        }
 
         report.diagnostics.append(&mut marker_notes);
 
@@ -840,6 +862,7 @@ impl<'a> Ingestor<'a> {
                 firsts[i].push(out.first.take());
                 report.calls += out.calls;
                 report.degraded += out.degraded;
+                report.declined += out.declined;
                 report.repaired += out.repaired;
                 report.diagnostics.extend(out.diagnostics);
                 pass_units.extend(out.units);
@@ -1004,17 +1027,46 @@ impl<'a> Ingestor<'a> {
                     ) {
                         calls += 1;
                     }
-                    if let ProviderError::Truncated { used: Some(n), .. } = e {
+                    if let ProviderError::Truncated { used: Some(n), .. }
+                    | ProviderError::Unanswered { used: Some(n), .. } = e
+                    {
                         usage.output_tokens += n as u64;
                         usage.estimated = true;
                     }
+                    if let ProviderError::Unanswered {
+                        thinking: Some(t), ..
+                    } = e
+                    {
+                        usage.thinking_tokens += t as u64;
+                    }
+                    let declined = matches!(e, ProviderError::Declined { .. });
+                    let unanswered = matches!(e, ProviderError::Unanswered { .. });
                     let (core, d) = repair::degrade(text, self.opts.rung, &e.to_string());
+                    // A refusal is neither a fault of the transport nor a mistake of the
+                    // model: it is a policy outcome, under its own code so a run can count
+                    // what the model would not structure apart from what it could not.
+                    let d = if declined {
+                        Diagnostic::on(smysl_core::Code::W438, smysl_core::canonical_uid(&core))
+                            .with_message(format!("span degraded to opaque prose: {e}"))
+                    } else if unanswered {
+                        // The budget went on reasoning before the answer began: not a
+                        // repair failure, and the remedy is the cap, which the message names.
+                        Diagnostic::on(smysl_core::Code::W455, smysl_core::canonical_uid(&core))
+                            .with_message(format!("span degraded to opaque prose: {e}"))
+                            .with_suggestion(
+                                "raise max_output: on this provider the model's reasoning is \
+                                 spent from it before the answer",
+                            )
+                    } else {
+                        d
+                    };
                     return ChunkOutcome {
                         units: vec![core],
                         relations: Vec::new(),
                         labels: BTreeMap::new(),
                         calls,
                         degraded: 1,
+                        declined: usize::from(declined),
                         repaired: 0,
                         diagnostics: vec![d],
                         first,
@@ -1029,9 +1081,32 @@ impl<'a> Ingestor<'a> {
             usage.output_tokens += completion.usage.output_tokens;
             usage.estimated |= completion.usage.estimated;
             usage.retries += completion.usage.retries;
+            usage.cache_read_tokens += completion.usage.cache_read_tokens;
+            usage.cache_write_tokens += completion.usage.cache_write_tokens;
+            usage.thinking_tokens += completion.usage.thinking_tokens;
 
             let (units, relations, mut diagnostics, labels) =
                 repair::convert_scoped(&completion.text, path, self.opts.rung, source, scope);
+
+            // The recipe was computed before the call and names the model the request asked
+            // for. A provider that falls back server-side answers under another name, and
+            // the units it staged would otherwise carry a provenance that is wrong about the
+            // one thing a recipe exists to pin. A warning, not an error: the answer is
+            // real, and a repair turn cannot change who gives it.
+            if let Some(answered) = answered_by_another(&request.model, &completion.model) {
+                diagnostics.push(
+                    Diagnostic::new(smysl_core::Code::W437)
+                        .with_message(format!(
+                            "asked `{}`, answered by `{answered}`; the recipe names the \
+                             model asked for",
+                            request.model
+                        ))
+                        .with_suggestion(
+                            "set `fallbacks: false` on the provider to pin the model, or \
+                             accept the answer knowing its provenance",
+                        ),
+                );
+            }
 
             // Check every attributed quote against the text this chunk was drawn from.
             // A quote that is not in the source is a fabricated attribution, and an error -
@@ -1081,6 +1156,7 @@ impl<'a> Ingestor<'a> {
                     labels,
                     calls,
                     degraded: 0,
+                    declined: 0,
                     repaired: usize::from(!history.is_empty()),
                     diagnostics,
                     first,
@@ -1145,6 +1221,7 @@ impl<'a> Ingestor<'a> {
                     labels: s.labels,
                     calls,
                     degraded: s.degraded,
+                    declined: 0,
                     repaired: 0,
                     diagnostics: history,
                     first,
@@ -1161,6 +1238,7 @@ impl<'a> Ingestor<'a> {
             labels: BTreeMap::new(),
             calls,
             degraded: 1,
+            declined: 0,
             repaired: 0,
             diagnostics: history,
             first,
@@ -1261,6 +1339,27 @@ impl<'a> Ingestor<'a> {
     }
 }
 
+/// The model that answered, where it is not the one asked for.
+///
+/// A provider's name for the model that ran may carry a snapshot the request did not spell
+/// (`gpt-x` answered by `gpt-x-2026-05-01`), which is the same model named more precisely,
+/// not another; so the test is a prefix at a dash boundary, and only a name that fails it is
+/// another model. An empty name on either side says nothing and is not a difference: mock
+/// providers name no model in their capabilities, and a mapper that did not read one back
+/// reports the one it asked for.
+#[cfg(feature = "model")]
+fn answered_by_another<'a>(asked: &str, answered: &'a str) -> Option<&'a str> {
+    if asked.is_empty() || answered.is_empty() || answered == asked {
+        return None;
+    }
+    match answered.strip_prefix(asked) {
+        Some(rest) if rest.starts_with('-') || rest.starts_with(':') || rest.starts_with('@') => {
+            None
+        }
+        _ => Some(answered),
+    }
+}
+
 #[cfg(feature = "model")]
 struct ChunkOutcome {
     units: Vec<UnitCore>,
@@ -1269,6 +1368,8 @@ struct ChunkOutcome {
     calls: usize,
     /// Spans degraded: the whole chunk counts one, a salvaged answer one per unit.
     degraded: usize,
+    /// 1 when the chunk degraded because the model declined it (`SMY-W438`).
+    declined: usize,
     /// 1 when this chunk succeeded after an attempt that did not.
     repaired: usize,
     diagnostics: Vec<Diagnostic>,
@@ -1279,6 +1380,28 @@ struct ChunkOutcome {
 #[cfg(all(test, feature = "model"))]
 mod tests {
     use super::*;
+
+    /// `SMY-W437` fires for another model, not for the same model named more precisely, and
+    /// never on a name that is missing — a mock names none, and that is not a fallback.
+    #[test]
+    fn another_model_is_a_different_name_not_a_longer_one() {
+        assert_eq!(
+            answered_by_another("claude-opus-5-5", "claude-opus-5-5"),
+            None
+        );
+        assert_eq!(
+            answered_by_another("claude-opus-5-5", "claude-opus-4-8"),
+            Some("claude-opus-4-8")
+        );
+        // A snapshot suffix is the same model, dated.
+        assert_eq!(answered_by_another("gpt-x", "gpt-x-2026-05-01"), None);
+        assert_eq!(answered_by_another("llama3.2", "llama3.2:latest"), None);
+        // But a longer name that is not a suffix at a boundary is another model.
+        assert_eq!(answered_by_another("gpt-4", "gpt-4o"), Some("gpt-4o"));
+        // Nothing to compare, nothing to say.
+        assert_eq!(answered_by_another("", "scripted"), None);
+        assert_eq!(answered_by_another("claude-opus-5-5", ""), None);
+    }
 
     #[test]
     fn repair_budget_is_two_attempts() {

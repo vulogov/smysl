@@ -11423,15 +11423,41 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         );
     }
     eprintln!(
-        "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} weakened, {} degraded, \
-         {} repaired, {} token(s)",
+        "smysl ingest: {} chunk(s), {} call(s), {} unit(s), {} weakened, {} degraded{}, \
+         {} repaired, {} token(s){}",
         report.chunks,
         report.calls,
         staged.len(),
         staged.weakened.len(),
         report.degraded,
+        // A decline is a degrade with a different remedy, so it is said when there is one.
+        if report.declined > 0 {
+            format!(" ({} declined by the model)", report.declined)
+        } else {
+            String::new()
+        },
         report.repaired,
-        report.usage.total()
+        report.usage.total(),
+        // The cache's share of the input, where the provider has one: a reader of the total
+        // should know how much of it was read at a fraction of the price.
+        {
+            let mut shares = Vec::new();
+            if report.usage.cache_read_tokens > 0 || report.usage.cache_write_tokens > 0 {
+                shares.push(format!(
+                    "{} read from cache, {} written",
+                    report.usage.cache_read_tokens, report.usage.cache_write_tokens
+                ));
+            }
+            // And the reasoning's share of the output, where the provider reports one.
+            if report.usage.thinking_tokens > 0 {
+                shares.push(format!("{} spent thinking", report.usage.thinking_tokens));
+            }
+            if shares.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", shares.join("; "))
+            }
+        }
     );
 
     // The ledger records counts, models, task and recipe - never content (§29).
