@@ -35,7 +35,7 @@ Add `default-features = false` for the pure library: no async runtime, no HTTP c
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.14.0` and the format is `smysl/1.0`.** The crate version means the API is
+**The crate is `1.15.0` and the format is `smysl/1.0`.** The crate version means the API is
 frozen: every public item moves only with a 2.0, enforced per crate by `cargo-semver-checks` on
 every push. [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise
 written down. The format version means nothing about the format changed incompatibly:
@@ -43,29 +43,33 @@ written down. The format version means nothing about the format changed incompat
 Python, JavaScript and Go written from the specification alone — and `smysl/1.0` reports that
 record rather than a change. SMYSL-2's library records are additions a 1.0 reader skips.
 
-## Release 1.14.0
+## Release 1.15.0
 
-The last of RFC SMYSL-2 that was owed in code, its open questions closed, and two examples that
-show it whole. The full account, with what each change cost, is in
-[`CHANGELOG.md`](CHANGELOG.md).
+The hosted-provider path run against a real Anthropic key for the first time, and what that
+run found: a mapper gone stale, a chunk wider than any answer it could get, and three kinds of
+model behaviour the diagnostics could not tell apart. The full account, with every figure
+measured, is in [`CHANGELOG.md`](CHANGELOG.md).
 
-- **Reply edges.** A text ingest of a chat turns each reply id into an `x.text/replies` edge
-  between the units of the two messages, and rule E reads them as ordering constraints.
-- **`order by` on several keys**, `order by salience descending, published ascending`, compared
-  key by key.
-- **A smaller index.** The substrate index stores a dense document id: at 155k units the
-  file shrinks from 540 MB to 85 MB, and opening a view takes 1.5 ms instead of 17.5.
-- **The structure hash is the segment tree** (OQ-70). A speaker, an instant or a pseudonym no
-  longer re-identifies a chat's parts.
-- **Whether the provider reproduced** is recorded beside the consensus agreement figure, with
-  `SMY-W454` when a provider configured at temperature 0 did not (OQ-74).
-- **`@commit d3:…`** names a dating in surface text (OQ-73).
-- **Examples:**
-  - [`examples/simple_demo`](examples/simple_demo/), the format's basics in ten steps;
-  - [`examples/information_theory`](examples/information_theory/), every layer of SMYSL-2 over
-    one library.
-
-  Both run offline. See [`examples/`](examples/).
+- **The Anthropic mapper speaks the current API** (`2026-10-21`) and is verified live on
+  Haiku, Sonnet and Opus 5.5: the tool under `auto`, no temperature, the reasoning accounted
+  for.
+- **A chunk is never wider than the answer it can get.** The window is the tighter of the
+  context and `max_output`, less a quarter of the output on a provider whose reasoning is
+  spent from it.
+- **What the model did is counted apart from what failed.** A refusal is `SMY-W438`, an
+  output limit spent entirely on reasoning is `SMY-W455`, an answer from a fallback model is
+  `SMY-W437`, a temperature the provider will not take is `SMY-W456`. The registry is 155.
+- **The ledger shows the prompt cache and the thinking share**, per call and in the totals,
+  and `smysl ingest` prints both.
+- **`effort: low | medium | high`** on an Anthropic provider. `low` stays the default: it
+  measured the same answer as `medium` at the same price, and `high` cost Haiku its whole
+  output limit.
+- **Anthropic streams, and waits ten minutes** by default. The probe reports each model's
+  lifecycle: deprecated since, retires at.
+- **An open payload goes unstrict** to an OpenAI-compatible endpoint; strict mode only when
+  the translated schema is closed.
+- **Measured and recorded:** three models at three efforts, the live model matrix, and the
+  byte estimator against the tokeniser, from 0.50 of the count on code to 1.14 on Cyrillic.
 
 Building from source:
 
@@ -381,7 +385,7 @@ and `cargo run --example information_theory` for the library layer. See
 
 ## Status
 
-Crate `1.14.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.15.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 

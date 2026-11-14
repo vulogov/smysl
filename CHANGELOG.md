@@ -9,9 +9,12 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.15.0
 
-What 1.14 leaves open, by what it blocks rather than the order it is easiest. Every question on
-the path to a release is closed, and the last of RFC SMYSL-2 that was owed in code is built; what
-is left is what a decision deferred, what a store does not yet hold, and questions not yet read.
+The hosted-provider path run against a real Anthropic key for the first time, and what that
+run found, each item below measured. What 1.15 leaves open is what 1.14 left open, by what it
+blocks rather than the order it is easiest: every question on the path to a release is closed,
+the last of RFC SMYSL-2 that was owed in code is built, and what is left is what a decision
+deferred, what a store does not yet hold, and questions not yet read. None of it was taken up
+this cycle, and none of it moved.
 
 **Questions still unread.** The sixth set reads 52 of 80. The yes-or-no forms declared out of
 reach stay so (Spanish `era`, `eran`, a Spanish question with no verb to read, French `-t-on`),
