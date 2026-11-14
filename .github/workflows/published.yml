@@ -32,10 +32,14 @@ jobs:
       - name: cargo install smysl
         run: cargo install smysl --root "$RUNNER_TEMP/install" --no-track
 
+      # `--version` prints `smysl 1.15.0` and nothing else; the format and kernel versions are
+      # in the long description, which `--help` prints. The grep below once asked `--version`
+      # for the format and failed every week from 1.11.0 on without saying anything about the
+      # crate: the line it wanted was never on that output.
       - name: the binary runs and reports its versions
         run: |
-          "$RUNNER_TEMP/install/bin/smysl" --version
-          "$RUNNER_TEMP/install/bin/smysl" --version | grep -q "format smysl/0.1"
+          "$RUNNER_TEMP/install/bin/smysl" --version | grep -qE '^smysl [0-9]+\.[0-9]+\.[0-9]+$'
+          "$RUNNER_TEMP/install/bin/smysl" --help | grep -q "format smysl/0.1, smysl/1.0"
 
       # A smoke test rather than a conformance run: the question is whether the published
       # artefact works at all, and the conformance suites already ask the harder question of
