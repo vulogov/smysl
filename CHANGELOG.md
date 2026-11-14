@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.15.0
+## 1.15.0 — 2026-11-14
 
 The hosted-provider path run against a real Anthropic key for the first time, and what that
 run found, each item below measured. What 1.15 leaves open is what 1.14 left open, by what it
