@@ -7,6 +7,37 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.16.0
+
+What 1.15 leaves open, by what it blocks rather than the order it is easiest. 1.15 ran the
+hosted-provider path against a real key for the first time and shipped to crates.io for the
+first time since 1.11.0; what it recorded and did not act on is where 1.16 starts.
+
+**The estimator is a quarter out, and knows it.** `bytes / 4` under-counts English prose by a
+tenth to a third, code by half, and over-counts Cyrillic by a seventh, measured against
+`count_tokens` and recorded. The estimator stays pure by design (rule D); what is open is
+whether a chunk should be sized by a per-script factor the calibration already gives, or
+whether the output cap's slack is enough. One run on a corpus of mixed scripts decides it.
+
+**The headroom is one fixture's number.** `REASONING_HEADROOM_RATIO` is a quarter of the
+output because Haiku at `high` spent 800 of 800 tokens thinking on the SM-P14 fixture. One
+model, one effort, one passage. The ratio is owed a measurement across the matrix at each
+effort before it is more than a floor that happened to hold.
+
+**Strict only when closed.** An OpenAI-compatible endpoint takes strict mode only for a
+closed schema, and an open payload goes unstrict, validated after the fact. Whether the
+repair rate differs between the two paths on the same fixture has not been measured.
+
+**The published check runs weekly against 1.15.0** for the first time with a grep that can
+match. What it finds in the registry copy, if anything, is the first item here.
+
+**And what 1.14 left.** Questions still unread (the sixth set at 52 of 80), a subject by a
+name the store does not write, a saved query and a pinned traversal waiting on a store that
+does not exist yet, GE-T7 on a thousand real works, and the ones only people can close.
+None of it moved in 1.15, and none of it is planned for 1.16 until something measured needs it.
+
+---
+
 ## 1.15.0 — 2026-11-14
 
 The hosted-provider path run against a real Anthropic key for the first time, and what that
