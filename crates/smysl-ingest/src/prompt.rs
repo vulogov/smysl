@@ -658,7 +658,7 @@ pub fn summarise_children() -> Template {
 
 /// The answer to a dossier's question (SMYSL-2.5 §3.13, `ask --answer`; TX-P8 step 3).
 ///
-/// Version 1. The dossier is the only material: a line per unit, `role`, tab, uid, tab, status,
+/// Version 2. The dossier is the only material: a line per unit, `role`, tab, uid, tab, status,
 /// tab, gist, with the question first. The model answers in surface records and grounds each on
 /// uids from those lines, which is what lets the caller check the answer mechanically — a ground
 /// outside the dossier is dropped (`SMY-W478`), and rule M caps every unit at its weakest ground
@@ -670,9 +670,21 @@ pub fn summarise_children() -> Template {
 /// rather than outside it, because it is a unit of the dossier like the rest and a person's
 /// question is no more an instruction to the model than a verse is.
 pub fn answer_dossier() -> Template {
+    answer_dossier_with(TokenEstimator::Utf8Div4)
+}
+
+/// As [`answer_dossier`], stating the gist bound for `est` (F-2).
+///
+/// Version 2 states the bound at all. Version 1 did not, and measured live on `claude-haiku-5-5`
+/// (1.16) 23 answers of 24 wrote at least one gist past `l0_max`, so the staged batch failed
+/// the check and nothing was kept — the model was never told the number every ingest template
+/// tells it. As with the ingest templates, the estimator is the recipe's to record, not the
+/// version's.
+pub fn answer_dossier_with(est: TokenEstimator) -> Template {
+    let gist_bound = gist_bound_for(est);
     Template {
         id: "ingest.ask.answer".to_string(),
-        version: 1,
+        version: 2,
         system: format!(
             "You answer a question from a dossier, and from nothing else. {UNTRUSTED}\n\n\
              Between the markers is one line per unit: a role, a tab, the unit's uid (`b3:` and \
@@ -689,7 +701,7 @@ pub fn answer_dossier() -> Template {
              is kept as derived from its grounds alone. Where the lines disagree, say that they \
              disagree and ground the record on both sides. Where they do not answer the \
              question, write one record saying so, grounded on the question's line. Three to \
-             six records is enough.\n\
+             six records is enough. Keep each gist to a {gist_bound}.\n\
              {LANG_RULE}"
         ),
         user: format!("{FENCE}\n{{input}}\n{FENCE}"),

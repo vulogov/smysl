@@ -189,7 +189,7 @@ impl Ingestor<'_> {
         let mut report = AnswerReport::default();
         let provider = self.registry.for_task(Task::ContentIngest)?;
         let caps = provider.caps();
-        let template = crate::prompt::answer_dossier();
+        let template = crate::prompt::answer_dossier_with(self.opts.estimator);
         let conditions = crate::recipe::Conditions::new(template.id.clone(), template.version)
             .with_provider(provider.id().to_string(), self.model_for(&caps))
             .with_temperature(self.opts.temperature)

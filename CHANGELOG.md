@@ -183,17 +183,25 @@ calls truncated, ten bodies placed outside their range and one quote reworded, w
 answer written as JSON by hand rather than through a tool or as prose. Nothing routes there
 by default.
 
-### Anthropic streams as the answer is written
+### Every stream is read as the answer is written
 
-1.15's `Provider::stream` for the Anthropic mapper read the response whole and replayed its
-events into the channel, which streamed nothing a `complete` did not: the first token and the
+1.15's `Provider::stream` read the response whole and replayed its events into the channel, on
+every mapper that streams, which streamed nothing a `complete` did not: the first token and the
 last arrived in the same drain. The transport now has a second POST (`http::post_stream`) that
 hands the connection over as soon as the status is in, sharing the attempt loop — backpressure
-waited out, the error body kept — and `read_stream` reads a `BufRead` line by line, emitting
-each event as its line completes. Measured on `claude-haiku-5-5` with a forty-line answer,
-`SMYSL_ANTHROPIC_STREAM=1`: the first token at 625 ms, the last at 1,301 ms, the text arriving
-over 26 separate drains of a 10 ms loop. The test asserts the first drain that carried text was
-not the one that ended the stream.
+waited out, the error body kept — and each mapper reads the body a line at a time, emitting
+each event as its line completes: the Anthropic mapper its own event stream, DeepSeek and
+OpenAI the chat-completions stream through one shared reader, Ollama its line-delimited JSON.
+Gemini does not stream and is unchanged. Measured with a forty-line answer, `SMYSL_STREAM=1`,
+on every provider reachable here, as the first drain that carried text against the last:
+
+| provider, model | first token | last token | drains with text | lines | output tokens |
+|---|---|---|---|---|---|
+| Ollama, `llama3.2` (loopback) | 88 ms | 598 ms | 40 | 40 | 80 |
+| DeepSeek, `deepseek-chat` | 1,119 ms | 1,527 ms | 17 | 40 | 109 |
+| Anthropic, `claude-haiku-5-5` | 568 ms | 1,319 ms | 9 | 40 | 232 |
+
+The test asserts the first drain that carried text was not the one that ended the stream.
 
 Three consequences. The timeout on the streaming path is the longest silence the mapper will
 sit through between bytes — connect, write, each read — not a bound on the whole answer, so a
@@ -204,10 +212,49 @@ it, so the rest of the answer is never sent or paid for. And a connection that b
 silent part way through is `Unreachable`, after the tokens already sent, which the caller must
 not take for an answer — `Stream::drain` already said so of a sender that vanished.
 
-Fixed on the way: 1.15's stream handed an error status's body to the event reader, which found
-no `data:` lines in it and reported an empty answer as a success. A status that is not success
-is now classified from its body as `complete` classifies one, by the same function. The other
-three streaming mappers still replay a whole body; they are not moved here.
+Fixed on the way, on all four: 1.15's stream handed an error status's body to the event
+reader, which found no events in it and reported an empty answer as a success. A status that
+is not success is now classified from its body as `complete` classifies one, by the same
+function, which each mapper now exposes to its streaming thread.
+
+### The effort measured on `ask --answer`, and the answer in the ledger
+
+The effort decision above reaches every request, and the measurement behind it was ingest's. The
+one other free-text request a user pays for from the CLI is `ask --answer`, the model reading a
+dossier and answering in grounded records, so the same question was put to it: on
+`claude-haiku-5-5`, over the dossier fixture, four questions, `SMYSL_ASK_RUNS` runs each at
+`low` and at `high`, each run a fresh copy of the store. A record is *proposed* when the model
+wrote it, *dropped* when it grounded outside the dossier (`SMY-W478`), *lowered* when rule M
+capped it (`SMY-W036`):
+
+| effort | runs | proposed | dropped | lowered | tokens | spent thinking | wall time |
+|---|---|---|---|---|---|---|---|
+| `low` | 12 | 55 | 0 | 16 | 22,571 | 1,146 | 38.6 s |
+| `high` | 12 | 53 | 0 | 16 | 29,568 | 8,356 | 68.1 s |
+
+**The same answer, for a third more.** Fifty-five records against fifty-three, none dropped on
+either side, sixteen lowered on each: nothing `high` wrote that `low` did not, and nothing
+grounded better. What `high` bought was 7,200 tokens of reasoning, 31% more spent and 77% more
+waited, on a dossier of five lines. The same result as ingest's, on the other free-text request
+there is, so `low` stands for every request and a per-task effort is not warranted by anything
+measured; it would be a field on the request, for the day a measurement wants it.
+
+**What the measurement found instead.** 23 answers of 24 failed the store's check — `SMY-E022`,
+a gist past `l0_max`, 52 records in all, 25 at `low` and 27 at `high` — and only one run of the
+24 staged anything. Every ingest template states the gist bound per script; the answer template
+did not, so the model was never told the number it was checked against. `ingest.ask.answer` is
+now version 2 and states it, through the same sentence the ingest templates use, for the
+estimator the caller named. Rerun at `low` with version 2, twelve answers: 10 records over
+the cap where the first pass had 2.2 a run, most of them two to eight tokens past it, and
+three runs of twelve staged where one of 24 had. Stating the bound cut the overrun by more
+than half; it did not end it, and `ask` has no repair turn by design, so the rest is a 1.16
+carry-over:
+whether the answer gets the shortening that ingest's repair turn gives a gist.
+
+On the way, `ask --answer`'s summary line now says what the call cost, with the reasoning's
+share where the provider reports one, and the call is recorded in the usage ledger under
+`content-ingest`, the task it is routed by. It was the one model call the CLI made that the
+ledger did not see; the manual's "only `ingest` writes the ledger" is corrected.
 
 **And what 1.14 left.** Questions still unread (the sixth set at 52 of 80), a subject by a
 name the store does not write, a saved query and a pinned traversal waiting on a store that

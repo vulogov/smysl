@@ -31,7 +31,8 @@ pub struct ProviderConfig {
     pub api_key_env: Option<String>,
     /// Command that prints the key. Never the key.
     pub api_key_cmd: Option<String>,
-    /// Request timeout in seconds.
+    /// Request timeout in seconds. `complete` reads the answer whole inside it; on `stream`,
+    /// since 1.16, it bounds the longest silence between bytes instead.
     pub timeout_secs: u64,
     /// Whether the provider may answer with a model other than the one named, where its API
     /// offers that (Anthropic's server-side fallback on a policy decline). On by default: an

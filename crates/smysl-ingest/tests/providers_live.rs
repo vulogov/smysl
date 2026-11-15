@@ -14,7 +14,8 @@
 //! SMYSL_ANTHROPIC_MATRIX=1  the fixture on every current Anthropic model, in turn
 //! SMYSL_ANTHROPIC_EFFORT   low, medium or high, for the Anthropic candidate (default: the mapper's)
 //! SMYSL_ANTHROPIC_HEADROOM=1 every model at every effort over four passages; the thinking share
-//! SMYSL_ANTHROPIC_STREAM=1  one streamed answer; when its first token arrived, and its last
+//! SMYSL_STREAM=1            one streamed answer per reachable provider that streams; when its
+//!                           first token arrived, and its last
 //! SMYSL_REPAIR_RATE=1       the fixture through each path every reachable provider has, several
 //!                           runs each; how often an answer needed repair (SMYSL_REPAIR_RUNS, 5)
 //! ```
@@ -489,29 +490,45 @@ fn the_repair_rate_is_measured_per_path() {
     assert!(any, "SMYSL_REPAIR_RATE=1 but no provider is reachable");
 }
 
-/// **Streaming is streaming.** One free-text answer from the Anthropic candidate, drained as a
-/// caller drains it, with the clock on the first token and on the last. 1.15 read the body
-/// whole and replayed it, so the first token and the last landed in the same drain; 1.16 reads
-/// the events as they arrive, and the first token lands while the answer is still being
-/// written. Opt-in with `SMYSL_ANTHROPIC_STREAM=1`: one paid call.
+/// **Streaming is streaming.** One free-text answer from every reachable candidate that
+/// streams, drained as a caller drains it, with the clock on the first token and on the last.
+/// 1.15 read the body whole and replayed it, so the first token and the last landed in the
+/// same drain; 1.16 reads the events as they arrive, and the first token lands while the
+/// answer is still being written. Opt-in with `SMYSL_STREAM=1`: one paid call per hosted
+/// provider.
 #[test]
-fn the_anthropic_stream_delivers_its_first_token_before_its_last() {
-    if std::env::var("SMYSL_ANTHROPIC_STREAM")
+fn the_stream_delivers_its_first_token_before_its_last() {
+    if std::env::var("SMYSL_STREAM")
         .unwrap_or_default()
         .trim()
         .is_empty()
     {
-        eprintln!("anthropic stream skipped: set SMYSL_ANTHROPIC_STREAM=1");
+        eprintln!("stream skipped: set SMYSL_STREAM=1");
         return;
     }
-    let c = candidates()
-        .into_iter()
-        .find(|c| c.kind == "anthropic")
-        .expect("the anthropic candidate");
-    let provider = match usable(&c) {
-        Ok(p) => p,
-        Err(why) => panic!("SMYSL_ANTHROPIC_STREAM=1 but anthropic cannot run: {why}"),
-    };
+    let mut ran = 0;
+    for c in candidates() {
+        let provider = match usable(&c) {
+            Ok(p) => p,
+            Err(why) => {
+                eprintln!("  {:<10} skipped ({why})", c.kind);
+                continue;
+            }
+        };
+        if !provider.caps().streaming {
+            eprintln!("  {:<10} skipped (does not stream)", c.kind);
+            continue;
+        }
+        stream_once(&c, provider);
+        ran += 1;
+    }
+    assert!(
+        ran > 0,
+        "SMYSL_STREAM=1 but no streaming provider is reachable"
+    );
+}
+
+fn stream_once(c: &Candidate, provider: Box<dyn Provider>) {
     let req = Request::new(
         &c.model,
         "Count from one to forty in words, one number per line, and write nothing else.",
@@ -544,7 +561,7 @@ fn the_anthropic_stream_delivers_its_first_token_before_its_last() {
     let ended = started.elapsed();
     let usage = worker.join().unwrap().expect("the stream completes");
     let (at, already_finished) = first.expect("some text arrived");
-    eprintln!("--- Anthropic stream, {} ---", c.model);
+    eprintln!("--- {} stream, {} ---", c.kind, c.model);
     eprintln!(
         "  first token at {} ms, last at {} ms; {} drains carried text; {} lines, {} output tokens",
         at.as_millis(),

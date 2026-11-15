@@ -161,10 +161,18 @@ mod client {
     /// A response whose body is still arriving.
     ///
     /// Dropping `body` closes the connection, which is how a caller that stopped listening
-    /// stops the download: the Anthropic mapper's read loop breaks when the channel's receiver
-    /// is gone, and the model's remaining output is never read off the wire.
-    // Only the Anthropic mapper streams the body yet; the others replay a whole response.
-    #[cfg_attr(not(feature = "anthropic"), allow(dead_code))]
+    /// stops the download: a mapper's read loop breaks when the channel's receiver is gone,
+    /// and the model's remaining output is never read off the wire.
+    // Every mapper that streams reads the body this way; Gemini does not stream.
+    #[cfg_attr(
+        not(any(
+            feature = "anthropic",
+            feature = "deepseek",
+            feature = "openai",
+            feature = "ollama"
+        )),
+        allow(dead_code)
+    )]
     pub struct Streamed {
         pub status: u16,
         /// How many attempts were retried before this one was answered.
@@ -180,7 +188,15 @@ mod client {
     /// whole exchange; here `idle` bounds each wait for the next bytes — the connection, the
     /// request, every read of the body — so a long answer is not cut off for being long, and
     /// a server that falls silent is still given up on.
-    #[cfg_attr(not(feature = "anthropic"), allow(dead_code))]
+    #[cfg_attr(
+        not(any(
+            feature = "anthropic",
+            feature = "deepseek",
+            feature = "openai",
+            feature = "ollama"
+        )),
+        allow(dead_code)
+    )]
     pub fn post_stream(
         url: &str,
         headers: &[(&str, String)],
@@ -289,9 +305,17 @@ mod client {
     }
 }
 
-/// The streamed POST has one caller, the Anthropic mapper, and its re-export follows that
-/// feature: without it the name would be an unused import, which the workspace denies.
-#[cfg(all(feature = "http-client", feature = "anthropic"))]
+/// The streamed POST's re-export follows the mappers that stream: without one of them the
+/// name would be an unused import, which the workspace denies.
+#[cfg(all(
+    feature = "http-client",
+    any(
+        feature = "anthropic",
+        feature = "deepseek",
+        feature = "openai",
+        feature = "ollama"
+    )
+))]
 pub use client::post_stream;
 #[cfg(feature = "http-client")]
 pub use client::{get_with, post_json};

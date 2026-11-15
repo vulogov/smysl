@@ -802,11 +802,12 @@ chunks reads the two from the cache on every chunk after the first, at a
 fraction of the input price; `usage` shows the share beside each row's total,
 and `ingest`'s summary line names it when there is one.
 
-Read this honestly rather than generalising it: in this build, `ingest` is
-the command that writes the ledger from the CLI. `attest`'s own report
-carries a token total too (the `N token(s)` in its final summary line from
-Chapter 11), but that total is not currently appended to
-`.smysl/usage.log` the way an `ingest` call's is. If you are reconciling
+Read this honestly rather than generalising it: in this build, `ingest` and,
+from 1.16, `ask --answer` are the commands that write the ledger from the
+CLI (an answer is recorded under `content-ingest`, the task it is routed by).
+`attest`'s own report carries a token total too (the `N token(s)` in its
+final summary line from Chapter 11), but that total is not currently appended
+to `.smysl/usage.log` the way an `ingest` call's is. If you are reconciling
 `usage` totals against a batch of `attest` runs, the ledger will
 under-report them — the number to trust for `attest`'s own cost, today, is
 the summary line `attest` prints for itself, not `usage --by task`.
@@ -913,8 +914,9 @@ history, never permission.
     a config file is always safe to commit.],
   [The usage ledger records counts, provider, model, task, recipe, and run —
     never prompt or completion content — one JSON line per call, append-only.],
-  [In this build, only `ingest` writes to the ledger from the CLI; `attest`'s
-    token total lives in its own run summary, not (yet) in `usage`.],
+  [In this build, `ingest` and `ask --answer` write to the ledger from the
+    CLI; `attest`'s token total lives in its own run summary, not (yet) in
+    `usage`.],
   [`usage --by provider|task|model|run`, `--since MS`, and `--reset` are how
     you read and clear that record; none of it ever blocks a command from
     running.],

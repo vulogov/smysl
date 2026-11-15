@@ -1260,40 +1260,18 @@ mod tests {
         ));
     }
 
-    /// A reader fed from a channel, so a test can hold the rest of the body back and see what
-    /// the reader did with the part it had.
-    struct Fed(std::sync::mpsc::Receiver<std::io::Result<Vec<u8>>>, Vec<u8>);
-
-    impl std::io::Read for Fed {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            if self.1.is_empty() {
-                match self.0.recv() {
-                    Ok(Ok(bytes)) => self.1 = bytes,
-                    Ok(Err(e)) => return Err(e),
-                    Err(_) => return Ok(0),
-                }
-            }
-            let n = buf.len().min(self.1.len());
-            buf[..n].copy_from_slice(&self.1[..n]);
-            self.1.drain(..n);
-            Ok(n)
-        }
-    }
+    use crate::stream::testing::Fed;
 
     /// The point of 1.16's streaming: a token is emitted when its event arrives, not when the
     /// body ends. The test holds the body open after the first delta and reads the token
     /// before sending the rest.
     #[test]
     fn a_token_is_emitted_before_the_body_ends() {
-        let (feed, body) = std::sync::mpsc::channel();
+        let (feed, body) = Fed::new();
         let (tx, rx) = std::sync::mpsc::channel();
         let reader = std::thread::spawn(move || {
             let mut emitter = Emitter::new(tx);
-            let usage = read_stream(
-                std::io::BufReader::new(Fed(body, Vec::new())),
-                0,
-                &mut emitter,
-            );
+            let usage = read_stream(std::io::BufReader::new(body), 0, &mut emitter);
             if let Ok(u) = usage {
                 emitter.done(u);
             }
@@ -1319,7 +1297,7 @@ mod tests {
     /// was already emitted: the caller holds partial text and must not take it for an answer.
     #[test]
     fn a_broken_connection_fails_the_stream_as_unreachable() {
-        let (feed, body) = std::sync::mpsc::channel();
+        let (feed, body) = Fed::new();
         let (tx, rx) = std::sync::mpsc::channel();
         feed.send(Ok(b"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"half\"}}\n\n".to_vec()))
             .unwrap();
@@ -1327,11 +1305,7 @@ mod tests {
             .unwrap();
         let mut emitter = Emitter::new(tx);
         assert_eq!(
-            read_stream(
-                std::io::BufReader::new(Fed(body, Vec::new())),
-                0,
-                &mut emitter
-            ),
+            read_stream(std::io::BufReader::new(body), 0, &mut emitter),
             Err(ProviderError::Unreachable)
         );
         assert_eq!(rx.try_recv().unwrap(), StreamMsg::Token("half".into()));

@@ -618,7 +618,10 @@ roles the three new schemas introduced — `Counter-evidence`, `Open questions`,
 dossier, fenced as data, and answers in surface records that may ground only on
 the dossier's units. A record grounding anywhere else is dropped and counted
 (`SMY-W478`), what survives is capped by rule M at its weakest ground
-(`SMY-W036`), and all of it is staged for review like any model output.
+(`SMY-W036`), and all of it is staged for review like any model output. The
+summary line says what the call cost, with the reasoning's share where the
+provider reports one, and the call is recorded in the usage ledger (from
+1.16) like an `ingest` call.
 
 *`ask` is experimental*, and says so on stderr every time it runs. Its slots
 were measured against a gold set (GE-T10: thirty questions, each in all five

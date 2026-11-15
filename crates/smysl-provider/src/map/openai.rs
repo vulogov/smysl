@@ -168,7 +168,7 @@ impl Provider for OpenAi {
 
         crate::runtime::run(move || {
             let mut emitter = Emitter::new(tx);
-            let resp = match http::post_json(
+            let resp = match http::post_stream(
                 &url,
                 &headers,
                 &body,
@@ -182,26 +182,30 @@ impl Provider for OpenAi {
                     return Err(e);
                 }
             };
-            let mut usage = Usage {
-                estimated: true,
-                retries: resp.retries,
-                ..Usage::default()
-            };
-            for line in resp.body.lines() {
-                if let Some(u) = openai_compat::sse_usage(line, resp.retries) {
-                    usage = u;
+            // A status that is not success is classified from its body, as `complete`
+            // classifies one; fed to the event reader it would read as an empty answer.
+            if resp.status >= 400 {
+                use std::io::Read as _;
+                let mut text = String::new();
+                let _ = resp.body.take(64 * 1024).read_to_string(&mut text);
+                let e = status_error(resp.status, &text);
+                emitter.fail(e.clone());
+                return Err(e);
+            }
+            match openai_compat::read_sse_stream(
+                std::io::BufReader::new(resp.body),
+                resp.retries,
+                &mut emitter,
+            ) {
+                Ok(usage) => {
+                    emitter.done(usage);
+                    Ok(usage)
                 }
-                if let Some(t) = openai_compat::sse_delta(line) {
-                    if !emitter.token(&t) {
-                        break;
-                    }
+                Err(e) => {
+                    emitter.fail(e.clone());
+                    Err(e)
                 }
             }
-            if usage.estimated {
-                usage.output_tokens = (emitter.output_chars() as u64).div_ceil(4);
-            }
-            emitter.done(usage);
-            Ok(usage)
         })
     }
 
@@ -255,22 +259,26 @@ impl Provider for OpenAi {
 
 impl StatusMapping for OpenAi {
     fn status_error(&self, status: u16, body: &str) -> ProviderError {
-        if let Ok(v) = serde_json::from_str::<Value>(body) {
-            if let Some(e) = openai_compat::error_of(&v) {
-                return match status {
-                    401 | 403 => ProviderError::Unauthorized,
-                    // The status decides backpressure, not the envelope: an overloaded
-                    // endpoint that explains itself must still arrive as something the
-                    // retry layer acts on.
-                    s if http::is_backpressure(s) => {
-                        ProviderError::RateLimited { retry_after: None }
-                    }
-                    _ => e,
-                };
-            }
-        }
-        http::status_error(status, body, None)
+        status_error(status, body)
     }
+}
+
+/// The status mapping as a free function, so the streaming thread, which holds no `self`,
+/// classifies an error status the way `complete` does.
+fn status_error(status: u16, body: &str) -> ProviderError {
+    if let Ok(v) = serde_json::from_str::<Value>(body) {
+        if let Some(e) = openai_compat::error_of(&v) {
+            return match status {
+                401 | 403 => ProviderError::Unauthorized,
+                // The status decides backpressure, not the envelope: an overloaded
+                // endpoint that explains itself must still arrive as something the
+                // retry layer acts on.
+                s if http::is_backpressure(s) => ProviderError::RateLimited { retry_after: None },
+                _ => e,
+            };
+        }
+    }
+    http::status_error(status, body, None)
 }
 
 #[cfg(test)]
