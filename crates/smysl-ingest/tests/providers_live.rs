@@ -14,6 +14,9 @@
 //! SMYSL_ANTHROPIC_MATRIX=1  the fixture on every current Anthropic model, in turn
 //! SMYSL_ANTHROPIC_EFFORT   low, medium or high, for the Anthropic candidate (default: the mapper's)
 //! SMYSL_ANTHROPIC_HEADROOM=1 every model at every effort over four passages; the thinking share
+//! SMYSL_ANTHROPIC_STREAM=1  one streamed answer; when its first token arrived, and its last
+//! SMYSL_REPAIR_RATE=1       the fixture through each path every reachable provider has, several
+//!                           runs each; how often an answer needed repair (SMYSL_REPAIR_RUNS, 5)
 //! ```
 //!
 //! The Anthropic default is the cheap model, so the gate is affordable to run routinely; the
@@ -31,9 +34,10 @@
 
 use smysl_core::{Rung, Severity, Status};
 use smysl_graph::Store;
-use smysl_ingest::{IngestOptions, Ingestor};
+use smysl_ingest::{IngestOptions, IngestPath, IngestReport, Ingestor};
 use smysl_provider::{
-    config::ProviderConfig, Provider, ProviderId, Registry, StructuredMode, Task,
+    config::ProviderConfig, stream::Stream, Provider, ProviderId, Registry, Request,
+    StructuredMode, Task,
 };
 
 /// The fixture. Short on purpose - every hosted call costs money, and the claim under test
@@ -288,25 +292,38 @@ fn each_provider_reports_its_own_structural_guarantee() {
 /// Every current Anthropic model the list names, by family, cheapest first.
 const ANTHROPIC_MATRIX: &[&str] = &["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"];
 
-/// What one model did with the fixture, for the matrix's record.
-fn run_fixture(c: &Candidate) -> Result<String, String> {
+/// The fixture through one candidate, on the path the caller names or the one ingest chooses:
+/// how many units it staged, and the report. Conformance is the one assertion.
+fn fixture_report(
+    c: &Candidate,
+    path: Option<IngestPath>,
+) -> Result<(usize, IngestReport), String> {
     let provider = usable(c)?;
     let id = provider.id();
     let registry = Registry::new()
         .with_provider(provider)
         .route(Task::ContentIngest, id);
-    let opts = IngestOptions::at_rung(Rung::Document)
+    let mut opts = IngestOptions::at_rung(Rung::Document)
         .with_model(&c.model)
         .with_max_output(800);
+    if let Some(p) = path {
+        opts = opts.with_path(p);
+    }
     let (staged, report) = Ingestor::new(&registry, opts)
         .ingest(&Store::new(), FIXTURE)
         .map_err(|e| format!("ingest failed: {e}"))?;
     if staged.report.fail_on(Severity::Error).is_err() {
         return Err("staged units do not check".to_string());
     }
+    Ok((staged.len(), report))
+}
+
+/// What one model did with the fixture, for the matrix's record.
+fn run_fixture(c: &Candidate) -> Result<String, String> {
+    let (units, report) = fixture_report(c, None)?;
     Ok(format!(
         "{} unit(s), {} call(s), {} degraded, {} repaired, {} token(s), {} thinking, model {}",
-        staged.len(),
+        units,
         report.calls,
         report.degraded,
         report.repaired,
@@ -349,6 +366,198 @@ fn every_current_anthropic_model_stages_conformant_units() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same candidate with another structured mode asked of its mapper.
+fn with_structured(c: &Candidate, structured: StructuredMode) -> Candidate {
+    Candidate {
+        id: c.id,
+        kind: c.kind,
+        endpoint: c.endpoint,
+        model: c.model.clone(),
+        key_var: c.key_var,
+        structured,
+        context_window: c.context_window,
+    }
+}
+
+/// **The repair rate, per path.** Whether the structured channel earns its keep is a question
+/// 1.15 left open: the same fixture through each path a provider has, several runs each, since
+/// one run is an anecdote. Three cells per provider — the path ingest chooses, the other path,
+/// and the json-ast path with no channel at all, where the schema rides in the prompt and the
+/// answer is checked on the way in — and the record is how often an answer needed a second
+/// turn, and how often none sufficed. Opt-in with `SMYSL_REPAIR_RATE=1`; `SMYSL_REPAIR_RUNS`
+/// is the runs per cell (default 5). A cell that fails is a row, not a panic: a provider that
+/// cannot take a path is what the measurement is for.
+#[test]
+fn the_repair_rate_is_measured_per_path() {
+    if std::env::var("SMYSL_REPAIR_RATE")
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        eprintln!("repair rate skipped: set SMYSL_REPAIR_RATE=1");
+        return;
+    }
+    let runs: usize = std::env::var("SMYSL_REPAIR_RUNS")
+        .ok()
+        .and_then(|n| n.trim().parse().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(5);
+    eprintln!("--- repair rate, {runs} run(s) per cell ---");
+    eprintln!(
+        "  provider   cell           path     runs units calls degraded repaired  tokens  warnings"
+    );
+    let mut any = false;
+    for c in candidates() {
+        if let Err(why) = usable(&c) {
+            eprintln!("  {:<10} skipped ({why})", c.id);
+            continue;
+        }
+        any = true;
+        let cells: [(&str, Option<IngestPath>, Option<StructuredMode>); 4] = [
+            ("default", None, None),
+            ("json-ast", Some(IngestPath::JsonAst), None),
+            ("surface", Some(IngestPath::Surface), None),
+            (
+                "json-ast/none",
+                Some(IngestPath::JsonAst),
+                Some(StructuredMode::None),
+            ),
+        ];
+        let mut default_path: Option<IngestPath> = None;
+        for (name, path, structured) in cells {
+            // The default is one of the two overrides; the override that repeats it is skipped
+            // rather than paid for twice.
+            if structured.is_none() && path.is_some() && path == default_path {
+                continue;
+            }
+            let cell = match structured {
+                Some(m) => with_structured(&c, m),
+                None => with_structured(&c, c.structured),
+            };
+            let (mut units, mut calls, mut degraded, mut repaired, mut tokens) = (0, 0, 0, 0, 0);
+            let mut failed = Vec::new();
+            let mut took: Option<IngestPath> = None;
+            // Which warnings the runs ended in, by code: a degraded span says why it degraded.
+            let mut codes: std::collections::BTreeMap<String, usize> = Default::default();
+            for _ in 0..runs {
+                match fixture_report(&cell, path) {
+                    Ok((n, r)) => {
+                        units += n;
+                        calls += r.calls;
+                        degraded += r.degraded;
+                        repaired += r.repaired;
+                        tokens += r.usage.total();
+                        took = took.or(r.path);
+                        for d in &r.diagnostics {
+                            if d.severity == Severity::Warn {
+                                *codes.entry(d.code.as_str().to_string()).or_default() += 1;
+                            }
+                        }
+                    }
+                    Err(why) => failed.push(why),
+                }
+            }
+            if name == "default" {
+                default_path = took;
+            }
+            eprintln!(
+                "  {:<10} {:<14} {:<8} {:>4} {:>5} {:>5} {:>8} {:>8} {:>7}  {}",
+                c.id,
+                name,
+                took.map(|p| p.as_str()).unwrap_or("-"),
+                runs,
+                units,
+                calls,
+                degraded,
+                repaired,
+                tokens,
+                codes
+                    .iter()
+                    .map(|(c, n)| format!("{c}×{n}"))
+                    .chain(
+                        failed
+                            .first()
+                            .map(|f| format!("{} failed ({f})", failed.len()))
+                    )
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
+    }
+    assert!(any, "SMYSL_REPAIR_RATE=1 but no provider is reachable");
+}
+
+/// **Streaming is streaming.** One free-text answer from the Anthropic candidate, drained as a
+/// caller drains it, with the clock on the first token and on the last. 1.15 read the body
+/// whole and replayed it, so the first token and the last landed in the same drain; 1.16 reads
+/// the events as they arrive, and the first token lands while the answer is still being
+/// written. Opt-in with `SMYSL_ANTHROPIC_STREAM=1`: one paid call.
+#[test]
+fn the_anthropic_stream_delivers_its_first_token_before_its_last() {
+    if std::env::var("SMYSL_ANTHROPIC_STREAM")
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        eprintln!("anthropic stream skipped: set SMYSL_ANTHROPIC_STREAM=1");
+        return;
+    }
+    let c = candidates()
+        .into_iter()
+        .find(|c| c.kind == "anthropic")
+        .expect("the anthropic candidate");
+    let provider = match usable(&c) {
+        Ok(p) => p,
+        Err(why) => panic!("SMYSL_ANTHROPIC_STREAM=1 but anthropic cannot run: {why}"),
+    };
+    let req = Request::new(
+        &c.model,
+        "Count from one to forty in words, one number per line, and write nothing else.",
+    )
+    .with_max_output(600);
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let started = std::time::Instant::now();
+    let worker = std::thread::spawn(move || provider.stream(&req, tx));
+    let mut stream = Stream::new(rx);
+    let mut first: Option<(std::time::Duration, bool)> = None;
+    let mut drains_with_text = 0;
+    loop {
+        let fresh = stream.drain();
+        if !fresh.is_empty() {
+            drains_with_text += 1;
+            if first.is_none() {
+                first = Some((started.elapsed(), stream.is_finished()));
+            }
+        }
+        if stream.is_finished() {
+            break;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(300),
+            "the stream did not end in five minutes"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let ended = started.elapsed();
+    let usage = worker.join().unwrap().expect("the stream completes");
+    let (at, already_finished) = first.expect("some text arrived");
+    eprintln!("--- Anthropic stream, {} ---", c.model);
+    eprintln!(
+        "  first token at {} ms, last at {} ms; {} drains carried text; {} lines, {} output tokens",
+        at.as_millis(),
+        ended.as_millis(),
+        drains_with_text,
+        stream.text().lines().count(),
+        usage.output_tokens
+    );
+    assert!(stream.error().is_none(), "{:?}", stream.error());
+    assert!(
+        !already_finished && drains_with_text > 1,
+        "the first token arrived in the same drain as the last: the body was read whole"
+    );
 }
 
 /// A longer passage for the headroom measurement: the fixture's incident told in full, so the

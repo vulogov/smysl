@@ -50,8 +50,10 @@ pub struct ProviderConfig {
 /// The request timeout an Anthropic provider gets when its configuration names none.
 ///
 /// Thinking is always on at the API version the mapper speaks, and a long chunk at a high
-/// effort can run past the two minutes every other provider defaults to. The mapper does not
-/// stream, so the whole answer has to arrive inside one timeout.
+/// effort can run past the two minutes every other provider defaults to. `complete` reads the
+/// answer whole, so the whole of it has to arrive inside one timeout; on `stream`, since 1.16,
+/// the same figure bounds the longest silence between bytes instead, which a long answer never
+/// approaches.
 pub const ANTHROPIC_TIMEOUT_SECS: u64 = 600;
 
 impl ProviderConfig {

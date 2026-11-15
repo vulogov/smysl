@@ -131,14 +131,89 @@ mod client {
         headers: &[(&str, String)],
         body: &str,
         timeout: Duration,
-        mut sleep: impl FnMut(Duration),
-        mut jitter: impl FnMut() -> f64,
+        sleep: impl FnMut(Duration),
+        jitter: impl FnMut() -> f64,
     ) -> Result<HttpResponse, ProviderError> {
         let agent = ureq::AgentBuilder::new()
             .timeout(timeout)
             .user_agent(concat!("smysl/", env!("CARGO_PKG_VERSION")))
             .build();
+        let (resp, retries) = send(&agent, url, headers, body, sleep, jitter)?;
+        let status = resp.status();
+        let body = match resp.into_string() {
+            Ok(text) => text,
+            // An error's body is the informative half, but an unreadable one is not worth
+            // failing over: the status alone still classifies.
+            Err(_) if status >= 400 => String::new(),
+            Err(e) => {
+                return Err(ProviderError::Malformed(format!(
+                    "unreadable response body: {e}"
+                )))
+            }
+        };
+        Ok(HttpResponse {
+            status,
+            body,
+            retries,
+        })
+    }
 
+    /// A response whose body is still arriving.
+    ///
+    /// Dropping `body` closes the connection, which is how a caller that stopped listening
+    /// stops the download: the Anthropic mapper's read loop breaks when the channel's receiver
+    /// is gone, and the model's remaining output is never read off the wire.
+    // Only the Anthropic mapper streams the body yet; the others replay a whole response.
+    #[cfg_attr(not(feature = "anthropic"), allow(dead_code))]
+    pub struct Streamed {
+        pub status: u16,
+        /// How many attempts were retried before this one was answered.
+        pub retries: u32,
+        pub body: Box<dyn std::io::Read + Send + Sync + 'static>,
+    }
+
+    /// POST a JSON body and hand the response back as it arrives, rather than once it has.
+    ///
+    /// The same attempt loop as `post_json`: a status arrives before any body does, so
+    /// backpressure is waited out the same way and an error status is returned the same way,
+    /// its body readable from `body`. What differs is the timeout. `post_json` bounds the
+    /// whole exchange; here `idle` bounds each wait for the next bytes — the connection, the
+    /// request, every read of the body — so a long answer is not cut off for being long, and
+    /// a server that falls silent is still given up on.
+    #[cfg_attr(not(feature = "anthropic"), allow(dead_code))]
+    pub fn post_stream(
+        url: &str,
+        headers: &[(&str, String)],
+        body: &str,
+        idle: Duration,
+        sleep: impl FnMut(Duration),
+        jitter: impl FnMut() -> f64,
+    ) -> Result<Streamed, ProviderError> {
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(idle)
+            .timeout_read(idle)
+            .timeout_write(idle)
+            .user_agent(concat!("smysl/", env!("CARGO_PKG_VERSION")))
+            .build();
+        let (resp, retries) = send(&agent, url, headers, body, sleep, jitter)?;
+        Ok(Streamed {
+            status: resp.status(),
+            retries,
+            body: resp.into_reader(),
+        })
+    }
+
+    /// The attempt loop both POSTs share. Backpressure is waited out, up to `MAX_ATTEMPTS`,
+    /// and whatever answered last comes back with the number of retries it took; a transport
+    /// failure on any attempt is `Unreachable`.
+    fn send(
+        agent: &ureq::Agent,
+        url: &str,
+        headers: &[(&str, String)],
+        body: &str,
+        mut sleep: impl FnMut(Duration),
+        mut jitter: impl FnMut() -> f64,
+    ) -> Result<(ureq::Response, u32), ProviderError> {
         let mut retries = 0u32;
         for attempt in 0..MAX_ATTEMPTS {
             let mut req = agent.post(url).set("content-type", "application/json");
@@ -146,33 +221,18 @@ mod client {
                 req = req.set(k, v);
             }
             match req.send_string(body) {
-                Ok(resp) => {
-                    let status = resp.status();
-                    let text = resp.into_string().map_err(|e| {
-                        ProviderError::Malformed(format!("unreadable response body: {e}"))
-                    })?;
-                    return Ok(HttpResponse {
-                        status,
-                        body: text,
-                        retries,
-                    });
-                }
+                Ok(resp) => return Ok((resp, retries)),
                 Err(ureq::Error::Status(status, resp)) => {
-                    let retry_after = resp
-                        .header("retry-after")
-                        .and_then(super::parse_retry_after);
-                    let text = resp.into_string().unwrap_or_default();
                     // Backpressure is the one class this layer acts on, because acting on it
                     // means waiting rather than deciding what it means. The last attempt
                     // returns the response instead of sleeping: a wait nobody is going to
                     // use is just a slower failure.
                     if !is_backpressure(status) || attempt + 1 == MAX_ATTEMPTS {
-                        return Ok(HttpResponse {
-                            status,
-                            body: text,
-                            retries,
-                        });
+                        return Ok((resp, retries));
                     }
+                    let retry_after = resp
+                        .header("retry-after")
+                        .and_then(super::parse_retry_after);
                     retries += 1;
                     sleep(retry_after.unwrap_or_else(|| backoff(attempt, jitter())));
                 }
@@ -230,7 +290,7 @@ mod client {
 }
 
 #[cfg(feature = "http-client")]
-pub use client::{get_with, post_json};
+pub use client::{get_with, post_json, post_stream};
 
 #[cfg(test)]
 mod tests {
@@ -523,6 +583,44 @@ mod tests {
             let r = post(&serve(vec![500, 200]));
             assert_eq!(r.status, 500);
             assert_eq!(r.retries, 0);
+        }
+
+        /// The streamed POST shares the attempt loop: backpressure is waited out before any
+        /// body is handed over, and an error's body is still readable from the reader.
+        #[cfg(feature = "http-client")]
+        #[test]
+        fn a_streamed_post_retries_the_same_way_and_hands_over_the_body() {
+            let mut slept = Vec::new();
+            let r = post_stream(
+                &serve(vec![529, 200]),
+                &[],
+                "{}",
+                Duration::from_secs(5),
+                |d| slept.push(d),
+                || 0.0,
+            )
+            .unwrap();
+            assert_eq!((r.status, r.retries), (200, 1));
+            assert_eq!(slept.len(), 1);
+            let mut body = String::new();
+            let mut reader = r.body;
+            reader.read_to_string(&mut body).unwrap();
+            assert_eq!(body, r#"{"status":200}"#);
+
+            let r = post_stream(
+                &serve(vec![500]),
+                &[],
+                "{}",
+                Duration::from_secs(5),
+                |_| {},
+                || 0.0,
+            )
+            .unwrap();
+            assert_eq!((r.status, r.retries), (500, 0));
+            let mut body = String::new();
+            let mut reader = r.body;
+            reader.read_to_string(&mut body).unwrap();
+            assert!(body.contains("500"), "the body reaches the mapper");
         }
     }
 }

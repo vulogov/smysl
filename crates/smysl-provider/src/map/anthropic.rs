@@ -48,9 +48,19 @@
 //! rather than an empty response. `effort` on the provider's configuration is sent as
 //! `output_config.effort` on every request; unset, a schema request is `low`.
 //!
+//! **A stream is read as it arrives** (1.16). `Provider::stream` holds the connection open and
+//! emits each event as its line completes, so a caller draining the channel sees the answer
+//! while the model is still writing it; 1.15 read the whole body first and replayed it, which
+//! streamed nothing a `complete` did not. The timeout on this path is the longest silence the
+//! mapper will sit through between bytes, not a bound on the whole answer, and a caller that
+//! drops the receiver stops the download rather than paying for the rest of it. A status that
+//! is not success is classified from its body as `complete` classifies one; 1.15's stream fed
+//! an error body to the event reader, which found no events in it and reported an empty
+//! answer as a success.
+//!
 //! | Path | Purpose |
 //! |---|---|
-//! | `POST /v1/messages` | completion, streaming or not (`read_stream` replays the events) |
+//! | `POST /v1/messages` | completion, streaming or not (`read_stream` reads the events as they arrive) |
 //! | `POST /v1/messages/count_tokens` | the tokeniser's count, for calibrating the estimator |
 //! | `GET /v1/models` | model list with each model's lifecycle; also the reachability probe |
 //!
@@ -446,14 +456,17 @@ pub fn sse_event(line: &str) -> Option<Value> {
     serde_json::from_str(payload).ok()
 }
 
-/// Read a streamed response, event by event, into the emitter.
+/// Read a streamed response, event by event, into the emitter, as the events arrive.
 ///
 /// `message_start` carries the input side of the usage, `content_block_delta` the text (or
 /// the tool input's JSON, piece by piece), `message_delta` the output side and the stop
 /// reason. A decline or an error event fails the stream the way `parse` would fail the
-/// completion.
+/// completion. The reader is read a line at a time and each event is emitted as its line
+/// completes, so nothing waits for the body to end; a connection that breaks or falls silent
+/// part way through is `Unreachable`, after the tokens already sent, which the caller must
+/// not take for an answer.
 pub(crate) fn read_stream(
-    body: &str,
+    body: impl std::io::BufRead,
     retries: u32,
     emitter: &mut Emitter,
 ) -> Result<Usage, ProviderError> {
@@ -463,7 +476,12 @@ pub(crate) fn read_stream(
         ..Usage::default()
     };
     for line in body.lines() {
-        let Some(ev) = sse_event(line) else { continue };
+        // A read error is the transport's: the server closed the connection before the
+        // message ended, or said nothing for longer than the timeout.
+        let Ok(line) = line else {
+            return Err(ProviderError::Unreachable);
+        };
+        let Some(ev) = sse_event(&line) else { continue };
         match ev.get("type").and_then(Value::as_str) {
             Some("message_start") => {
                 let u = ev.pointer("/message/usage");
@@ -566,6 +584,8 @@ impl Provider for Anthropic {
             // Since 1.15: `Provider::stream` reads the event stream (`read_stream`). It said
             // `true` for as long as the mapper existed while inheriting the trait default,
             // which refuses; from 1.11 to 1.14 it said `false`, which was at least true.
+            // Since 1.16 the events are read as they arrive rather than replayed from a body
+            // read whole, so it is true in the sense a caller means.
             streaming: true,
             usage_reporting: true,
             offline: self.cfg.is_local(),
@@ -608,12 +628,12 @@ impl Provider for Anthropic {
         let url = self.url("/v1/messages");
         let timeout = Duration::from_secs(self.cfg.timeout_secs);
 
-        // The body is read whole and then replayed event by event, as the other mappers do:
-        // `http::post_json` returns a complete response. So the timeout covers the whole
-        // answer here too, which is why an Anthropic provider's default is the longer one.
+        // The connection is handed over as soon as the status is in, and the events are read
+        // off it as they arrive. The timeout bounds the silence between bytes, not the answer:
+        // `complete` reads whole and is why an Anthropic provider's default is the longer one.
         crate::runtime::run(move || {
             let mut emitter = Emitter::new(tx);
-            let resp = match http::post_json(
+            let resp = match http::post_stream(
                 &url,
                 &headers,
                 &body,
@@ -627,7 +647,21 @@ impl Provider for Anthropic {
                     return Err(e);
                 }
             };
-            match read_stream(&resp.body, resp.retries, &mut emitter) {
+            if resp.status >= 400 {
+                // The error's body is the informative half, and it is short; what is not read
+                // of a long one classifies no better.
+                use std::io::Read as _;
+                let mut text = String::new();
+                let _ = resp.body.take(64 * 1024).read_to_string(&mut text);
+                let e = status_error(resp.status, &text);
+                emitter.fail(e.clone());
+                return Err(e);
+            }
+            match read_stream(
+                std::io::BufReader::new(resp.body),
+                resp.retries,
+                &mut emitter,
+            ) {
                 Ok(usage) => {
                     emitter.done(usage);
                     Ok(usage)
@@ -684,22 +718,26 @@ impl Provider for Anthropic {
 
 impl StatusMapping for Anthropic {
     fn status_error(&self, status: u16, body: &str) -> ProviderError {
-        if let Ok(v) = serde_json::from_str::<Value>(body) {
-            if let Some(e) = error_of(&v) {
-                return match status {
-                    401 | 403 => ProviderError::Unauthorized,
-                    // The status decides backpressure, not the envelope. Anthropic's 529 is
-                    // 503 under a number of its own, and an overloaded server is worth
-                    // waiting out rather than reporting as a fault.
-                    s if http::is_backpressure(s) => {
-                        ProviderError::RateLimited { retry_after: None }
-                    }
-                    _ => e,
-                };
-            }
-        }
-        http::status_error(status, body, None)
+        status_error(status, body)
     }
+}
+
+/// What a failed response means. A free function because the stream classifies on the
+/// provider thread, where `self` cannot follow; the mapping needs nothing of the mapper.
+fn status_error(status: u16, body: &str) -> ProviderError {
+    if let Ok(v) = serde_json::from_str::<Value>(body) {
+        if let Some(e) = error_of(&v) {
+            return match status {
+                401 | 403 => ProviderError::Unauthorized,
+                // The status decides backpressure, not the envelope. Anthropic's 529 is
+                // 503 under a number of its own, and an overloaded server is worth
+                // waiting out rather than reporting as a fault.
+                s if http::is_backpressure(s) => ProviderError::RateLimited { retry_after: None },
+                _ => e,
+            };
+        }
+    }
+    http::status_error(status, body, None)
 }
 
 #[cfg(test)]
@@ -1190,7 +1228,7 @@ mod tests {
             \"usage\":{\"output_tokens\":7,\"output_tokens_details\":{\"thinking_tokens\":3}}}\n";
         let (tx, rx) = std::sync::mpsc::channel();
         let mut emitter = Emitter::new(tx);
-        let usage = read_stream(body, 1, &mut emitter).unwrap();
+        let usage = read_stream(body.as_bytes(), 1, &mut emitter).unwrap();
         emitter.done(usage);
         let text: String = rx
             .iter()
@@ -1210,9 +1248,86 @@ mod tests {
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut emitter = Emitter::new(tx);
         assert!(matches!(
-            read_stream(refused, 0, &mut emitter),
+            read_stream(refused.as_bytes(), 0, &mut emitter),
             Err(ProviderError::Declined { category }) if category == "cyber"
         ));
+    }
+
+    /// A reader fed from a channel, so a test can hold the rest of the body back and see what
+    /// the reader did with the part it had.
+    struct Fed(std::sync::mpsc::Receiver<std::io::Result<Vec<u8>>>, Vec<u8>);
+
+    impl std::io::Read for Fed {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.1.is_empty() {
+                match self.0.recv() {
+                    Ok(Ok(bytes)) => self.1 = bytes,
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Ok(0),
+                }
+            }
+            let n = buf.len().min(self.1.len());
+            buf[..n].copy_from_slice(&self.1[..n]);
+            self.1.drain(..n);
+            Ok(n)
+        }
+    }
+
+    /// The point of 1.16's streaming: a token is emitted when its event arrives, not when the
+    /// body ends. The test holds the body open after the first delta and reads the token
+    /// before sending the rest.
+    #[test]
+    fn a_token_is_emitted_before_the_body_ends() {
+        let (feed, body) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut emitter = Emitter::new(tx);
+            let usage = read_stream(
+                std::io::BufReader::new(Fed(body, Vec::new())),
+                0,
+                &mut emitter,
+            );
+            if let Ok(u) = usage {
+                emitter.done(u);
+            }
+            usage
+        });
+
+        feed.send(Ok(b"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"first\"}}\n\n".to_vec()))
+            .unwrap();
+        // Nothing more has been sent, and the token is already here.
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            StreamMsg::Token("first".into())
+        );
+        feed.send(Ok(b"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n".to_vec()))
+            .unwrap();
+        drop(feed);
+        let usage = reader.join().unwrap().unwrap();
+        assert_eq!(usage.output_tokens, 2);
+        assert!(matches!(rx.recv().unwrap(), StreamMsg::Done(_)));
+    }
+
+    /// A connection that breaks part way through is the transport's failure, after whatever
+    /// was already emitted: the caller holds partial text and must not take it for an answer.
+    #[test]
+    fn a_broken_connection_fails_the_stream_as_unreachable() {
+        let (feed, body) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::channel();
+        feed.send(Ok(b"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"half\"}}\n\n".to_vec()))
+            .unwrap();
+        feed.send(Err(std::io::Error::from(std::io::ErrorKind::TimedOut)))
+            .unwrap();
+        let mut emitter = Emitter::new(tx);
+        assert_eq!(
+            read_stream(
+                std::io::BufReader::new(Fed(body, Vec::new())),
+                0,
+                &mut emitter
+            ),
+            Err(ProviderError::Unreachable)
+        );
+        assert_eq!(rx.try_recv().unwrap(), StreamMsg::Token("half".into()));
     }
 
     #[test]

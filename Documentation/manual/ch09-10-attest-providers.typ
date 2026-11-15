@@ -643,9 +643,12 @@ such a setting ignore the key.
 
 `timeout_secs` is the request timeout, 120 by default — except for an
 Anthropic provider that names none, which gets 600. Thinking is always on at
-the API version the mapper speaks, the mapper reads a streamed answer whole
-rather than token by token, and a long chunk at a high effort can run past
-two minutes.
+the API version the mapper speaks, a completion is read whole, and a long
+chunk at a high effort can run past two minutes. A streamed answer is read
+as it arrives from 1.16, event by event, and there the same figure bounds
+the longest silence between two events rather than the whole answer; a
+caller that stops draining the stream closes the connection, and the rest
+of the answer is never sent or paid for.
 
 On a provider whose reasoning is spent from `max_output` along with its
 answer — Anthropic's current models, Gemini's thinking models; the mapper

@@ -17,9 +17,13 @@ first time since 1.11.0; what it recorded and did not act on is where 1.16 start
 and the headroom's single measurement are the first two entries below; both turned out to be
 about chunk sizing, and the second found the premise under it wrong.
 
-**Strict only when closed.** An OpenAI-compatible endpoint takes strict mode only for a
-closed schema, and an open payload goes unstrict, validated after the fact. Whether the
-repair rate differs between the two paths on the same fixture has not been measured.
+**Strict is a path the kernel schema never takes.** An OpenAI-compatible endpoint takes
+strict mode only for a closed schema, and the kernel's `payload` is open, so the ingest schema
+goes unstrict on every endpoint that has a strict mode — and DeepSeek has no `json_schema`
+response format at all, strict or not: probed 2026-11-14, both forms answer *"This
+response_format type is unavailable now"*. The question 1.15 left, whether the repair rate
+differs between the two, is therefore not one about strict. What can differ is the channel the
+answer comes back through, and that is measured below, on DeepSeek and on Anthropic.
 
 **The published check runs weekly against 1.15.0** for the first time with a grep that can
 match. What it finds in the registry copy, if anything, is the first item here.
@@ -120,6 +124,67 @@ signature and a deliberate choice: the GE-T2 finding was that a window measured 
 Russian down a different path from English, and a count the caller can name was the answer.
 Whether its windows should be sized by the tokeniser's estimate as well is a question for a
 text the size of a Bible, and it is open.
+
+### The channel measured against the open path, on DeepSeek and on Anthropic
+
+`SMYSL_REPAIR_RATE=1` runs the SM-P14 fixture through each path a provider has, five times a
+cell (`SMYSL_REPAIR_RUNS`): the path ingest chooses, the other path, and the json-ast path with
+no channel at all, where the schema rides in the prompt and the answer is checked on the way
+in. 2026-11-14, `deepseek-chat` and `claude-haiku-5-5`, 800 output tokens, totals over the
+five runs:
+
+| provider, cell | path | units | calls | degraded | repaired | tokens | warnings |
+|---|---|---|---|---|---|---|---|
+| DeepSeek, default | surface | 21 | 7 | 0 | 2 | 7,709 | |
+| DeepSeek, json-ast | json-ast, `json_object` | 23 | 6 | 0 | 1 | 11,091 | |
+| DeepSeek, json-ast, no channel | json-ast | 21 | 5 | 0 | 0 | 8,598 | |
+| Anthropic, default | json-ast, tool | 25 | 5 | 0 | 0 | 13,111 | |
+| Anthropic, surface | surface | 5 | 5 | 5 | 0 | 4,000 | W304 ×4, W455 ×1 |
+| Anthropic, json-ast, no channel | json-ast | 5 | 5 | 5 | 0 | 4,000 | W304 ×4, W455 ×1 |
+
+**On DeepSeek the channel changes nothing five runs can measure.** Two repairs in seven calls
+on the surface path, one in six through `json_object`, none in five with no channel, and no
+span degraded anywhere: the differences are inside what five runs tell apart. What the channel
+does cost is tokens — `json_object` spent 29% more than the same path without it, for the same
+units — so D-9's default stands: the surface path is the recoverable one and is no dearer.
+(A first run of the same cells put Anthropic's default at six calls and one repair; the table
+is the second run, the one that recorded warnings.)
+
+**On Anthropic the tool channel is the only path that finishes at 800 tokens.** Both free-text
+paths hit the limit on every run — truncated four times, unanswered once, each call spending
+exactly the 800 — and staged one unit per run under rule I. That is not a repair rate: nothing
+arrived whole to repair. The cause is effort. The mapper pins `low` only on a schema request,
+which is what the tool channel sends; a free-text request runs at the model's default, and on
+Haiku the reasoning at that default spends the budget before the answer is written. Whether
+an ingest's free-text request should carry the same effort as its schema request is the open
+question this leaves, and it is a one-line change once decided; the quarter headroom was
+measured at `low`, and holds there.
+
+### Anthropic streams as the answer is written
+
+1.15's `Provider::stream` for the Anthropic mapper read the response whole and replayed its
+events into the channel, which streamed nothing a `complete` did not: the first token and the
+last arrived in the same drain. The transport now has a second POST (`http::post_stream`) that
+hands the connection over as soon as the status is in, sharing the attempt loop — backpressure
+waited out, the error body kept — and `read_stream` reads a `BufRead` line by line, emitting
+each event as its line completes. Measured on `claude-haiku-5-5` with a forty-line answer,
+`SMYSL_ANTHROPIC_STREAM=1`: the first token at 625 ms, the last at 1,301 ms, the text arriving
+over 26 separate drains of a 10 ms loop. The test asserts the first drain that carried text was
+not the one that ended the stream.
+
+Three consequences. The timeout on the streaming path is the longest silence the mapper will
+sit through between bytes — connect, write, each read — not a bound on the whole answer, so a
+long answer is never cut off for being long; `complete` still reads whole, and
+`ANTHROPIC_TIMEOUT_SECS` stays 600 for it. A caller that drops the receiver stops the download:
+the read loop breaks when the channel is gone, the reader is dropped, and the connection with
+it, so the rest of the answer is never sent or paid for. And a connection that breaks or falls
+silent part way through is `Unreachable`, after the tokens already sent, which the caller must
+not take for an answer — `Stream::drain` already said so of a sender that vanished.
+
+Fixed on the way: 1.15's stream handed an error status's body to the event reader, which found
+no `data:` lines in it and reported an empty answer as a success. A status that is not success
+is now classified from its body as `complete` classifies one, by the same function. The other
+three streaming mappers still replay a whole body; they are not moved here.
 
 **And what 1.14 left.** Questions still unread (the sixth set at 52 of 80), a subject by a
 name the store does not write, a saved query and a pinned traversal waiting on a store that
