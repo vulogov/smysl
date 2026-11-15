@@ -289,8 +289,12 @@ mod client {
     }
 }
 
+/// The streamed POST has one caller, the Anthropic mapper, and its re-export follows that
+/// feature: without it the name would be an unused import, which the workspace denies.
+#[cfg(all(feature = "http-client", feature = "anthropic"))]
+pub use client::post_stream;
 #[cfg(feature = "http-client")]
-pub use client::{get_with, post_json, post_stream};
+pub use client::{get_with, post_json};
 
 #[cfg(test)]
 mod tests {
@@ -591,7 +595,7 @@ mod tests {
         #[test]
         fn a_streamed_post_retries_the_same_way_and_hands_over_the_body() {
             let mut slept = Vec::new();
-            let r = post_stream(
+            let r = client::post_stream(
                 &serve(vec![529, 200]),
                 &[],
                 "{}",
@@ -607,7 +611,7 @@ mod tests {
             reader.read_to_string(&mut body).unwrap();
             assert_eq!(body, r#"{"status":200}"#);
 
-            let r = post_stream(
+            let r = client::post_stream(
                 &serve(vec![500]),
                 &[],
                 "{}",
