@@ -23,6 +23,10 @@ pub mod consensus;
 // chunks as part of the path a caller actually takes.
 #[cfg(feature = "model")]
 pub(crate) mod chunk;
+/// The sizing estimate chunking measures a passage with (1.16). Public so the live
+/// calibration can print it next to the tokeniser's count; gated with the module it
+/// belongs to.
+#[cfg(feature = "model")]
 pub use chunk::sizing_tokens;
 pub mod import;
 /// Reachable for `smysl-eval`'s `quoting_live.rs`, which drives real models against the
