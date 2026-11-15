@@ -187,8 +187,18 @@ impl Emitter {
     }
 }
 
-/// Test support for the mappers' stream readers: a body that arrives in pieces.
-#[cfg(test)]
+/// Test support for the mappers' stream readers: a body that arrives in pieces. Gated on the
+/// mappers that stream, since without one no test reads it and the no-feature cell builds
+/// with `-D warnings`.
+#[cfg(all(
+    test,
+    any(
+        feature = "anthropic",
+        feature = "deepseek",
+        feature = "openai",
+        feature = "ollama"
+    )
+))]
 pub(crate) mod testing {
     /// A reader fed from a channel, so a test can hold the rest of the body back and see what
     /// the reader did with the part it had. A sent `Err` is the transport failing; a dropped
