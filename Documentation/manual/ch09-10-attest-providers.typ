@@ -634,10 +634,11 @@ not structure, not what it could not.
 
 `effort`, from 1.15, is how hard the model is asked to think, where the API
 takes a setting: `low`, `medium` or `high`. Left unset, the Anthropic mapper
-sends `low` on a schema request — the schema does the work, and the reasoning
-a higher effort buys is spent from `max_output` — and leaves a free-text
-request at the model's default. The three settings were measured on the
-SM-P14 fixture for 1.15 (the changelog has the figures); the setting is the
+sends `low` on every request: the reasoning a higher effort buys is spent from
+`max_output`, and a chunk is sized on the premise that it is not. The three
+settings were measured on the SM-P14 fixture for 1.15, and the free-text
+request, which 1.15 had left at the model's default, was measured against the
+schema request for 1.16 (the changelog has the figures); the setting is the
 caller's, and the default is the one that measured best. Providers without
 such a setting ignore the key.
 

@@ -46,7 +46,9 @@
 //! `usage.output_tokens_details.thinking_tokens` is carried as `Usage::thinking_tokens`, and a
 //! `max_tokens` stop with no answer at all is `ProviderError::Unanswered` with that share,
 //! rather than an empty response. `effort` on the provider's configuration is sent as
-//! `output_config.effort` on every request; unset, a schema request is `low`.
+//! `output_config.effort` on every request; unset, every request is `low` (since 1.16; 1.15
+//! pinned it on schema requests alone, and a free-text request at the model's default spent
+//! the chunk's whole limit on every call measured).
 //!
 //! **A stream is read as it arrives** (1.16). `Provider::stream` holds the connection open and
 //! emits each event as its line completes, so a caller draining the channel sees the answer
@@ -199,11 +201,6 @@ impl Anthropic {
                 // The choice is the model's — forcing it is refused — and the prompt makes
                 // the choice; at most one call, since the one call carries every unit.
                 body["tool_choice"] = json!({"type": "auto", "disable_parallel_tool_use": true});
-                // A schema-shaped extraction is the simple case: the schema does the work,
-                // and the reasoning a higher effort buys is spent from the caller's
-                // `max_tokens`. Free-text requests take the model's default. A configured
-                // `effort` overrides both, below.
-                body["output_config"] = json!({"effort": "low"});
                 if !system.is_empty() {
                     system.push_str("\n\n");
                 }
@@ -211,12 +208,15 @@ impl Anthropic {
             }
             _ => return Err(ProviderError::StructuredUnsupported),
         }
-        // The configured effort, on every request. Measured on 1.15 (see the changelog):
-        // the setting is the caller's to make, and the default above is what measured best
-        // for a schema request.
-        if let Some(e) = &self.cfg.effort {
-            body["output_config"] = json!({"effort": e});
-        }
+        // The effort, on every request. The reasoning a higher effort buys is spent from the
+        // caller's `max_tokens`, and the chunk is sized on the premise that it is not spent:
+        // measured on 1.15 and 1.16 (see the changelog), `low` and `medium` are the same
+        // answer at the same price, `high` bought one unit once and on Haiku answered
+        // nothing, and a free-text request at the model's default ran out of limit on every
+        // call. So `low` is the default on every request, structured or not, and the setting
+        // is the caller's to make.
+        let effort = self.cfg.effort.as_deref().unwrap_or("low");
+        body["output_config"] = json!({"effort": effort});
         if !system.is_empty() {
             // One text block with a cache breakpoint. `tools` renders before `system`, so the
             // marker covers the schema as well as the prompt — the two things every chunk of
@@ -863,13 +863,17 @@ mod tests {
             }
         }
 
-        /// A schema-shaped request runs at low effort; a free-text one takes the default.
+        /// Every request runs at low effort unless the configuration says otherwise; 1.15
+        /// pinned it on schema requests alone and let a free-text one run at the default.
         #[test]
-        fn a_structured_request_runs_at_low_effort() {
+        fn every_request_runs_at_low_effort_by_default() {
             let body = body_for(StructuredMode::ToolForce);
             assert_eq!(body["output_config"]["effort"], "low");
             let body = body_for(StructuredMode::None);
-            assert!(body.get("output_config").is_none(), "effort pinned unasked");
+            assert_eq!(
+                body["output_config"]["effort"], "low",
+                "free text ran at the default"
+            );
         }
 
         /// Both modes ask for the fallback chain: a decline is retried in the same call.
@@ -1157,15 +1161,18 @@ mod tests {
         assert_eq!((c.usage.output_tokens, c.usage.thinking_tokens), (40, 31));
     }
 
-    /// A configured effort is sent on every request; without one a schema request is `low`
-    /// and a free-text request takes the model's default.
+    /// A configured effort is sent on every request; without one every request is `low`,
+    /// the free-text one included.
     #[test]
     fn the_configured_effort_is_sent_and_the_default_is_the_measured_one() {
         let free = Request::new("m", "hello");
         let schema =
             Request::new("m", "x").with_schema(StructuredMode::ToolForce, r#"{"type":"object"}"#);
         let p = provider();
-        assert!(p.body(&free, false).unwrap().get("output_config").is_none());
+        assert_eq!(
+            p.body(&free, false).unwrap()["output_config"]["effort"],
+            "low"
+        );
         assert_eq!(
             p.body(&schema, false).unwrap()["output_config"]["effort"],
             "low"

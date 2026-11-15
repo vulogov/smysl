@@ -40,10 +40,11 @@ pub struct ProviderConfig {
     /// endpoints have no such chain ignore it.
     pub fallbacks: bool,
     /// How hard the model is asked to think, where the API takes a setting: `low`, `medium`
-    /// or `high`. `None` leaves it to the mapper — Anthropic sends `low` on a schema request,
-    /// since the schema does the work and the reasoning a higher effort buys is spent from
-    /// `max_output`, and leaves a free-text request at the model's default. Mappers whose
-    /// endpoints have no such setting ignore it. Since 1.15.
+    /// or `high`. `None` leaves it to the mapper — Anthropic sends `low` on every request,
+    /// since the reasoning a higher effort buys is spent from `max_output` and the chunk is
+    /// sized on the premise that it is not (1.15 left a free-text request at the model's
+    /// default, which spent the whole limit on every call measured). Mappers whose endpoints
+    /// have no such setting ignore it. Since 1.15.
     pub effort: Option<String>,
 }
 

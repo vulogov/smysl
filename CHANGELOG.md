@@ -142,6 +142,15 @@ five runs:
 | Anthropic, surface | surface | 5 | 5 | 5 | 0 | 4,000 | W304 ×4, W455 ×1 |
 | Anthropic, json-ast, no channel | json-ast | 5 | 5 | 5 | 0 | 4,000 | W304 ×4, W455 ×1 |
 
+And the same three Anthropic cells again on 2026-11-15, after the effort change below, with the
+free-text requests at `low`:
+
+| provider, cell | path | units | calls | degraded | repaired | tokens | warnings |
+|---|---|---|---|---|---|---|---|
+| Anthropic, default | json-ast, tool | 25 | 5 | 0 | 0 | 12,455 | |
+| Anthropic, surface | surface | 25 | 5 | 0 | 0 | 7,397 | |
+| Anthropic, json-ast, no channel | json-ast | 17 | 6 | 2 | 0 | 11,425 | W041 ×10, W304 ×2, W308 ×1 |
+
 **On DeepSeek the channel changes nothing five runs can measure.** Two repairs in seven calls
 on the surface path, one in six through `json_object`, none in five with no channel, and no
 span degraded anywhere: the differences are inside what five runs tell apart. What the channel
@@ -153,12 +162,26 @@ is the second run, the one that recorded warnings.)
 **On Anthropic the tool channel is the only path that finishes at 800 tokens.** Both free-text
 paths hit the limit on every run — truncated four times, unanswered once, each call spending
 exactly the 800 — and staged one unit per run under rule I. That is not a repair rate: nothing
-arrived whole to repair. The cause is effort. The mapper pins `low` only on a schema request,
-which is what the tool channel sends; a free-text request runs at the model's default, and on
-Haiku the reasoning at that default spends the budget before the answer is written. Whether
-an ingest's free-text request should carry the same effort as its schema request is the open
-question this leaves, and it is a one-line change once decided; the quarter headroom was
-measured at `low`, and holds there.
+arrived whole to repair. The cause is effort. 1.15 pinned `low` only on a schema request,
+which is what the tool channel sends; a free-text request ran at the model's default, and on
+Haiku the reasoning at that default spends the budget before the answer is written. **Every
+request is now `low` unless the configuration says otherwise.** The grounds are the three
+measurements that exist: `low` and `medium` are the same answer at the same price on every
+model, `high` bought one unit once on Opus and on Haiku answered nothing, and the default on
+free text ran out of limit on five calls of five. The quarter headroom and the four-to-one
+sizing were both measured at `low`, and an ingest should cost the same on whichever path the
+router picks for it. `effort` on the provider still overrides, on every request. A request
+carries no task, so the default reaches `ask`, `attest`, `link` and `summarise` as well; the
+measurement covers ingest, and a per-task effort is a field on the request for the day
+`ask --misses` shows the answers wanted the reasoning.
+
+Measured after the change, the second table: the surface path stages the same twenty-five
+units in the same five calls as the tool channel, nothing degraded, for 41% fewer tokens — on
+Anthropic as on DeepSeek, the open path is the one that costs less, and the channel buys no
+unit it does not. The json-ast path with no channel is the one that still pays: two of six
+calls truncated, ten bodies placed outside their range and one quote reworded, which is the
+answer written as JSON by hand rather than through a tool or as prose. Nothing routes there
+by default.
 
 ### Anthropic streams as the answer is written
 
