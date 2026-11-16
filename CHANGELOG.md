@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.16.0
+## 1.16.0 — 2026-11-16
 
 What 1.15 recorded and did not act on, measured and acted on, each item below with its
 figures. 1.15 ran the hosted-provider path against a real key for the first time; 1.16 took
