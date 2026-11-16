@@ -7,6 +7,45 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.17.0
+
+What 1.16 leaves open, by what it blocks rather than the order it is easiest. 1.16 measured
+what 1.15 had recorded and found two premises wrong under it; what 1.16 itself measured and
+chose not to move is where 1.17 starts.
+
+**A third of the cache was written where one write in forty-seven would do.** The ingest's
+prompt never changes between chunks, and the repair turn's system prompt accounts for one
+more write, not nine. The ledger writes one line per run, so it cannot say which calls wrote;
+either the line gains a per-call record, or a run is instrumented once to find out. Until then
+the cache's saving is the 42% read, and the 21% written is a cost nobody has explained.
+
+**Ten repair turns of forty-seven bought what a cut does for nothing.** Every repair in the
+README ingest was `SMY-E022`, a gist one to seven tokens over the bound, and `ask --answer`
+meets the same defect without a turn (`SMY-W457`). Ingest's repair loop has a measurement
+behind it, and `UNIT_LOCAL` already names `E022` as a defect one unit can carry alone; whether
+the cut should run before the turn is one measurement on the same README.
+
+**A model told the bound still writes past it once an answer.** Fifteen cuts across twelve
+answers with the bound stated in tokens, sixteen with rule M stated beside it. A model counts
+words better than tokens; a template that states the bound in words per script is the next
+version, and `SMY-W457`'s count is the instrument.
+
+**The sizing estimate's residual is German that carries the cause without the mark.**
+Technical German of compounds and two accented letters in 245 is still 28% under, and a text
+window is still filled by the format's count rather than the sizing estimate — open since the
+1.16 entry, and a question for a text the size of a Bible.
+
+**The Ollama text arm is the model's size.** A 3B model stages surface records whole over the
+fixture and answers nothing comparable over a window of verses with spans and quotes. A larger
+local model over the same corpus is one run, and H-10 closes or does not on it.
+
+**And what 1.14 left.** Questions still unread (the sixth set at 52 of 80), a subject by a
+name the store does not write, a saved query and a pinned traversal waiting on a store that
+does not exist yet, GE-T7 on a thousand real works, and the ones only people can close.
+None of it moved in 1.16, and none of it is planned for 1.17 until something measured needs it.
+
+---
+
 ## 1.16.0 — 2026-11-16
 
 What 1.15 recorded and did not act on, measured and acted on, each item below with its
