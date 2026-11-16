@@ -1,0 +1,23 @@
+[package]
+name        = "smysl-tel"
+description = "smysl for telemetry (RFC SMYSL-3): exact JSON, canonical leaf values, profiles and the canonical diff"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+
+[dependencies]
+# `dec`, `x.tel/v1`'s names and builders, payload CBOR and the diagnostic registry. The one
+# dependency TL-P2 step 1 needs: a canonical leaf value is a function of JSON text and a
+# profile, and nothing about a store.
+smysl-core = { workspace = true }
+# Strings are NFC (§5.5), as every text field the kernel hashes is.
+unicode-normalization = { workspace = true }

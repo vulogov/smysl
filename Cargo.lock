@@ -2271,6 +2271,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "smysl-tel"
+version = "1.17.0"
+dependencies = [
+ "smysl-core",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "smysl-text"
 version = "1.17.0"
 dependencies = [

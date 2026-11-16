@@ -234,6 +234,47 @@ reserved numbers are reported, not refused), the reasons are above. TL-P2 (objec
 in either order. TL-P0's architecture prerequisites are still owed, and so are the RFC's
 companion documents, which aren't in the repository.
 
+
+### `smysl-tel`, and reading a snapshot exactly (TL-P2 step 1)
+
+TL-P2 is object snapshots: Kubernetes objects and Zabbix hosts and items, diffed leaf by leaf
+into change units (§8). A change carries a leaf's value as text, inside its uid, so two
+implementations that disagree about one leaf's text disagree about the change. Step 1 is the
+reading that agreement rests on, in a new crate, `smysl-tel` (RFC §18). The crate is pure, is
+on `xtask check-purity`'s list from its first commit, and isn't published yet (`UNPUBLISHED`).
+
+- **`json`: JSON with numbers kept as tokens.** A JSON number becomes a `dec` read from its
+  digits (§5.3), so a parser that converts to `f64` has already lost it. `serde_json` does
+  that, and its `arbitrary_precision` feature would keep tokens, but Cargo unifies features
+  across the workspace, so enabling it here would change every other crate's JSON.
+  - The reader follows RFC 8259 strictly. It refuses a key repeated in one object (two readers
+    picking different members would give one snapshot two diffs), lone surrogates, trailing
+    commas, text after the value, and nesting past 128.
+  - Strings and keys are NFC, since both become hashed text.
+  - `parse_lines` reads a watch stream, one event per line.
+- **`jcs`: RFC 8785, with `dec` numbers.** An unkeyed array or opaque object is one leaf of
+  `vtype json`. Members are sorted by UTF-16 code units, and strings are escaped as
+  `JSON.stringify` escapes them. Numbers are written as their `dec` spelling instead of JCS's
+  binary64, which would turn `18446744073709551615` into `…552000`. A number outside `dec`'s
+  range is kept as its token and flagged.
+- **`leaf`: §5.5's table.** A leaf's canonical value is a `vtype` and one text per value:
+  - `41` and `41.0` are no change, and `41.2` and `41.20` from two exporters are one value.
+  - A number is `int` only where the caller says the source types the field as an integer,
+    and only if it is integral.
+  - A number out of range is `text`, flagged for `SMY-W613`.
+- **`pointer`: RFC 6901 and the profile pattern.**
+  - A pointer has one spelling (`~0`, `~1`).
+  - A pattern's `*` matches any one segment, and a literal `*` key is written `~2`.
+    `Pointer::parse` refuses `~2`, which belongs to profiles and never to units.
+  - `covers` is §8.1 step 4's "the pattern or a prefix of it".
+
+**The RFC's PRNG ban is in force for this crate now.** It is H-7, scheduled for TL-P0, but it
+costs nothing to obey from the start, so `xtask check-purity` already forbids in `smysl-tel`'s
+source: `thread_rng`, `StdRng`, `SmallRng`, `HashMap`, `HashSet`, clocks and `std::env`. A
+fuzz target, `tel_json`, holds that the reader never panics and that canonical text reads back
+to itself. It runs in `make fuzz` and CI, and its first run was 1.5 million inputs with no
+failure.
+
 ---
 
 ## 1.16.0 — 2026-11-16

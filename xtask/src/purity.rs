@@ -181,6 +181,12 @@ const PURE_CRATES: &[&str] = &[
     // `std::fs` that `write_collection` and `import` use is the store's own precedent, not a
     // runtime.
     "smysl-lib",
+    // Telemetry (RFC SMYSL-3 §18, TL-P2 step 1). Pure from its first commit, with
+    // `smysl-core` and `unicode-normalization` for dependencies: a canonical leaf value is a
+    // function of JSON text and a profile. The readers that need more arrive behind features,
+    // as `smysl-text`'s do. `CRATE_SYMBOLS` adds the RFC's PRNG ban (H-7) for it now rather
+    // than at TL-P0, because a list obeyed from the start is a list nobody has to argue with.
+    "smysl-tel",
 ];
 
 /// Symbols forbidden in one pure crate's source beyond [`FORBIDDEN_SYMBOLS`], each list with
@@ -190,17 +196,40 @@ const PURE_CRATES: &[&str] = &[
 /// recipe, and a result's identity is its value, so a clock, the environment or an unseeded
 /// generator anywhere in the crate would let one recipe write two units. `rand_core` without
 /// `os_rng` already cannot draw an unseeded number; the scan is for whoever adds the feature.
-const CRATE_SYMBOLS: &[(&str, &[&str])] = &[(
-    "smysl-measure",
-    &[
-        "thread_rng",
-        "OsRng",
-        "from_entropy",
-        "SystemTime",
-        "Instant",
-        "std::env",
-    ],
-)];
+///
+/// `smysl-tel`: RFC SMYSL-3 §17's PRNG ban (H-7) and the same clock and environment as
+/// `smysl-measure`'s. A change, window or anomaly unit's uid is a function of its inputs, so
+/// nothing on a record path may draw from an unseeded generator, read a clock, or iterate a
+/// `HashMap` or `HashSet` in the order a random hasher gives it — `BTreeMap` replaces both.
+const CRATE_SYMBOLS: &[(&str, &[&str])] = &[
+    (
+        "smysl-measure",
+        &[
+            "thread_rng",
+            "OsRng",
+            "from_entropy",
+            "SystemTime",
+            "Instant",
+            "std::env",
+        ],
+    ),
+    (
+        "smysl-tel",
+        &[
+            "thread_rng",
+            "rand::random",
+            "StdRng",
+            "SmallRng",
+            "OsRng",
+            "from_entropy",
+            "HashMap",
+            "HashSet",
+            "SystemTime",
+            "Instant",
+            "std::env",
+        ],
+    ),
+];
 
 /// Rule A, as `src/lib.rs` states it: *"no CLI capability may be unreachable from here, and
 /// no code path may be CLI-only."*
