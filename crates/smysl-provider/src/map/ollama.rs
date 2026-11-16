@@ -301,51 +301,41 @@ impl Provider for Ollama {
         let body = self.body(req, true)?.to_string();
         let url = self.url("/api/chat");
         let timeout = self.timeout();
-        let fallback_model = self.cfg.model.clone();
 
         crate::runtime::run(move || {
             let mut emitter = Emitter::new(tx);
-            let resp = match http::post_json(&url, &[], &body, timeout, std::thread::sleep, || 0.5)
-            {
-                Ok(r) => r,
+            let resp =
+                match http::post_stream(&url, &[], &body, timeout, std::thread::sleep, || 0.5) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        emitter.fail(e.clone());
+                        return Err(e);
+                    }
+                };
+            // A status that is not success is classified from its body, as `complete`
+            // classifies one; fed to the line reader it would read as an empty answer.
+            if resp.status >= 400 {
+                use std::io::Read as _;
+                let mut text = String::new();
+                let _ = resp.body.take(64 * 1024).read_to_string(&mut text);
+                let e = status_error(resp.status, &text);
+                emitter.fail(e.clone());
+                return Err(e);
+            }
+            match read_stream(
+                std::io::BufReader::new(resp.body),
+                resp.retries,
+                &mut emitter,
+            ) {
+                Ok(usage) => {
+                    emitter.done(usage);
+                    Ok(usage)
+                }
                 Err(e) => {
                     emitter.fail(e.clone());
-                    return Err(e);
-                }
-            };
-
-            let mut usage = Usage {
-                estimated: true,
-                retries: resp.retries,
-                ..Usage::default()
-            };
-            for line in resp.body.lines().filter(|l| !l.trim().is_empty()) {
-                let Ok(v) = serde_json::from_str::<Value>(line) else {
-                    continue;
-                };
-                if let Some(t) = v.pointer("/message/content").and_then(Value::as_str) {
-                    if !t.is_empty() && !emitter.token(t) {
-                        // The receiver went away: a cancelled operation, not a failure.
-                        break;
-                    }
-                }
-                if v.get("done").and_then(Value::as_bool) == Some(true) {
-                    let i = v.get("prompt_eval_count").and_then(Value::as_u64);
-                    let o = v.get("eval_count").and_then(Value::as_u64);
-                    usage = Usage {
-                        input_tokens: i.unwrap_or(0),
-                        output_tokens: o.unwrap_or((emitter.output_chars() as u64).div_ceil(4)),
-                        estimated: i.is_none() || o.is_none(),
-                        retries: resp.retries,
-                        cache_read_tokens: 0,
-                        cache_write_tokens: 0,
-                        thinking_tokens: 0,
-                    };
+                    Err(e)
                 }
             }
-            let _ = &fallback_model;
-            emitter.done(usage);
-            Ok(usage)
         })
     }
 
@@ -409,6 +399,57 @@ impl Provider for Ollama {
     }
 }
 
+/// Read Ollama's stream as it arrives: one JSON object a line, each `message.content` a
+/// token, the `done` object the usage.
+///
+/// Each token is emitted as its line completes, so nothing waits for the body to end. A read
+/// error is the transport's — the server closed the connection before `done`, or fell silent
+/// for longer than the timeout — and is `Unreachable`, after the tokens already sent, which the
+/// caller must not take for an answer. A receiver that has gone away ends the read, and the
+/// download with it.
+pub(crate) fn read_stream(
+    body: impl std::io::BufRead,
+    retries: u32,
+    emitter: &mut Emitter,
+) -> Result<Usage, ProviderError> {
+    let mut usage = Usage {
+        estimated: true,
+        retries,
+        ..Usage::default()
+    };
+    for line in body.lines() {
+        let Ok(line) = line else {
+            return Err(ProviderError::Unreachable);
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if let Some(t) = v.pointer("/message/content").and_then(Value::as_str) {
+            if !t.is_empty() && !emitter.token(t) {
+                // The receiver went away: a cancelled operation, not a failure.
+                break;
+            }
+        }
+        if v.get("done").and_then(Value::as_bool) == Some(true) {
+            let i = v.get("prompt_eval_count").and_then(Value::as_u64);
+            let o = v.get("eval_count").and_then(Value::as_u64);
+            usage = Usage {
+                input_tokens: i.unwrap_or(0),
+                output_tokens: o.unwrap_or((emitter.output_chars() as u64).div_ceil(4)),
+                estimated: i.is_none() || o.is_none(),
+                retries,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                thinking_tokens: 0,
+            };
+        }
+    }
+    Ok(usage)
+}
+
 impl StatusMapping for Ollama {
     /// Responsibility 5, for the status path.
     ///
@@ -417,25 +458,87 @@ impl StatusMapping for Ollama {
     /// missing model is a configuration error, and the difference decides whether a caller
     /// goes and pulls the model or files a bug about the server.
     fn status_error(&self, status: u16, body: &str) -> ProviderError {
-        // The status decides backpressure before the body gets a say: a loaded Ollama
-        // answers 503 while a model loads, and `classify` would read the explanation as a
-        // fault that nothing retries.
-        if http::is_backpressure(status) {
-            return ProviderError::RateLimited { retry_after: None };
-        }
-        if let Ok(v) = serde_json::from_str::<Value>(body) {
-            if let Some(msg) = v.get("error").and_then(Value::as_str) {
-                return classify(msg);
-            }
-        }
-        http::status_error(status, body, None)
+        status_error(status, body)
     }
+}
+
+/// The status mapping as a free function, so the streaming thread, which holds no `self`,
+/// classifies an error status the way `complete` does.
+fn status_error(status: u16, body: &str) -> ProviderError {
+    // The status decides backpressure before the body gets a say: a loaded Ollama
+    // answers 503 while a model loads, and `classify` would read the explanation as a
+    // fault that nothing retries.
+    if http::is_backpressure(status) {
+        return ProviderError::RateLimited { retry_after: None };
+    }
+    if let Ok(v) = serde_json::from_str::<Value>(body) {
+        if let Some(msg) = v.get("error").and_then(Value::as_str) {
+            return classify(msg);
+        }
+    }
+    http::status_error(status, body, None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stream::testing::Fed;
     use crate::Message;
+
+    /// A token is emitted when its line arrives, not when the body ends; the `done` line
+    /// carries the exact usage.
+    #[test]
+    fn a_token_is_emitted_before_the_body_ends() {
+        let (feed, body) = Fed::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut emitter = Emitter::new(tx);
+            let usage = read_stream(std::io::BufReader::new(body), 0, &mut emitter);
+            if let Ok(u) = usage {
+                emitter.done(u);
+            }
+            usage
+        });
+        feed.send(Ok(
+            b"{\"message\":{\"role\":\"assistant\",\"content\":\"first\"},\"done\":false}\n"
+                .to_vec(),
+        ))
+        .unwrap();
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            StreamMsg::Token("first".into())
+        );
+        feed.send(Ok(
+            b"{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"prompt_eval_count\":9,\"eval_count\":2}\n".to_vec(),
+        ))
+        .unwrap();
+        drop(feed);
+        let usage = reader.join().unwrap().unwrap();
+        assert_eq!((usage.input_tokens, usage.output_tokens), (9, 2));
+        assert!(!usage.estimated);
+        assert!(matches!(rx.recv().unwrap(), StreamMsg::Done(_)));
+    }
+
+    /// A connection that breaks part way through is the transport's failure, after whatever
+    /// was already emitted.
+    #[test]
+    fn a_broken_connection_fails_the_stream_as_unreachable() {
+        let (feed, body) = Fed::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        feed.send(Ok(
+            b"{\"message\":{\"role\":\"assistant\",\"content\":\"half\"},\"done\":false}\n"
+                .to_vec(),
+        ))
+        .unwrap();
+        feed.send(Err(std::io::Error::from(std::io::ErrorKind::TimedOut)))
+            .unwrap();
+        let mut emitter = Emitter::new(tx);
+        assert_eq!(
+            read_stream(std::io::BufReader::new(body), 0, &mut emitter),
+            Err(ProviderError::Unreachable)
+        );
+        assert_eq!(rx.try_recv().unwrap(), StreamMsg::Token("half".into()));
+    }
 
     fn cfg() -> ProviderConfig {
         let mut c = ProviderConfig::new(ProviderId::new("ollama").unwrap(), "ollama");

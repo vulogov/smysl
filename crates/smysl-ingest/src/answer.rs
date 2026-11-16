@@ -28,12 +28,17 @@
 //! No repair loop: an answer that does not parse is reported and nothing is staged. A repair
 //! turn asks a model to fix the shape of what it wrote, and the shape is the least of what can
 //! be wrong with an answer — the grounds are checked whatever the shape, and a second turn is a
-//! second chance to ground somewhere else.
+//! second chance to ground somewhere else. The one shape defect a constructed unit can carry, a
+//! gist over the profile's bound, is met without a turn: [`fit_gists`](crate::answer::fit_gists)
+//! cuts it and keeps the claim whole in the body (`SMY-W457`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::surface::parse_surface;
-use smysl_core::{Code, Diagnostic, Label, Record, Relation, Status, Uid, UnitCore};
+use smysl_core::{
+    canonical_uid, Code, Diagnostic, GranularityProfile, Label, Record, Relation, Status, Uid,
+    UnitCore,
+};
 use smysl_graph::Store;
 use smysl_provider::{ProviderError, Request, Task, Usage};
 
@@ -58,6 +63,8 @@ pub struct AnswerReport {
     pub proposed: usize,
     /// Of those, dropped for grounding outside the dossier (`SMY-W478`).
     pub dropped: usize,
+    /// Of the rest, gists over the profile's bound, cut to it (`SMY-W457`).
+    pub shortened: usize,
     /// Of the rest, lowered by rule M (`SMY-W036`).
     pub lowered: usize,
     /// Gists a fence marker was neutralised in (`SMY-W443`).
@@ -180,6 +187,86 @@ pub fn admit(
     )
 }
 
+/// The one shape defect a constructed unit can carry, met without a model turn.
+///
+/// A gist over the profile's bound (`SMY-E022`) is cut to it, ending in an ellipsis, and the
+/// claim it carried moves whole into the body, above whatever body the unit had — the
+/// diagnostic's own suggestion, done mechanically. Nothing is invented and nothing is lost: the
+/// gist is a prefix of the model's sentence, and the sentence is in the body. Identities move
+/// with the text, so grounds, deps, edges and labels follow, in the topological order rule M's
+/// remap uses. Each cut is reported as `SMY-W457` on the unit's new uid.
+///
+/// Measured before it existed (1.16): with the bound stated in the template, nine answers of
+/// twelve at `low` still carried a gist two to eight tokens over, and each lost the whole answer
+/// to that one gist. A model cannot count the way the estimator does; the cut is where that is
+/// settled. A profile naming an estimator this build lacks cuts nothing: the bound is then
+/// unevaluable, and the check says so (`SMY-W025`).
+pub fn fit_gists(
+    units: Vec<UnitCore>,
+    relations: Vec<Relation>,
+    labels: BTreeMap<Label, Uid>,
+    granularity: &GranularityProfile,
+) -> (
+    Vec<UnitCore>,
+    Vec<Relation>,
+    BTreeMap<Label, Uid>,
+    Vec<Diagnostic>,
+) {
+    fn follow(set: &BTreeSet<Uid>, remap: &BTreeMap<Uid, Uid>) -> BTreeSet<Uid> {
+        set.iter()
+            .map(|u| remap.get(u).copied().unwrap_or(*u))
+            .collect()
+    }
+    let mut remap: BTreeMap<Uid, Uid> = BTreeMap::new();
+    let mut diagnostics = Vec::new();
+    // Placed back by index, so the answer keeps its order however the sweep visited it.
+    let mut placed: Vec<Option<UnitCore>> = vec![None; units.len()];
+    for i in smysl_graph::relink::topological(&units) {
+        let before = canonical_uid(&units[i]);
+        let mut core = units[i].clone();
+        core.grounds = follow(&core.grounds, &remap);
+        core.deps = follow(&core.deps, &remap);
+        if let Some(cut) = granularity.shorten_gist(&core.gist) {
+            let n = granularity.tokens(&core.gist).unwrap_or(0);
+            let body = match &core.body {
+                Some(b) => format!("{}\n\n{b}", core.gist),
+                None => core.gist.clone(),
+            };
+            core.gist = cut;
+            core.body = Some(body);
+            diagnostics.push(
+                Diagnostic::on(Code::W457, canonical_uid(&core)).with_message(format!(
+                    "gist of {n} tokens cut to the {} the profile allows; the claim stands \
+                     whole in the body",
+                    granularity.l0_max
+                )),
+            );
+        }
+        let after = canonical_uid(&core);
+        if after != before {
+            remap.insert(before, after);
+        }
+        placed[i] = Some(core);
+    }
+    let units: Vec<UnitCore> = placed
+        .into_iter()
+        .map(|u| u.expect("the topological sweep visits every unit"))
+        .collect();
+    let relations = relations
+        .into_iter()
+        .map(|mut r| {
+            r.from = remap.get(&r.from).copied().unwrap_or(r.from);
+            r.to = remap.get(&r.to).copied().unwrap_or(r.to);
+            r
+        })
+        .collect();
+    let labels = labels
+        .into_iter()
+        .map(|(l, u)| (l, remap.get(&u).copied().unwrap_or(u)))
+        .collect();
+    (units, relations, labels, diagnostics)
+}
+
 impl Ingestor<'_> {
     /// Ask a model to answer the dossier's question from its members, and stage what it says.
     ///
@@ -189,7 +276,7 @@ impl Ingestor<'_> {
         let mut report = AnswerReport::default();
         let provider = self.registry.for_task(Task::ContentIngest)?;
         let caps = provider.caps();
-        let template = crate::prompt::answer_dossier();
+        let template = crate::prompt::answer_dossier_with(self.opts.estimator);
         let conditions = crate::recipe::Conditions::new(template.id.clone(), template.version)
             .with_provider(provider.id().to_string(), self.model_for(&caps))
             .with_temperature(self.opts.temperature)
@@ -266,12 +353,19 @@ impl Ingestor<'_> {
             return Ok(report);
         }
 
-        let staged_uids: BTreeSet<Uid> = units.iter().map(smysl_core::canonical_uid).collect();
+        let staged_uids: BTreeSet<Uid> = units.iter().map(canonical_uid).collect();
         let labels: BTreeMap<Label, Uid> = parsed
             .labels
             .into_iter()
             .filter(|(_, u)| staged_uids.contains(u))
             .collect();
+        // Under the profile the check below runs under — the store's own, since `prepare_under`
+        // is given none — because a bound and the count it is compared against have to come
+        // from one estimator.
+        let granularity = smysl_check::store_granularity(store);
+        let (units, relations, labels, cut) = fit_gists(units, relations, labels, &granularity);
+        report.shortened = cut.len();
+        report.diagnostics.extend(cut);
         let attest = Attest::new(
             self.opts.agent.clone(),
             self.opts.rung,
@@ -345,6 +439,76 @@ mod tests {
         assert_eq!(kept, vec![good, built_on]);
         assert_eq!(diags.len(), 3);
         assert!(diags.iter().all(|d| d.code == Code::W478));
+    }
+
+    #[test]
+    fn an_over_cap_gist_is_cut_to_the_bound_and_the_claim_moves_whole_into_the_body() {
+        let inside = Uid::from_bytes([1; 32]);
+        let long = "Naomi was bitter because the hand of the Lord had gone out against her, \
+                    taking her husband and both her sons in Moab and leaving her with nothing";
+        assert!(
+            long.len() > 120,
+            "the fixture must be over the default bound"
+        );
+        let fine = claim("Naomi left Moab for Bethlehem", &[inside]);
+        let over = claim(long, &[inside]);
+        let over_uid = canonical_uid(&over);
+        let rests = claim("so she returned empty", &[over_uid]);
+        let rests_uid = canonical_uid(&rests);
+        let edge = Relation::new(smysl_core::RelKind::Elaborates, rests_uid, over_uid);
+        let labels = BTreeMap::from([(Label::new("a/why").unwrap(), over_uid)]);
+        let g = GranularityProfile::default();
+
+        let (units, relations, labels, diags) =
+            fit_gists(vec![fine.clone(), over, rests], vec![edge], labels, &g);
+
+        assert_eq!(units[0], fine, "a gist within the bound is left as written");
+        let cut = &units[1];
+        assert!(g.gist_within_bound(g.tokens(&cut.gist).unwrap()));
+        assert!(cut.gist.ends_with('\u{2026}'));
+        assert!(long.starts_with(cut.gist.trim_end_matches('\u{2026}')));
+        assert_eq!(
+            cut.body.as_deref(),
+            Some(long),
+            "the claim stands whole in the body"
+        );
+        assert_eq!(
+            cut.grounds,
+            BTreeSet::from([inside]),
+            "the grounds are kept"
+        );
+        let cut_uid = canonical_uid(cut);
+        assert_ne!(cut_uid, over_uid);
+        assert_eq!(
+            units[2].grounds,
+            BTreeSet::from([cut_uid]),
+            "what rests on it follows its new identity"
+        );
+        assert_eq!(relations[0].to, cut_uid);
+        assert_eq!(relations[0].from, canonical_uid(&units[2]));
+        assert_eq!(labels.values().copied().collect::<Vec<_>>(), vec![cut_uid]);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code, Code::W457);
+    }
+
+    #[test]
+    fn an_over_cap_gist_with_a_body_keeps_the_body_below_the_claim() {
+        let inside = Uid::from_bytes([1; 32]);
+        let long = "a".repeat(60) + " " + &"b".repeat(60) + " " + &"c".repeat(20);
+        let mut b = UnitCoreBuilder::new(KernelType::Claim, &long, Status::Derived).body("detail");
+        b.grounds = BTreeSet::from([inside]);
+        let (units, _, _, diags) = fit_gists(
+            vec![b.build().unwrap()],
+            Vec::new(),
+            BTreeMap::new(),
+            &GranularityProfile::default(),
+        );
+        assert_eq!(
+            units[0].body.as_deref(),
+            Some(format!("{long}\n\ndetail").as_str())
+        );
+        assert_eq!(units[0].gist, format!("{}\u{2026}", "a".repeat(60)));
+        assert_eq!(diags.len(), 1);
     }
 
     #[test]

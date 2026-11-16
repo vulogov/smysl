@@ -12,6 +12,7 @@
 use serde_json::{json, Value};
 use smysl_core::error::ProviderError;
 
+use crate::stream::Emitter;
 use crate::{Completion, Request, StructuredMode, Usage};
 
 /// What a compatible provider is allowed to do, so a mapper can refuse a mechanism it does
@@ -440,10 +441,119 @@ pub fn sse_usage(line: &str, retries: u32) -> Option<Usage> {
     })
 }
 
+/// Read a chat-completions event stream as it arrives, emitting each delta as its line
+/// completes.
+///
+/// Shared by every mapper that speaks this dialect. A `data:` line with a delta is a token;
+/// the final chunk's `usage`, when the endpoint sends one (`stream_options.include_usage`),
+/// is the exact count, and otherwise the output is estimated from the characters emitted. A
+/// read error is the transport's — the connection closed before `[DONE]`, or nothing came for
+/// longer than the timeout — and is `Unreachable`, after whatever was already emitted, which
+/// the caller must not take for an answer. A receiver that has gone away ends the read, and
+/// with it the download.
+pub(crate) fn read_sse_stream(
+    body: impl std::io::BufRead,
+    retries: u32,
+    emitter: &mut Emitter,
+) -> Result<Usage, ProviderError> {
+    let mut usage = Usage {
+        estimated: true,
+        retries,
+        ..Usage::default()
+    };
+    for line in body.lines() {
+        let Ok(line) = line else {
+            return Err(ProviderError::Unreachable);
+        };
+        if let Some(u) = sse_usage(&line, retries) {
+            usage = u;
+        }
+        if let Some(t) = sse_delta(&line) {
+            if !emitter.token(&t) {
+                break;
+            }
+        }
+    }
+    if usage.estimated {
+        usage.output_tokens = (emitter.output_chars() as u64).div_ceil(4);
+    }
+    Ok(usage)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stream::testing::Fed;
+    use crate::stream::StreamMsg;
     use crate::Message;
+
+    /// The point of 1.16's streaming, for this dialect: a token is emitted when its line
+    /// arrives, not when the body ends. The body is held open after the first delta.
+    #[test]
+    fn a_delta_is_emitted_before_the_body_ends() {
+        let (feed, body) = Fed::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut emitter = Emitter::new(tx);
+            let usage = read_sse_stream(std::io::BufReader::new(body), 1, &mut emitter);
+            if let Ok(u) = usage {
+                emitter.done(u);
+            }
+            usage
+        });
+        feed.send(Ok(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n".to_vec(),
+        ))
+        .unwrap();
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            StreamMsg::Token("first".into())
+        );
+        feed.send(Ok(
+            b"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\ndata: [DONE]\n".to_vec(),
+        ))
+        .unwrap();
+        drop(feed);
+        let usage = reader.join().unwrap().unwrap();
+        assert_eq!((usage.input_tokens, usage.output_tokens), (7, 2));
+        assert!(!usage.estimated);
+        assert_eq!(usage.retries, 1);
+        assert!(matches!(rx.recv().unwrap(), StreamMsg::Done(_)));
+    }
+
+    /// Without a usage chunk the output is estimated from what was emitted, and says so.
+    #[test]
+    fn a_stream_without_usage_estimates_its_output() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut emitter = Emitter::new(tx);
+        let body =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"twelve chars\"}}]}\n\ndata: [DONE]\n";
+        let usage = read_sse_stream(body.as_bytes(), 0, &mut emitter).unwrap();
+        assert!(usage.estimated);
+        assert_eq!(usage.output_tokens, 3);
+    }
+
+    /// A connection that breaks part way through is the transport's failure, after whatever
+    /// was already emitted.
+    #[test]
+    fn a_broken_connection_fails_the_stream_as_unreachable() {
+        let (feed, body) = Fed::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        feed.send(Ok(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"half\"}}]}\n\n".to_vec(),
+        ))
+        .unwrap();
+        feed.send(Err(std::io::Error::from(
+            std::io::ErrorKind::ConnectionReset,
+        )))
+        .unwrap();
+        let mut emitter = Emitter::new(tx);
+        assert_eq!(
+            read_sse_stream(std::io::BufReader::new(body), 0, &mut emitter),
+            Err(ProviderError::Unreachable)
+        );
+        assert_eq!(rx.try_recv().unwrap(), StreamMsg::Token("half".into()));
+    }
 
     const SCHEMA_DIALECT: Dialect = Dialect {
         structured: StructuredMode::JsonSchema,

@@ -556,6 +556,35 @@ context leaves after the prompt and the output reserve, and `max_output`
 itself. On an 8k context the two coincide; on a million-token one the first
 alone would make a chunk of a whole book, and lose it.
 
+1.16 measured the premise and replaced it. An answer is not the size of its
+passage: on the three current Anthropic models a staged unit carries its gist,
+its kind, its span and its provenance, and the answer came to three to five
+times the passage's tokens on paragraphs of prose and code, seven on a passage
+of three sentences, eight on Russian. A chunk is now sized to the answer the
+call can carry — `max_output`, less a quarter where the model's reasoning is
+spent from it — divided by four. A provider with an 8k output takes passages of
+about 2,000 tokens; one with 2k, passages of 512; the floor of 256 holds below
+that. More calls, each carrying the prompt, and on a provider with a prompt
+cache the prompt is read from it after the first.
+
+From 1.16 the chunk is measured in a sizing estimate rather than the format's
+own count. The format counts `ceil(bytes / 4)`, and stays so: it is pure, and
+the same in every implementation. Against the tokeniser it is also a third
+short on almost everything — prose, code, markup, most scripts — and short is
+the wrong side for a chunk, whose answer then does not fit. The sizing estimate
+counts bytes per token by class of character: three for letters, one for
+digits and punctuation, four for Cyrillic, two for the other two-byte scripts
+and two and a half for the wide ones, each on the safe side of what 93 samples
+measured. Latin script that is not English is dearer to the tokeniser — a
+token per 2.9 letters of English against 2.3 of Spanish or French and 2.1 of
+German, measured over GE-T2's corpus — so where accented letters are at least
+one in a hundred of the plain ones, letters count at two and a quarter bytes
+(from 1.16; the first cut of the estimate put the German gap down to compounds,
+and the Luther German has almost none). It over-estimates English by a tenth to
+a third, brings Spanish and French within a few percent and German within a
+tenth, and it is used for nothing else: the ledger, the gist limits and `pack`
+budgets keep the format's count.
+
 An `ingest` block holds the defaults that are facts about the project rather
 than things to type on every invocation: `prompt`, a prompt override file;
 `path`, the ingest path to prefer; and, from 1.9, `temperature`, from 0.0 to
@@ -611,18 +640,22 @@ not structure, not what it could not.
 
 `effort`, from 1.15, is how hard the model is asked to think, where the API
 takes a setting: `low`, `medium` or `high`. Left unset, the Anthropic mapper
-sends `low` on a schema request — the schema does the work, and the reasoning
-a higher effort buys is spent from `max_output` — and leaves a free-text
-request at the model's default. The three settings were measured on the
-SM-P14 fixture for 1.15 (the changelog has the figures); the setting is the
+sends `low` on every request: the reasoning a higher effort buys is spent from
+`max_output`, and a chunk is sized on the premise that it is not. The three
+settings were measured on the SM-P14 fixture for 1.15, and the free-text
+request, which 1.15 had left at the model's default, was measured against the
+schema request for 1.16 (the changelog has the figures); the setting is the
 caller's, and the default is the one that measured best. Providers without
 such a setting ignore the key.
 
 `timeout_secs` is the request timeout, 120 by default — except for an
 Anthropic provider that names none, which gets 600. Thinking is always on at
-the API version the mapper speaks, the mapper reads a streamed answer whole
-rather than token by token, and a long chunk at a high effort can run past
-two minutes.
+the API version the mapper speaks, a completion is read whole, and a long
+chunk at a high effort can run past two minutes. A streamed answer is read
+as it arrives from 1.16, event by event, and there the same figure bounds
+the longest silence between two events rather than the whole answer; a
+caller that stops draining the stream closes the connection, and the rest
+of the answer is never sent or paid for.
 
 On a provider whose reasoning is spent from `max_output` along with its
 answer — Anthropic's current models, Gemini's thinking models; the mapper
@@ -773,13 +806,25 @@ line it always wrote. The Anthropic mapper marks its system prompt as a cache
 breakpoint, which covers the kernel schema sent with it, so an ingest of many
 chunks reads the two from the cache on every chunk after the first, at a
 fraction of the input price; `usage` shows the share beside each row's total,
-and `ingest`'s summary line names it when there is one.
+and `ingest`'s summary line names it when there is one. Measured in 1.16 on an
+ingest of this project's README — 35 chunks, 47 calls on Haiku — 42% of the
+input was read from the cache and 21% written to it; the rest is the passages
+themselves, which no cache holds. A third of what the cache saw was written
+rather than read, where a prefix that never changes needs one write in
+forty-seven — the repair turn's system prompt accounts for one more, not nine —
+and one line per run cannot say which calls wrote. Recorded, not resolved.
 
-Read this honestly rather than generalising it: in this build, `ingest` is
-the command that writes the ledger from the CLI. `attest`'s own report
-carries a token total too (the `N token(s)` in its final summary line from
-Chapter 11), but that total is not currently appended to
-`.smysl/usage.log` the way an `ingest` call's is. If you are reconciling
+An `ingest` writes one line for its run, and from 1.16 the line says how many
+calls the run made (`calls`, written only when it is not one), so `usage`
+counts calls and not lines. Before it, the 47-call ingest above read as one
+call.
+
+Read this honestly rather than generalising it: in this build, `ingest` and,
+from 1.16, `ask --answer` are the commands that write the ledger from the
+CLI (an answer is recorded under `content-ingest`, the task it is routed by).
+`attest`'s own report carries a token total too (the `N token(s)` in its
+final summary line from Chapter 11), but that total is not currently appended
+to `.smysl/usage.log` the way an `ingest` call's is. If you are reconciling
 `usage` totals against a batch of `attest` runs, the ledger will
 under-report them — the number to trust for `attest`'s own cost, today, is
 the summary line `attest` prints for itself, not `usage --by task`.
@@ -886,8 +931,9 @@ history, never permission.
     a config file is always safe to commit.],
   [The usage ledger records counts, provider, model, task, recipe, and run —
     never prompt or completion content — one JSON line per call, append-only.],
-  [In this build, only `ingest` writes to the ledger from the CLI; `attest`'s
-    token total lives in its own run summary, not (yet) in `usage`.],
+  [In this build, `ingest` and `ask --answer` write to the ledger from the
+    CLI; `attest`'s token total lives in its own run summary, not (yet) in
+    `usage`.],
   [`usage --by provider|task|model|run`, `--since MS`, and `--reset` are how
     you read and clear that record; none of it ever blocks a command from
     running.],

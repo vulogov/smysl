@@ -502,6 +502,13 @@ registry! {
         W455 = "SMY-W455", Warn,  "The output limit was spent on reasoning before any answer began; degraded to opaque prose";
         W456 = "SMY-W456", Warn,  "A sampling temperature was set for a provider that takes none; it had no effect";
     }
+
+    // 1.16. `ask --answer` has no repair turn, so the one defect a constructed unit can carry
+    // (`E022`) is met without one; in a block of its own for the reason the two above give, in
+    // the library's group where the other ingest-side codes (`W443`, `W444`, `W448`) are.
+    Library => {
+        W457 = "SMY-W457", Warn,  "An answer gist over the bound was cut to it; the claim stands whole in the body";
+    }
 }
 
 impl fmt::Display for Code {
@@ -1013,9 +1020,13 @@ mod tests {
     /// 155 with `SMY-W455` and `SMY-W456` in 1.15.0: an output limit spent on reasoning
     /// before any answer, on a provider whose reasoning shares it; and a temperature set for a
     /// provider whose endpoint takes none.
+    ///
+    /// 156 with `SMY-W457` in 1.16.0: an answer gist over the profile's bound, cut to it with
+    /// the claim moved whole into the body. `ask` has no repair turn, and a model cannot count
+    /// the way the estimator does, so the cut is where that is settled.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 155);
+        assert_eq!(Code::ALL.len(), 156);
     }
 
     #[test]

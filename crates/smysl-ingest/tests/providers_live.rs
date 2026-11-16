@@ -13,6 +13,11 @@
 //! SMYSL_ANTHROPIC_MODEL   the Anthropic model the gate runs (default claude-haiku-5-5)
 //! SMYSL_ANTHROPIC_MATRIX=1  the fixture on every current Anthropic model, in turn
 //! SMYSL_ANTHROPIC_EFFORT   low, medium or high, for the Anthropic candidate (default: the mapper's)
+//! SMYSL_ANTHROPIC_HEADROOM=1 every model at every effort over four passages; the thinking share
+//! SMYSL_STREAM=1            one streamed answer per reachable provider that streams; when its
+//!                           first token arrived, and its last
+//! SMYSL_REPAIR_RATE=1       the fixture through each path every reachable provider has, several
+//!                           runs each; how often an answer needed repair (SMYSL_REPAIR_RUNS, 5)
 //! ```
 //!
 //! The Anthropic default is the cheap model, so the gate is affordable to run routinely; the
@@ -30,9 +35,10 @@
 
 use smysl_core::{Rung, Severity, Status};
 use smysl_graph::Store;
-use smysl_ingest::{IngestOptions, Ingestor};
+use smysl_ingest::{IngestOptions, IngestPath, IngestReport, Ingestor};
 use smysl_provider::{
-    config::ProviderConfig, Provider, ProviderId, Registry, StructuredMode, Task,
+    config::ProviderConfig, stream::Stream, Provider, ProviderId, Registry, Request,
+    StructuredMode, Task,
 };
 
 /// The fixture. Short on purpose - every hosted call costs money, and the claim under test
@@ -287,25 +293,38 @@ fn each_provider_reports_its_own_structural_guarantee() {
 /// Every current Anthropic model the list names, by family, cheapest first.
 const ANTHROPIC_MATRIX: &[&str] = &["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"];
 
-/// What one model did with the fixture, for the matrix's record.
-fn run_fixture(c: &Candidate) -> Result<String, String> {
+/// The fixture through one candidate, on the path the caller names or the one ingest chooses:
+/// how many units it staged, and the report. Conformance is the one assertion.
+fn fixture_report(
+    c: &Candidate,
+    path: Option<IngestPath>,
+) -> Result<(usize, IngestReport), String> {
     let provider = usable(c)?;
     let id = provider.id();
     let registry = Registry::new()
         .with_provider(provider)
         .route(Task::ContentIngest, id);
-    let opts = IngestOptions::at_rung(Rung::Document)
+    let mut opts = IngestOptions::at_rung(Rung::Document)
         .with_model(&c.model)
         .with_max_output(800);
+    if let Some(p) = path {
+        opts = opts.with_path(p);
+    }
     let (staged, report) = Ingestor::new(&registry, opts)
         .ingest(&Store::new(), FIXTURE)
         .map_err(|e| format!("ingest failed: {e}"))?;
     if staged.report.fail_on(Severity::Error).is_err() {
         return Err("staged units do not check".to_string());
     }
+    Ok((staged.len(), report))
+}
+
+/// What one model did with the fixture, for the matrix's record.
+fn run_fixture(c: &Candidate) -> Result<String, String> {
+    let (units, report) = fixture_report(c, None)?;
     Ok(format!(
         "{} unit(s), {} call(s), {} degraded, {} repaired, {} token(s), {} thinking, model {}",
-        staged.len(),
+        units,
         report.calls,
         report.degraded,
         report.repaired,
@@ -344,6 +363,409 @@ fn every_current_anthropic_model_stages_conformant_units() {
             Err(why) => {
                 eprintln!("  FAILED  {model}: {why}");
                 failures.push(format!("{model}: {why}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same candidate with another structured mode asked of its mapper.
+fn with_structured(c: &Candidate, structured: StructuredMode) -> Candidate {
+    Candidate {
+        id: c.id,
+        kind: c.kind,
+        endpoint: c.endpoint,
+        model: c.model.clone(),
+        key_var: c.key_var,
+        structured,
+        context_window: c.context_window,
+    }
+}
+
+/// **The repair rate, per path.** Whether the structured channel earns its keep is a question
+/// 1.15 left open: the same fixture through each path a provider has, several runs each, since
+/// one run is an anecdote. Three cells per provider — the path ingest chooses, the other path,
+/// and the json-ast path with no channel at all, where the schema rides in the prompt and the
+/// answer is checked on the way in — and the record is how often an answer needed a second
+/// turn, and how often none sufficed. Opt-in with `SMYSL_REPAIR_RATE=1`; `SMYSL_REPAIR_RUNS`
+/// is the runs per cell (default 5). A cell that fails is a row, not a panic: a provider that
+/// cannot take a path is what the measurement is for.
+#[test]
+fn the_repair_rate_is_measured_per_path() {
+    if std::env::var("SMYSL_REPAIR_RATE")
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        eprintln!("repair rate skipped: set SMYSL_REPAIR_RATE=1");
+        return;
+    }
+    let runs: usize = std::env::var("SMYSL_REPAIR_RUNS")
+        .ok()
+        .and_then(|n| n.trim().parse().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(5);
+    eprintln!("--- repair rate, {runs} run(s) per cell ---");
+    eprintln!(
+        "  provider   cell           path     runs units calls degraded repaired  tokens  warnings"
+    );
+    let mut any = false;
+    for c in candidates() {
+        if let Err(why) = usable(&c) {
+            eprintln!("  {:<10} skipped ({why})", c.id);
+            continue;
+        }
+        any = true;
+        let cells: [(&str, Option<IngestPath>, Option<StructuredMode>); 4] = [
+            ("default", None, None),
+            ("json-ast", Some(IngestPath::JsonAst), None),
+            ("surface", Some(IngestPath::Surface), None),
+            (
+                "json-ast/none",
+                Some(IngestPath::JsonAst),
+                Some(StructuredMode::None),
+            ),
+        ];
+        let mut default_path: Option<IngestPath> = None;
+        for (name, path, structured) in cells {
+            // The default is one of the two overrides; the override that repeats it is skipped
+            // rather than paid for twice.
+            if structured.is_none() && path.is_some() && path == default_path {
+                continue;
+            }
+            let cell = match structured {
+                Some(m) => with_structured(&c, m),
+                None => with_structured(&c, c.structured),
+            };
+            let (mut units, mut calls, mut degraded, mut repaired, mut tokens) = (0, 0, 0, 0, 0);
+            let mut failed = Vec::new();
+            let mut took: Option<IngestPath> = None;
+            // Which warnings the runs ended in, by code: a degraded span says why it degraded.
+            let mut codes: std::collections::BTreeMap<String, usize> = Default::default();
+            for _ in 0..runs {
+                match fixture_report(&cell, path) {
+                    Ok((n, r)) => {
+                        units += n;
+                        calls += r.calls;
+                        degraded += r.degraded;
+                        repaired += r.repaired;
+                        tokens += r.usage.total();
+                        took = took.or(r.path);
+                        for d in &r.diagnostics {
+                            if d.severity == Severity::Warn {
+                                *codes.entry(d.code.as_str().to_string()).or_default() += 1;
+                            }
+                        }
+                    }
+                    Err(why) => failed.push(why),
+                }
+            }
+            if name == "default" {
+                default_path = took;
+            }
+            eprintln!(
+                "  {:<10} {:<14} {:<8} {:>4} {:>5} {:>5} {:>8} {:>8} {:>7}  {}",
+                c.id,
+                name,
+                took.map(|p| p.as_str()).unwrap_or("-"),
+                runs,
+                units,
+                calls,
+                degraded,
+                repaired,
+                tokens,
+                codes
+                    .iter()
+                    .map(|(c, n)| format!("{c}×{n}"))
+                    .chain(
+                        failed
+                            .first()
+                            .map(|f| format!("{} failed ({f})", failed.len()))
+                    )
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
+    }
+    assert!(any, "SMYSL_REPAIR_RATE=1 but no provider is reachable");
+}
+
+/// **Streaming is streaming.** One free-text answer from every reachable candidate that
+/// streams, drained as a caller drains it, with the clock on the first token and on the last.
+/// 1.15 read the body whole and replayed it, so the first token and the last landed in the
+/// same drain; 1.16 reads the events as they arrive, and the first token lands while the
+/// answer is still being written. Opt-in with `SMYSL_STREAM=1`: one paid call per hosted
+/// provider.
+#[test]
+fn the_stream_delivers_its_first_token_before_its_last() {
+    if std::env::var("SMYSL_STREAM")
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        eprintln!("stream skipped: set SMYSL_STREAM=1");
+        return;
+    }
+    let mut ran = 0;
+    for c in candidates() {
+        let provider = match usable(&c) {
+            Ok(p) => p,
+            Err(why) => {
+                eprintln!("  {:<10} skipped ({why})", c.kind);
+                continue;
+            }
+        };
+        if !provider.caps().streaming {
+            eprintln!("  {:<10} skipped (does not stream)", c.kind);
+            continue;
+        }
+        stream_once(&c, provider);
+        ran += 1;
+    }
+    assert!(
+        ran > 0,
+        "SMYSL_STREAM=1 but no streaming provider is reachable"
+    );
+}
+
+fn stream_once(c: &Candidate, provider: Box<dyn Provider>) {
+    let req = Request::new(
+        &c.model,
+        "Count from one to forty in words, one number per line, and write nothing else.",
+    )
+    .with_max_output(600);
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let started = std::time::Instant::now();
+    let worker = std::thread::spawn(move || provider.stream(&req, tx));
+    let mut stream = Stream::new(rx);
+    let mut first: Option<(std::time::Duration, bool)> = None;
+    let mut drains_with_text = 0;
+    loop {
+        let fresh = stream.drain();
+        if !fresh.is_empty() {
+            drains_with_text += 1;
+            if first.is_none() {
+                first = Some((started.elapsed(), stream.is_finished()));
+            }
+        }
+        if stream.is_finished() {
+            break;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(300),
+            "the stream did not end in five minutes"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let ended = started.elapsed();
+    let usage = worker.join().unwrap().expect("the stream completes");
+    let (at, already_finished) = first.expect("some text arrived");
+    eprintln!("--- {} stream, {} ---", c.kind, c.model);
+    eprintln!(
+        "  first token at {} ms, last at {} ms; {} drains carried text; {} lines, {} output tokens",
+        at.as_millis(),
+        ended.as_millis(),
+        drains_with_text,
+        stream.text().lines().count(),
+        usage.output_tokens
+    );
+    assert!(stream.error().is_none(), "{:?}", stream.error());
+    assert!(
+        !already_finished && drains_with_text > 1,
+        "the first token arrived in the same drain as the last: the body was read whole"
+    );
+}
+
+/// A longer passage for the headroom measurement: the fixture's incident told in full, so the
+/// answer has more to say and the reasoning more to weigh.
+const REPORT: &str = "\
+On Thursday at 09:12 UTC the eu-west shard slowed. The p95 request latency rose from 180ms to \
+410ms over eleven minutes and stayed there until 10:40, when it fell back without anyone \
+changing anything.
+
+Connection pool wait time rose alongside the latency, from under a millisecond to 90ms at the \
+peak. The pool was at its configured ceiling of 64 connections for the whole window, which \
+suggests saturation as the cause: requests queued for a connection before they could run.
+
+The canary shard, which runs the same build against a replica of the same database with a \
+pool of the same size, stayed clean throughout. Its latency did not move and its pool never \
+filled. The pool theory does not explain that, since the canary took the same traffic shape \
+at a tenth of the volume.
+
+A second reading is that the database itself was slow: a vacuum ran on the orders table from \
+09:10 to 10:38 on the primary, and the canary reads from a replica that was not vacuuming. \
+That would put the pool saturation downstream of the cause rather than at it.
+
+Nobody has yet compared the vacuum's timing against the latency curve minute by minute, and \
+until that is done neither reading is more than a suggestion.";
+
+/// Source code, for the headroom measurement: a provider's reading of this is a different
+/// shape of answer, and the tokeniser counts it differently.
+const CODE: &str = "\
+/// Waits for a connection, or gives up after `wait` and reports the pool as saturated.
+pub fn acquire(pool: &Pool, wait: Duration) -> Result<Conn, PoolError> {
+    let start = Instant::now();
+    loop {
+        if let Some(conn) = pool.try_take() {
+            pool.metrics.record_wait(start.elapsed());
+            return Ok(conn);
+        }
+        if start.elapsed() >= wait {
+            pool.metrics.saturated.fetch_add(1, Ordering::Relaxed);
+            return Err(PoolError::Saturated { size: pool.size(), waited: wait });
+        }
+        // The canary never reaches this branch: its pool is the same size but its traffic is
+        // a tenth of the shard's, so a connection is always free. The shard reached it 2,140
+        // times on Thursday between 09:12 and 10:40.
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}";
+
+/// Cyrillic prose, for the headroom measurement: two-byte letters, which the estimator
+/// over-counts and the model answers in its own script.
+const RUSSIAN: &str = "\
+В четверг сегмент eu-west замедлился: задержка p95 выросла со 180 до 410 миллисекунд за \
+одиннадцать минут и держалась до 10:40, после чего вернулась к норме сама.
+
+Время ожидания соединения из пула росло вместе с задержкой, и пул весь этот час был заполнен \
+до предела в 64 соединения. Это указывает на насыщение пула как на причину.
+
+Канареечный сегмент, который работает на той же сборке с пулом того же размера, оставался \
+чистым всё время. Теория насыщения пула этого не объясняет.
+
+Второе прочтение: медленной была сама база. С 09:10 до 10:38 на основном узле шла очистка \
+таблицы заказов, а канарейка читает с реплики, где очистки не было.";
+
+/// The passages the headroom measurement runs, by name.
+const HEADROOM_PASSAGES: &[(&str, &str)] = &[
+    ("fixture", FIXTURE),
+    ("report", REPORT),
+    ("code", CODE),
+    ("russian", RUSSIAN),
+];
+
+/// What one call did with one passage, for the headroom record.
+struct HeadroomCell {
+    units: usize,
+    output: u64,
+    thinking: u64,
+    degraded: usize,
+    unanswered: bool,
+    truncated: bool,
+}
+
+/// One ingest of `text` on `model` at `effort` with `max_output`, and what the ledger saw.
+fn run_passage(
+    base: &Candidate,
+    model: &str,
+    effort: &str,
+    max_output: usize,
+    text: &str,
+) -> Result<HeadroomCell, String> {
+    let c = Candidate {
+        id: base.id,
+        kind: base.kind,
+        endpoint: base.endpoint,
+        model: model.to_string(),
+        key_var: base.key_var,
+        structured: base.structured,
+        context_window: base.context_window,
+    };
+    let mut cfg = config(&c);
+    cfg.effort = Some(effort.to_string());
+    cfg.max_output = max_output;
+    cfg.timeout_secs = 300;
+    let provider = smysl_provider::map::build(&cfg).map_err(|e| e.to_string())?;
+    let id = provider.id();
+    let registry = Registry::new()
+        .with_provider(provider)
+        .route(Task::ContentIngest, id);
+    let opts = IngestOptions::at_rung(Rung::Document)
+        .with_model(model)
+        .with_max_output(max_output);
+    let (staged, report) = Ingestor::new(&registry, opts)
+        .ingest(&Store::new(), text)
+        .map_err(|e| format!("ingest failed: {e}"))?;
+    let has = |suffix: &str| {
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code.as_str().ends_with(suffix))
+    };
+    Ok(HeadroomCell {
+        units: staged.len(),
+        output: report.usage.output_tokens,
+        thinking: report.usage.thinking_tokens,
+        degraded: report.degraded,
+        unanswered: has("W455"),
+        truncated: has("W304"),
+    })
+}
+
+/// **The reasoning headroom across the matrix.** [`REASONING_HEADROOM_RATIO`] is a quarter
+/// of `max_output` on the strength of one case, Haiku at `high` on the fixture. This runs
+/// every current model at every effort over four passages — the fixture, a longer report,
+/// source code and Cyrillic prose — at the gate's 800-token limit, and the `high` effort
+/// again at 2,048, and prints what each call spent thinking as a share of its limit. The
+/// record, not an assertion, is the product; the one assertion is that every call was
+/// answered by the endpoint, since a transport failure would be a hole in the table. Opt-in
+/// with `SMYSL_ANTHROPIC_HEADROOM=1`: it is 48 paid calls.
+///
+/// [`REASONING_HEADROOM_RATIO`]: smysl_ingest::chunk::REASONING_HEADROOM_RATIO
+#[test]
+fn the_reasoning_headroom_is_measured_across_the_matrix() {
+    if std::env::var("SMYSL_ANTHROPIC_HEADROOM")
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        eprintln!("anthropic headroom skipped: set SMYSL_ANTHROPIC_HEADROOM=1");
+        return;
+    }
+    let base = candidates()
+        .into_iter()
+        .find(|c| c.kind == "anthropic")
+        .expect("the anthropic candidate");
+    if let Err(why) = usable(&base) {
+        eprintln!("anthropic headroom skipped: {why}");
+        return;
+    }
+    let mut cells: Vec<(&str, usize)> = Vec::new();
+    for effort in ["low", "medium", "high"] {
+        cells.push((effort, 800));
+    }
+    cells.push(("high", 2048));
+    let mut failures = Vec::new();
+    eprintln!("--- Anthropic reasoning headroom (thinking as a share of max_output) ---");
+    eprintln!("  model            effort   max passage  units output  think share  note");
+    for model in ANTHROPIC_MATRIX {
+        for (effort, max_output) in &cells {
+            for (name, text) in HEADROOM_PASSAGES {
+                match run_passage(&base, model, effort, *max_output, text) {
+                    Ok(cell) => {
+                        let share = cell.thinking as f64 / *max_output as f64;
+                        let note = if cell.unanswered {
+                            "W455 unanswered"
+                        } else if cell.truncated {
+                            "W304 truncated"
+                        } else if cell.degraded > 0 {
+                            "degraded"
+                        } else {
+                            ""
+                        };
+                        eprintln!(
+                            "  {model:<16} {effort:<6} {max_output:>5} {name:<8} {:>5} {:>6} {:>6} {share:>5.2}  {note}",
+                            cell.units, cell.output, cell.thinking
+                        );
+                    }
+                    Err(why) => {
+                        eprintln!(
+                            "  {model:<16} {effort:<6} {max_output:>5} {name:<8} FAILED {why}"
+                        );
+                        failures.push(format!("{model} {effort} {max_output} {name}: {why}"));
+                    }
+                }
             }
         }
     }
@@ -402,8 +824,11 @@ fn the_estimator_is_calibrated_against_the_count_tokens_endpoint() {
              восточного канала.",
         ),
     ];
-    eprintln!("--- estimator calibration (ceil(bytes/4) against count_tokens) ---");
+    eprintln!(
+        "--- estimator calibration (ceil(bytes/4) and the sizing estimate against count_tokens) ---"
+    );
     let mut worst = 0.0f64;
+    let mut worst_sizing = 0.0f64;
     for (name, text) in samples {
         let counted = anthropic
             .count_tokens_remote(text)
@@ -411,12 +836,19 @@ fn the_estimator_is_calibrated_against_the_count_tokens_endpoint() {
             .saturating_sub(baseline)
             .max(1);
         let estimated = smysl_core::tokens(text) as u64;
+        let sizing = smysl_ingest::sizing_tokens(text) as u64;
         let ratio = estimated as f64 / counted as f64;
+        let sizing_ratio = sizing as f64 / counted as f64;
         worst = worst.max((ratio - 1.0).abs());
+        worst_sizing = worst_sizing.max((sizing_ratio - 1.0).abs());
         eprintln!(
-            "  {name:<9} bytes {:>5}  estimated {estimated:>5}  counted {counted:>5}  ratio {ratio:.2}",
+            "  {name:<9} bytes {:>5}  estimated {estimated:>5}  counted {counted:>5}  ratio {ratio:.2}  sizing {sizing:>5} ({sizing_ratio:.2})",
             text.len()
         );
     }
-    eprintln!("  worst deviation {:.0}%", worst * 100.0);
+    eprintln!(
+        "  worst deviation: format count {:.0}%, sizing estimate {:.0}%",
+        worst * 100.0,
+        worst_sizing * 100.0
+    );
 }

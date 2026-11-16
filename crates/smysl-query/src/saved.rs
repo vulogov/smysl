@@ -338,7 +338,8 @@ fn lookup(name: &str, params: &BTreeMap<String, String>, span: Span) -> Result<S
 /// The records a save writes: the `x.query/saved` unit and one [`RESULT_EDGE`] per result.
 ///
 /// `query` is the query the plan was lowered from — bound first, by [`bind`], because the text
-/// saved is the text after binding. The unit's gist is that text in canonical form, its source
+/// saved is the text after binding. The unit's gist is that text in canonical form — cut to
+/// the gist bound when it is over it, with the text whole in the body and in `query:text` — its source
 /// cites it (`sq:<recipe hash, short>`, status `cited`, as `@question` units are authored in
 /// `fixtures/corpus/F4-qa.smy`), and its payload carries the eight keys. A query that did not
 /// run to completion never reaches here: the [`Run`] is the proof.
@@ -408,11 +409,24 @@ pub fn to_records(
 
     let schema = SchemaId::Extension(schema::SAVED.to_string());
     let source = SourceRef::new(SourceKind::Doc, format!("sq:{}", &recipe_hex[..12]));
-    let mut builder = UnitCoreBuilder::new(schema, text, Status::Cited)
+    // The gist is the text while the text fits the gist bound, and the text cut to the bound
+    // when it does not (1.16): a dossier's `counter` slot binds the question's terms into
+    // `matches` clauses, and "Why was Naomi bitter?" saved a gist of 34 tokens that failed the
+    // check of every store it was saved into, and with it every answer staged over that store.
+    // A rerun reads `query:text`, never the gist, so the text stays whole there, and in the
+    // body — under the question, when there is one — for a reader.
+    let cut = smysl_core::GranularityProfile::default().shorten_gist(&text);
+    let mut builder = UnitCoreBuilder::new(schema, cut.as_deref().unwrap_or(&text), Status::Cited)
         .source(source)
         .payload(bytes);
-    if let Some(q) = &opts.question {
-        builder = builder.body(q.clone());
+    let body = match (&opts.question, cut.is_some()) {
+        (Some(q), true) => Some(format!("{q}\n\n{text}")),
+        (Some(q), false) => Some(q.clone()),
+        (None, true) => Some(text.clone()),
+        (None, false) => None,
+    };
+    if let Some(b) = body {
+        builder = builder.body(b);
     }
     let unit = builder.build().map_err(|e| {
         Diagnostic::at(Code::E460, span)

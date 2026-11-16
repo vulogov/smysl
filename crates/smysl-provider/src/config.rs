@@ -31,7 +31,8 @@ pub struct ProviderConfig {
     pub api_key_env: Option<String>,
     /// Command that prints the key. Never the key.
     pub api_key_cmd: Option<String>,
-    /// Request timeout in seconds.
+    /// Request timeout in seconds. `complete` reads the answer whole inside it; on `stream`,
+    /// since 1.16, it bounds the longest silence between bytes instead.
     pub timeout_secs: u64,
     /// Whether the provider may answer with a model other than the one named, where its API
     /// offers that (Anthropic's server-side fallback on a policy decline). On by default: an
@@ -40,18 +41,21 @@ pub struct ProviderConfig {
     /// endpoints have no such chain ignore it.
     pub fallbacks: bool,
     /// How hard the model is asked to think, where the API takes a setting: `low`, `medium`
-    /// or `high`. `None` leaves it to the mapper — Anthropic sends `low` on a schema request,
-    /// since the schema does the work and the reasoning a higher effort buys is spent from
-    /// `max_output`, and leaves a free-text request at the model's default. Mappers whose
-    /// endpoints have no such setting ignore it. Since 1.15.
+    /// or `high`. `None` leaves it to the mapper — Anthropic sends `low` on every request,
+    /// since the reasoning a higher effort buys is spent from `max_output` and the chunk is
+    /// sized on the premise that it is not (1.15 left a free-text request at the model's
+    /// default, which spent the whole limit on every call measured). Mappers whose endpoints
+    /// have no such setting ignore it. Since 1.15.
     pub effort: Option<String>,
 }
 
 /// The request timeout an Anthropic provider gets when its configuration names none.
 ///
 /// Thinking is always on at the API version the mapper speaks, and a long chunk at a high
-/// effort can run past the two minutes every other provider defaults to. The mapper does not
-/// stream, so the whole answer has to arrive inside one timeout.
+/// effort can run past the two minutes every other provider defaults to. `complete` reads the
+/// answer whole, so the whole of it has to arrive inside one timeout; on `stream`, since 1.16,
+/// the same figure bounds the longest silence between bytes instead, which a long answer never
+/// approaches.
 pub const ANTHROPIC_TIMEOUT_SECS: u64 = 600;
 
 impl ProviderConfig {

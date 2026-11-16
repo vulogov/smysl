@@ -187,6 +187,52 @@ impl Emitter {
     }
 }
 
+/// Test support for the mappers' stream readers: a body that arrives in pieces. Gated on the
+/// mappers that stream, since without one no test reads it and the no-feature cell builds
+/// with `-D warnings`.
+#[cfg(all(
+    test,
+    any(
+        feature = "anthropic",
+        feature = "deepseek",
+        feature = "openai",
+        feature = "ollama"
+    )
+))]
+pub(crate) mod testing {
+    /// A reader fed from a channel, so a test can hold the rest of the body back and see what
+    /// the reader did with the part it had. A sent `Err` is the transport failing; a dropped
+    /// sender is the end of the body.
+    pub(crate) struct Fed(
+        pub(crate) std::sync::mpsc::Receiver<std::io::Result<Vec<u8>>>,
+        pub(crate) Vec<u8>,
+    );
+
+    impl Fed {
+        /// A body and the handle that feeds it.
+        pub(crate) fn new() -> (std::sync::mpsc::Sender<std::io::Result<Vec<u8>>>, Fed) {
+            let (feed, body) = std::sync::mpsc::channel();
+            (feed, Fed(body, Vec::new()))
+        }
+    }
+
+    impl std::io::Read for Fed {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.1.is_empty() {
+                match self.0.recv() {
+                    Ok(Ok(bytes)) => self.1 = bytes,
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Ok(0),
+                }
+            }
+            let n = buf.len().min(self.1.len());
+            buf[..n].copy_from_slice(&self.1[..n]);
+            self.1.drain(..n);
+            Ok(n)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

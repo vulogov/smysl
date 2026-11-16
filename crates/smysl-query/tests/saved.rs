@@ -104,6 +104,42 @@ fn save_append_data_and_rerun_pinned_reports_exactly_the_appended_set() {
     assert!(again.data_effect.removed.is_empty());
 }
 
+/// A text over the gist bound saves a gist cut to it, the text whole in the body and in the
+/// payload, and the rerun reads the payload.
+#[test]
+fn a_long_query_saves_within_the_gist_bound_and_reruns_from_its_text() {
+    let mut store = store_of(NAME);
+    let long = "from store:F1-incident\nfind \"connection pool\"\nwhere matches \"retry\" or \
+                matches \"storm\" or matches \"leak\" or matches \"ceiling\" or matches \
+                \"batch\" or matches \"exhausted\"";
+    let (_, records) = saved_records(&store, long);
+    let Record::Unit(unit) = &records[0] else {
+        unreachable!()
+    };
+    let g = smysl_core::GranularityProfile::default();
+    assert!(
+        !g.gist_within_bound(g.tokens(long).unwrap()),
+        "the fixture must be over the bound"
+    );
+    assert!(g.gist_within_bound(g.tokens(&unit.gist).unwrap()));
+    assert!(unit.gist.ends_with('\u{2026}'));
+    assert!(long.starts_with(unit.gist.trim_end_matches('\u{2026}')));
+    assert_eq!(
+        unit.body.as_deref(),
+        Some(long),
+        "the text stands whole in the body"
+    );
+
+    let saved_uid = canonical_uid(unit);
+    store.append(&records).expect("appends");
+    let saved = load(&store, &saved_uid).expect("loads");
+    assert_eq!(saved.text, long, "the rerun's text is the payload's, uncut");
+    let scope = StoreScope::new(NAME, &store);
+    let env = Env::new(&store, &scope);
+    let again = rerun(&saved, &env, &PlanOptions::default(), false).expect("reruns");
+    assert!(again.recipe_matches);
+}
+
 /// §5.4, last bullet: OQ-49's guard, on the scores.
 #[test]
 fn saving_a_query_changes_no_result_s_salience() {

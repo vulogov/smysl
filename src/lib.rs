@@ -568,8 +568,9 @@ mod tests {
         // answer came from a model other than the one its recipe names; 153 with `SMY-W438`
         // (1.15.0), raised by a span the model declined as a matter of policy; 155 with
         // `SMY-W455` and `SMY-W456` (1.15.0), an output limit spent on reasoning before any
-        // answer, and a temperature set for a provider that takes none.
-        assert_eq!(Code::ALL.len(), 155);
+        // answer, and a temperature set for a provider that takes none; 156 with `SMY-W457`
+        // (1.16.0), an answer gist over the bound, cut to it with the claim whole in the body.
+        assert_eq!(Code::ALL.len(), 156);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
@@ -630,7 +631,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "1.15.0");
+        assert_eq!(VERSION, "1.16.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

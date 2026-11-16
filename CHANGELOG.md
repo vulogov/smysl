@@ -7,6 +7,375 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.16.0 — 2026-11-16
+
+What 1.15 recorded and did not act on, measured and acted on, each item below with its
+figures. 1.15 ran the hosted-provider path against a real key for the first time; 1.16 took
+what that run wrote down — the estimator's distance from the tokeniser, the headroom's single
+number, strict mode's unmeasured repair rate — and found under two of the three a premise that
+was wrong. What 1.16 leaves open is at the end: what it measured and chose not to move, and
+what 1.14 left, none of which moved.
+
+**What 1.15 recorded, 1.16 acted on first.** The estimator's distance from the tokeniser
+and the headroom's single measurement are the first two entries below; both turned out to be
+about chunk sizing, and the second found the premise under it wrong.
+
+**Strict is a path the kernel schema never takes.** An OpenAI-compatible endpoint takes
+strict mode only for a closed schema, and the kernel's `payload` is open, so the ingest schema
+goes unstrict on every endpoint that has a strict mode — and DeepSeek has no `json_schema`
+response format at all, strict or not: probed 2026-11-14, both forms answer *"This
+response_format type is unavailable now"*. The question 1.15 left, whether the repair rate
+differs between the two, is therefore not one about strict. What can differ is the channel the
+answer comes back through, and that is measured below, on DeepSeek and on Anthropic.
+
+**The published check ran weekly against 1.15.0** for the first time with a grep that can
+match, twice in the cycle, and found nothing to report in the registry copy.
+
+### The headroom measured across the matrix, and the answer that is four times the passage
+
+`REASONING_HEADROOM_RATIO` was a quarter on the strength of one case. `SMYSL_ANTHROPIC_HEADROOM=1`
+now runs every current model at every effort over four passages — the SM-P14 fixture (91
+tokens), an incident report of five paragraphs (380), a Rust function (324) and Russian prose
+(259) — at the gate's 800-token limit, and `high` again at 2,048. 48 calls; each cell is the
+units staged, or the warning the call ended in, with the thinking share where it was not zero:
+
+| model, effort, limit | fixture | report | code | russian |
+|---|---|---|---|---|
+| Haiku `low` 800 | 5 | W304 | W455 | W455 |
+| Haiku `medium` 800 | 5 | W455 | W455 | W455 |
+| Haiku `high` 800 | W455 | W455 | W455 | W455 |
+| Haiku `high` 2048 | 5 (59%) | W455 | W304 | W304 |
+| Sonnet `low` 800 | 4 | W304 | 3 | W304 |
+| Sonnet `medium` 800 | 5 | W304 | 3 (13%) | W304 |
+| Sonnet `high` 800 | 5 | W304 | W304 | W304 |
+| Sonnet `high` 2048 | 5 | 7 | 3 (15%) | 6 (16%) |
+| Opus `low` 800 | 4 | W304 | W304 | W304 |
+| Opus `medium` 800 | 4 | W304 | W304 | W304 |
+| Opus `high` 800 | 4 | W455 | W304 | W455 |
+| Opus `high` 2048 | 4 (11%) | W304 | W304 | W304 |
+
+Three things the table says.
+
+**The limit, not the reasoning, is what the long passages ran out of.** At 800 every passage
+but the three-sentence fixture ended in `SMY-W304` or `SMY-W455` on every model at every
+effort: the answer did not fit. 1.15 capped a chunk at `max_output` on the premise that an
+answer is about the size of its passage. Measured on the calls that were answered whole,
+`output_tokens` less the thinking over the passage's `count_tokens` is 3.1 to 4.7 on the
+report and the code, 4.6 to 7.4 on the fixture, whose three units each pay for a gist, a
+kind, a span and provenance, and 8.1 on the Russian, with its repair turns. The chunk is now
+sized to the answer the call can carry divided by `ANSWER_PER_INPUT_TOKEN`, which is four:
+a provider with an 8,192-token output takes 2,048-token chunks where 1.15 gave it 8,192; one
+with 2,048 takes 512; the gate's 800 sits on the 256 floor as before. More calls, each with
+the prompt, and the prompt cache 1.15 turned on is what carries that.
+
+**The quarter holds, for two models of three.** Where the limit held the answer, Sonnet and
+Opus spent nothing thinking at `low` and `medium` and 11% to 16% at `high`. Haiku spent 59%
+at `high`, and at `low` and `medium` spent all 800 on the passages the limit could not hold
+anyway. `REASONING_HEADROOM_RATIO` stays a quarter; it is generous for Sonnet and Opus at
+every effort, and too small only for Haiku at `high`, which is the case `SMY-W455` exists
+for and the reason the default effort is `low`.
+
+**An unanswered call on Haiku is first a sign of an undersized limit.** Sonnet and Opus
+truncate when the answer does not fit; Haiku thinks until the limit is gone and answers
+nothing. With the chunk sized to the answer, the three `W455` columns above are the cells
+the new sizing takes away.
+
+The sizing estimate's own test found a second thing: the `\n\n` a chunk's paragraphs are
+rejoined with was never counted against the budget, and `ceil(bytes / 4)`'s slack hid it.
+It is counted now.
+
+### A chunk is sized by an estimate that has met the tokeniser
+
+1.15 measured `smysl_core::tokens`, which is `ceil(bytes / 4)`, against `count_tokens` on
+four samples and recorded the distance without acting on it. 1.16 measured it on 48 — prose
+from the README, the manual and this file, Rust from three crates, TOML, SMYSL surface, and
+passages in Russian, Ukrainian, Spanish, French, German, Greek, Arabic, Hebrew, Chinese,
+Japanese, Korean, Hindi, a line of emoji and a block of JSON — and fitted one divisor per class
+of character by least squares:
+
+| class | bytes per token, fitted | bytes per token, used for sizing |
+|---|---|---|
+| ASCII letters and spaces | 3.5 | 3.0 |
+| other ASCII: digits, punctuation, newlines | 1.1 | 1.0 |
+| Cyrillic | 5.1 | 4.0 |
+| other two-byte scripts | 2.5 | 2.0 |
+| three- and four-byte: CJK, Devanagari, emoji | 2.9 | 2.5 |
+
+| estimate | mean error | worst | under-estimates |
+|---|---|---|---|
+| `ceil(bytes / 4)` | 34% | 57% | 45 of 48, by up to 57% |
+| the fit, on the 24 samples it was not fitted on | 10% | 39% | 10 of 24 |
+| the sizing divisors | 16% | 41% | 8 of 48, by at most 25% |
+
+The format's count under-counts almost everything, and under is the wrong side for a chunk:
+a chunk the estimator calls 600 tokens is 1,200 to the tokeniser on code or JSON, and its
+answer does not fit the limit the chunk was sized to. The one place it over-counts is
+Cyrillic, which the 1.15 sample happened to be.
+
+`smysl_ingest::sizing_tokens` is the five-class estimate, with each divisor rounded to the
+safe side of the fit, since over-estimating costs a call and under-estimating costs the
+chunk. Chunking works in it from 1.16: paragraphs are grouped and oversized ones split by the
+sizing estimate against the same `max_output`-derived budget as before. Nothing else moves.
+The format's count stays `ceil(bytes / 4)` — it is pure by rule D, every implementation
+agrees on it, and the ledger's estimated figures, the gist limits of the granularity profile
+and `pack` budgets keep it. German is the residual: its compounds split into more tokens
+than any byte class predicts, and the sizing estimate is a quarter short on it.
+
+The text path is not moved. `text::window::windows` fills a window by the estimator the
+caller named — `--estimator`, the one that also bounds a gist — and that is a public
+signature and a deliberate choice: the GE-T2 finding was that a window measured in bytes sent
+Russian down a different path from English, and a count the caller can name was the answer.
+Whether its windows should be sized by the tokeniser's estimate as well is a question for a
+text the size of a Bible, and it is open.
+
+### The channel measured against the open path, on DeepSeek and on Anthropic
+
+`SMYSL_REPAIR_RATE=1` runs the SM-P14 fixture through each path a provider has, five times a
+cell (`SMYSL_REPAIR_RUNS`): the path ingest chooses, the other path, and the json-ast path with
+no channel at all, where the schema rides in the prompt and the answer is checked on the way
+in. 2026-11-14, `deepseek-chat` and `claude-haiku-5-5`, 800 output tokens, totals over the
+five runs:
+
+| provider, cell | path | units | calls | degraded | repaired | tokens | warnings |
+|---|---|---|---|---|---|---|---|
+| DeepSeek, default | surface | 21 | 7 | 0 | 2 | 7,709 | |
+| DeepSeek, json-ast | json-ast, `json_object` | 23 | 6 | 0 | 1 | 11,091 | |
+| DeepSeek, json-ast, no channel | json-ast | 21 | 5 | 0 | 0 | 8,598 | |
+| Anthropic, default | json-ast, tool | 25 | 5 | 0 | 0 | 13,111 | |
+| Anthropic, surface | surface | 5 | 5 | 5 | 0 | 4,000 | W304 ×4, W455 ×1 |
+| Anthropic, json-ast, no channel | json-ast | 5 | 5 | 5 | 0 | 4,000 | W304 ×4, W455 ×1 |
+
+And the same three Anthropic cells again on 2026-11-15, after the effort change below, with the
+free-text requests at `low`:
+
+| provider, cell | path | units | calls | degraded | repaired | tokens | warnings |
+|---|---|---|---|---|---|---|---|
+| Anthropic, default | json-ast, tool | 25 | 5 | 0 | 0 | 12,455 | |
+| Anthropic, surface | surface | 25 | 5 | 0 | 0 | 7,397 | |
+| Anthropic, json-ast, no channel | json-ast | 17 | 6 | 2 | 0 | 11,425 | W041 ×10, W304 ×2, W308 ×1 |
+
+**On DeepSeek the channel changes nothing five runs can measure.** Two repairs in seven calls
+on the surface path, one in six through `json_object`, none in five with no channel, and no
+span degraded anywhere: the differences are inside what five runs tell apart. What the channel
+does cost is tokens — `json_object` spent 29% more than the same path without it, for the same
+units — so D-9's default stands: the surface path is the recoverable one and is no dearer.
+(A first run of the same cells put Anthropic's default at six calls and one repair; the table
+is the second run, the one that recorded warnings.)
+
+**On Anthropic the tool channel is the only path that finishes at 800 tokens.** Both free-text
+paths hit the limit on every run — truncated four times, unanswered once, each call spending
+exactly the 800 — and staged one unit per run under rule I. That is not a repair rate: nothing
+arrived whole to repair. The cause is effort. 1.15 pinned `low` only on a schema request,
+which is what the tool channel sends; a free-text request ran at the model's default, and on
+Haiku the reasoning at that default spends the budget before the answer is written. **Every
+request is now `low` unless the configuration says otherwise.** The grounds are the three
+measurements that exist: `low` and `medium` are the same answer at the same price on every
+model, `high` bought one unit once on Opus and on Haiku answered nothing, and the default on
+free text ran out of limit on five calls of five. The quarter headroom and the four-to-one
+sizing were both measured at `low`, and an ingest should cost the same on whichever path the
+router picks for it. `effort` on the provider still overrides, on every request. A request
+carries no task, so the default reaches `ask`, `attest`, `link` and `summarise` as well; the
+measurement covers ingest, and a per-task effort is a field on the request for the day
+`ask --misses` shows the answers wanted the reasoning.
+
+Measured after the change, the second table: the surface path stages the same twenty-five
+units in the same five calls as the tool channel, nothing degraded, for 41% fewer tokens — on
+Anthropic as on DeepSeek, the open path is the one that costs less, and the channel buys no
+unit it does not. The json-ast path with no channel is the one that still pays: two of six
+calls truncated, ten bodies placed outside their range and one quote reworded, which is the
+answer written as JSON by hand rather than through a tool or as prose. Nothing routes there
+by default.
+
+### Every stream is read as the answer is written
+
+1.15's `Provider::stream` read the response whole and replayed its events into the channel, on
+every mapper that streams, which streamed nothing a `complete` did not: the first token and the
+last arrived in the same drain. The transport now has a second POST (`http::post_stream`) that
+hands the connection over as soon as the status is in, sharing the attempt loop — backpressure
+waited out, the error body kept — and each mapper reads the body a line at a time, emitting
+each event as its line completes: the Anthropic mapper its own event stream, DeepSeek and
+OpenAI the chat-completions stream through one shared reader, Ollama its line-delimited JSON.
+Gemini does not stream and is unchanged. Measured with a forty-line answer, `SMYSL_STREAM=1`,
+on every provider reachable here, as the first drain that carried text against the last:
+
+| provider, model | first token | last token | drains with text | lines | output tokens |
+|---|---|---|---|---|---|
+| Ollama, `llama3.2` (loopback) | 88 ms | 598 ms | 40 | 40 | 80 |
+| DeepSeek, `deepseek-chat` | 1,119 ms | 1,527 ms | 17 | 40 | 109 |
+| Anthropic, `claude-haiku-5-5` | 568 ms | 1,319 ms | 9 | 40 | 232 |
+
+The test asserts the first drain that carried text was not the one that ended the stream.
+
+Three consequences. The timeout on the streaming path is the longest silence the mapper will
+sit through between bytes — connect, write, each read — not a bound on the whole answer, so a
+long answer is never cut off for being long; `complete` still reads whole, and
+`ANTHROPIC_TIMEOUT_SECS` stays 600 for it. A caller that drops the receiver stops the download:
+the read loop breaks when the channel is gone, the reader is dropped, and the connection with
+it, so the rest of the answer is never sent or paid for. And a connection that breaks or falls
+silent part way through is `Unreachable`, after the tokens already sent, which the caller must
+not take for an answer — `Stream::drain` already said so of a sender that vanished.
+
+Fixed on the way, on all four: 1.15's stream handed an error status's body to the event
+reader, which found no events in it and reported an empty answer as a success. A status that
+is not success is now classified from its body as `complete` classifies one, by the same
+function, which each mapper now exposes to its streaming thread.
+
+### The effort measured on `ask --answer`, its gists cut to the bound, and the answer in the ledger
+
+The effort decision above reaches every request, and the measurement behind it was ingest's. The
+one other free-text request a user pays for from the CLI is `ask --answer`, the model reading a
+dossier and answering in grounded records, so the same question was put to it: on
+`claude-haiku-5-5`, over the dossier fixture, four questions, `SMYSL_ASK_RUNS` runs each at
+`low` and at `high`, each run a fresh copy of the store. A record is *proposed* when the model
+wrote it, *dropped* when it grounded outside the dossier (`SMY-W478`), *lowered* when rule M
+capped it (`SMY-W036`):
+
+| effort | runs | proposed | dropped | lowered | tokens | spent thinking | wall time |
+|---|---|---|---|---|---|---|---|
+| `low` | 12 | 55 | 0 | 16 | 22,571 | 1,146 | 38.6 s |
+| `high` | 12 | 53 | 0 | 16 | 29,568 | 8,356 | 68.1 s |
+
+**The same answer, for a third more.** Fifty-five records against fifty-three, none dropped on
+either side, sixteen lowered on each: nothing `high` wrote that `low` did not, and nothing
+grounded better. What `high` bought was 7,200 tokens of reasoning, 31% more spent and 77% more
+waited, on a dossier of five lines. The same result as ingest's, on the other free-text request
+there is, so `low` stands for every request and a per-task effort is not warranted by anything
+measured; it would be a field on the request, for the day a measurement wants it.
+
+**What the measurement found instead.** 23 answers of 24 failed the store's check — `SMY-E022`,
+a gist past `l0_max`, 52 records in all, 25 at `low` and 27 at `high` — and only one run of the
+24 staged anything. Every ingest template states the gist bound per script; the answer template
+did not, so the model was never told the number it was checked against. `ingest.ask.answer` is
+now version 2 and states it, through the same sentence the ingest templates use, for the
+estimator the caller named. Rerun at `low` with version 2, twelve answers: 10 records over
+the cap where the first pass had 2.2 a run, most of them two to eight tokens past it, and
+three runs of twelve staged where one of 24 had. Stating the bound cut the overrun by more
+than half; it did not end it, because a model cannot count the way the estimator does, and every
+answer still carrying one gist a few tokens over lost the whole answer to it. `ask` has no repair
+turn by design, and the one shape defect a constructed unit can carry does not need one: a gist
+over the bound is now cut to it, ending in an ellipsis, and the claim as the model wrote it moves
+whole into the body, above any body the unit had — the diagnostic's own suggestion, done
+mechanically, under a new `SMY-W457` on the unit's new identity, with its grounds, edges and
+labels following, in the topological order rule M's remap uses. Nothing is invented and nothing
+is lost; the cut is measured under the store's own profile, the one the check runs under.
+
+The rerun with the cut found the last of the failures was not the answer's at all. "Why was
+Naomi bitter?" failed its check three times of three with no cut reported, on one uid every
+time: the `counter` slot's saved query, whose gist is its text by design (OQ-85), and whose
+text — the question's terms bound into `matches` clauses — ran to 34 tokens. `ask --save` had
+been writing a record that failed the check of every store it was saved into, so `smysl check`
+on such a store failed, and so did every answer staged over it. A saved query's gist is now its
+text while the text fits the bound and the text cut to it when it does not; the text stays
+whole in `query:text`, which is what a rerun reads, and in the body for a reader. The cut is
+one routine on the granularity profile, `shorten_gist`, which the answer path and the saved
+query share. Rerun at `low` with both cuts, twelve answers: twelve staged, no gist over the
+cap, fifteen cuts reported across them, and the saved store checks clean of errors — one
+warning remains on it, `SMY-W041`, the cut query's body being shorter than the body range
+wants, which is true and is what a warning is for.
+
+On the way, `ask --answer`'s summary line now counts the cuts beside the drops and the
+lowerings, and says what the call cost, with the reasoning's share where the provider reports
+one; and the call is recorded in the usage ledger under
+`content-ingest`, the task it is routed by. It was the one model call the CLI made that the
+ledger did not see; the manual's "only `ingest` writes the ledger" is corrected.
+
+### Four measurements on what 1.16 had already built
+
+Each of the four below is a number 1.16 recorded and did not act on, or a premise it rested on
+without measuring. None adds a feature; each changes what an existing one does, or says what it
+does.
+
+**The Ollama mapper, measured through the other path.** TX-P5 recorded the mapper as not usable
+over a real corpus — one opaque unit per pass on GE-T2's text windows, every call answered 200 —
+and located the cause "in the path rather than the model's size" without saying where in the
+path. Rerun 2026-11-16 on `llama3.2`, both arms. The text arm is as it was: one window of
+English, two spanless units, nothing comparable. The chunked path, `SMYSL_REPAIR_RATE=1` over
+the SM-P14 fixture at 800 output tokens, five runs a cell:
+
+| cell | path | units | calls | degraded | repaired | tokens |
+|---|---|---|---|---|---|---|
+| default, `json-schema` enforced | json-ast | 5 | 15 | 5 | 0 | 17,685 |
+| surface | surface | 10 | 5 | 0 | 0 | 4,415 |
+| json-ast, no channel | json-ast | 5 | 15 | 5 | 0 | 28,230 |
+
+On the surface path every call answered whole: two units a run, no repair turn, a quarter of
+the tokens. Through Ollama's `format` schema and through JSON written by hand, every run ran to
+the limit (`SMY-W304`), spent its three attempts and degraded to one opaque unit. So the mapper
+is not the defect and neither is the transport: a 3B model does not finish a JSON answer, and
+the same model asked for surface records does. The text arm runs the surface path already — a
+default Ollama configuration enforces no structured mode, and D-9 sends an unenforced provider
+down the surface path — so what it cannot answer is the window prompt, verses with spans and
+quotes, and that is the model's size after all. H-10 narrows to those two sentences. Nothing
+changes by default: a configuration that enforces `json-schema` on Ollama asked for the channel,
+and this table is what to read before asking.
+
+**The cache's share, measured.** The chunk sizing above makes more calls and says the prompt
+cache carries them; nothing had measured that. One `ingest` of this project's README on
+`claude-haiku-5-5` at `low`, the default `max_output`: 35 chunks, 47 calls — 10 of them repair
+turns, 2 chunks degraded — 272 units staged, 118,932 tokens, of which 67,157 in, 51,775 out and
+20,318 of the output spent thinking. Of the input, **27,951 (42%) was read from the cache and
+13,904 (21%) written to it**; the remaining 25,302 is the passages themselves, which no cache
+holds. At a tenth for a read and a quarter over for a write, that is a third off the input, and
+the input is a fifth of the bill at a five-to-one output price: the cache carries the prompt,
+not the cost. Two things the numbers say beside that. A third of what the cache saw was
+*written* rather than read, where a prefix that never changes needs one write in forty-seven;
+the repair turn's system prompt differs from the content template's and accounts for one more,
+not nine, and the ledger cannot say which calls wrote, because an ingest writes one line for its
+run — which `usage` then reported as **one call**. The line now says how many calls the run made
+(`calls`, written only when it is not one), so a total counts calls and not lines; a ledger from
+before 1.16 reads back unchanged. And the ten repair turns were all `SMY-E022`, a gist one to
+seven tokens over the bound: 21% of the calls, and the cache writes with them, bought what
+`ask --answer`'s cut now does for nothing. Not moved here — ingest's repair loop is a design
+with a measurement behind it — but it is the next thing that measurement should look at.
+
+**Rule M stated to the model.** Of the 55 records `ask --answer` proposed at `low`, 16 were
+lowered by rule M. Version 2 of the answer template told the model to write `status: derived` on
+every record and nothing about the grounds' statuses, so a record resting on a line the dossier
+marked `speculative` was written `derived` and lowered at staging — every one of the sixteen.
+Version 3 states the rule as the ingest templates state theirs: the status is the weakest
+ground's and never above `derived`. Twelve answers at `low`, before and after:
+
+| template | proposed | lowered (`SMY-W036`) | cut (`SMY-W457`) | tokens |
+|---|---|---|---|---|
+| 2, bound stated | 54 | 16 | 15 | 22,696 |
+| 3, rule M stated | 57 | 2 | 16 | 25,497 |
+
+The records now carry the statuses the lines support — `derived`, `inferred` and `speculative`
+in one answer where version 2 wrote `derived` six times — and a lowering means the model
+overclaimed rather than that it was never told, which is the only thing `SMY-W036` was ever for.
+The cut count did not move: a model told the bound still writes past it about once an answer.
+The tokens rose by a ninth, the longer prompt and a larger thinking share on the two longer
+questions; Haiku's reasoning at `low` is not zero on every request.
+
+**Latin script that is not English is dearer, and it was not compounds.** The sizing estimate
+above was a quarter short on German, and the entry put that down to compounds. Measured again
+over GE-T2's corpus — Genesis 4, Exodus 20 and a psalm in each tier-1 language, 45 samples
+beside the 48 — the tokeniser spends a token per 2.9 letters of English, 2.3 of Spanish or
+French and 2.1 of German, and the Luther German has almost no long words: every Spanish, French
+and German sample came out under, by 10% to 29%, and a word rule — letters in words past 8, 10,
+12 or 14 characters at a divisor of their own — fitted to nothing. The residual is the
+tokeniser's English, and it reaches every Latin-script language that is not. A divisor by
+language would need a language, and the chunker is given none; what those languages carry that
+English does not is accented letters, so where two-byte letters are at least one in a hundred of
+the ASCII ones and no Cyrillic is present, letters now count at 2.25 bytes a token. Over the 93:
+
+| | English (41) | German (10) | Spanish, French (20) |
+|---|---|---|---|
+| before, under by | 8, at most 11.5% | 10, at most 28.8% | 20, at most 21.0% |
+| after, under by | 8, at most 11.5% | 9, at most 27.8%; 9 of 10 within 10% | 7, at most 2.8% |
+
+English is untouched, Spanish and French are within three percent, and nine German samples of
+ten are within a tenth. The tenth is the 48's own German, technical prose of compounds with two
+accented letters in 245, still 28% under: the mark is not the cause, and a text that carries the
+cause without the mark is still mis-sized. Recorded.
+
+**And what 1.14 left.** Questions still unread (the sixth set at 52 of 80), a subject by a
+name the store does not write, a saved query and a pinned traversal waiting on a store that
+does not exist yet, GE-T7 on a thousand real works, and the ones only people can close.
+None of it moved in 1.15, and none of it is planned for 1.16 until something measured needs it.
+
+---
+
 ## 1.15.0 — 2026-11-14
 
 The hosted-provider path run against a real Anthropic key for the first time, and what that

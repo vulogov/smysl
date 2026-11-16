@@ -9601,9 +9601,39 @@ fn ask_answer(
     }
     eprintln!(
         "smysl ask: answer: {} proposed, {} dropped for grounding outside the dossier (SMY-W478), \
-         {} lowered by rule M (SMY-W036)",
-        report.proposed, report.dropped, report.lowered
+         {} cut to the gist bound (SMY-W457), {} lowered by rule M (SMY-W036); {} tokens{}",
+        report.proposed,
+        report.dropped,
+        report.shortened,
+        report.lowered,
+        report.usage.total(),
+        // The reasoning's share of the output, where the provider reports one: an answer is
+        // one call at the caller's effort, and this is what the effort cost.
+        if report.usage.thinking_tokens > 0 {
+            format!(" ({} spent thinking)", report.usage.thinking_tokens)
+        } else {
+            String::new()
+        }
     );
+    // The ledger records counts, models, task and recipe - never content (§29). An answer is a
+    // model call like any other, and until 1.16 it was the one call the ledger did not see.
+    if let Some(provider) = &report.provider {
+        let mut ledger = smysl::Ledger::open(project_file(global, smysl::Ledger::PATH));
+        let entry = smysl::LedgerEntry::new(
+            now_millis(),
+            provider.clone(),
+            report.model.clone().unwrap_or_default(),
+            smysl::Task::ContentIngest,
+            report.usage,
+        );
+        let entry = match report.recipe {
+            Some(r) => entry.with_recipe(smysl::recipe_short(&r)),
+            None => entry,
+        };
+        if let Err(e) = ledger.record(entry) {
+            eprintln!("smysl ask: the ledger could not be written: {e}");
+        }
+    }
     let Some(staged) = report.staged else {
         eprintln!("smysl ask: nothing to stage");
         return ExitCode::Success;
@@ -11472,7 +11502,10 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             report.model.clone().unwrap_or_default(),
             smysl::Task::ContentIngest,
             report.usage,
-        );
+        )
+        // One line for the run, and the line says how many calls it was. Measured in 1.16: a
+        // 47-call ingest the ledger reported as one call.
+        .with_calls(u32::try_from(report.calls).unwrap_or(u32::MAX));
         let entry = match report.recipe {
             Some(r) => entry.with_recipe(smysl::recipe_short(&r)),
             None => entry,

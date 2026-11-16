@@ -658,7 +658,7 @@ pub fn summarise_children() -> Template {
 
 /// The answer to a dossier's question (SMYSL-2.5 §3.13, `ask --answer`; TX-P8 step 3).
 ///
-/// Version 1. The dossier is the only material: a line per unit, `role`, tab, uid, tab, status,
+/// Version 3. The dossier is the only material: a line per unit, `role`, tab, uid, tab, status,
 /// tab, gist, with the question first. The model answers in surface records and grounds each on
 /// uids from those lines, which is what lets the caller check the answer mechanically — a ground
 /// outside the dossier is dropped (`SMY-W478`), and rule M caps every unit at its weakest ground
@@ -670,9 +670,31 @@ pub fn summarise_children() -> Template {
 /// rather than outside it, because it is a unit of the dossier like the rest and a person's
 /// question is no more an instruction to the model than a verse is.
 pub fn answer_dossier() -> Template {
+    answer_dossier_with(TokenEstimator::Utf8Div4)
+}
+
+/// As [`answer_dossier`], stating the gist bound for `est` (F-2).
+///
+/// Version 3 states rule M. Version 2 told the model to write `status: derived` on every record
+/// and said nothing of the grounds' statuses, so a record resting on a line the dossier marked
+/// `speculative` was written `derived` and lowered at staging (`SMY-W036`): measured live on
+/// `claude-haiku-5-5` (1.16), 16 records of 55 at `low`, every one of them. The rule is now stated
+/// as the ingest templates state theirs — the status is the weakest ground's, never above
+/// `derived` — so that a lowering means the model overclaimed rather than that it was never told.
+/// Measured with it, twelve answers at `low`: 2 records of 57 lowered where 16 of 54 had been,
+/// and the records carry the statuses the lines support — `derived`, `inferred` and
+/// `speculative` in one answer where version 2 wrote `derived` six times.
+///
+/// Version 2 states the bound at all. Version 1 did not, and measured live on `claude-haiku-5-5`
+/// (1.16) 23 answers of 24 wrote at least one gist past `l0_max`, so the staged batch failed
+/// the check and nothing was kept — the model was never told the number every ingest template
+/// tells it. As with the ingest templates, the estimator is the recipe's to record, not the
+/// version's.
+pub fn answer_dossier_with(est: TokenEstimator) -> Template {
+    let gist_bound = gist_bound_for(est);
     Template {
         id: "ingest.ask.answer".to_string(),
-        version: 1,
+        version: 3,
         system: format!(
             "You answer a question from a dossier, and from nothing else. {UNTRUSTED}\n\n\
              Between the markers is one line per unit: a role, a tab, the unit's uid (`b3:` and \
@@ -682,14 +704,17 @@ pub fn answer_dossier() -> Template {
              Answer with surface records and nothing else: no commentary, no code fence. Write \
              each record as a header line and a gist line, exactly like this:\n\n\
              {ANSWER_EXAMPLE}\n\n\
-             Each record is `@claim` with a label of your choosing, `status: derived` and \
-             `grounds:` listing the uids of the lines it rests on, copied in full. Ground every \
-             record on at least one line, and only on lines you were given: a record grounded on \
-             anything else is discarded. Say nothing the lines do not say, because each record \
-             is kept as derived from its grounds alone. Where the lines disagree, say that they \
+             Each record is `@claim` with a label of your choosing, a `status` and `grounds:` \
+             listing the uids of the lines it rests on, copied in full. Ground every record on \
+             at least one line, and only on lines you were given: a record grounded on anything \
+             else is discarded. Its status is the weakest of its grounds' and never more than \
+             `derived`: `speculative` when any ground is `speculative`, `inferred` when any is \
+             `inferred`, `derived` otherwise. A record is kept at that status whatever you \
+             write, so write the one it will keep. Say nothing the lines do not say, because \
+             each record is kept as derived from its grounds alone. Where the lines disagree, say that they \
              disagree and ground the record on both sides. Where they do not answer the \
              question, write one record saying so, grounded on the question's line. Three to \
-             six records is enough.\n\
+             six records is enough. Keep each gist to a {gist_bound}.\n\
              {LANG_RULE}"
         ),
         user: format!("{FENCE}\n{{input}}\n{FENCE}"),
