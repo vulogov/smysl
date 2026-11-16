@@ -35,7 +35,7 @@ Add `default-features = false` for the pure library: no async runtime, no HTTP c
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.15.0` and the format is `smysl/1.0`.** The crate version means the API is
+**The crate is `1.16.0` and the format is `smysl/1.0`.** The crate version means the API is
 frozen: every public item moves only with a 2.0, enforced per crate by `cargo-semver-checks` on
 every push. [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise
 written down. The format version means nothing about the format changed incompatibly:
@@ -43,33 +43,32 @@ written down. The format version means nothing about the format changed incompat
 Python, JavaScript and Go written from the specification alone — and `smysl/1.0` reports that
 record rather than a change. SMYSL-2's library records are additions a 1.0 reader skips.
 
-## Release 1.15.0
+## Release 1.16.0
 
-The hosted-provider path run against a real Anthropic key for the first time, and what that
-run found: a mapper gone stale, a chunk wider than any answer it could get, and three kinds of
-model behaviour the diagnostics could not tell apart. The full account, with every figure
-measured, is in [`CHANGELOG.md`](CHANGELOG.md).
+What 1.15 recorded and did not act on, measured and acted on: the chunk, the channel, the
+stream, the one other model call the CLI makes, and four more figures the cycle's own entries
+rested on. The full account, with every figure measured, is in [`CHANGELOG.md`](CHANGELOG.md).
 
-- **The Anthropic mapper speaks the current API** (`2026-10-21`) and is verified live on
-  Haiku, Sonnet and Opus 5.5: the tool under `auto`, no temperature, the reasoning accounted
-  for.
-- **A chunk is never wider than the answer it can get.** The window is the tighter of the
-  context and `max_output`, less a quarter of the output on a provider whose reasoning is
-  spent from it.
-- **What the model did is counted apart from what failed.** A refusal is `SMY-W438`, an
-  output limit spent entirely on reasoning is `SMY-W455`, an answer from a fallback model is
-  `SMY-W437`, a temperature the provider will not take is `SMY-W456`, an answer gist cut to its bound is `SMY-W457`. The registry is 156.
-- **The ledger shows the prompt cache and the thinking share**, per call and in the totals,
-  and `smysl ingest` prints both. An ingest's line counts the calls of its run.
-- **`effort: low | medium | high`** on an Anthropic provider. `low` stays the default: it
-  measured the same answer as `medium` at the same price, and `high` cost Haiku its whole
-  output limit.
-- **Anthropic streams, and waits ten minutes** by default. The probe reports each model's
-  lifecycle: deprecated since, retires at.
-- **An open payload goes unstrict** to an OpenAI-compatible endpoint; strict mode only when
-  the translated schema is closed.
-- **Measured and recorded:** three models at three efforts, the live model matrix, and the
-  byte estimator against the tokeniser, from 0.50 of the count on code to 1.14 on Cyrillic.
+- **A chunk is sized to the answer, not the passage.** Measured across three models and three
+  efforts, an answer is three to seven times its passage's tokens, so a chunk is `max_output`
+  less the reasoning headroom, divided by four. It is measured in a sizing estimate by class
+  of character, fitted to the tokeniser on 93 samples; Latin script that is not English counts
+  its letters dearer, because the tokeniser does.
+- **The open path costs less and buys no fewer units.** On Anthropic as on DeepSeek, the
+  surface path stages the same units as the structured channel for 41% fewer tokens, and
+  every request runs at `low` effort unless the configuration says otherwise: `high` bought
+  nothing `low` did not, on ingest or on `ask`.
+- **Every stream is read as the answer is written**, on Anthropic, DeepSeek, OpenAI and
+  Ollama; the first token arrives before the last, a dropped receiver stops the download, and
+  an error status is classified rather than read as an empty answer.
+- **`ask --answer` keeps its answers.** A gist over the bound is cut to it with the claim whole
+  in the body (`SMY-W457`), a saved query's gist the same, and the template states rule M, so
+  a lowering means an overclaim. Twelve answers of twelve stage where one of twenty-four did.
+  The call is in the usage ledger. The registry is 156.
+- **The ledger counts calls, and the cache's share is measured**: 42% of an ingest's input
+  read from the cache, 21% written, the passages the rest.
+- **The Ollama mapper is not the defect.** A 3B model stages surface records whole and runs to
+  the limit through a JSON schema; the finding H-10 waited on is recorded.
 
 Building from source:
 
@@ -385,7 +384,7 @@ and `cargo run --example information_theory` for the library layer. See
 
 ## Status
 
-Crate `1.15.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.16.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 

@@ -9,9 +9,12 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.16.0
 
-What 1.15 leaves open, by what it blocks rather than the order it is easiest. 1.15 ran the
-hosted-provider path against a real key for the first time and shipped to crates.io for the
-first time since 1.11.0; what it recorded and did not act on is where 1.16 starts.
+What 1.15 recorded and did not act on, measured and acted on, each item below with its
+figures. 1.15 ran the hosted-provider path against a real key for the first time; 1.16 took
+what that run wrote down — the estimator's distance from the tokeniser, the headroom's single
+number, strict mode's unmeasured repair rate — and found under two of the three a premise that
+was wrong. What 1.16 leaves open is at the end: what it measured and chose not to move, and
+what 1.14 left, none of which moved.
 
 **What 1.15 recorded, 1.16 acted on first.** The estimator's distance from the tokeniser
 and the headroom's single measurement are the first two entries below; both turned out to be
@@ -25,8 +28,8 @@ response_format type is unavailable now"*. The question 1.15 left, whether the r
 differs between the two, is therefore not one about strict. What can differ is the channel the
 answer comes back through, and that is measured below, on DeepSeek and on Anthropic.
 
-**The published check runs weekly against 1.15.0** for the first time with a grep that can
-match. What it finds in the registry copy, if anything, is the first item here.
+**The published check ran weekly against 1.15.0** for the first time with a grep that can
+match, twice in the cycle, and found nothing to report in the registry copy.
 
 ### The headroom measured across the matrix, and the answer that is four times the passage
 
