@@ -24,7 +24,9 @@ pub mod jcs;
 pub mod json;
 pub mod leaf;
 pub mod pointer;
+pub mod profile;
 
 pub use json::{Json, JsonError};
 pub use leaf::{Leaf, VType};
 pub use pointer::{Pattern, Pointer};
+pub use profile::{Profile, ProfileError};

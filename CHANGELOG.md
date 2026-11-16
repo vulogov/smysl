@@ -275,6 +275,29 @@ fuzz target, `tel_json`, holds that the reader never panics and that canonical t
 to itself. It runs in `make fuzz` and CI, and its first run was 1.5 million inputs with no
 failure.
 
+
+### Profiles (TL-P2 step 2)
+
+`smysl_tel::Profile` is §20.2's reader profile: an HJSON file that says which objects it
+selects, which leaves are noise, which arrays are keyed and by what, each leaf's class, and
+where a class's leaves go instead of becoming units. Unknown fields are refused, because a
+misspelt `clases:` silently ignored would leave every leaf a `gauge`.
+
+Three things the RFC needs and doesn't spell out:
+
+- **`ints`**, the pointers the source types as integers. §5.5 makes a number `int` when the
+  source format types it so (a Kubernetes field whose OpenAPI type is `integer`) and `dec`
+  otherwise, but a snapshot doesn't say which, and §20.2's example has nowhere to. A profile
+  lists them.
+- **A tie-break for classification.** §8.1 step 4 takes the longest covering class pattern, but
+  `/a/*` and `/*/b` both cover `/a/b`. The pattern with fewer `*`s wins, then the one whose
+  canonical text sorts first, so two implementations can't classify one leaf two ways.
+- **What the hash is a hash of:** `hash_bytes` over the canonical CBOR of the parsed profile,
+  as a measure recipe's is, and spelled `b3:`. Patterns are re-spelled canonically and the
+  collections sorted, so comments, whitespace, key order and spelling don't move it, and a
+  changed class does. Empty collections are omitted, so a field added later doesn't move the
+  hash of a profile that doesn't use it.
+
 ---
 
 ## 1.16.0 — 2026-11-16
