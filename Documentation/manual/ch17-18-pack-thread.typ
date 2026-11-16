@@ -619,8 +619,10 @@ dossier, fenced as data, and answers in surface records that may ground only on
 the dossier's units. A record grounding anywhere else is dropped and counted
 (`SMY-W478`), a gist over the profile's bound is cut to it with the claim moved
 whole into the body (`SMY-W457`, from 1.16; there is no repair turn), what
-survives is capped by rule M at its weakest ground (`SMY-W036`), and all of it
-is staged for review like any model output. The
+survives is capped by rule M at its weakest ground (`SMY-W036`; from 1.16 the
+template states the rule, so a lowering means the model overclaimed rather than
+that it was never told), and all of it is staged for review like any model
+output. The
 summary line says what the call cost, with the reasoning's share where the
 provider reports one, and the call is recorded in the usage ledger (from
 1.16) like an `ingest` call.

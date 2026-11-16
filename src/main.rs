@@ -11502,7 +11502,10 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             report.model.clone().unwrap_or_default(),
             smysl::Task::ContentIngest,
             report.usage,
-        );
+        )
+        // One line for the run, and the line says how many calls it was. Measured in 1.16: a
+        // 47-call ingest the ledger reported as one call.
+        .with_calls(u32::try_from(report.calls).unwrap_or(u32::MAX));
         let entry = match report.recipe {
             Some(r) => entry.with_recipe(smysl::recipe_short(&r)),
             None => entry,

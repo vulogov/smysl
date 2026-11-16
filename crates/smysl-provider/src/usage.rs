@@ -34,6 +34,11 @@ pub struct LedgerEntry {
     pub output_tokens: u64,
     pub estimated: bool,
     pub retries: u32,
+    /// Model calls the line stands for. One for a single call; an ingest writes one line for
+    /// its run and says how many calls it made, repairs included, so a total counts calls and
+    /// not lines. Written only when it is not one, so a ledger from before 1.16 reads back
+    /// unchanged. Measured before it existed: a 47-call ingest that `usage` reported as one.
+    pub calls: u32,
     /// Of `input_tokens`, served from the provider's prompt cache. Zero where there is no
     /// cache; written to the line only when it is not.
     pub cache_read_tokens: u64,
@@ -65,6 +70,7 @@ impl LedgerEntry {
             output_tokens: u.output_tokens,
             estimated: u.estimated,
             retries: u.retries,
+            calls: 1,
             cache_read_tokens: u.cache_read_tokens,
             cache_write_tokens: u.cache_write_tokens,
             thinking_tokens: u.thinking_tokens,
@@ -80,6 +86,12 @@ impl LedgerEntry {
 
     pub fn with_run(mut self, r: impl Into<String>) -> LedgerEntry {
         self.run = Some(r.into());
+        self
+    }
+
+    /// How many model calls this line stands for; see [`LedgerEntry::calls`].
+    pub fn with_calls(mut self, n: u32) -> LedgerEntry {
+        self.calls = n.max(1);
         self
     }
 
@@ -103,6 +115,9 @@ impl LedgerEntry {
         s.push_str(&format!(",\"out\":{}", self.output_tokens));
         s.push_str(&format!(",\"estimated\":{}", self.estimated));
         s.push_str(&format!(",\"retries\":{}", self.retries));
+        if self.calls > 1 {
+            s.push_str(&format!(",\"calls\":{}", self.calls));
+        }
         // The cache's share, only where there is one: a provider without a cache writes the
         // line it always wrote, and a ledger from before 1.15 reads back unchanged.
         if self.cache_read_tokens > 0 {
@@ -146,6 +161,10 @@ impl LedgerEntry {
                 .get("retries")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0),
+            calls: fields
+                .get("calls")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1),
             cache_read_tokens: fields
                 .get("cache_read")
                 .and_then(|v| v.parse().ok())
@@ -421,7 +440,7 @@ impl Ledger {
                 cache_write_tokens: 0,
                 thinking_tokens: 0,
             });
-            row.calls += 1;
+            row.calls += u64::from(e.calls);
             row.input_tokens += e.input_tokens;
             row.output_tokens += e.output_tokens;
             row.retries += e.retries as u64;
@@ -550,6 +569,24 @@ mod tests {
         );
         let o = rows.iter().find(|r| r.key == "ollama").unwrap();
         assert!(!o.to_string().contains("cache"), "{o}");
+    }
+
+    /// An ingest writes one line for a run of many calls, and the line says how many, so a
+    /// total counts the calls that were made and not the lines that were written.
+    #[test]
+    fn a_run_of_many_calls_is_one_line_that_counts_them() {
+        let one = entry(1, "anthropic", Task::ContentIngest, 300, 120);
+        assert!(!one.to_line().contains("calls"), "{}", one.to_line());
+        let run = entry(2, "anthropic", Task::ContentIngest, 67_157, 51_775).with_calls(47);
+        let line = run.to_line();
+        assert!(line.contains("\"calls\":47"), "{line}");
+        assert_eq!(LedgerEntry::from_line(&line), Some(run.clone()));
+
+        let mut l = Ledger::new();
+        l.record(one).unwrap();
+        l.record(run).unwrap();
+        let rows = l.totals(GroupBy::Provider, None);
+        assert_eq!(rows[0].calls, 48);
     }
 
     #[test]

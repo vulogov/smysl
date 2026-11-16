@@ -531,6 +531,16 @@ fn reachable() -> Option<Box<dyn Provider>> {
         // the model's size. SMYSL-2.1 H-10 and 2.2 O-3 both flag this mapper as unverified for
         // want of an Ollama to test against; this is the first measurement of it over a real
         // corpus, and diagnosing it is its own work, not GE-T2's.
+        //
+        // Diagnosed in 1.16 (2026-11-16), through the chunked path rather than this one: over
+        // the SM-P14 fixture `llama3.2` stages two units a call on the surface path, five runs
+        // of five, no repair — and runs to the output limit on every run through Ollama's
+        // `format` schema and through hand-written JSON (`SMY-W304`). The mapper and the
+        // transport are not the defect; a 3B model does not finish a JSON answer. This arm
+        // runs the surface path already (a default configuration enforces no structured mode),
+        // so what it cannot answer is the window prompt — verses, spans and quotes — and that
+        // is the model's size after all. Rerun the same day: one window of English, two
+        // spanless units, nothing comparable, as before.
         cfg.model = std::env::var("SMYSL_GE_T2_MODEL")
             .ok()
             .filter(|m| !m.trim().is_empty())

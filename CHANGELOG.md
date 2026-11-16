@@ -276,6 +276,96 @@ one; and the call is recorded in the usage ledger under
 `content-ingest`, the task it is routed by. It was the one model call the CLI made that the
 ledger did not see; the manual's "only `ingest` writes the ledger" is corrected.
 
+### Four measurements on what 1.16 had already built
+
+Each of the four below is a number 1.16 recorded and did not act on, or a premise it rested on
+without measuring. None adds a feature; each changes what an existing one does, or says what it
+does.
+
+**The Ollama mapper, measured through the other path.** TX-P5 recorded the mapper as not usable
+over a real corpus — one opaque unit per pass on GE-T2's text windows, every call answered 200 —
+and located the cause "in the path rather than the model's size" without saying where in the
+path. Rerun 2026-11-16 on `llama3.2`, both arms. The text arm is as it was: one window of
+English, two spanless units, nothing comparable. The chunked path, `SMYSL_REPAIR_RATE=1` over
+the SM-P14 fixture at 800 output tokens, five runs a cell:
+
+| cell | path | units | calls | degraded | repaired | tokens |
+|---|---|---|---|---|---|---|
+| default, `json-schema` enforced | json-ast | 5 | 15 | 5 | 0 | 17,685 |
+| surface | surface | 10 | 5 | 0 | 0 | 4,415 |
+| json-ast, no channel | json-ast | 5 | 15 | 5 | 0 | 28,230 |
+
+On the surface path every call answered whole: two units a run, no repair turn, a quarter of
+the tokens. Through Ollama's `format` schema and through JSON written by hand, every run ran to
+the limit (`SMY-W304`), spent its three attempts and degraded to one opaque unit. So the mapper
+is not the defect and neither is the transport: a 3B model does not finish a JSON answer, and
+the same model asked for surface records does. The text arm runs the surface path already — a
+default Ollama configuration enforces no structured mode, and D-9 sends an unenforced provider
+down the surface path — so what it cannot answer is the window prompt, verses with spans and
+quotes, and that is the model's size after all. H-10 narrows to those two sentences. Nothing
+changes by default: a configuration that enforces `json-schema` on Ollama asked for the channel,
+and this table is what to read before asking.
+
+**The cache's share, measured.** The chunk sizing above makes more calls and says the prompt
+cache carries them; nothing had measured that. One `ingest` of this project's README on
+`claude-haiku-5-5` at `low`, the default `max_output`: 35 chunks, 47 calls — 10 of them repair
+turns, 2 chunks degraded — 272 units staged, 118,932 tokens, of which 67,157 in, 51,775 out and
+20,318 of the output spent thinking. Of the input, **27,951 (42%) was read from the cache and
+13,904 (21%) written to it**; the remaining 25,302 is the passages themselves, which no cache
+holds. At a tenth for a read and a quarter over for a write, that is a third off the input, and
+the input is a fifth of the bill at a five-to-one output price: the cache carries the prompt,
+not the cost. Two things the numbers say beside that. A third of what the cache saw was
+*written* rather than read, where a prefix that never changes needs one write in forty-seven;
+the repair turn's system prompt differs from the content template's and accounts for one more,
+not nine, and the ledger cannot say which calls wrote, because an ingest writes one line for its
+run — which `usage` then reported as **one call**. The line now says how many calls the run made
+(`calls`, written only when it is not one), so a total counts calls and not lines; a ledger from
+before 1.16 reads back unchanged. And the ten repair turns were all `SMY-E022`, a gist one to
+seven tokens over the bound: 21% of the calls, and the cache writes with them, bought what
+`ask --answer`'s cut now does for nothing. Not moved here — ingest's repair loop is a design
+with a measurement behind it — but it is the next thing that measurement should look at.
+
+**Rule M stated to the model.** Of the 55 records `ask --answer` proposed at `low`, 16 were
+lowered by rule M. Version 2 of the answer template told the model to write `status: derived` on
+every record and nothing about the grounds' statuses, so a record resting on a line the dossier
+marked `speculative` was written `derived` and lowered at staging — every one of the sixteen.
+Version 3 states the rule as the ingest templates state theirs: the status is the weakest
+ground's and never above `derived`. Twelve answers at `low`, before and after:
+
+| template | proposed | lowered (`SMY-W036`) | cut (`SMY-W457`) | tokens |
+|---|---|---|---|---|
+| 2, bound stated | 54 | 16 | 15 | 22,696 |
+| 3, rule M stated | 57 | 2 | 16 | 25,497 |
+
+The records now carry the statuses the lines support — `derived`, `inferred` and `speculative`
+in one answer where version 2 wrote `derived` six times — and a lowering means the model
+overclaimed rather than that it was never told, which is the only thing `SMY-W036` was ever for.
+The cut count did not move: a model told the bound still writes past it about once an answer.
+The tokens rose by a ninth, the longer prompt and a larger thinking share on the two longer
+questions; Haiku's reasoning at `low` is not zero on every request.
+
+**Latin script that is not English is dearer, and it was not compounds.** The sizing estimate
+above was a quarter short on German, and the entry put that down to compounds. Measured again
+over GE-T2's corpus — Genesis 4, Exodus 20 and a psalm in each tier-1 language, 45 samples
+beside the 48 — the tokeniser spends a token per 2.9 letters of English, 2.3 of Spanish or
+French and 2.1 of German, and the Luther German has almost no long words: every Spanish, French
+and German sample came out under, by 10% to 29%, and a word rule — letters in words past 8, 10,
+12 or 14 characters at a divisor of their own — fitted to nothing. The residual is the
+tokeniser's English, and it reaches every Latin-script language that is not. A divisor by
+language would need a language, and the chunker is given none; what those languages carry that
+English does not is accented letters, so where two-byte letters are at least one in a hundred of
+the ASCII ones and no Cyrillic is present, letters now count at 2.25 bytes a token. Over the 93:
+
+| | English (41) | German (10) | Spanish, French (20) |
+|---|---|---|---|
+| before, under by | 8, at most 11.5% | 10, at most 28.8% | 20, at most 21.0% |
+| after, under by | 8, at most 11.5% | 9, at most 27.8%; 9 of 10 within 10% | 7, at most 2.8% |
+
+English is untouched, Spanish and French are within three percent, and nine German samples of
+ten are within a tenth. The tenth is the 48's own German, technical prose of compounds with two
+accented letters in 245, still 28% under: the mark is not the cause, and a text that carries the
+cause without the mark is still mis-sized. Recorded.
+
 **And what 1.14 left.** Questions still unread (the sixth set at 52 of 80), a subject by a
 name the store does not write, a saved query and a pinned traversal waiting on a store that
 does not exist yet, GE-T7 on a thousand real works, and the ones only people can close.

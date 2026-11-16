@@ -574,10 +574,16 @@ short on almost everything — prose, code, markup, most scripts — and short i
 the wrong side for a chunk, whose answer then does not fit. The sizing estimate
 counts bytes per token by class of character: three for letters, one for
 digits and punctuation, four for Cyrillic, two for the other two-byte scripts
-and two and a half for the wide ones, each on the safe side of what 48 samples
-measured. It over-estimates most text by a tenth to a third and under-estimates
-German by a quarter, and it is used for nothing else: the ledger, the gist
-limits and `pack` budgets keep the format's count.
+and two and a half for the wide ones, each on the safe side of what 93 samples
+measured. Latin script that is not English is dearer to the tokeniser — a
+token per 2.9 letters of English against 2.3 of Spanish or French and 2.1 of
+German, measured over GE-T2's corpus — so where accented letters are at least
+one in a hundred of the plain ones, letters count at two and a quarter bytes
+(from 1.16; the first cut of the estimate put the German gap down to compounds,
+and the Luther German has almost none). It over-estimates English by a tenth to
+a third, brings Spanish and French within a few percent and German within a
+tenth, and it is used for nothing else: the ledger, the gist limits and `pack`
+budgets keep the format's count.
 
 An `ingest` block holds the defaults that are facts about the project rather
 than things to type on every invocation: `prompt`, a prompt override file;
@@ -800,7 +806,18 @@ line it always wrote. The Anthropic mapper marks its system prompt as a cache
 breakpoint, which covers the kernel schema sent with it, so an ingest of many
 chunks reads the two from the cache on every chunk after the first, at a
 fraction of the input price; `usage` shows the share beside each row's total,
-and `ingest`'s summary line names it when there is one.
+and `ingest`'s summary line names it when there is one. Measured in 1.16 on an
+ingest of this project's README — 35 chunks, 47 calls on Haiku — 42% of the
+input was read from the cache and 21% written to it; the rest is the passages
+themselves, which no cache holds. A third of what the cache saw was written
+rather than read, where a prefix that never changes needs one write in
+forty-seven — the repair turn's system prompt accounts for one more, not nine —
+and one line per run cannot say which calls wrote. Recorded, not resolved.
+
+An `ingest` writes one line for its run, and from 1.16 the line says how many
+calls the run made (`calls`, written only when it is not one), so `usage`
+counts calls and not lines. Before it, the 47-call ingest above read as one
+call.
 
 Read this honestly rather than generalising it: in this build, `ingest` and,
 from 1.16, `ask --answer` are the commands that write the ledger from the

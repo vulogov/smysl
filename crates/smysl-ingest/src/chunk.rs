@@ -44,10 +44,24 @@
 /// | other two-byte scripts: Latin accents, Greek, Arabic, Hebrew | 2.0 | 2.5 |
 /// | three- and four-byte: CJK, Devanagari, emoji | 2.5 | 2.9 |
 ///
-/// On the 48 samples this under-estimates 8, by at most 25% (German, whose compounds the
-/// tokeniser splits), and over-estimates the rest by up to 41%; the mean error is 16%. It is
-/// a sizing estimate and nothing else: the ledger, the gist limits and the pack budgets keep
-/// the format's count.
+/// On the 48 samples this under-estimates 8, by at most 25%, and over-estimates the rest by up
+/// to 41%; the mean error is 16%.
+///
+/// **Latin script that is not English is dearer.** The 25% was German, and 1.16 first put it
+/// down to compounds. Measured again over GE-T2's corpus — Genesis 4, Exodus 20 and a psalm in
+/// each tier-1 language, 45 samples beside the 48 — the tokeniser spends a token per 2.9 letters
+/// of English, 2.3 of Spanish or French and 2.1 of German, and the Luther German has almost no
+/// long words: the residual is the tokeniser's English, and it reaches every Latin-script
+/// language that is not. Those languages carry a mark English does not, accented letters, so
+/// where the two-byte letters are at least one in a hundred of the ASCII ones and no Cyrillic is
+/// present, letters are counted at 2.25 bytes a token. Under that rule the English samples are
+/// as before (8 of 41 under, by at most 11.5%), Spanish and French are within 3%, and nine
+/// German samples of ten are within 10%; the tenth is technical German of compounds and two
+/// accents, still 28% under. A word rule — letters in words past 8, 10, 12 or 14 characters at
+/// a divisor of their own — fitted to nothing on the 93 and is not used.
+///
+/// It is a sizing estimate and nothing else: the ledger, the gist limits and the pack budgets
+/// keep the format's count.
 pub fn sizing_tokens(text: &str) -> u32 {
     let mut tally = Sizing::default();
     for ch in text.chars() {
@@ -92,7 +106,14 @@ impl Sizing {
     /// Each class rounds up on its own, so a text of one class never estimates to zero and
     /// the sum never falls below the fit's figure for any class.
     fn tokens(self) -> u32 {
-        self.alpha.div_ceil(3)
+        // Accented letters mark a Latin-script text as not English, and the tokeniser spends
+        // more on it: 2.25 bytes a letter where English gets 3.0 (see [`sizing_tokens`]).
+        let alpha = if self.cyrillic == 0 && self.two * 100 >= self.alpha {
+            (self.alpha * 4).div_ceil(9)
+        } else {
+            self.alpha.div_ceil(3)
+        };
+        alpha
             + self.other
             + self.cyrillic.div_ceil(4)
             + self.two.div_ceil(2)
@@ -702,6 +723,20 @@ mod tests {
         assert_eq!(sizing_tokens("αβγδεζηθ"), 8);
         // Five three-byte characters, 15 bytes at two and a half per token: 6.
         assert_eq!(sizing_tokens("中文分词器"), 6);
+    }
+
+    #[test]
+    fn the_sizing_estimate_counts_accented_latin_dearer_than_english() {
+        // Thirty-six letters: English at three bytes a token is 12. With one umlaut among them
+        // the text is not English to the tokeniser, which spends a token per 2.25 bytes of its
+        // letters: 16, and the umlaut's own two bytes make 17.
+        let latin = "abcdefghijklmnopqrstuvwxyzabcdefghij";
+        assert_eq!(sizing_tokens(latin), 12);
+        assert_eq!(sizing_tokens(&format!("{latin}\u{fc}")), 17);
+        // One accent in three hundred letters is under the one-in-a-hundred mark: 100 and 1.
+        assert_eq!(sizing_tokens(&format!("{}\u{fc}", "a".repeat(300))), 101);
+        // Cyrillic beside Latin is a mixed text, not an accented one: 12 and 4.
+        assert_eq!(sizing_tokens(&format!("{latin}абвгдежз")), 16);
     }
 
     #[test]
