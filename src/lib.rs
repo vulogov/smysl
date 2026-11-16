@@ -572,8 +572,9 @@ mod tests {
         // (1.16.0), an answer gist over the bound, cut to it with the claim whole in the body;
         // 158 with `SMY-E611` and `SMY-E612` (1.17, SMYSL-3 TL-P1), a derived-only contention
         // and a reserved number, raised by `check`'s extension pass; 159 with `SMY-E602` (TL-P1
-        // step 2), a non-canonical `dec`, refused by `smysl_core::Decimal`'s decoder.
-        assert_eq!(Code::ALL.len(), 159);
+        // step 2), a non-canonical `dec`, refused by `smysl_core::Decimal`'s decoder; 160 with
+        // `SMY-E607` (step 3), a series or instrument unit breaking the entity-like rule.
+        assert_eq!(Code::ALL.len(), 160);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

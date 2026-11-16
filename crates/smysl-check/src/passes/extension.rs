@@ -143,6 +143,7 @@ pub fn run(
     }
 
     reserved(store, report);
+    entity_like(store, report);
 
     // `SMY-W409` - an enumeration *code* this build does not know, which is W014's argument
     // one level down. 1.9 opened four enumerations so that an unrecognised code no longer
@@ -278,6 +279,38 @@ pub fn fidelity(store: &(impl StoreRead + ?Sized), profile: &ConsumerProfile) ->
         overall,
         degraded,
         missing,
+    }
+}
+
+/// `SMY-E607` - a series or instrument unit that breaks SMYSL-3 §4.1's entity-like rule.
+///
+/// The rule is `x.text/v1` rule 7's argument for telemetry: a series is what is measured, not
+/// when, so its identity is a function of its identity tuple and one series seen by fifty
+/// scrapes is one unit. Give it an `observed` and it becomes fifty. The implementation is
+/// `smysl_core::schemas::tel::entity_like_violations`, shared with the producer, for the reason
+/// the library pass gives for sharing rule 7's.
+fn entity_like(store: &(impl StoreRead + ?Sized), report: &mut Report) {
+    use smysl_core::schemas::tel;
+    for (uid, unit) in store.units() {
+        let broken = tel::entity_like_violations(&unit.core);
+        if broken.is_empty() {
+            continue;
+        }
+        report.push(
+            Diagnostic::on(Code::E607, *uid)
+                .with_message(format!(
+                    "an `{}` carries what its identity forbids: {}",
+                    unit.core.schema.as_str(),
+                    broken.join(", ")
+                ))
+                .with_suggestion(
+                    "a series or instrument has no span, manifest, published or observed time, \
+                     and no grounds, and its source is exactly `series:<scheme>:<key>` (metric) \
+                     or `instrument:<key>` (tool); what varies over time belongs in its `-meta` \
+                     unit"
+                        .to_string(),
+                ),
+        );
     }
 }
 

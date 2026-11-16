@@ -52,6 +52,12 @@ pub enum FieldType {
     Enum,
     /// A homogeneous list. `&'static` rather than boxed so the table stays a `const`.
     List(&'static FieldType),
+    /// A canonical decimal, `[m, e]` (RFC SMYSL-3 §5; [`crate::Decimal`]). Defined by
+    /// `x.tel/v1` for its own payloads, and proposed for A-7 (§5.4).
+    Dec,
+    /// A 32-byte byte string that is **not** a reference and is never resolved: a digest
+    /// (RFC SMYSL-3 §4). Defined and proposed as [`FieldType::Dec`] is.
+    Bytes32,
 }
 
 impl FieldType {
@@ -64,6 +70,8 @@ impl FieldType {
             FieldType::Uid => "uid",
             FieldType::Edtf => "edtf",
             FieldType::Enum => "enum",
+            FieldType::Dec => "dec",
+            FieldType::Bytes32 => "bytes32",
             // The one case that cannot be a static string for every inner type. Only the
             // types A-7 admits appear, so the arms are exhaustive over what can be written.
             FieldType::List(inner) => match inner {
@@ -73,6 +81,8 @@ impl FieldType {
                 FieldType::Uid => "list<uid>",
                 FieldType::Edtf => "list<edtf>",
                 FieldType::Enum => "list<enum>",
+                FieldType::Dec => "list<dec>",
+                FieldType::Bytes32 => "list<bytes32>",
                 FieldType::List(_) => "list<list>",
             },
         }
@@ -597,6 +607,8 @@ pub mod text {
     }
 }
 
+pub mod tel;
+
 /// `x.query/v1` — the saved query (A-11, Appendix C; SMYSL-2.5 §3.6).
 ///
 /// One type and one relation kind. The type is the unit a query is saved as; the relation is
@@ -778,5 +790,7 @@ mod tests {
     fn a_list_type_spells_itself() {
         assert_eq!(FieldType::List(&FieldType::Text).as_str(), "list<text>");
         assert_eq!(FieldType::Uid.as_str(), "uid");
+        assert_eq!(FieldType::List(&FieldType::Dec).as_str(), "list<dec>");
+        assert_eq!(FieldType::Bytes32.as_str(), "bytes32");
     }
 }

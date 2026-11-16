@@ -125,6 +125,47 @@ spelling, and a unit carrying one has no surface form. It lives in CBOR, as a sa
 quantised. That predates SMYSL-3 and is left as it is here. It is why a wide `dec` must not be
 spelled at the surface.
 
+
+### `x.tel/v1`, registered (TL-P1 step 3)
+
+`smysl_core::schemas::tel` registers SMYSL-3's schema as `schemas::text` registers
+`x.text/v1`: the id, the seventeen unit types and eight relation kinds of §4, the
+enumerations of §4.3, and a declaration with `payload_shape` absent until A-7. Two things it
+does differently:
+
+- **Fields are tabled per type** (`TYPE_DEFS`), not flat. One key means two things:
+  `tel:basis` is `start-time` or `decrease` on a reset, and `substrate` or `platform` on a
+  window. A flat table would have to give it both value sets, and so check neither.
+  `FieldType` gains `Dec` and `Bytes32`, the two types §5.4 proposes for A-7.
+- **Keys are `tel:`-prefixed.** The RFC names its fields bare (`scheme`, `from_ms`). Every
+  extension schema here prefixes its keys (`text:holder`, `query:text`, `measure:v`), and the
+  prefix isn't taste: a bare payload key that is a unit header word (`status`, `source`,
+  `grounds`) has no surface spelling. The RFC's spellings are otherwise kept, underscores
+  included. Rule TQ's quote syntax (`<uid>#<field>=<value>`) will meet this in TL-P6, which
+  decides whether a quote names `tel:max` or `max`.
+
+**The entity-like rule.** A series and an instrument are what is measured and by what, not
+when, so their identity is a function of an identity tuple.
+
+- `tel::series(scheme, key)` and `tel::instrument(role, key)` take nothing else, as
+  `text::entity` takes nothing but its three. They fix the status at `cited` and the source at
+  `series:<scheme>:<key>` (metric) or `instrument:<key>` (tool).
+- They write only the key and the scheme or role. The declared `tel:name`, `tel:unit` and
+  `tel:kind` are inside the uid, and a reader that spelled a unit differently would split one
+  series into two, so they belong in `x.tel/series-meta`.
+- The gist is the key, cut at 64 characters with an ellipsis. The whole key is in the payload
+  and the reference, so the cut costs no identity, and it keeps a long Prometheus label set
+  under a 30-token gist bound.
+- **`SMY-E607`** is what `check` says of a series or instrument that carries a span, a
+  manifest, a published or observed time, grounds, or a source other than the one its tuple
+  gives. The message names which. 160 codes.
+- Both units round-trip through surface text to the same uid.
+
+**A consequence for later phases:** a window's `tel:digest` is a CBOR byte string, which the
+surface payload model has no value for. A window carrying one has no surface form and lives in
+CBOR, and code that reads its payload has to read CBOR, not the surface object. TL-P4 builds
+windows, so TL-P4 meets it.
+
 ---
 
 ## 1.16.0 — 2026-11-16
