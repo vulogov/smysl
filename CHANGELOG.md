@@ -88,6 +88,43 @@ What step 1 does not do, and where it differs from the RFC:
 
   So `check` reports both, and nothing refuses them.
 
+
+### `dec`, a decimal that is one value (TL-P1 step 2)
+
+Telemetry values can't use the kernel float. It is binary32 quantised to 1/1024, so it loses a
+latency of 0.0004 s and every counter above 2²⁴. SMYSL-3 §5 gives `x.tel/v1` a type of its
+own, and `smysl_core::Decimal` is it.
+
+- **The pair.** A value is m × 10^e, on the wire a CBOR array of two shortest-form integers.
+  The mantissa carries no trailing zero, and zero is `[0, 0]`. The range is a `u64`
+  magnitude, sign separate, and an exponent in [−400, 400].
+- **Refusals.** The decoder refuses any other encoding of a value as `SMY-E602` rather than
+  normalising it, because two encodings of one value would be two uids. There are 159 codes.
+- **Reading from a source.** A token is read exactly as written, never through binary64:
+  `41`, `41.0` and `4.10e1` are one value. `NaN` and the infinities are refused as not values
+  (a stale marker is a fact, not a number). A binary64 becomes the decimal ECMA-262's
+  `Number::toString` selects, and a typed integer is never routed through a double.
+- **The one spelling.** Each value has exactly one text spelling, plain decimal with no
+  exponent, and it reads back to the same pair.
+
+**Checked against a second reading.** `fixtures/tel/dec/cases.json` is written by a
+JavaScript generator. Its 2,030 binary64 cases are what the engine's own `String(x)` says, so
+the claim that Rust's shortest formatting makes ECMA-262's choice is tested, not assumed. Its
+token, spelling and CBOR cases are the generator's own reading of §5. All agree, and the three
+ports will read the same file in step 4. A fuzz target, `dec`, holds the laws (one encoding per
+value, one spelling per value, no panic) and runs in `make fuzz` and in CI's fuzz job. Its
+first local run was 1.78 million inputs with no failure.
+
+**In a payload.** A `dec` is an ordinary array of two integers, so a payload carries one as
+`[412, -1]`. The generic payload encoder writes exactly `Decimal::to_cbor`'s bytes, which a
+test asserts, so the uid doesn't depend on which path put it there. The surface value model's
+integers are `i64` and closed by design. A mantissa beyond `i64` therefore has no surface
+spelling, and a unit carrying one has no surface form. It lives in CBOR, as a saved query does.
+
+**Found on the way:** an integer literal beyond `i64` in surface text is read as a float, and
+quantised. That predates SMYSL-3 and is left as it is here. It is why a wide `dec` must not be
+spelled at the surface.
+
 ---
 
 ## 1.16.0 — 2026-11-16

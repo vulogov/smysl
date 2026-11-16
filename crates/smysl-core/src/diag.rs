@@ -514,6 +514,7 @@ registry! {
     // group appended last for the reason the blocks above give. Only the two TL-P1 raises are
     // registered; the rest arrive with what raises them.
     Telemetry => {
+        E602 = "SMY-E602", Error, "A non-canonical dec: not two shortest integers, a trailing-zero mantissa, zero with an exponent, out of range, or -2^64";
         E611 = "SMY-E611", Error, "A record 6 of a detection kind that is derived and never written (6 or 7)";
         E612 = "SMY-E612", Error, "A writer emitted a reserved number: source key 7 or record 16";
     }
@@ -1035,9 +1036,11 @@ mod tests {
     ///
     /// 158 with `SMY-E611` and `SMY-E612` in 1.17 (SMYSL-3 TL-P1), in a fifteenth group,
     /// `Telemetry`: a record 6 of a kind SMYSL-3 derives, and a reserved number written.
+    ///
+    /// 159 with `SMY-E602` in TL-P1 step 2: a `dec` that is not canonical, refused by its decoder.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 158);
+        assert_eq!(Code::ALL.len(), 159);
     }
 
     #[test]

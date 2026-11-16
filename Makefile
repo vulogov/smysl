@@ -521,7 +521,7 @@ live-hosted: ## Live ingest gate against whichever hosted providers have keys se
 # than from the minutes a cold run spends discovering that `find` is a word.
 FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact readers \
                 redaction_merge edtf time_engine sq_parse lib_roundtrip lib_import lens_laws \
-                store_union
+                store_union dec
 
 # Seeds, not a corpus. The repo already holds inputs worth starting from — the corpus
 # fixtures are real `.smy` documents, and `fuzz/artifacts/` holds every input that has ever

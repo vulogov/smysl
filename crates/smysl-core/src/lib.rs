@@ -12,6 +12,7 @@
 #![deny(rust_2018_idioms)]
 
 pub mod cbor;
+pub mod dec;
 pub mod diag;
 pub mod edtf;
 pub mod error;
@@ -26,6 +27,7 @@ pub mod types;
 
 pub use cbor::envelope::unit_core_bytes;
 pub use cbor::{from_cbor, from_cbor_seq, to_cbor, to_cbor_seq};
+pub use dec::{DecError, Decimal};
 pub use diag::{Code, Diagnostic, Group, Report, Severity, Span, Subject};
 pub use error::{
     CodecError, Error, ExitCode, IdError, IntegrityError, LibError, MergeError, NonDetReason,

@@ -131,3 +131,9 @@ name = "store_union"
 path = "fuzz_targets/store_union.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "dec"
+path = "fuzz_targets/dec.rs"
+test = false
+doc = false
