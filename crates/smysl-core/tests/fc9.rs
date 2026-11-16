@@ -352,6 +352,15 @@ fn a_list_type_parses_and_prints() {
         FieldType::parse("decimal"),
         FieldType::Other("decimal".into())
     );
+    // SMYSL-3 §5.4's two, named from 1.17; `decimal` above is still a name nobody proposed.
+    for (name, ty) in [("dec", FieldType::Dec), ("bytes32", FieldType::Bytes32)] {
+        assert_eq!(FieldType::parse(name), ty);
+        assert_eq!(ty.as_string(), name);
+    }
+    assert_eq!(
+        FieldType::parse("list<dec>"),
+        FieldType::List(Box::new(FieldType::Dec))
+    );
 }
 
 #[test]

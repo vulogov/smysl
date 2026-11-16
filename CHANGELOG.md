@@ -199,6 +199,41 @@ both.
 - **The generator is checked too.** CI's Node job regenerates `cases.json` and requires no
   diff, so the file four implementations are held to can't drift from what it says it is.
 
+
+### TL-P1 closes: the format spec, A-7 and the manual (step 5)
+
+- **Format spec §5.2** registers `x.tel/v1` beside `x.text/v1` in §5.1. It gives:
+  - the seventeen types, eight relation kinds and fifty-seven `tel:` payload keys;
+  - the entity-like rule for series and instruments;
+  - `dec`'s wire form, its five canonical rules, how a source value becomes one, and its one
+    spelling;
+  - `bytes32`.
+
+  §7 names SMYSL-3's three conformance classes and says the three ports are C-Tel-Read.
+- **`spec-tables` reads §5.1 and §5.2 now.** Nothing compared the registered schemas' names
+  with the code before. Every other table in the spec was parsed and checked, and the one list
+  whose whole purpose is that implementations agree on its names was checked by no one. Both
+  schemas' types, relation kinds and payload keys are compared with the Rust modules'
+  constants in both directions, 91 comparisons. Dropping one key from the spec fails it.
+- **A-7**, the field-type vocabulary a schema declaration would carry, gains `dec` and
+  `bytes32` as RFC SMYSL-3 §5.4 proposes, in SMYSL-2.3's text. `smysl_core::schema` decodes
+  both names, where it read them as unknown before.
+- **The manual's Part XI**, Chapter 38, says what 1.17 has of SMYSL-3 and what it doesn't, with
+  real output: `SMY-E607` on a series with a time in it, a clean check without it, and the
+  `timeline` refusal.
+
+**TL-P1's exit, against the RFC's:**
+
+- C-Tel-Read on all four implementations: met.
+- The format spec updated for timeline roles and kinds 6 and 7: met.
+- The A-7 proposal amended: met.
+
+Where step 1 departed from the RFC (the store's refusal of kinds 6 and 7 has no code, and the
+reserved numbers are reported, not refused), the reasons are above. TL-P2 (object snapshots:
+`k8s/1`, `zabbix/1`, the canonical diff) and TL-P3 (the series substrate) can start from here,
+in either order. TL-P0's architecture prerequisites are still owed, and so are the RFC's
+companion documents, which aren't in the repository.
+
 ---
 
 ## 1.16.0 — 2026-11-16

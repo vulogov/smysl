@@ -52,6 +52,10 @@
   // identities, ingest over texts, time, propositions, sq/1, measures, exchange, scale.
   include "manual/ch30-37-texts.typ",
 
+  // ── Part XI — Telemetry (SMYSL-3) ──────────────────────────────────────
+  // Chapter 38: what 1.17 builds of RFC SMYSL-3, its format phase TL-P1.
+  include "manual/ch38-telemetry.typ",
+
   // ── Appendices ─────────────────────────────────────────────────────────
   include "manual/appendices.typ",
 

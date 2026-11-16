@@ -422,7 +422,11 @@ Key 5 is new.
 | 5 | lenses | array of lens steps: `{0: from revision, 1: to revision, 2: [op, …]}` (Appendix B) |
 
 Field map entries:
-- **0 `type`**: text, one of `text`, `int`, `bool`, `uid`, `edtf`, `enum`, `list<T>`.
+- **0 `type`**: text, one of `text`, `int`, `bool`, `uid`, `edtf`, `enum`, `list<T>`, and — proposed
+  by RFC SMYSL-3 §5.4 (1.17), for the day this structure is accepted — `dec` and `bytes32`. A `dec` is
+  `[m, e]`, the canonical decimal of SMYSL-3 §5 (format spec §5.2); a `bytes32` is a 32-byte byte
+  string that is not a reference and is never resolved. A reader that knows neither preserves the
+  field under rule X, and `smysl_core::schema` decodes both names from 1.17.
 - **1 `values`**: array of text, for `enum`.
 - **2 `retired-in`**: unsigned revision.
 - **3 `note`**: text.
