@@ -10,6 +10,8 @@
 //! declaration; a series and an instrument; a window whose payload holds `dec`s, a list of
 //! `dec`s and a 32-byte digest — a CBOR byte string, which no earlier payload in the fixtures
 //! has; an anomaly grounded on it; a hypothesis quoting it; and three of the new relation kinds.
+//! Uid-typed fields (`tel:series`, `tel:instrument`, `tel:target`) are `b3:` text, as every
+//! uid-typed payload field is until A-7; the digest is not a reference, so it stays bytes.
 //!
 //! `SMYSL_BLESS=1` rewrites the file. That changes what three other implementations are checked
 //! against.
@@ -50,7 +52,9 @@ fn payload(entries: Vec<(&str, V)>) -> Vec<u8> {
             match v {
                 V::Text(s) => ve.text(s),
                 V::Int(n) => ve.uint(n),
-                V::Uid(u) => ve.bytes(u.as_bytes()),
+                // `b3:` text, as `text:holder` is written: until A-7 a payload uid is text, which
+                // keeps its surface form (TL-P2 step 3; F15 carried byte strings until then).
+                V::Uid(u) => ve.text(&u.canonical()),
                 V::Dec(d) => d.encode(&mut ve),
                 V::Decs(ds) => {
                     ve.array_head(ds.len());

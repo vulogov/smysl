@@ -417,12 +417,14 @@ impl core::fmt::Display for TelError {
 
 impl std::error::Error for TelError {}
 
-/// The gist of an entity-like unit: its key, cut at [`GIST_CHARS`].
-fn key_gist(key: &str) -> String {
-    if key.chars().count() <= GIST_CHARS {
-        key.to_string()
+/// A gist cut at [`GIST_CHARS`], ending in an ellipsis when it was cut: an entity-like unit's
+/// key, or a change unit's `op` and pointer. Deterministic, so a cut gist is still a function of
+/// what it was cut from, and the whole text is always elsewhere in the unit.
+pub fn gist_of(text: &str) -> String {
+    if text.chars().count() <= GIST_CHARS {
+        text.to_string()
     } else {
-        let mut g: String = key.chars().take(GIST_CHARS - 1).collect();
+        let mut g: String = text.chars().take(GIST_CHARS - 1).collect();
         g.push('…');
         g
     }
@@ -466,7 +468,7 @@ pub fn series(scheme: &str, key: &str) -> Result<UnitCore, TelError> {
     let source = SourceRef::new(SourceKind::Metric, format!("{SERIES_REF}{scheme}:{key}"));
     UnitCoreBuilder::new(
         SchemaId::Extension(SERIES.to_string()),
-        key_gist(key),
+        gist_of(key),
         Status::Cited,
     )
     .source(source)
@@ -493,7 +495,7 @@ pub fn instrument(role: &str, key: &str) -> Result<UnitCore, TelError> {
     let source = SourceRef::new(SourceKind::Tool, format!("{INSTRUMENT_REF}{key}"));
     UnitCoreBuilder::new(
         SchemaId::Extension(INSTRUMENT.to_string()),
-        key_gist(key),
+        gist_of(key),
         Status::Cited,
     )
     .source(source)

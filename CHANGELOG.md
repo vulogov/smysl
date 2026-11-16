@@ -298,6 +298,56 @@ Three things the RFC needs and doesn't spell out:
   changed class does. Empty collections are omitted, so a field added later doesn't move the
   hash of a profile that doesn't use it.
 
+
+### The canonical diff (TL-P2 step 3)
+
+`smysl_tel::diff` is §8.1: two snapshots of one object under one profile become `x.tel/change`
+and `x.tel/recreate` units, and the result is a function of the three inputs.
+
+- **Keying.** Keyed arrays become objects keyed by their elements' key text. An array that
+  can't be keyed (a missing, non-scalar or repeated key) is one `json` leaf and reports
+  `SMY-W608`.
+- **Noise.** Noise patterns remove whole subtrees as the walk descends, after the keying above
+  them.
+- **Units.**
+  - Each `config` or `membership` leaf that was added, removed or replaced is one change. It
+    carries `tel:op`, the pointer, the class, the `vtype` and `tel:from`/`tel:to`, and
+    `tel:object` names the object's own series.
+  - A replaced `identity` leaf is a recreate.
+  - Leaves of a routed class (`gauge` to `series`) are handed back for the substrate, every one
+    of them, because the substrate wants every reading.
+  - A change's source is S₁'s tid with the pointer as its locator, plus S₁'s manifest and
+    instant, and its status is `measured`. The attestation that makes `measured` reachable
+    (`Op::Imported` at `Rung::Computed`) is the caller's, as every producer's is.
+- **`part_text`** is §8.3's stored form: the filtered, keyed object as JCS with `dec` numbers.
+  A snapshot changed only in noise is the same part with the same tid, and a snapshot whose
+  keyed arrays are reordered is too.
+- **`SourceRef::of_manifest`** is new in `smysl-core`. A manifest without a span was always
+  legal on the wire and at the surface, but nothing public could set one, and §8.1's change
+  names its snapshot's manifest with no byte range.
+- **Codes:** `SMY-W608` and `SMY-W613` are registered (162 codes).
+
+Choices §8.1 leaves open, made and stated in the module:
+
+- An empty object is a leaf, `{}`, so emptying one is a change and not a disappearance.
+- A replaced leaf records the new value's `vtype`.
+- An `identity` leaf added or removed is a change of class `identity`, because a recreate needs
+  both identities.
+
+**`fixtures/tel/diff/`** pins it: a Deployment profile carrying §8.3's noise filters, a base
+snapshot, and nine cases, with `expected.tsv` giving each case's part tid, unit uids, notes and
+routed count. The cases check that noise never reaches the part, that a gauge drop is a new
+part and no unit, and that reordered keyed arrays and `3.0`/`1e1`/`8.08E3` are the base's part
+to the byte.
+
+**`F15-telemetry.cbor` now writes uids as text.** Its uid-typed fields were CBOR byte strings.
+Every uid-typed payload field here is `b3:` text until A-7 (`text:holder` is
+`holder.canonical()`), which keeps a surface form. The fixture is re-blessed, the three ports
+still round-trip it, and its `tel:digest` stays bytes, because a digest isn't a reference.
+
+**For TL-P3:** a routed `gauge` can be text. `/status/conditions/Available/status` is `"True"`,
+and the substrate stores `dec`s, so TL-P3 decides what a non-numeric routed leaf becomes.
+
 ---
 
 ## 1.16.0 — 2026-11-16

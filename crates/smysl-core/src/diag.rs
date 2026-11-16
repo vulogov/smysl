@@ -516,8 +516,10 @@ registry! {
     Telemetry => {
         E602 = "SMY-E602", Error, "A non-canonical dec: not two shortest integers, a trailing-zero mantissa, zero with an exponent, out of range, or -2^64";
         E607 = "SMY-E607", Error, "A series or instrument unit carries what its identity forbids: time, grounds, or another source";
+        W608 = "SMY-W608", Warn,  "A declared keyed array could not be keyed (missing, non-scalar or repeated key); diffed as one json leaf";
         E611 = "SMY-E611", Error, "A record 6 of a detection kind that is derived and never written (6 or 7)";
         E612 = "SMY-E612", Error, "A writer emitted a reserved number: source key 7 or record 16";
+        W613 = "SMY-W613", Warn,  "A number outside dec's range, kept as its token (vtype text)";
     }
 }
 
@@ -1040,10 +1042,12 @@ mod tests {
     ///
     /// 159 with `SMY-E602` in TL-P1 step 2: a `dec` that is not canonical, refused by its decoder.
     /// 160 with `SMY-E607` in step 3: a series or instrument unit breaking §4.1's entity-like
-    /// rule, raised by `check`'s extension pass.
+    /// rule, raised by `check`'s extension pass. 162 with `SMY-W608` and `SMY-W613` in TL-P2
+    /// step 3, raised by the canonical diff (`smysl_tel::diff`): a keyed array that could not be
+    /// keyed, and a number outside `dec`'s range.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 160);
+        assert_eq!(Code::ALL.len(), 162);
     }
 
     #[test]

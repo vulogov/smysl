@@ -20,12 +20,14 @@
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
+pub mod diff;
 pub mod jcs;
 pub mod json;
 pub mod leaf;
 pub mod pointer;
 pub mod profile;
 
+pub use diff::{diff, leaves, part_text, Diff, Note, Snapshot};
 pub use json::{Json, JsonError};
 pub use leaf::{Leaf, VType};
 pub use pointer::{Pattern, Pointer};
