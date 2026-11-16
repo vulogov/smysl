@@ -15,6 +15,7 @@ a uid is; this package now derives them, over a hand-rolled BLAKE3, and reproduc
 
 from .blake3 import blake3
 from .cbor import CborError, decode_one, encode_one
+from .dec import DecError
 from .records import (
     RECORD_NAMES,
     UNDERSTOOD_RECORDS,

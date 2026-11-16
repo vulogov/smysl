@@ -6,6 +6,7 @@
 // reading is worth more than a second one, and for what this still does not reach.
 
 export { CborError, MAX_NESTING, decodeOne, encodeOne } from "./cbor.js";
+export { DecError, fromCbor as decFromCbor, fromF64 as decFromF64, parseToken as decParseToken, spell as decSpell, toCbor as decToCbor } from "./dec.js";
 export {
   RECORD_NAMES,
   Record,

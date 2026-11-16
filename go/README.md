@@ -15,6 +15,15 @@ to implement without inference, which is the outcome the clarifications were wri
 preserving what is not understood; and derive uids, laying out a unit core canonically and
 refusing to emit one that is not well formed.
 
+**C-Tel-Read, as of 1.17 (RFC SMYSL-3, TL-P1 step 4).** `dec`, telemetry's canonical decimal, is
+decoded strictly and refused as `SMY-E602` in every non-canonical form (§5.2), read from a token
+exactly as written, converted from a binary64 as ECMA-262's `Number::toString` would, and spelled
+the one way §5.3 allows — all checked against `fixtures/tel/dec/cases.json`, whose binary64 cases
+a JavaScript engine wrote. The preservation half needs no new code: `fixtures/wire/F15-telemetry.cbor`
+holds `x.tel/v1` units, relations and a payload with a 32-byte digest, and it round-trips byte for
+byte like every other wire fixture. The mantissa can need 65 bits, sign and a full `uint64`, so it
+is held as a `*big.Int`.
+
 ```sh
 cd go
 go test ./...

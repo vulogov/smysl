@@ -166,6 +166,39 @@ surface payload model has no value for. A window carrying one has no surface for
 CBOR, and code that reads its payload has to read CBOR, not the surface object. TL-P4 builds
 windows, so TL-P4 meets it.
 
+
+### Three ports read telemetry (TL-P1 step 4: C-Tel-Read)
+
+SMYSL-3 §16's C-Tel-Read asks two things of a reader: decode `dec` canonically, and preserve
+every `x.tel` type, relation and field under rule X. `python/`, `nodejs/` and `go/` meet
+both.
+
+- **`dec`, three more times.** Each port gains a `dec` module written from RFC SMYSL-3 §5, as
+  the rest of each port is written from the format spec: `python/smysl/dec.py`,
+  `nodejs/src/dec.js` and `go/dec.go`.
+  - Each does what `smysl_core::Decimal` does: the strict decoder with every refusal as
+    `SMY-E602`, the encoder, the exact token reader, conversion from binary64 and the one
+    spelling.
+  - The mantissa is an `int`, a `BigInt` and a `*big.Int`, because §5.2's range needs 65
+    bits.
+  - Each runs `fixtures/tel/dec/cases.json` whole. Python's `repr` and Go's
+    `strconv.FormatFloat(x, 'e', -1, 64)` agree with the engine's `String(x)` on all 2,030
+    binary64 cases, so four implementations now agree on every case.
+  - The one place §5.3 left a choice, the grammar of a token, is marked `SPEC:` in each.
+- **Preservation needs no new code, and a fixture shows it.** `fixtures/wire/F15-telemetry.cbor`,
+  written by `crates/smysl-core/tests/tel_wire_fixture.rs`, holds:
+  - the schema's declaration, a series, an instrument and a window;
+  - in the window's payload: `dec`s, a list of them, a mantissa beyond `i64` and a 32-byte
+    digest, the first byte string in any fixture payload;
+  - an anomaly, a hypothesis quoting the window, and three of the new relation kinds.
+
+  The ports glob `fixtures/wire` and re-encode each file byte for byte, so the file is the
+  cross-implementation test, as F14 was. A test also pins that the window has no surface form
+  and the series does. GE-T15's import and export matrix globs the same directory: P1 holds
+  over F15 in every cell, and `fixtures/ge-t15/duplication.tsv` gains its rows.
+- **The generator is checked too.** CI's Node job regenerates `cases.json` and requires no
+  diff, so the file four implementations are held to can't drift from what it says it is.
+
 ---
 
 ## 1.16.0 — 2026-11-16

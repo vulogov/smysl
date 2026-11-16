@@ -16,6 +16,13 @@ about its source, so the ids are canonical and nothing behind them is in this re
 third unit is at other bytes of the same part, and it is there so that an engine proposing every
 pair fails against the file rather than passing.
 
+`wire/F15-telemetry.cbor` is a store of `x.tel/v1` (RFC SMYSL-3, TL-P1 step 4), written by
+`crates/smysl-core/tests/tel_wire_fixture.rs`: the schema's declaration, a series and an
+instrument, a window whose payload holds `dec`s, a list of them, a mantissa beyond `i64` and a
+32-byte digest — the first CBOR byte string in any fixture payload — an anomaly, a hypothesis and
+three of the new relation kinds. The three ports glob `wire/` and re-encode it byte for byte,
+which is C-Tel-Read's preservation half; `tel/dec/cases.json` is its other half.
+
 `wire/rsd/` holds the record-set digest's vectors (SMYSL-2.7 §5.4): `empty.cbor`, `f13.cbor` (F13
 as CBOR) and `repeats.cbor` (F13 reversed, then again), with `cases.json` naming each one's record
 count and digest. The last two have one digest, which is the property: order and repeats do not

@@ -116,6 +116,11 @@ wire-f13-commitment	by-expression	7	7	1.000
 wire-f13-commitment	by-query	10	7	1.429
 wire-f13-commitment	by-time	7	7	1.000
 wire-f13-commitment	single	7	7	1.000
+wire-f15-telemetry	by-collection	9	9	1.000
+wire-f15-telemetry	by-expression	9	9	1.000
+wire-f15-telemetry	by-query	9	9	1.000
+wire-f15-telemetry	by-time	16	9	1.778
+wire-f15-telemetry	single	9	9	1.000
 wire-f4-qa	by-collection	22	22	1.000
 wire-f4-qa	by-expression	22	22	1.000
 wire-f4-qa	by-query	62	22	2.818

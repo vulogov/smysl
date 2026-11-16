@@ -425,6 +425,11 @@ jobs:
         with:
           node-version: "20"
       - run: npm test --prefix nodejs
+      # `fixtures/tel/dec/cases.json` is written by a JavaScript generator, and its binary64
+      # cases are this engine's own `String(x)`. Regenerate it and require no diff, so the file
+      # the four implementations are held to cannot drift from what it claims to be.
+      - name: the dec fixture is what its generator writes
+        run: node fixtures/tel/dec/generate.mjs | diff - fixtures/tel/dec/cases.json
 
   # The same specification, read a fourth time — and the first reading against the *revised*
   # document, which makes it a check on the clarifications rather than only on the format.
