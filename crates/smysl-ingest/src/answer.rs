@@ -29,8 +29,8 @@
 //! turn asks a model to fix the shape of what it wrote, and the shape is the least of what can
 //! be wrong with an answer — the grounds are checked whatever the shape, and a second turn is a
 //! second chance to ground somewhere else. The one shape defect a constructed unit can carry, a
-//! gist over the profile's bound, is met without a turn: [`fit_gists`] cuts it and keeps the
-//! claim whole in the body (`SMY-W457`).
+//! gist over the profile's bound, is met without a turn: [`fit_gists`](crate::answer::fit_gists)
+//! cuts it and keeps the claim whole in the body (`SMY-W457`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
