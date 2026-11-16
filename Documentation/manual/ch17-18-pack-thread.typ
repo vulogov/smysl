@@ -597,6 +597,18 @@ rules, and `thread --derive dossier` refuses and names `ask`, because a dossier'
 steps are slots a template filled and a derivation that guessed them from the
 graph would be a dossier nobody asked for.
 
+`timeline` (code 5) arrived in 1.17, the first of RFC SMYSL-3's telemetry work.
+SMYSL-2 allocated the code and left it undefined; SMYSL-3 gives it eleven
+roles, codes 49 to 59: `trigger`, `onset`, `detection`, `escalation`,
+`diagnosis`, `mitigation`, `recovery`, `closure`, `impact`, `communication` and
+`follow-up`. A timeline must have exactly one `detection`, since nobody can
+write a timeline for an incident nobody noticed. It is ordered by when each
+unit was said, under rule E, and not by its roles. Like a dossier it has no
+rules yet, so `--derive timeline` refuses. The derivation comes with the
+telemetry unit types it proposes roles from. Until then a timeline is authored.
+The role is `closure` rather than `resolution` because `resolution` is already
+narrative's, and a role name means one role in every schema.
+
 `smysl ask "What is Naomi?" store` makes one. A closed rule table per tier-1
 language reads the question's intent — `define`, `explain`, `verify`,
 `attribute`, `trace`, `locate`, `depend` or `compare`, and `SMY-E468` with

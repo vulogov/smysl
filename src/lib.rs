@@ -569,8 +569,10 @@ mod tests {
         // (1.15.0), raised by a span the model declined as a matter of policy; 155 with
         // `SMY-W455` and `SMY-W456` (1.15.0), an output limit spent on reasoning before any
         // answer, and a temperature set for a provider that takes none; 156 with `SMY-W457`
-        // (1.16.0), an answer gist over the bound, cut to it with the claim whole in the body.
-        assert_eq!(Code::ALL.len(), 156);
+        // (1.16.0), an answer gist over the bound, cut to it with the claim whole in the body;
+        // 158 with `SMY-E611` and `SMY-E612` (1.17, SMYSL-3 TL-P1), a derived-only contention
+        // and a reserved number, raised by `check`'s extension pass.
+        assert_eq!(Code::ALL.len(), 158);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

@@ -44,6 +44,50 @@ name the store does not write, a saved query and a pinned traversal waiting on a
 does not exist yet, GE-T7 on a thousand real works, and the ones only people can close.
 None of it moved in 1.16, and none of it is planned for 1.17 until something measured needs it.
 
+### SMYSL-3 begins: the format's reservations (TL-P1 step 1)
+
+RFC SMYSL-3, smysl for telemetry study and research, is in
+`Documentation/SMYSL-3_RFC/SMYSL-3_TELEMETRY.md`. Its format phase, TL-P1, adds no record type
+and changes no kernel rule. It does fix four numbers the wire already had room for, and step 1
+fixes them before anything writes `x.tel/v1`:
+
+- **Detection kinds 6 and 7** are `rival-explanation` and `witness-conflict`. Both are
+  derived-only, as rule E's 4 and 5 are, so a store refuses a record 6 of either at the door.
+  The refusal now names who derives the kind: rule E for 4 and 5, `x.tel/v1`'s detection for
+  6 and 7. Until TL-P6 and TL-P7 derive them they map to `SMY-W053`, since SMYSL-3 allocates
+  them no reporting code.
+- **Thread schema 5 is `timeline`**, with roles 49 to 59: `trigger`, `onset`, `detection`,
+  `escalation`, `diagnosis`, `mitigation`, `recovery`, `closure`, `impact`, `communication`,
+  `follow-up`. Roles 60 to 63 stay reserved. A timeline requires one `detection` and has no
+  rules yet, so `thread --derive timeline` refuses. Unlike the dossier refusal, it doesn't send
+  the reader to `ask`, which has never made one. Renders head the new roles by name.
+- **`source` key 7 stays reserved, and so does record 16.** Neither is assigned. Both are
+  carried when they arrive (key 7 is inside the uid), and `check` names them.
+- **Two codes, in a fifteenth group, `Telemetry`:**
+  - `SMY-E611`: a record 6 of kind 6 or 7 in a store built without the door, such as a
+    document as written or a log from an older peer.
+  - `SMY-E612`: a reserved number written. A record 16 reports this instead of `SMY-W014`.
+  - The registry has 158 codes.
+  - Rule E's 4 and 5 keep no code, as before. SMYSL-3 §15 allocates `E611` for its own two only.
+
+`fixtures/wire/F14-unknown-codes.cbor` used detection kind 6 as its "unknown" code. It now uses
+9, which is the move TX-P8 made when it assigned thread schema 7.
+
+What step 1 does not do, and where it differs from the RFC:
+
+- **`SMY-E611` is not the store's refusal.** The RFC has the store refuse a kind-6 record with
+  `E611`. This tree's door refuses 4 and 5 with no code, deliberately, because a refusal makes
+  the violation unrepresentable rather than reportable. Kinds 6 and 7 share that door, and
+  `E611` is what `check` says about a store that got one past it.
+- **Neither reserved number is refused on write.** The RFC's TL-P1 says both are "refused on
+  write", and §10.2 says a foreign key 7 is "carried, not refused". These are reconciled by
+  what can write them:
+  - The surface refuses an unknown `source` key and cannot spell record 16.
+  - The CBOR builders cannot construct record 16.
+  - A key 7 can only enter through `SourceRef::extra`, which exists to preserve keys like it.
+
+  So `check` reports both, and nothing refuses them.
+
 ---
 
 ## 1.16.0 — 2026-11-16

@@ -802,14 +802,15 @@ pub enum LibError {
         /// The record code offered, 15 or 18, so a message names what was refused.
         record: u8,
     },
-    /// A record 6 carrying a detection kind rule E derives (SMYSL-2.3 A-8.2).
+    /// A record 6 carrying a detection kind that is derived and never written: rule E's two
+    /// (SMYSL-2.3 A-8.2) and SMYSL-3's two (§11.5).
     ///
     /// No diagnostic code, and that is the point: a time contention is derived and reported,
     /// never written, so a store that refuses the record makes the violation unrepresentable
     /// rather than reportable. The same shape as the redaction decision in TX-P2 step 4 — the
     /// cheapest place to enforce a MUST NOT is the door.
     DerivedContention {
-        /// The detection kind offered, 4 or 5, so a message names what was refused.
+        /// The detection kind offered, 4, 5, 6 or 7, so a message names what was refused.
         kind: u8,
     },
     /// Input that is not text at all: invalid UTF-8 at a byte offset. No code, because
@@ -984,11 +985,19 @@ impl fmt::Display for LibError {
                 "{}: record {record} does not belong in a log; text lives in the object store",
                 Code::E452
             ),
-            LibError::DerivedContention { kind } => write!(
-                f,
-                "a contention of detection kind {kind} is derived by rule E, never written; \
-                 a resolution names its derived id and needs no record 6"
-            ),
+            LibError::DerivedContention { kind } => {
+                // Who derives it, so a reader looks in the right place: rule E for 4 and 5,
+                // `x.tel/v1`'s detection for SMYSL-3's 6 and 7.
+                let by = match crate::types::DetectionKind::from_u8(*kind) {
+                    Some(k) if !k.is_derived_by_rule_e() => "the `x.tel/v1` schema's detection",
+                    _ => "rule E",
+                };
+                write!(
+                    f,
+                    "a contention of detection kind {kind} is derived by {by}, never written; \
+                     a resolution names its derived id and needs no record 6"
+                )
+            }
             LibError::Redacted { tid } => write!(
                 f,
                 "{tid} has been redacted; this library no longer holds its text"

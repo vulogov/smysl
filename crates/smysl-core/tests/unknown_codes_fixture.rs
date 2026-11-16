@@ -14,7 +14,8 @@
 //! The codes chosen are deliberate. 9 is beyond the source kinds 1.9 defines, 9 beyond the
 //! thread schemas A-8.2 assigns (it was 7 until TX-P8 step 2 made 7 `dialogue`), 64 beyond
 //! every role code A-8.2 assigns or reserves (it was 30 until the same step made 30 `reply`),
-//! and 6 is beyond the detection kinds. None is 255, which is reserved in all five enumerations and never assigned.
+//! and 9 beyond the detection kinds (it was 6 until SMYSL-3 TL-P1 made 6 `rival-explanation`
+//! and 7 `witness-conflict`). None is 255, which is reserved in all five enumerations and never assigned.
 //!
 //! `SMYSL_BLESS=1` rewrites the file. That should be a decision: it changes what three other
 //! implementations are checked against.
@@ -71,7 +72,8 @@ fn build() -> Vec<u8> {
             .expect("64 is neither reserved nor a role this build knows"),
     );
 
-    // A contention whose detection kind is 6.
+    // A contention whose detection kind is 9. It was 6 until SMYSL-3 TL-P1 assigned 6 and 7
+    // (§11.5); a build before TL-P1 reads a rival explanation as kind 6, unknown, and keeps it.
     let contention = Contention::new(
         ContentionId::new("k/later").unwrap(),
         uid,
@@ -80,8 +82,8 @@ fn build() -> Vec<u8> {
             DetectionKind::SupersessionFork,
             Hlc::new(1_726_500_000_001, 0, who),
         )
-        .with_unknown_kind(6)
-        .expect("6 is neither reserved nor a detection kind this build knows"),
+        .with_unknown_kind(9)
+        .expect("9 is neither reserved nor a detection kind this build knows"),
     );
 
     to_cbor_seq(&[
@@ -141,7 +143,7 @@ fn every_unknown_code_is_read_as_unknown_and_kept() {
                 assert_eq!(c.detected.kind, DetectionKind::Unknown);
                 assert_eq!(
                     c.detected.kind_code(),
-                    6,
+                    9,
                     "the detection code is kept verbatim"
                 );
             }

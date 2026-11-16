@@ -70,8 +70,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn schema_set_is_closed_at_eight() {
-        assert_eq!(ThreadSchema::ALL.len(), 8);
+    fn schema_set_is_closed_at_nine() {
+        assert_eq!(ThreadSchema::ALL.len(), 9);
     }
 
     #[test]

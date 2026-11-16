@@ -133,6 +133,7 @@ pub fn definition(schema: ThreadSchema) -> &'static SchemaDef {
         ThreadSchema::Brief => &BRIEF,
         ThreadSchema::Qa => &QA,
         ThreadSchema::Plan => &PLAN,
+        ThreadSchema::Timeline => &TIMELINE,
         ThreadSchema::Exposition => &EXPOSITION,
         ThreadSchema::Dialogue => &DIALOGUE,
         ThreadSchema::Dossier => &DOSSIER,
@@ -442,6 +443,62 @@ static DIALOGUE: SchemaDef = SchemaDef {
 };
 
 // ---------------------------------------------------------------------------
+// timeline: SMYSL-3 §12, and no rules yet
+// ---------------------------------------------------------------------------
+//
+// The roles are TL-P1's, the derivation TL-P6's: proposing a role from a unit type needs the
+// `x.tel/v1` types to exist first. Until then a timeline is authored, as a dossier is
+// templated, and `derivable` says no. Its order is effective said-time (rule E), which is
+// not the order the roles are listed in, so `in_order` is false.
+
+static TIMELINE: SchemaDef = SchemaDef {
+    schema: ThreadSchema::Timeline,
+    roles: &[
+        Role::Trigger,
+        Role::Onset,
+        Role::Detection,
+        Role::Escalation,
+        Role::Diagnosis,
+        Role::Mitigation,
+        Role::Recovery,
+        Role::Closure,
+        Role::Impact,
+        Role::Communication,
+        Role::FollowUp,
+    ],
+    arity: &[
+        (Role::Trigger, 0..=3),
+        (Role::Onset, 0..=3),
+        // The one role a timeline cannot lack: an incident nobody noticed has no timeline.
+        // The trigger can be unknown, and often is while the investigation is open.
+        (Role::Detection, 1..=1),
+        (Role::Escalation, 0..=5),
+        (Role::Diagnosis, 0..=20),
+        (Role::Mitigation, 0..=10),
+        (Role::Recovery, 0..=3),
+        (Role::Closure, 0..=1),
+        (Role::Impact, 0..=5),
+        (Role::Communication, 0..=20),
+        (Role::FollowUp, 0..=10),
+    ],
+    rules: &[],
+    weights: &[
+        (Role::Trigger, 1.0),
+        (Role::Onset, 0.9),
+        (Role::Detection, 0.7),
+        (Role::Escalation, 0.5),
+        (Role::Diagnosis, 0.6),
+        (Role::Mitigation, 0.8),
+        (Role::Recovery, 0.7),
+        (Role::Closure, 0.9),
+        (Role::Impact, 0.8),
+        (Role::Communication, 0.3),
+        (Role::FollowUp, 0.5),
+    ],
+    in_order: false,
+};
+
+// ---------------------------------------------------------------------------
 // dossier: the slots of SMYSL-2.5 §3.13, and no rules
 // ---------------------------------------------------------------------------
 //
@@ -529,7 +586,7 @@ mod tests {
 
     #[test]
     fn every_schema_has_a_table() {
-        assert_eq!(all().len(), 8);
+        assert_eq!(all().len(), 9);
         for s in ThreadSchema::ALL {
             assert_eq!(definition(*s).schema, *s);
         }

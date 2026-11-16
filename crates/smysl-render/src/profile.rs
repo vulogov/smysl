@@ -438,7 +438,8 @@ fn override_markers(
 
 /// The built-in profiles. Two of them are the RFC's own worked example (Appendix G): the
 /// same graph read as an executive brief and as an analyst's trace.
-/// Headings for the roles TX-P8 gave the three new schemas, codes 24 to 48 (SMYSL-2.3 A-8.2).
+/// Headings for the roles TX-P8 gave the three new schemas, codes 24 to 48 (SMYSL-2.3 A-8.2),
+/// and SMYSL-3's `timeline`, 49 to 59.
 ///
 /// Only those. A role that existed before them is headed by its name in every artifact rendered
 /// so far, and a default that renamed `question` to "Question" would change every `qa` render
@@ -471,6 +472,17 @@ fn default_headings() -> BTreeMap<Role, String> {
         (Role::Location, "Where it appears"),
         (Role::Dependent, "What depends on it"),
         (Role::Gap, "Gaps"),
+        (Role::Trigger, "Trigger"),
+        (Role::Onset, "Onset"),
+        (Role::Detection, "Detection"),
+        (Role::Escalation, "Escalation"),
+        (Role::Diagnosis, "Diagnosis"),
+        (Role::Mitigation, "Mitigation"),
+        (Role::Recovery, "Recovery"),
+        (Role::Closure, "Closure"),
+        (Role::Impact, "Impact"),
+        (Role::Communication, "Communication"),
+        (Role::FollowUp, "Follow-up"),
     ]
     .into_iter()
     .map(|(r, h)| (r, h.to_string()))

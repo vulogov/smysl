@@ -152,6 +152,11 @@ uids *and* enforce a different monotonicity rule while believing itself conforma
 | 5 | span | array of two uint `[start, end]`, `start < end` | optional; requires key 1 to name a part |
 | 6 | manifest | 32 bytes: a mid (§2.6) | optional; required when key 5 is present |
 
+Key 7 is **reserved** for an optional sub-millisecond remainder beside `observed` (RFC SMYSL-3
+§10.2). It is not assigned: a writer MUST NOT emit it, and an experiment decides whether it ever
+is. A reader preserves it as it preserves any key it does not know, because `source` is inside the
+uid; an implementation that registers `x.tel/v1` reports it as `SMY-E612`.
+
 `lang` (key 9) is the language the unit's text fields are written in. An absent `lang` means
 "the language of the view that presents the unit" (§2.8, view key 6), which is what every unit
 meant before 1.10. Absent and present are different unit cores and different uids: the language
@@ -547,7 +552,8 @@ would make a commitment impossible to walk back, so `retconned` could never take
 
 Records 14, 15 and 18 were added in 1.10, in the same way again. Records 16, 17 and 19 are
 **allocated and not yet defined here**: 16 is reserved and MUST NOT be emitted until a later
-revision defines it, and 17 and 19 are specified by RFC SMYSL-2.3 A-5 and are folded in with the
+revision defines it (RFC SMYSL-3 keeps it reserved behind an experiment, and expects to release
+it; an implementation that registers `x.tel/v1` reports one as `SMY-E612`), and 17 and 19 are specified by RFC SMYSL-2.3 A-5 and are folded in with the
 release that writes them. A decoder MUST treat all three as unknown type codes, which is what it
 already does with 9.
 
@@ -1123,6 +1129,12 @@ in step 1, and never written back.
 with detection kind 4 or 5. A resolution (record 12) names that identity, and an implementation
 MUST NOT write a record 6 with either kind — which keeps a store readable by an implementation
 that predates them.
+
+**So are SMYSL-3's two.** Detection kinds 6 (a rival explanation) and 7 (a witness conflict)
+are derived from the record set by an implementation that registers `x.tel/v1` (RFC SMYSL-3
+§11.5), with the same identity and the same rule: a resolution names the derived id, and an
+implementation MUST NOT write a record 6 with either kind. A store written by one that predates
+them decodes such a record as an unknown kind and keeps it.
 
 ## 7. Conformance classes
 

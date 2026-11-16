@@ -180,7 +180,7 @@ macro_rules! registry {
 }
 
 registry! {
-    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure, Export, Schema, Store }
+    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure, Export, Schema, Store, Telemetry }
 
     // --- Parse and encoding ------------------------------------------------
     Parse => {
@@ -508,6 +508,14 @@ registry! {
     // the library's group where the other ingest-side codes (`W443`, `W444`, `W448`) are.
     Library => {
         W457 = "SMY-W457", Warn,  "An answer gist over the bound was cut to it; the claim stands whole in the body";
+    }
+
+    // 1.17, SMYSL-3 TL-P1: the range `SMY-E6xx`/`W6xx` is telemetry's (§15), in a fifteenth
+    // group appended last for the reason the blocks above give. Only the two TL-P1 raises are
+    // registered; the rest arrive with what raises them.
+    Telemetry => {
+        E611 = "SMY-E611", Error, "A record 6 of a detection kind that is derived and never written (6 or 7)";
+        E612 = "SMY-E612", Error, "A writer emitted a reserved number: source key 7 or record 16";
     }
 }
 
@@ -1024,9 +1032,12 @@ mod tests {
     /// 156 with `SMY-W457` in 1.16.0: an answer gist over the profile's bound, cut to it with
     /// the claim moved whole into the body. `ask` has no repair turn, and a model cannot count
     /// the way the estimator does, so the cut is where that is settled.
+    ///
+    /// 158 with `SMY-E611` and `SMY-E612` in 1.17 (SMYSL-3 TL-P1), in a fifteenth group,
+    /// `Telemetry`: a record 6 of a kind SMYSL-3 derives, and a reserved number written.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 156);
+        assert_eq!(Code::ALL.len(), 158);
     }
 
     #[test]
@@ -1037,7 +1048,7 @@ mod tests {
                 "group {g} has no codes"
             );
         }
-        assert_eq!(Group::ALL.len(), 14);
+        assert_eq!(Group::ALL.len(), 15);
     }
 
     #[test]

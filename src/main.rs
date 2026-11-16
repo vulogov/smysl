@@ -1833,6 +1833,7 @@ fn cli() -> Command {
                             "brief",
                             "qa",
                             "plan",
+                            "timeline",
                             "exposition",
                             "dialogue",
                             "dossier",
@@ -1849,6 +1850,7 @@ fn cli() -> Command {
                             "brief",
                             "qa",
                             "plan",
+                            "timeline",
                             "exposition",
                             "dialogue",
                             "dossier",
@@ -10305,11 +10307,14 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // A dossier has no matcher rules: its steps are slots a template filled, and only `ask`
     // fills them (SMYSL-2.5 §3.13). Deriving one from the graph would return an empty thread
     // — correct and useless — so it is refused here, with the command that does produce one.
+    // A timeline has none yet either (SMYSL-3 §12): its rules wait for the `x.tel/v1` types
+    // they read, so until TL-P6 one is authored.
     if !smysl::derivable(schema) {
-        eprintln!(
-            "smysl thread: `{raw}` cannot be derived from the graph; a {raw} thread is produced \
-             by `ask` (TX-P8 step 3)"
-        );
+        let how = match schema {
+            smysl::ThreadSchema::Dossier => "is produced by `ask` (TX-P8 step 3)",
+            _ => "is authored; its derivation is not built yet",
+        };
+        eprintln!("smysl thread: `{raw}` cannot be derived from the graph; a {raw} thread {how}");
         return ExitCode::Usage;
     }
 

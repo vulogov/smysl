@@ -104,6 +104,11 @@ pub fn run(
     // about it is how a reader comes to believe they have seen the whole document.
     for r in store.hot_records(HotKind::Unknown) {
         if let smysl_core::Record::Unknown { code, payload } = r {
+            // Record 16 is not merely unknown but reserved (SMYSL-3 D-T6): `SMY-E612` below
+            // says so, and saying `W014` as well would describe one record twice.
+            if *code == smysl_core::types::record::code::HOLD {
+                continue;
+            }
             report.push(Diagnostic::new(Code::W014).with_message(format!(
                 "record type {code} is not known to this build; \
                  {} byte(s) preserved verbatim, skipped semantically",
@@ -136,6 +141,8 @@ pub fn run(
             }
         }
     }
+
+    reserved(store, report);
 
     // `SMY-W409` - an enumeration *code* this build does not know, which is W014's argument
     // one level down. 1.9 opened four enumerations so that an unrecognised code no longer
@@ -271,6 +278,65 @@ pub fn fidelity(store: &(impl StoreRead + ?Sized), profile: &ConsumerProfile) ->
         overall,
         degraded,
         missing,
+    }
+}
+
+/// SMYSL-3's reservations (TL-P1): what no writer may emit, found in a store that holds it.
+///
+/// `SMY-E611` is a record 6 of a detection kind SMYSL-3 derives, 6 or 7. A store of this build
+/// refuses one at the door, as it refuses rule E's 4 and 5, so this is what a store built some
+/// other way holds: a document checked as written, or a log written by a peer that predates
+/// TL-P1 and kept the record as `Unknown`. 4 and 5 have no code, and stay without one: the
+/// door is their whole enforcement, and SMYSL-3 §15 allocates a code for its own two only.
+///
+/// `SMY-E612` is a reserved number written: record 16 (`hold`, D-T6) or `source` key 7 (a
+/// sub-millisecond remainder, D-T5). Both are **carried**, not refused. Record 16 decodes as
+/// `Unknown` and key 7 lands in the source's `extra`, both kept byte for byte because rule X
+/// says so and, for key 7, because it is inside the uid. Reporting is the whole response.
+fn reserved(store: &(impl StoreRead + ?Sized), report: &mut Report) {
+    use smysl_core::cbor::keys::source::RESERVED_SUB_MS;
+    use smysl_core::types::record::code::HOLD;
+    use smysl_core::DetectionKind;
+
+    for c in store.contentions() {
+        if matches!(
+            c.detected.kind,
+            DetectionKind::RivalExplanation | DetectionKind::WitnessConflict
+        ) {
+            report.push(Diagnostic::new(Code::E611).with_message(format!(
+                "contention {} is of detection kind {} ({}), which is derived from the record \
+                 set and never written; a resolution names its derived id instead",
+                c.id,
+                c.detected.kind.as_u8(),
+                c.detected.kind
+            )));
+        }
+    }
+    for r in store.hot_records(HotKind::Unknown) {
+        if let smysl_core::Record::Unknown { code, payload } = r {
+            if *code == HOLD {
+                report.push(Diagnostic::new(Code::E612).with_message(format!(
+                    "record 16 is reserved (hold) and MUST NOT be written; \
+                     {} byte(s) preserved verbatim",
+                    payload.len()
+                )));
+            }
+        }
+    }
+    for r in store.records() {
+        if let smysl_core::Record::Unit(u) = &*r {
+            if u.source
+                .as_ref()
+                .is_some_and(|s| s.extra.contains_key(&RESERVED_SUB_MS))
+            {
+                report.push(
+                    Diagnostic::on(Code::E612, smysl_core::canonical_uid(u)).with_message(
+                        "source key 7 is reserved (a sub-millisecond remainder) and MUST NOT \
+                         be written; preserved verbatim, because it is inside the uid",
+                    ),
+                );
+            }
+        }
     }
 }
 

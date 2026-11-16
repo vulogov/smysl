@@ -21,9 +21,12 @@ pub enum ThreadSchema {
     Brief = 2,
     Qa = 3,
     Plan = 4,
-    // 5 is `timeline`, allocated by SMYSL-2.3 A-8.2 to the 1.9 timeline work and not yet
-    // assigned a definition; a build that decodes 5 reads `Unknown`, which is what A-8.2 says
-    // of a code it has reserved and nobody has defined.
+    /// What happened in an incident, ordered by effective said-time (SMYSL-3 §12, TL-P1).
+    ///
+    /// Allocated by SMYSL-2.3 A-8.2 and defined by SMYSL-3, which assigns its roles 49–59.
+    /// Not derivable until TL-P6 gives `smysl-thread` its rules; until then a timeline is one
+    /// somebody authored.
+    Timeline = 5,
     /// A text explained in its own order (SMYSL-2.5; TX-P8 step 2).
     Exposition = 6,
     /// A conversation, ordered by its replies (SMYSL-2.5; TX-P8 step 2).
@@ -46,6 +49,7 @@ impl ThreadSchema {
         ThreadSchema::Brief,
         ThreadSchema::Qa,
         ThreadSchema::Plan,
+        ThreadSchema::Timeline,
         ThreadSchema::Exposition,
         ThreadSchema::Dialogue,
         ThreadSchema::Dossier,
@@ -62,6 +66,7 @@ impl ThreadSchema {
             2 => Some(ThreadSchema::Brief),
             3 => Some(ThreadSchema::Qa),
             4 => Some(ThreadSchema::Plan),
+            5 => Some(ThreadSchema::Timeline),
             6 => Some(ThreadSchema::Exposition),
             7 => Some(ThreadSchema::Dialogue),
             8 => Some(ThreadSchema::Dossier),
@@ -77,6 +82,7 @@ impl ThreadSchema {
             ThreadSchema::Brief => "brief",
             ThreadSchema::Qa => "qa",
             ThreadSchema::Plan => "plan",
+            ThreadSchema::Timeline => "timeline",
             ThreadSchema::Exposition => "exposition",
             ThreadSchema::Dialogue => "dialogue",
             ThreadSchema::Dossier => "dossier",
@@ -115,6 +121,19 @@ impl ThreadSchema {
                 Role::Step,
                 Role::Decision,
                 Role::Risk,
+            ],
+            ThreadSchema::Timeline => &[
+                Role::Trigger,
+                Role::Onset,
+                Role::Detection,
+                Role::Escalation,
+                Role::Diagnosis,
+                Role::Mitigation,
+                Role::Recovery,
+                Role::Closure,
+                Role::Impact,
+                Role::Communication,
+                Role::FollowUp,
             ],
             ThreadSchema::Exposition => &[
                 Role::Introduces,
@@ -229,7 +248,30 @@ pub enum Role {
     Dependent = 47,
     /// An empty dossier slot: a step whose unit is the slot's saved query (SMYSL-2.5 §3.13).
     Gap = 48,
-    // 49–63 are reserved for `timeline` (A-8.2) and decode as `Unknown` until assigned.
+    // timeline (49–59, SMYSL-3 §12). 60–63 stay reserved for it and decode as `Unknown`.
+    /// The change, deploy or action believed to start an incident.
+    Trigger = 49,
+    /// The first anomalous evidence.
+    Onset = 50,
+    /// The first alert or human notice.
+    Detection = 51,
+    /// Paging, or severity raised.
+    Escalation = 52,
+    /// Probes and hypotheses.
+    Diagnosis = 53,
+    /// Actions taken to reduce impact.
+    Mitigation = 54,
+    /// Evidence of return to baseline.
+    Recovery = 55,
+    /// The investigation closed, and the explanation accepted. Not `resolution`, which is
+    /// role 10's name, and `Role::parse` returns the first match.
+    Closure = 56,
+    /// Evidence of user-facing effect.
+    Impact = 57,
+    /// Status updates, chat.
+    Communication = 58,
+    /// Tickets and postmortem actions.
+    FollowUp = 59,
     /// A role this build does not know (1.9). See `ThreadSchema::Unknown`.
     Unknown = 255,
 }
@@ -285,6 +327,17 @@ impl Role {
         Role::Location,
         Role::Dependent,
         Role::Gap,
+        Role::Trigger,
+        Role::Onset,
+        Role::Detection,
+        Role::Escalation,
+        Role::Diagnosis,
+        Role::Mitigation,
+        Role::Recovery,
+        Role::Closure,
+        Role::Impact,
+        Role::Communication,
+        Role::FollowUp,
     ];
 
     pub const fn as_u8(self) -> u8 {
@@ -353,6 +406,17 @@ impl Role {
             Role::Location => "location",
             Role::Dependent => "dependent",
             Role::Gap => "gap",
+            Role::Trigger => "trigger",
+            Role::Onset => "onset",
+            Role::Detection => "detection",
+            Role::Escalation => "escalation",
+            Role::Diagnosis => "diagnosis",
+            Role::Mitigation => "mitigation",
+            Role::Recovery => "recovery",
+            Role::Closure => "closure",
+            Role::Impact => "impact",
+            Role::Communication => "communication",
+            Role::FollowUp => "follow-up",
             Role::Unknown => "unknown",
         }
     }
@@ -516,14 +580,14 @@ mod tests {
     }
 
     #[test]
-    fn eight_schemas_round_trip() {
-        assert_eq!(ThreadSchema::ALL.len(), 8);
+    fn nine_schemas_round_trip() {
+        assert_eq!(ThreadSchema::ALL.len(), 9);
         for &s in ThreadSchema::ALL {
             assert_eq!(ThreadSchema::from_u8(s.as_u8()), Some(s));
             assert_eq!(ThreadSchema::parse(s.as_str()), Some(s));
         }
-        // 5 is reserved for `timeline` and unassigned; 9 is beyond A-8.2's table.
-        assert_eq!(ThreadSchema::from_u8(5), None);
+        // 5 is `timeline`, defined by SMYSL-3 (TL-P1); 9 is beyond A-8.2's table.
+        assert_eq!(ThreadSchema::from_u8(5), Some(ThreadSchema::Timeline));
         assert_eq!(ThreadSchema::from_u8(9), None);
         assert_eq!(ThreadSchema::parse("essay"), None);
         assert_eq!(ThreadSchema::Exposition.as_u8(), 6);
@@ -564,18 +628,39 @@ mod tests {
             names(ThreadSchema::Plan),
             ["goal", "constraint", "step", "decision", "risk"]
         );
+        // SMYSL-3 §12's table, in its order.
+        assert_eq!(
+            names(ThreadSchema::Timeline),
+            [
+                "trigger",
+                "onset",
+                "detection",
+                "escalation",
+                "diagnosis",
+                "mitigation",
+                "recovery",
+                "closure",
+                "impact",
+                "communication",
+                "follow-up"
+            ]
+        );
     }
 
     #[test]
-    fn forty_nine_roles_round_trip() {
-        assert_eq!(Role::ALL.len(), 49);
+    fn sixty_roles_round_trip() {
+        assert_eq!(Role::ALL.len(), 60);
         for &r in Role::ALL {
             assert_eq!(Role::from_u8(r.as_u8()), Some(r));
             assert_eq!(Role::parse(r.as_str()), Some(r));
         }
-        // 49–63 are reserved for `timeline` (A-8.2) and decode as nothing this build names.
-        assert_eq!(Role::from_u8(49), None);
+        // 49–59 are `timeline`'s (SMYSL-3 §12); 60–63 stay reserved for it and decode as
+        // nothing this build names.
+        assert_eq!(Role::from_u8(49), Some(Role::Trigger));
+        assert_eq!(Role::from_u8(59), Some(Role::FollowUp));
+        assert_eq!(Role::from_u8(60), None);
         assert_eq!(Role::from_u8(63), None);
+        assert_eq!(Role::Closure.as_u8(), 56);
         assert_eq!(Role::Introduces.as_u8(), 24);
         assert_eq!(Role::Reply.as_u8(), 30);
         assert_eq!(Role::Gap.as_u8(), 48);
@@ -608,6 +693,17 @@ mod tests {
     fn schemas_reject_roles_they_do_not_declare() {
         assert!(!ThreadSchema::Brief.allows(Role::Coda));
         assert!(!ThreadSchema::Qa.allows(Role::Goal));
+        assert!(!ThreadSchema::Timeline.allows(Role::Resolution));
+        assert!(ThreadSchema::Timeline.allows(Role::Closure));
+    }
+
+    /// `Role::parse` returns the first match, so a role name is unique across every schema.
+    /// SMYSL-3 named `closure` rather than `resolution` for exactly this.
+    #[test]
+    fn role_names_are_unique() {
+        let names: std::collections::BTreeSet<&str> =
+            Role::ALL.iter().map(|r| r.as_str()).collect();
+        assert_eq!(names.len(), Role::ALL.len());
     }
 
     #[test]

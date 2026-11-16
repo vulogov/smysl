@@ -580,7 +580,7 @@ fn seed_check_names_the_flag_that_broke_reproducibility() {
 }
 
 /// `thread --derive dossier` is refused before anything runs, and says which command makes one
-/// (SMYSL-2.5 §3.13; TX-P8 step 2). The two schemas step 2 made derivable derive.
+/// (SMYSL-2.5 §3.13; TX-P8 step 2); so is `timeline`, which no command makes yet (SMYSL-3 §12). The two schemas step 2 made derivable derive.
 #[test]
 fn a_dossier_cannot_be_derived_and_exposition_and_dialogue_can() {
     let out = Command::new(env!("CARGO_BIN_EXE_smysl"))
@@ -591,6 +591,18 @@ fn a_dossier_cannot_be_derived_and_exposition_and_dialogue_can() {
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("`ask`"), "{err}");
+    assert!(out.stdout.is_empty(), "nothing was derived");
+    // A timeline is refused too (SMYSL-3 §12, TL-P1), and does not send its reader to `ask`,
+    // which has never made one.
+    let out = Command::new(env!("CARGO_BIN_EXE_smysl"))
+        .args(["thread", "--derive", "timeline", F1])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("authored"), "{err}");
+    assert!(!err.contains("`ask`"), "{err}");
     assert!(out.stdout.is_empty(), "nothing was derived");
     for schema in ["exposition", "dialogue"] {
         let out = Command::new(env!("CARGO_BIN_EXE_smysl"))
