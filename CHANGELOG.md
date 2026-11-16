@@ -217,7 +217,7 @@ reader, which found no events in it and reported an empty answer as a success. A
 is not success is now classified from its body as `complete` classifies one, by the same
 function, which each mapper now exposes to its streaming thread.
 
-### The effort measured on `ask --answer`, and the answer in the ledger
+### The effort measured on `ask --answer`, its gists cut to the bound, and the answer in the ledger
 
 The effort decision above reaches every request, and the measurement behind it was ingest's. The
 one other free-text request a user pays for from the CLI is `ask --answer`, the model reading a
@@ -247,12 +247,32 @@ now version 2 and states it, through the same sentence the ingest templates use,
 estimator the caller named. Rerun at `low` with version 2, twelve answers: 10 records over
 the cap where the first pass had 2.2 a run, most of them two to eight tokens past it, and
 three runs of twelve staged where one of 24 had. Stating the bound cut the overrun by more
-than half; it did not end it, and `ask` has no repair turn by design, so the rest is a 1.16
-carry-over:
-whether the answer gets the shortening that ingest's repair turn gives a gist.
+than half; it did not end it, because a model cannot count the way the estimator does, and every
+answer still carrying one gist a few tokens over lost the whole answer to it. `ask` has no repair
+turn by design, and the one shape defect a constructed unit can carry does not need one: a gist
+over the bound is now cut to it, ending in an ellipsis, and the claim as the model wrote it moves
+whole into the body, above any body the unit had — the diagnostic's own suggestion, done
+mechanically, under a new `SMY-W457` on the unit's new identity, with its grounds, edges and
+labels following, in the topological order rule M's remap uses. Nothing is invented and nothing
+is lost; the cut is measured under the store's own profile, the one the check runs under.
 
-On the way, `ask --answer`'s summary line now says what the call cost, with the reasoning's
-share where the provider reports one, and the call is recorded in the usage ledger under
+The rerun with the cut found the last of the failures was not the answer's at all. "Why was
+Naomi bitter?" failed its check three times of three with no cut reported, on one uid every
+time: the `counter` slot's saved query, whose gist is its text by design (OQ-85), and whose
+text — the question's terms bound into `matches` clauses — ran to 34 tokens. `ask --save` had
+been writing a record that failed the check of every store it was saved into, so `smysl check`
+on such a store failed, and so did every answer staged over it. A saved query's gist is now its
+text while the text fits the bound and the text cut to it when it does not; the text stays
+whole in `query:text`, which is what a rerun reads, and in the body for a reader. The cut is
+one routine on the granularity profile, `shorten_gist`, which the answer path and the saved
+query share. Rerun at `low` with both cuts, twelve answers: twelve staged, no gist over the
+cap, fifteen cuts reported across them, and the saved store checks clean of errors — one
+warning remains on it, `SMY-W041`, the cut query's body being shorter than the body range
+wants, which is true and is what a warning is for.
+
+On the way, `ask --answer`'s summary line now counts the cuts beside the drops and the
+lowerings, and says what the call cost, with the reasoning's share where the provider reports
+one; and the call is recorded in the usage ledger under
 `content-ingest`, the task it is routed by. It was the one model call the CLI made that the
 ledger did not see; the manual's "only `ingest` writes the ledger" is corrected.
 

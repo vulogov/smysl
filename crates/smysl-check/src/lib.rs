@@ -256,7 +256,7 @@ impl CheckOptions {
 /// `l1_min`, the largest `l1_max`, and `topical` admission if any view uses it. A unit outside
 /// that is outside every profile present, which is a warning worth having; a unit inside it is
 /// not flagged on the strength of a sort order.
-fn store_granularity(store: &(impl StoreRead + ?Sized)) -> GranularityProfile {
+pub fn store_granularity(store: &(impl StoreRead + ?Sized)) -> GranularityProfile {
     let mut distinct: Vec<&GranularityProfile> = Vec::new();
     for v in store.views() {
         if !distinct.contains(&&v.granularity) {

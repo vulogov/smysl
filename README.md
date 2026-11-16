@@ -58,7 +58,7 @@ measured, is in [`CHANGELOG.md`](CHANGELOG.md).
   spent from it.
 - **What the model did is counted apart from what failed.** A refusal is `SMY-W438`, an
   output limit spent entirely on reasoning is `SMY-W455`, an answer from a fallback model is
-  `SMY-W437`, a temperature the provider will not take is `SMY-W456`. The registry is 155.
+  `SMY-W437`, a temperature the provider will not take is `SMY-W456`, an answer gist cut to its bound is `SMY-W457`. The registry is 156.
 - **The ledger shows the prompt cache and the thinking share**, per call and in the totals,
   and `smysl ingest` prints both.
 - **`effort: low | medium | high`** on an Anthropic provider. `low` stays the default: it

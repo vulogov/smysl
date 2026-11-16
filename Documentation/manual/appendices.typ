@@ -1118,7 +1118,7 @@ Every diagnostic `smysl` can emit has a stable code, declared once in the `regis
 macro invocation in `crates/smysl-core/src/diag.rs` and never reused. The registry is
 single-sourced: wire string, severity, group, and one-line meaning all come from that one
 place, and two tests (`the_registry_is_the_size_it_is_meant_to_be` in `smysl-core`, and
-`facade_reexports_the_diagnostic_registry` in the facade) assert the count below stays at 155. Codes are grouped exactly as the source groups them; group membership is
+`facade_reexports_the_diagnostic_registry` in the facade) assert the count below stays at 156. Codes are grouped exactly as the source groups them; group membership is
 reporting structure only; it carries no weight on the wire.
 
 #dtable(
@@ -1272,6 +1272,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W438`], [warning], [The model declined the span as a matter of policy, and it degraded to opaque prose under rule I. Not a fault: the provider's own category is in the message, and the report counts declines apart from `SMY-W304`, because a fault is retried or reconfigured and a decline is read.]),
     ([`SMY-W455`], [warning], [The output limit was spent on the model's reasoning before any answer began, on a provider whose reasoning is spent from the same limit as its answer; the span degraded to opaque prose under rule I. The message names the limit, the reasoning's share where the provider reports one, and the remedy, which is `max_output`.]),
     ([`SMY-W456`], [warning], [A sampling temperature was set for a provider whose endpoint takes none; the run sampled at the model's default. Said once per run, before the first call.]),
+    ([`SMY-W457`], [warning], [An answer gist was over the profile's bound (`l0_max`) and was cut to it, ending in an ellipsis; the claim as the model wrote it stands whole in the unit's body, above any body it had. `ask --answer` has no repair turn, so this is how the one shape defect a constructed unit can carry is met. The message gives both counts.]),
   ),
 )
 

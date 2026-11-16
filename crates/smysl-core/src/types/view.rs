@@ -208,6 +208,30 @@ impl GranularityProfile {
             .estimator()
             .map(|e| e.fit_with_suffix(text, suffix, self.l0_max))
     }
+
+    /// `text` cut to `l0_max` when it is over it: the longest prefix that fits with an ellipsis
+    /// after it, taken back to a word boundary so it reads as a shortened sentence rather than
+    /// a severed one (solid script has none and keeps the whole prefix). `None` when the text
+    /// is within the bound, when the bound is unevaluable ([`Self::tokens`]), or when nothing
+    /// fits. The caller keeps the text whole somewhere else — a body, a payload — since the cut
+    /// is a reading of it, not a replacement.
+    pub fn shorten_gist(&self, text: &str) -> Option<String> {
+        if self.gist_within_bound(self.tokens(text)?) {
+            return None;
+        }
+        let end = self.fit_gist_with(text, "\u{2026}")?;
+        let mut cut = text[..end].to_string();
+        if let Some(ws) = cut.rfind(char::is_whitespace) {
+            if ws > 0 {
+                cut.truncate(ws);
+            }
+        }
+        let cut = cut.trim_end();
+        if cut.is_empty() {
+            return None;
+        }
+        Some(format!("{cut}\u{2026}"))
+    }
 }
 
 impl Default for GranularityProfile {
@@ -328,6 +352,29 @@ mod tests {
         for p in [&c, &d, &f] {
             assert_eq!(p.l0_max, 30, "the gist bound does not vary by profile");
         }
+    }
+
+    #[test]
+    fn a_gist_over_the_bound_is_cut_at_a_word_and_one_within_it_is_left() {
+        let g = GranularityProfile::default();
+        assert_eq!(g.shorten_gist("short enough"), None);
+        let long = "Naomi was bitter because the hand of the Lord had gone out against her, \
+                    taking her husband and both her sons in Moab and leaving her with nothing";
+        let cut = g.shorten_gist(long).expect("over the bound");
+        assert!(cut.ends_with('\u{2026}'));
+        let stem = cut.trim_end_matches('\u{2026}');
+        assert!(long.starts_with(stem));
+        assert!(!stem.ends_with(char::is_whitespace), "trimmed to the word");
+        assert!(
+            long[stem.len()..].starts_with(char::is_whitespace),
+            "cut at a word boundary"
+        );
+        assert!(g.gist_within_bound(g.tokens(&cut).unwrap()));
+        // Solid script has no word boundary and keeps the whole prefix that fits.
+        let cjk = "\u{4e00}".repeat(200);
+        let cut = g.shorten_gist(&cjk).expect("over the bound");
+        assert!(g.gist_within_bound(g.tokens(&cut).unwrap()));
+        assert!(cut.chars().count() > 1);
     }
 
     #[test]

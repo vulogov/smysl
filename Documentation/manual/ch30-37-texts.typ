@@ -524,7 +524,9 @@ alias prefix. A scope that names nothing is refused (`SMY-E511`) rather than tre
 
 `--save` appends the query, after it has run, as an `x.query/saved` unit with an
 `x.query/answers` edge to each result. A saved unit's payload has no surface spelling, so a
-saved query lives in a CBOR store (`smysl merge doc.smy -o store.cbor`):
+saved query lives in a CBOR store (`smysl merge doc.smy -o store.cbor`). The unit's gist is
+the query's text; a text over the gist bound is saved with the gist cut to the bound and the
+text whole in the body and the payload, which is what a rerun reads (from 1.16):
 
 #screen(caption: "$ smysl q --save 'from store:ci\\nfind \"cache\"' ci.cbor")[
 ```

@@ -9601,9 +9601,10 @@ fn ask_answer(
     }
     eprintln!(
         "smysl ask: answer: {} proposed, {} dropped for grounding outside the dossier (SMY-W478), \
-         {} lowered by rule M (SMY-W036); {} tokens{}",
+         {} cut to the gist bound (SMY-W457), {} lowered by rule M (SMY-W036); {} tokens{}",
         report.proposed,
         report.dropped,
+        report.shortened,
         report.lowered,
         report.usage.total(),
         // The reasoning's share of the output, where the provider reports one: an answer is
