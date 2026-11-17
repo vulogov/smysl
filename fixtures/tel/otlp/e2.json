@@ -1,0 +1,183 @@
+{
+ "resourceMetrics": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "cart"
+      }
+     },
+     {
+      "key": "service.instance.id",
+      "value": {
+       "stringValue": "c1"
+      }
+     }
+    ]
+   },
+   "scopeMetrics": [
+    {
+     "scope": {
+      "name": "io.opentelemetry.http",
+      "version": "1.2.0"
+     },
+     "metrics": [
+      {
+       "name": "http.server.requests",
+       "unit": "{request}",
+       "description": "the http.server.requests",
+       "sum": {
+        "dataPoints": [
+         {
+          "attributes": [
+           {
+            "key": "route",
+            "value": {
+             "stringValue": "/a"
+            }
+           }
+          ],
+          "startTimeUnixNano": "1768557620000000000",
+          "timeUnixNano": "1768557630000000000",
+          "asInt": "3"
+         },
+         {
+          "attributes": [
+           {
+            "key": "route",
+            "value": {
+             "stringValue": "/b"
+            }
+           }
+          ],
+          "startTimeUnixNano": "1768557620000000000",
+          "timeUnixNano": "1768557630000000000",
+          "asInt": "9"
+         }
+        ],
+        "aggregationTemporality": 2,
+        "isMonotonic": true
+       }
+      },
+      {
+       "name": "cpu.temp",
+       "unit": "Cel",
+       "description": "the cpu.temp",
+       "gauge": {
+        "dataPoints": [
+         {
+          "attributes": [
+           {
+            "key": "cpu",
+            "value": {
+             "intValue": "0"
+            }
+           }
+          ],
+          "timeUnixNano": "1768557625000000000",
+          "asDouble": 40.0
+         },
+         {
+          "attributes": [
+           {
+            "key": "cpu",
+            "value": {
+             "intValue": "0"
+            }
+           }
+          ],
+          "timeUnixNano": "1768557630000000000",
+          "asDouble": 39.75
+         }
+        ]
+       }
+      },
+      {
+       "name": "http.server.duration",
+       "unit": "s",
+       "description": "the http.server.duration",
+       "histogram": {
+        "dataPoints": [
+         {
+          "startTimeUnixNano": "1768557620000000000",
+          "timeUnixNano": "1768557630000000000",
+          "count": "1",
+          "sum": 0.05,
+          "bucketCounts": [
+           "1",
+           "0",
+           "0"
+          ],
+          "explicitBounds": [
+           0.1,
+           0.5
+          ]
+         }
+        ],
+        "aggregationTemporality": 2
+       }
+      },
+      {
+       "name": "gc.pause",
+       "unit": "s",
+       "description": "the gc.pause",
+       "summary": {
+        "dataPoints": [
+         {
+          "startTimeUnixNano": "1768557620000000000",
+          "timeUnixNano": "1768557630000000000",
+          "count": "1",
+          "sum": 0.004,
+          "quantileValues": [
+           {
+            "quantile": 0.5,
+            "value": 0.004
+           },
+           {
+            "quantile": 0.99,
+            "value": 0.004
+           }
+          ]
+         }
+        ]
+       }
+      },
+      {
+       "name": "legacy.hits",
+       "unit": "1",
+       "description": "the legacy.hits",
+       "sum": {
+        "dataPoints": [
+         {
+          "timeUnixNano": "1768557630000000000",
+          "asInt": "12"
+         }
+        ],
+        "aggregationTemporality": 2,
+        "isMonotonic": true
+       }
+      },
+      {
+       "name": "bytes.sent",
+       "unit": "By",
+       "description": "the bytes.sent",
+       "sum": {
+        "dataPoints": [
+         {
+          "startTimeUnixNano": "1768557615000000000",
+          "timeUnixNano": "1768557630000000000",
+          "asInt": "512"
+         }
+        ],
+        "aggregationTemporality": 1,
+        "isMonotonic": true
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

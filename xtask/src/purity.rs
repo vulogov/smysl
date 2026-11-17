@@ -78,6 +78,10 @@ const NOT_IN_THE_CORE: &[(&str, &str)] = &[
         "only through `reader-osis` and `reader-zefania` of `smysl-text`",
     ),
     ("pulldown-cmark", "only through `reader-md` of `smysl-text`"),
+    // OTLP's protobuf encoding (RFC SMYSL-3 §20.1, TL-P3 step 3). `prost` 0.14.4 declares
+    // rustc 1.85, the base, and brings `bytes` and its derive; with the messages declared in
+    // `smysl-tel` there is no `opentelemetry-proto`, which would have linked an SDK.
+    ("prost", "only through `reader-otlp` of `smysl-tel`"),
     // A Slack export is an archive, and TX-P2 step 2 is where that stopped being a plan. Both
     // are here for the reason the parsers are: a reader's dependency is recorded against the
     // reader, and a later edit that made `reader-slack` a default feature would put a zip

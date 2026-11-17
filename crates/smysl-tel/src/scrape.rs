@@ -28,7 +28,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::schemas::tel;
 use smysl_core::surface::hjson::{HObject, HValue, Spanned};
 use smysl_core::{
-    canonical_uid, Decimal, SchemaId, SourceKind, SourceRef, Status, Uid, UnitCore, UnitCoreBuilder,
+    canonical_uid, Decimal, RelKind, Relation, SchemaId, SourceKind, SourceRef, Status, Uid,
+    UnitCore, UnitCoreBuilder,
 };
 use smysl_series::{flags, Backend, Sample, SeriesInfo, Substrate};
 
@@ -43,6 +44,68 @@ pub trait History {
     fn before(&self, series: &Uid, t_ms: u64) -> Result<Option<Sample>, smysl_series::Error>;
     /// The series whose last sample before `t_ms` is counted (not stale), with their keys.
     fn live(&self, t_ms: u64) -> Result<Vec<(Uid, String)>, smysl_series::Error>;
+}
+
+/// Two histories read as one: what the store holds, and what this run has recorded and not yet
+/// written. A review that writes nothing (`tel read` without `--yes`) still reads each file
+/// after the ones before it, so its units are the ones the writing run will commit.
+pub struct Layered<A, B> {
+    pub base: Option<A>,
+    pub over: B,
+}
+
+impl<A: History, B: History> History for Layered<A, B> {
+    fn before(&self, series: &Uid, t_ms: u64) -> Result<Option<Sample>, smysl_series::Error> {
+        let over = self.over.before(series, t_ms)?;
+        let base = match &self.base {
+            Some(b) => b.before(series, t_ms)?,
+            None => None,
+        };
+        // The later sample is the one in force; at one instant the sample order decides.
+        Ok(over.max(base))
+    }
+
+    fn live(&self, t_ms: u64) -> Result<Vec<(Uid, String)>, smysl_series::Error> {
+        let mut keys: BTreeMap<Uid, String> = self.over.live(t_ms)?.into_iter().collect();
+        if let Some(b) = &self.base {
+            keys.extend(b.live(t_ms)?);
+        }
+        // A series live in one layer may have gone stale in the other since.
+        let mut out = Vec::new();
+        for (uid, key) in keys {
+            if self.before(&uid, t_ms)?.is_some_and(|s| s.is_counted()) {
+                out.push((uid, key));
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// The `x.tel/of-series` relations (§4.2) of `units`: each reset and stale to its series, read
+/// from the unit's own `tel:series`.
+pub fn of_series(units: &[UnitCore]) -> Vec<Relation> {
+    let mut out = Vec::new();
+    for u in units {
+        if ![tel::RESET, tel::STALE].contains(&u.schema.as_str()) {
+            continue;
+        }
+        let series = u
+            .payload
+            .as_deref()
+            .and_then(|p| smysl_core::surface::payload_to_object(p).ok())
+            .and_then(|o| match o.get("tel:series").map(|v| &v.value) {
+                Some(HValue::Str(s)) => s.parse::<Uid>().ok(),
+                _ => None,
+            });
+        if let Some(series) = series {
+            out.push(Relation::new(
+                RelKind::Extension(tel::OF_SERIES.to_string()),
+                canonical_uid(u),
+                series,
+            ));
+        }
+    }
+    out
 }
 
 /// A substrate's history for one instrument and scheme.
@@ -199,7 +262,14 @@ pub fn record(
                 .expect("the flags it had, and one more");
             }
             if is_headline(t) {
-                units.push(reset(&ss.info.key, tuid, start_ms, at_ms, "start-time"));
+                units.push(reset(
+                    SCHEME,
+                    &ss.info.key,
+                    tuid,
+                    start_ms,
+                    at_ms,
+                    "start-time",
+                ));
             }
         }
     }
@@ -213,7 +283,14 @@ pub fn record(
         let ts = s.ts.map_or(at_ms, |t| t.0);
         if let Some(prev) = history.before(uid, ts)? {
             if prev.is_counted() && numeric_cmp(&now, &prev.value_dec()) == Ordering::Less {
-                units.push(reset(&series[uid].info.key, uid, ts, at_ms, "decrease"));
+                units.push(reset(
+                    SCHEME,
+                    &series[uid].info.key,
+                    uid,
+                    ts,
+                    at_ms,
+                    "decrease",
+                ));
             }
         }
     }
@@ -225,7 +302,7 @@ pub fn record(
             continue;
         }
         let unit = tel::series(SCHEME, &key).map_err(|e| ScrapeError::Unit(e.to_string()))?;
-        units.push(stale(&key, &uid, at_ms));
+        units.push(stale(SCHEME, &key, &uid, at_ms, "stale-nan"));
         series.insert(
             uid,
             SeriesSamples {
@@ -303,7 +380,7 @@ pub fn numeric_cmp(a: &Decimal, b: &Decimal) -> Ordering {
     }
 }
 
-fn payload(entries: &[(&str, HValue)]) -> Vec<u8> {
+pub(crate) fn payload(entries: &[(&str, HValue)]) -> Vec<u8> {
     let span = smysl_core::Span::new(0, 0);
     let mut o = HObject::new();
     for (k, v) in entries {
@@ -315,16 +392,24 @@ fn payload(entries: &[(&str, HValue)]) -> Vec<u8> {
     smysl_core::surface::object_to_payload(&o).unwrap_or_default()
 }
 
-fn source(key: &str, at_ms: u64) -> SourceRef {
-    SourceRef::new(SourceKind::Metric, format!("series:{SCHEME}:{key}")).observed_at(at_ms)
+fn source(scheme: &str, key: &str, at_ms: u64) -> SourceRef {
+    SourceRef::new(SourceKind::Metric, format!("series:{scheme}:{key}")).observed_at(at_ms)
 }
 
-fn ms(v: u64) -> HValue {
+pub(crate) fn ms(v: u64) -> HValue {
     // An epoch millisecond is far below i64::MAX for the next 292 million years.
     HValue::Int(i64::try_from(v).unwrap_or(i64::MAX))
 }
 
-fn reset(key: &str, series: &Uid, at: u64, observed: u64, basis: &str) -> UnitCore {
+/// An `x.tel/reset` of the series `key` of `scheme`, at `at`, seen at `observed`.
+pub(crate) fn reset(
+    scheme: &str,
+    key: &str,
+    series: &Uid,
+    at: u64,
+    observed: u64,
+    basis: &str,
+) -> UnitCore {
     let (status, grounds) = match basis {
         "start-time" => (Status::Measured, Vec::new()),
         _ => (Status::Derived, vec![*series]),
@@ -334,7 +419,7 @@ fn reset(key: &str, series: &Uid, at: u64, observed: u64, basis: &str) -> UnitCo
         tel::gist_of(&format!("reset {key}")),
         status,
     )
-    .source(source(key, observed))
+    .source(source(scheme, key, observed))
     .grounds(grounds)
     .payload(payload(&[
         ("tel:series", HValue::Str(series.canonical())),
@@ -345,17 +430,18 @@ fn reset(key: &str, series: &Uid, at: u64, observed: u64, basis: &str) -> UnitCo
     .expect("a reset unit is well formed by construction")
 }
 
-fn stale(key: &str, series: &Uid, at: u64) -> UnitCore {
+/// An `x.tel/stale` of the series `key` of `scheme` at `at`, as `marker` (§4.1) says.
+pub(crate) fn stale(scheme: &str, key: &str, series: &Uid, at: u64, marker: &str) -> UnitCore {
     UnitCoreBuilder::new(
         SchemaId::Extension(tel::STALE.to_string()),
         tel::gist_of(&format!("stale {key}")),
         Status::Measured,
     )
-    .source(source(key, at))
+    .source(source(scheme, key, at))
     .payload(payload(&[
         ("tel:series", HValue::Str(series.canonical())),
         ("tel:at_ms", ms(at)),
-        ("tel:marker", HValue::Str("stale-nan".into())),
+        ("tel:marker", HValue::Str(marker.into())),
     ]))
     .build()
     .expect("a stale unit is well formed by construction")
@@ -542,5 +628,60 @@ mod tests {
             sub.window(&a.series[0].uid, &a.inst, 0, u64::MAX).unwrap(),
             before
         );
+    }
+
+    #[test]
+    fn a_layered_history_is_the_store_and_the_run_together() {
+        // The store holds the first scrape; this run recorded the second and has not written it.
+        let mut store = Substrate::new(MemBackend::default());
+        scrape(&mut store, "# TYPE c counter\nc_total 5\ng 1\n", T0);
+        let mut run = Substrate::new(MemBackend::default());
+        let key = instrument_key("node", "h:9100");
+        let inst = canonical_uid(&tel::instrument("scraper", &key).unwrap());
+        let s2 = prom::read("# TYPE c counter\nc_total 7\n", TARGET).unwrap();
+        let r2 = {
+            let h = Layered {
+                base: Some(SubstrateHistory {
+                    substrate: &store,
+                    instrument: inst,
+                    scheme: SCHEME,
+                }),
+                over: SubstrateHistory {
+                    substrate: &run,
+                    instrument: inst,
+                    scheme: SCHEME,
+                },
+            };
+            record(&s2, T0 + 15_000, &key, &h).unwrap()
+        };
+        assert_eq!(
+            kinds(&r2),
+            [("x.tel/stale".into(), "measured".into())],
+            "g went"
+        );
+        for ss in &r2.series {
+            run.add(&ss.uid, &r2.inst, &ss.info, &ss.samples).unwrap();
+        }
+        // The third scrape sees the run's 7, not the store's 5, and g stale in the run.
+        let s3 = prom::read("# TYPE c counter\nc_total 6\n", TARGET).unwrap();
+        let h = Layered {
+            base: Some(SubstrateHistory {
+                substrate: &store,
+                instrument: inst,
+                scheme: SCHEME,
+            }),
+            over: SubstrateHistory {
+                substrate: &run,
+                instrument: inst,
+                scheme: SCHEME,
+            },
+        };
+        let r3 = record(&s3, T0 + 30_000, &key, &h).unwrap();
+        assert_eq!(kinds(&r3), [("x.tel/reset".into(), "derived".into())]);
+        let rels = of_series(&r3.units);
+        assert_eq!(rels.len(), 1);
+        assert_eq!(rels[0].from, canonical_uid(&r3.units[0]));
+        assert_eq!(rels[0].to, r3.series[0].uid);
+        assert_eq!(rels[0].kind.as_str(), tel::OF_SERIES);
     }
 }

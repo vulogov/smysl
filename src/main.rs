@@ -193,7 +193,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "lib",       about: "Import smysl files into the library; export it as files", purity: Purity::Pure,  phase: "TX-P11" , impure_when: None , forms: LIB_FORMS },
     Cmd { name: "schema",    about: "Show schema revisions; check the naming rule and lens totality", purity: Purity::Pure,  phase: "TX-P12" , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "migrate",   about: "Re-derive a schema's units under a newer revision; staged", purity: Purity::Pure,  phase: "TX-P12" , impure_when: None , forms: NO_DOCUMENT },
-    Cmd { name: "tel",       about: "Read telemetry snapshots into a library; check a profile", purity: Purity::Pure,  phase: "TL-P2"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "tel",       about: "Read telemetry into a library; the value in force at t; check a profile", purity: Purity::Pure,  phase: "TL-P2"  , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -2520,10 +2520,10 @@ fn cli() -> Command {
                     Arg::new("action")
                         .required(true)
                         .value_name("ACTION")
-                        .value_parser(["read", "profile"])
+                        .value_parser(["read", "at", "profile"])
                         .help(
-                            "read snapshots with a reader into a library, or check a profile \
-                             and print its hash",
+                            "read exports with a reader into a library, the value in force at \
+                             an instant, or check a profile and print its hash",
                         ),
                 )
                 .arg(
@@ -2532,8 +2532,8 @@ fn cli() -> Command {
                         .num_args(1..)
                         .action(ArgAction::Append)
                         .help(
-                            "`read READER FILE...` (k8s/1, zabbix/1); `profile check \
-                             FILE|NAME`",
+                            "`read READER FILE...` (k8s/1, zabbix/1, prom/1, otlp/1, \
+                             otlp-json/1); `at SERIES MS`; `profile check FILE|NAME`",
                         ),
                 )
                 .arg(
@@ -2554,6 +2554,34 @@ fn cli() -> Command {
                         .long("licence")
                         .value_name("SPDX")
                         .help("The snapshots' licence, as `text add` takes it; required"),
+                )
+                .arg(
+                    Arg::new("job")
+                        .long("job")
+                        .value_name("JOB")
+                        .help("prom/1: the target's `job` label"),
+                )
+                .arg(
+                    Arg::new("instance")
+                        .long("instance")
+                        .value_name("INSTANCE")
+                        .help("prom/1: the target's `instance` label"),
+                )
+                .arg(
+                    Arg::new("instrument")
+                        .long("instrument")
+                        .value_name("I")
+                        .help(
+                            "otlp/1, otlp-json/1 and zabbix/1 history: the instrument's key \
+                             (`otel-collector:<id>`, `zabbix-server:<name>`); `at`: an \
+                             instrument uid",
+                        ),
+                )
+                .arg(
+                    Arg::new("items")
+                        .long("items")
+                        .value_name("FILE")
+                        .help("zabbix/1: the item export the FILEs' history belongs to"),
                 )
                 .arg(
                     Arg::new("zabbix-api")
@@ -13473,6 +13501,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .unwrap_or_default();
     match action {
         "profile" => tel_profile(&args),
+        "at" => tel_at(m, global, &args),
         "read" => tel_read(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
@@ -13544,6 +13573,12 @@ fn tel_read(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
     if files.is_empty() {
         eprintln!("smysl tel read: no file given");
         return ExitCode::Usage;
+    }
+    // The series readers write the substrate rather than snapshots.
+    let series_reader = matches!(reader.as_str(), "prom/1" | "otlp/1" | "otlp-json/1")
+        || (reader.as_str() == zabbix::ID && m.contains_id("items"));
+    if series_reader {
+        return tel_read_series(m, global, reader, files);
     }
     let (Some(spec), Some(&at), Some(licence)) = (
         m.get_one::<String>("profile"),
@@ -13833,6 +13868,472 @@ fn tel_read(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
         stage_root.join(smysl::stage::PATH).display()
     );
     ExitCode::Staged
+}
+
+/// `<library>/index/series.redb` (RFC SMYSL-3 §19.3).
+#[cfg(feature = "tel")]
+fn tel_series_path(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("index").join("series.redb")
+}
+
+/// `smysl tel read prom/1|otlp/1|otlp-json/1 FILE...` and `smysl tel read zabbix/1 FILE...
+/// --items FILE`: series readers (TL-P3), into the substrate.
+///
+/// **What is written, and when**, as for snapshots: with `--yes` the samples go to
+/// `<library>/index/series.redb` and the units (series, instrument, reset, stale,
+/// series-meta) and their `x.tel/of-series` relations are committed. Without it nothing is
+/// written: the units are staged for review and the samples counted. Each file is still
+/// recorded after the ones before it — the review reads the store and its own earlier files
+/// as one ([`smysl::tel::scrape::Layered`]) — so a review's units are the ones `--yes` commits.
+///
+/// **`--at`** is the attestation clock, and for `prom/1` the scrape instant too: a text scrape
+/// does not carry its own. So `prom/1` takes one file per run.
+#[cfg(feature = "tel")]
+fn tel_read_series(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    reader: &str,
+    files: &[&String],
+) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::{MemBackend, Sample, SeriesInfo, Substrate};
+    use smysl::tel::readers::{otlp, prom, zabbix_history};
+    use smysl::tel::scrape::{self, Layered, Scraped, SubstrateHistory};
+    use smysl::text::library::Library;
+
+    let Some(&at) = m.get_one::<u64>("at") else {
+        eprintln!("smysl tel read: --at is required: the attestation clock, and for prom/1 the");
+        eprintln!("  scrape instant, which a text scrape does not carry");
+        return ExitCode::Usage;
+    };
+    let arg = |n: &str| m.get_one::<String>(n).map(String::as_str);
+    // The instrument, and what each file is read with.
+    let (role, key, scheme) = match reader {
+        "prom/1" => {
+            let (Some(job), Some(instance)) = (arg("job"), arg("instance")) else {
+                eprintln!("smysl tel read: prom/1 needs --job and --instance, the target's labels");
+                eprintln!("  that the exposition does not carry and every series key includes");
+                return ExitCode::Usage;
+            };
+            if files.len() != 1 {
+                eprintln!("smysl tel read: prom/1 reads one scrape per run: --at is its instant");
+                return ExitCode::Usage;
+            }
+            (
+                "scraper",
+                scrape::instrument_key(job, instance),
+                scrape::SCHEME,
+            )
+        }
+        _ => {
+            let Some(key) = arg("instrument") else {
+                eprintln!(
+                    "smysl tel read: {reader} needs --instrument, the key of what the export was \
+                     read from"
+                );
+                eprintln!("  (`otel-collector:<service.instance.id>`, `zabbix-server:<name>`)");
+                return ExitCode::Usage;
+            };
+            let scheme = if reader == "zabbix/1" {
+                smysl::tel::zabbix_history::SCHEME
+            } else {
+                smysl::tel::otel::SCHEME
+            };
+            ("collector", key.to_string(), scheme)
+        }
+    };
+    let api = arg("zabbix-api");
+    if reader == "zabbix/1" && api.is_none() {
+        eprintln!("smysl tel read: zabbix/1 needs --zabbix-api, the `apiinfo.version` the");
+        eprintln!("  export was taken from");
+        return ExitCode::Usage;
+    }
+    let items = match arg("items").map(std::fs::read_to_string).transpose() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("smysl tel read: --items: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let inst = match smysl::schemas::tel::instrument(role, &key) {
+        Ok(u) => smysl::canonical_uid(&u),
+        Err(e) => {
+            eprintln!("smysl tel read: --instrument `{key}`: {e}");
+            return ExitCode::Usage;
+        }
+    };
+
+    let yes = m.get_flag("yes");
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let opened = if yes {
+        Library::create(&root).map(Some)
+    } else if Library::is_library(&root) {
+        Library::open(&root).map(Some)
+    } else {
+        Ok(None)
+    };
+    let mut library = match opened {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel read: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let _locks = match &library {
+        Some(l) => match smysl::text::lock::acquire_all(&root, &l.shards(), "tel read") {
+            Ok(locks) => Some(locks),
+            Err(e) => {
+                eprintln!("smysl tel read: {e}");
+                return ExitCode::Failure;
+            }
+        },
+        None => None,
+    };
+    let path = tel_series_path(&root);
+    // A review opens the store only if it is there: it creates nothing.
+    let mut store = if yes || path.exists() {
+        if let Some(dir) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                eprintln!("smysl tel read: {}: {e}", dir.display());
+                return ExitCode::Failure;
+            }
+        }
+        match RedbBackend::open(&path) {
+            Ok(b) => Some(Substrate::new(b)),
+            Err(e) => {
+                eprintln!("smysl tel read: {}: {e}", path.display());
+                return ExitCode::Failure;
+            }
+        }
+    } else {
+        None
+    };
+
+    let mut run = Substrate::new(MemBackend::default());
+    let mut batches: Vec<(Uid, SeriesInfo, Vec<Sample>)> = Vec::new();
+    let mut units: std::collections::BTreeMap<Uid, smysl::UnitCore> =
+        std::collections::BTreeMap::new();
+    let mut relations = Vec::new();
+    let (mut samples_n, mut facts) = (0u64, 0usize);
+    for file in files {
+        let bytes = match std::fs::read(file.as_str()) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("smysl tel read: {file}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let text = || std::str::from_utf8(&bytes).map_err(|e| format!("not UTF-8 text: {e}"));
+        let history = Layered {
+            base: store.as_ref().map(|s| SubstrateHistory {
+                substrate: s,
+                instrument: inst,
+                scheme,
+            }),
+            over: SubstrateHistory {
+                substrate: &run,
+                instrument: inst,
+                scheme,
+            },
+        };
+        let recorded: Result<Scraped, String> = match reader {
+            "prom/1" => text().and_then(|t| {
+                let target = [
+                    ("job", arg("job").unwrap_or("")),
+                    ("instance", arg("instance").unwrap_or("")),
+                ];
+                let s = prom::read(t, &target).map_err(|e| e.to_string())?;
+                scrape::record(&s, at, &key, &history).map_err(|e| e.to_string())
+            }),
+            "otlp/1" | "otlp-json/1" => {
+                let e = if reader == "otlp/1" {
+                    otlp::read_proto(&bytes).map_err(|e| e.to_string())
+                } else {
+                    text().and_then(|t| otlp::read_json(t).map_err(|e| e.to_string()))
+                };
+                e.and_then(|e| {
+                    if e.unsplit() > 0 {
+                        eprintln!(
+                            "smysl tel read: {file}: {} exponential-histogram bucket(s) not \
+                             split into series",
+                            e.unsplit()
+                        );
+                    }
+                    smysl::tel::otel::record(&e, role, &key, &history).map_err(|e| e.to_string())
+                })
+            }
+            _ => text().and_then(|t| {
+                let h = zabbix_history::read(t, items.as_deref().unwrap_or(""), api.unwrap_or(""))
+                    .map_err(|e| e.to_string())?;
+                if h.not_numeric > 0 {
+                    eprintln!(
+                        "smysl tel read: {file}: {} row(s) of non-numeric items left out",
+                        h.not_numeric
+                    );
+                }
+                if !h.unknown_items.is_empty() {
+                    let ids: Vec<&str> = h.unknown_items.iter().map(String::as_str).collect();
+                    eprintln!(
+                        "smysl tel read: {file}: rows of item(s) not in --items: {}",
+                        ids.join(", ")
+                    );
+                }
+                smysl::tel::zabbix_history::record(&h, &key).map_err(|e| e.to_string())
+            }),
+        };
+        let r = match recorded {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("smysl tel read: {file}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        if r.not_values > 0 {
+            eprintln!(
+                "smysl tel read: {file}: {} sample(s) not a value (NaN, ±Inf or out of range), \
+                 kept with flag 4",
+                r.not_values
+            );
+        }
+        let n: usize = r.series.iter().map(|s| s.samples.len()).sum();
+        println!(
+            "read      {file}: {} series, {n} sample(s), {} fact(s)",
+            r.series.len(),
+            r.units.len()
+        );
+        samples_n += n as u64;
+        facts += r.units.len();
+        units.insert(r.inst, r.instrument.clone());
+        relations.extend(scrape::of_series(&r.units));
+        for u in &r.units {
+            units.insert(smysl::canonical_uid(u), u.clone());
+        }
+        for ss in r.series {
+            units.insert(ss.uid, ss.unit.clone());
+            match run.add(&ss.uid, &inst, &ss.info, &ss.samples) {
+                Ok(rep) => {
+                    for (ms, ns) in rep.conflicts {
+                        eprintln!(
+                            "smysl tel read: {file}: SMY-W615: {} holds two samples at {ms}.{ns:06}",
+                            ss.info.key
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!("smysl tel read: {file}: {e}");
+                    return ExitCode::Failure;
+                }
+            }
+            batches.push((ss.uid, ss.info, ss.samples));
+        }
+    }
+
+    // The samples first: a unit about a series the substrate does not hold would be a fact
+    // with nothing behind it.
+    let mut added = 0u64;
+    if let (true, Some(store)) = (yes, store.as_mut()) {
+        for (series, info, samples) in &batches {
+            match store.add(series, &inst, info, samples) {
+                Ok(rep) => added += rep.added,
+                Err(e) => {
+                    eprintln!("smysl tel read: {}: {e}", path.display());
+                    return ExitCode::Failure;
+                }
+            }
+        }
+        // Not the path: stdout is rule D's, and the same run into another directory is the
+        // same run.
+        println!(
+            "series    {added} sample(s) added to the substrate, {} already there",
+            samples_n - added
+        );
+    } else {
+        println!("series    {samples_n} sample(s) would be added; {facts} fact(s)");
+    }
+    drop(store);
+
+    let agent = match AgentId::new("tool:smysl-tel") {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl tel read: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    // The recipe is the reader and the instrument: what the units are a function of besides
+    // the exports and the substrate's prior samples.
+    let recipe = smysl::hash_bytes(format!("{reader} {key}").as_bytes());
+    let attest = smysl::stage::Attest::new(
+        agent.clone(),
+        smysl::Rung::Computed,
+        smysl::Hlc::new(at, 0, agent),
+    )
+    .with_recipe(recipe, recipe);
+    let empty = Store::new();
+    let staged = smysl::stage::prepare_declared(
+        library.as_ref().map_or(&empty, |l| l.store()),
+        units.into_values().collect(),
+        relations,
+        std::collections::BTreeMap::new(),
+        vec![smysl::schemas::tel::decl()],
+        &attest,
+    );
+    if staged.has_errors() {
+        eprintln!("smysl tel read: the batch did not check clean");
+        for d in &staged.report.diagnostics {
+            eprintln!("  {d}");
+        }
+        return ExitCode::Failure;
+    }
+    let n = staged.len();
+    if let (true, Some(library)) = (yes, library.as_mut()) {
+        if let Err(e) = library.append_records(&staged.records()) {
+            eprintln!("smysl tel read: {e}");
+            return ExitCode::Failure;
+        }
+        println!("{n} record(s) committed");
+        return ExitCode::Success;
+    }
+    let stage_root = std::path::PathBuf::from(".");
+    if let Err(e) = smysl::stage::write(&stage_root, &staged) {
+        eprintln!("smysl tel read: {e}");
+        return ExitCode::Failure;
+    }
+    println!(
+        "{n} record(s) staged in {} for review; nothing was written to the library - run again \
+         with --yes to add the samples and commit them",
+        stage_root.join(smysl::stage::PATH).display()
+    );
+    ExitCode::Staged
+}
+
+/// `smysl tel at SERIES MS [--instrument UID] -s LIB`: the value in force at an instant
+/// (RFC SMYSL-3 §19.3, §23), from the substrate.
+///
+/// `SERIES` is a series uid, or `<scheme>:<key>` (`prom:up{instance="h:9100",job="node"}`),
+/// which names the same uid. One line per instrument the series has samples from, or the one
+/// `--instrument` names: the instrument's uid, the sample's instant (`ms` or `ms.nnnnnn`), its
+/// value, and what its flags say. A stale or no-value sample is printed as what it is, never
+/// as a number: what is "in force" past a stale marker is the reader's decision (§19.3).
+///
+/// Exit 0 with a sample for at least one instrument, 1 with none.
+#[cfg(feature = "tel")]
+fn tel_at(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::{flags, Substrate};
+
+    let (Some(series), Some(t), None) = (args.first(), args.get(1), args.get(2)) else {
+        eprintln!("smysl tel at: `SERIES MS`");
+        return ExitCode::Usage;
+    };
+    let Ok(t) = t.parse::<u64>() else {
+        eprintln!("smysl tel at: `{t}` is not an instant in epoch milliseconds");
+        return ExitCode::Usage;
+    };
+    let uid = match series.parse::<Uid>() {
+        Ok(u) => u,
+        Err(_) => {
+            let Some((scheme, key)) = series.split_once(':') else {
+                eprintln!("smysl tel at: `{series}` is neither a series uid nor `<scheme>:<key>`");
+                return ExitCode::Usage;
+            };
+            match smysl::schemas::tel::series(scheme, key) {
+                Ok(u) => smysl::canonical_uid(&u),
+                Err(e) => {
+                    eprintln!("smysl tel at: `{series}`: {e}");
+                    return ExitCode::Usage;
+                }
+            }
+        }
+    };
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let path = tel_series_path(&root);
+    if !path.exists() {
+        eprintln!(
+            "smysl tel at: {} has no series substrate ({}); `tel read --yes` writes one",
+            root.display(),
+            path.display()
+        );
+        return ExitCode::Failure;
+    }
+    let sub = match RedbBackend::open(&path) {
+        Ok(b) => Substrate::new(b),
+        Err(e) => {
+            eprintln!("smysl tel at: {}: {e}", path.display());
+            return ExitCode::Failure;
+        }
+    };
+    let insts = match m.get_one::<String>("instrument") {
+        Some(i) => match i.parse::<Uid>() {
+            Ok(u) => vec![u],
+            Err(_) => {
+                eprintln!("smysl tel at: --instrument takes an instrument uid; `{i}` is not one");
+                return ExitCode::Usage;
+            }
+        },
+        None => match sub.instruments(&uid) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("smysl tel at: {e}");
+                return ExitCode::Failure;
+            }
+        },
+    };
+    let row = sub.row(&uid).ok().flatten();
+    println!(
+        "series    {}  {}",
+        uid.canonical(),
+        row.as_ref()
+            .map(|r| format!("{}:{}", r.scheme, r.key))
+            .unwrap_or_else(|| "(not in the substrate)".into())
+    );
+    let mut found = false;
+    for inst in insts {
+        let s = match sub.at(&uid, &inst, t) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("smysl tel at: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let Some(s) = s else {
+            println!("none      {}  nothing at or before {t}", inst.canonical());
+            continue;
+        };
+        found = true;
+        let instant = match s.ns() {
+            Some(ns) => format!("{}.{ns:06}", s.ts_ms()),
+            None => s.ts_ms().to_string(),
+        };
+        let f = s.flags();
+        let value = if f & flags::STALE != 0 {
+            "stale".to_string()
+        } else if f & flags::NO_VALUE != 0 {
+            "no-value".to_string()
+        } else {
+            s.value_dec().to_string()
+        };
+        let mut notes = Vec::new();
+        if f & flags::RESET != 0 {
+            notes.push("reset");
+        }
+        let notes = if notes.is_empty() {
+            String::new()
+        } else {
+            format!("  ({})", notes.join(", "))
+        };
+        println!("value     {}  {instant}  {value}{notes}", inst.canonical());
+    }
+    if found {
+        ExitCode::Success
+    } else {
+        ExitCode::Failure
+    }
 }
 
 #[cfg(not(feature = "tel"))]

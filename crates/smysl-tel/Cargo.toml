@@ -13,6 +13,9 @@ all-features = true
 
 [features]
 default = []
+# `otlp/1`, the protobuf OTLP metrics reader (RFC SMYSL-3 §20.1). `otlp-json/1` needs nothing
+# and is always built.
+reader-otlp = ["dep:prost"]
 
 [dependencies]
 # `dec`, `x.tel/v1`'s names and builders, payload CBOR and the diagnostic registry. The one
@@ -24,8 +27,16 @@ smysl-core = { workspace = true }
 smysl-series = { workspace = true }
 # Strings are NFC (§5.5), as every text field the kernel hashes is.
 unicode-normalization = { workspace = true }
+# Protobuf decoding for `otlp/1`, with the metrics messages declared in `readers/otlp_pb.rs`:
+# `opentelemetry-proto` would bring `opentelemetry_sdk` with its types.
+prost = { workspace = true, optional = true }
 
 [dev-dependencies]
 # `tests/prom_fixture.rs` records the fixture into the redb backend as well as memory: the
 # substrate round trip TL-P3's exit criterion names.
 smysl-series = { workspace = true, features = ["store-redb"] }
+
+# The OTLP fixture reads each export's protobuf twin as well as its JSON.
+[[test]]
+name = "otlp_fixture"
+required-features = ["reader-otlp"]

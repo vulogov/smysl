@@ -1110,7 +1110,8 @@ migrate or under `--dry-run`, and 1 when the store does not declare the target r
 
 #section("tel")
 
-*Read telemetry snapshots into a library; check a profile.* Pure · TL-P2.
+*Read telemetry into a library; the value in force at an instant; check a profile.* Pure ·
+TL-P2, TL-P3.
 
 `tel read READER FILE...` reads platform exports with one of SMYSL-3's object readers. `k8s/1`
 reads `kubectl get -o json` lists, objects and watch events; `zabbix/1` reads `host.get` and
@@ -1131,23 +1132,41 @@ The same command with `--yes` writes those manifests, by the same ids, and commi
 `tel profile check FILE|NAME` validates a profile and prints its name, scheme and hash, the
 hash every manifest it reads records.
 
+The series readers write samples, not snapshots (TL-P3, chapter 38). `prom/1` reads one
+Prometheus scrape, text 0.0.4 or OpenMetrics, taken at `--at`. `otlp/1` and `otlp-json/1`
+read OTLP metrics exports. `zabbix/1` with `--items` reads `history.get` exports against
+their `item.get`. With `--yes` the samples go to `<library>/index/series.redb`, and the facts
+they establish are committed with their `x.tel/of-series` relations: `x.tel/reset`,
+`x.tel/stale` and Zabbix's `x.tel/series-meta`. Without `--yes` nothing is written, and each
+file is still judged after the ones before it. Reading an export twice adds nothing.
+
+`tel at SERIES MS` prints the value in force at `MS`, the last sample at or before it, for each
+instrument the series has samples from. `SERIES` is a series uid or `<scheme>:<key>`. A stale
+or no-value sample is printed as `stale` or `no-value`, and one that began a counter afresh is
+marked `(reset)`.
+
 #dtable(
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`read` or `profile`.]),
-    ([`ARG…`], [positional], [`read`: the reader, `k8s/1` or `zabbix/1`, then the files. `profile`: `check` and a profile file or shipped name.]),
-    ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for `read`; it must be for the reader's scheme.]),
-    ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds. Required: nothing here reads a clock, and the change units' `observed` is this instant.]),
-    ([`--licence`], [`SPDX`], [The manifests' licence. Required, as `text add` requires it.]),
+    ([`ACTION`], [positional, required], [`read`, `at` or `profile`.]),
+    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `profile`: `check` and a profile file or shipped name.]),
+    ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for the object readers; it must be for the reader's scheme.]),
+    ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds, and for `prom/1` the scrape instant. Required for `read`: nothing here reads a clock.]),
+    ([`--licence`], [`SPDX`], [The manifests' licence. Required for the object readers, as `text add` requires it.]),
     ([`--zabbix-api`], [`VERSION`], [The Zabbix API version the export came from (`apiinfo.version`). Required for `zabbix/1`: 6.x, 7.x or 8.x.]),
+    ([`--job`, `--instance`], [`JOB`, `INSTANCE`], [`prom/1`: the target's labels, which the exposition does not carry and every series key includes. Required.]),
+    ([`--instrument`], [`I`], [`read`: the key of what an OTLP or Zabbix export was read from, such as `otel-collector:c1` or `zabbix-server:main`. Required for those readers. `at`: an instrument uid, to ask one instrument only.]),
+    ([`--items`], [`FILE`], [`zabbix/1`: the `item.get` export (with `selectHosts`) the files' history belongs to. With it, the files are `history.get` exports.]),
     ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing.]),
     ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),
   ),
 )
 
 `tel read` exits 0 when it commits, 10 when it stages, and 2 when a required flag is missing,
-the reader is not a telemetry reader, or the profile is for another scheme. It reports
+the reader is not a telemetry reader, or the profile is for another scheme. `tel at` exits 0
+when some instrument has a sample at or before the instant, and 1 when none has or the library
+has no substrate. It reports
 `SMY-W608` for a keyed array it could not key, `SMY-W613` for a number out of `dec`'s range,
 and `SMY-W610` for an object whose previous snapshot was read under another profile. That
 boundary is recorded and not diffed.

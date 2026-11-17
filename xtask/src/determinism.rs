@@ -248,6 +248,79 @@ const OPS: &[Op] = &[
         setup: None,
     },
     Op {
+        name: "tel_read_series",
+        // RFC SMYSL-3's series path (TL-P3): three protobuf OTLP exports decoded, split into
+        // series, judged for resets and stales against the substrate and each other, and added
+        // to `series.redb`. stdout carries each export's series, sample and fact counts and
+        // what the substrate took.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "tel",
+            "read",
+            "otlp/1",
+            "fixtures/tel/otlp/e0.pb",
+            "fixtures/tel/otlp/e1.pb",
+            "fixtures/tel/otlp/e2.pb",
+            "--instrument",
+            "otel-collector:c1",
+            "--at",
+            "1768557600000",
+            "-s",
+            SCRATCH,
+            "--yes",
+        ],
+        setup: None,
+    },
+    Op {
+        name: "tel_at",
+        // The value in force at an instant (§19.3), read back from the substrate the exports
+        // above wrote: the series uid its key names, the instrument's uid, the sample's
+        // instant and value, and its reset flag — the restart the third export states.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "tel",
+            "at",
+            r#"otel:{"attributes":{"route":"/a"},"kind":"sum","monotonic":true,"name":"http.server.requests","resource":{"service.instance.id":"c1","service.name":"cart"},"scope":{"name":"io.opentelemetry.http","version":"1.2.0"},"temporality":"cumulative","unit":"{request}"}"#,
+            "1768557645000",
+            "-s",
+            SCRATCH,
+        ],
+        setup: Some(&[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "tel",
+            "read",
+            "otlp/1",
+            "fixtures/tel/otlp/e0.pb",
+            "fixtures/tel/otlp/e1.pb",
+            "fixtures/tel/otlp/e2.pb",
+            "--instrument",
+            "otel-collector:c1",
+            "--at",
+            "1768557600000",
+            "-s",
+            SCRATCH,
+            "--yes",
+        ]),
+    },
+    Op {
         name: "text_show",
         // Resolving a locator and printing the passage: the reading's segment table read back
         // as a tree, the range it names, and the bytes sliced out of the part.

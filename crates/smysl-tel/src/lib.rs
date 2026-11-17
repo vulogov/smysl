@@ -24,11 +24,13 @@ pub mod diff;
 pub mod jcs;
 pub mod json;
 pub mod leaf;
+pub mod otel;
 pub mod pointer;
 pub mod profile;
 pub mod readers;
 pub mod scrape;
 pub mod snapshot;
+pub mod zabbix_history;
 
 pub use diff::{diff, leaves, part_text, Diff, Note, Snapshot};
 pub use json::{Json, JsonError};

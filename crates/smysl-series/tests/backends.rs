@@ -79,6 +79,15 @@ fn contract<B: Backend>(mut sub: Substrate<B>) {
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].1.key, info().key);
     assert!(sub.series(Some("otel")).unwrap().is_empty());
+
+    // Instruments: one seek each, whatever the chunks between them.
+    assert_eq!(sub.instruments(&s).unwrap(), vec![i]);
+    sub.add(&s, &uid(0), &info(), &[v(5, 1)]).unwrap();
+    sub.add(&s, &uid(9), &info(), &[v(5, 1), v(9_000_000, 2)])
+        .unwrap();
+    sub.add(&uid(4), &i, &info(), &[v(5, 1)]).unwrap();
+    assert_eq!(sub.instruments(&s).unwrap(), vec![uid(0), i, uid(9)]);
+    assert!(sub.instruments(&other).unwrap().is_empty());
 }
 
 #[test]

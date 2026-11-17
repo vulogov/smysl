@@ -1,0 +1,15 @@
+# RFC SMYSL-3 §6, §20.1: fixtures/tel/zabbix/ history recorded into the series substrate.
+# Written by crates/smysl-tel/tests/zabbix_history_fixture.rs; SMYSL_BLESS=1 rewrites it.
+# Instrument zabbix-server:zbx-main; windows [1768557600000, 1768557900000). series: key, samples, flags OR'd, digest.
+export	history-a.json	3 series	0 not numeric	0 not values	unknown {"99"}
+unit	x.tel/series-meta	cited	b3:ys4forq6kw6kf7vmfamnwvp66jmu6skq7o5eyynain3pmwrnzpya	host:web-01/item:system.cpu.load[percpu,avg1] is itemid 42
+unit	x.tel/series-meta	cited	b3:aqvmc7dszdgyi6bl4edzwmghtixr7jzhjq4ukvtgknis37mupzvq	host:web-01/item:net.if.in["eth0"] is itemid 43
+unit	x.tel/series-meta	cited	b3:ktajsjbjt2gkjtob6hx4wvnshnpx4pwn7raeyxekpqlfrfyojlcq	host:DB 01/item:mysql.qps is itemid 51
+export	history-b.json	3 series	0 not numeric	1 not values	unknown {}
+unit	x.tel/series-meta	cited	b3:ys4forq6kw6kf7vmfamnwvp66jmu6skq7o5eyynain3pmwrnzpya	host:web-01/item:system.cpu.load[percpu,avg1] is itemid 42
+unit	x.tel/series-meta	cited	b3:aqvmc7dszdgyi6bl4edzwmghtixr7jzhjq4ukvtgknis37mupzvq	host:web-01/item:net.if.in["eth0"] is itemid 43
+unit	x.tel/series-meta	cited	b3:ktajsjbjt2gkjtob6hx4wvnshnpx4pwn7raeyxekpqlfrfyojlcq	host:DB 01/item:mysql.qps is itemid 51
+export	history-char.json	0 series	1 not numeric	0 not values	unknown {}
+series	host:DB 01/item:mysql.qps	5	0	87656d21b42268895372cf7eea4781648ce4b7b5016a3753adfc7035cafff20f
+series	host:web-01/item:net.if.in["eth0"]	5	0	9c3e5999a284a9482798b7762b5b4788904ad80767ba214e17d93467b27777f2
+series	host:web-01/item:system.cpu.load[percpu,avg1]	5	12	bcfe1e54e90336b4b3632c32166453984bda5cd08669cd0eaa465b1ffdc9325e

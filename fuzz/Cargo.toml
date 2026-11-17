@@ -20,7 +20,7 @@ smysl-check = { path = "../crates/smysl-check" }
 smysl-query = { path = "../crates/smysl-query" }
 # Import and export (TX-P11 step 11): `lib_roundtrip` and `lib_import`.
 smysl-lib = { path = "../crates/smysl-lib" }
-smysl-tel = { path = "../crates/smysl-tel" }
+smysl-tel = { path = "../crates/smysl-tel", features = ["reader-otlp"] }
 smysl-series = { path = "../crates/smysl-series" }
 # Every reader, so one target covers all nine and the purity gate's feature split is exercised
 # by the fuzzer rather than only by the test suite.
@@ -149,5 +149,11 @@ doc = false
 [[bin]]
 name = "series_chunk"
 path = "fuzz_targets/series_chunk.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tel_otlp"
+path = "fuzz_targets/tel_otlp.rs"
 test = false
 doc = false

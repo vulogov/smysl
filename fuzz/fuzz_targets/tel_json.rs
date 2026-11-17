@@ -12,12 +12,15 @@
 //!
 //! So does `prom/1` (TL-P3 step 2): a scrape is a target's bytes, read or refused, and what it
 //! reads records against an empty substrate without a panic.
+//!
+//! So does `zabbix/1` history (TL-P3 step 4): an input with a `\n---\n` line is history above
+//! it and the item export below, read together and recorded.
 
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use smysl_tel::profile::builtin;
 use smysl_series::{MemBackend, Substrate};
-use smysl_tel::readers::{k8s, prom, zabbix};
+use smysl_tel::readers::{k8s, prom, zabbix, zabbix_history};
 use smysl_tel::scrape::{self, SubstrateHistory};
 use smysl_tel::snapshot::record;
 use smysl_tel::{jcs, json};
@@ -56,5 +59,10 @@ fuzz_target!(|data: &[u8]| {
             scheme: scrape::SCHEME,
         };
         let _ = scrape::record(&s, 1, &key, &h);
+    }
+    if let Some((history, items)) = text.split_once("\n---\n") {
+        if let Ok(h) = zabbix_history::read(history, items, "7.0") {
+            let _ = smysl_tel::zabbix_history::record(&h, "zabbix-server:f");
+        }
     }
 });

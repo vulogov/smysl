@@ -5,7 +5,7 @@ use std::path::Path;
 use ::redb::{Database, ReadableTable, TableDefinition};
 use smysl_core::Uid;
 
-use crate::store::{chunk_key, Backend, ChunkKey};
+use crate::store::{chunk_key, key_inst, Backend, ChunkKey};
 use crate::Error;
 
 const CHUNKS: TableDefinition<'_, &[u8; 72], &[u8]> = TableDefinition::new("chunks");
@@ -29,8 +29,32 @@ pub struct RedbBackend {
 impl RedbBackend {
     /// Open the file at `path`, creating it with its four tables if it is not there, and refuse
     /// one written in another format.
+    ///
+    /// A file already in this format is opened with a read transaction only. A write
+    /// transaction commits, and a commit is a durable flush: `tel at` paid one for every
+    /// question, which was most of its time.
     pub fn open(path: &Path) -> Result<RedbBackend, Error> {
         let db = Database::create(path).map_err(backend)?;
+        {
+            let txn = db.begin_read().map_err(backend)?;
+            match txn.open_table(META) {
+                Ok(meta) => {
+                    if let Some(f) = meta.get("format").map_err(backend)? {
+                        if f.value() != FORMAT {
+                            return Err(Error::Backend(format!(
+                                "{} is series format `{}`, not `{}`",
+                                path.display(),
+                                String::from_utf8_lossy(f.value()),
+                                String::from_utf8_lossy(FORMAT)
+                            )));
+                        }
+                        return Ok(RedbBackend { db });
+                    }
+                }
+                Err(::redb::TableError::TableDoesNotExist(_)) => {}
+                Err(e) => return Err(backend(e)),
+            }
+        }
         let txn = db.begin_write().map_err(backend)?;
         {
             let mut meta = txn.open_table(META).map_err(backend)?;
@@ -103,6 +127,27 @@ impl Backend for RedbBackend {
             }
             None => Ok(None),
         }
+    }
+
+    fn instruments(&self, series: &Uid) -> Result<Vec<Uid>, Error> {
+        use core::ops::Bound::{Excluded, Included};
+        let txn = self.db.begin_read().map_err(backend)?;
+        let t = txn.open_table(CHUNKS).map_err(backend)?;
+        let end = chunk_key(series, &Uid::from_bytes([0xff; 32]), u64::MAX);
+        let mut out = Vec::new();
+        let mut from = Included(chunk_key(series, &Uid::from_bytes([0; 32]), 0));
+        // One seek per instrument, not one step per chunk.
+        loop {
+            let next = t
+                .range::<&[u8; 72]>((from.as_ref(), Included(&end)))
+                .map_err(backend)?
+                .next();
+            let Some(row) = next else { break };
+            let inst = key_inst(row.map_err(backend)?.0.value());
+            out.push(inst);
+            from = Excluded(chunk_key(series, &inst, u64::MAX));
+        }
+        Ok(out)
     }
 
     fn evicted(&self, series: &Uid, inst: &Uid, lo: u64, hi: u64) -> Result<Vec<u64>, Error> {

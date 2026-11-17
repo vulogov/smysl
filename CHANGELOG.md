@@ -560,6 +560,205 @@ digests. Recording the same scrape twice gives the same units and no new samples
 `tel_json`'s fuzz target now reads and records scrapes too, and `make seed-fuzz` seeds it from
 `fixtures/tel/`. `smysl-tel` depends on `smysl-series`.
 
+### `otlp-json/1` and `otlp/1`, and what an export establishes (TL-P3 step 3)
+
+**One reading, two encodings** (`smysl_tel::readers::otlp`). An `ExportMetricsServiceRequest`
+is read as OTLP/JSON (`read_json`, always built) or as protobuf (`read_proto`, feature
+`reader-otlp`). Both decode into the same data points, and one function turns those into series
+samples, so the two cannot disagree about a key or a value.
+
+- **Our own JSON reader** (§20.1):
+  - `asInt` and every 64-bit integer are read from a string or a number, never through a
+    double. `9007199254740993` stays `9007199254740993`.
+  - Field names are accepted in lowerCamelCase and in the proto's snake_case. Enums are
+    accepted as integers or by name. Unknown fields are ignored.
+- **Values** (§5.3):
+  - `asInt`, counts and bucket counts are typed integers.
+  - `asDouble`, sums, bounds and quantiles are binary64. A JSON token is parsed to the double
+    it denotes before taking the ECMA-262 decimal, so `0.1` in JSON and `0.1` in protobuf are
+    one value.
+  - `NaN` and `±Infinity` are kept with flag 4 and counted.
+- **Identity** (§6, scheme `otel`) is the JCS text, with `dec` numbers, of
+  `{resource, scope:{name,version}, name, kind, unit, temporality, monotonic, attributes}`.
+  - Attribute sets are objects, so they are sorted by key.
+  - Bytes are `{"bytes": hex}`, which a string cannot be confused with.
+  - `description` is not in the key.
+- **A point that is not one number is split**, and the key gains a `part`:
+  - A histogram becomes `count`, `sum`, and cumulative `le:<bound>` buckets ending in
+    `le:+Inf`. These are Prometheus' buckets, so the two sources read alike.
+  - A summary becomes `count`, `sum` and `quantile:<q>`.
+  - An exponential histogram becomes `count` and `sum` only. Its bucket index is relative to
+    a scale that can change between points, so it is not an identity. Its buckets are counted
+    as `unsplit`, not dropped silently.
+  - `part` is an addition to §6's tuple. A histogram whose layout changes keeps its `count`
+    and `sum` series and gains bucket series.
+
+**The protobuf messages are declared in `smysl-tel`** (`readers::otlp_pb`), with `prost`'s
+derive and the upstream field numbers. This departs from §18's dependency table:
+`opentelemetry-proto`'s message types come only with its non-optional `opentelemetry` and
+`opentelemetry_sdk` dependencies, and an SDK is not what a pure reader of bytes should link.
+`prost` is pinned at `=0.14.4`, which declares rustc 1.85, the base. It is on the purity gate's
+list of crates allowed only through a feature, here `reader-otlp`.
+
+**Recording** (`smysl_tel::otel`) establishes the same facts a scrape does, told differently:
+
+- **`x.tel/reset`, `start-time`, `measured`.** The count is a cumulative one: a monotonic sum,
+  or a histogram's or summary's `count`. While it accumulates, its start time stays before the
+  previous point's time. A point whose start is at or after the previous point's time began
+  again since then. The unit's `at_ms` is the new start, and every sample of the point (each
+  bucket, the sum) carries flag 2. Comparing against the previous point's time, not its start,
+  means the substrate does not need to store start times.
+- **`x.tel/reset`, `decrease`, `derived`.** A cumulative count with no start time (`0`) fell.
+- **`x.tel/stale`, `no-recorded-value`, `measured`.** A point carries
+  `FLAG_NO_RECORDED_VALUE`. An export is pushed, not polled, so absence is never staleness
+  here.
+- Delta sums and gauges never reset.
+- Several points of one series in one export are taken in time order, each against the one
+  before it.
+- Time keeps its sub-millisecond nanoseconds.
+- The instrument's role and key are the caller's to give.
+
+`scrape`'s unit builders now take the scheme and the stale marker, and both sources share them.
+
+**`fixtures/tel/otlp/`** pins three exports of one service, 15 s apart. Between the second and
+third the process restarts.
+
+- Each export is given as OTLP/JSON and as protobuf. The protobuf is `protoc --encode` of a
+  text proto with `metrics.proto`, the metrics subset with upstream field numbers, so the bytes
+  read are not smysl's own.
+- The test records the JSON into memory and the protobuf into redb reopened after each export,
+  and requires the same units and digests from both. The JSON samples added last export first
+  give the same digests.
+- `expected.tsv` holds the units the exports establish:
+  - in the second export, a stale and a derived reset;
+  - in the third, three measured resets: a sum, a histogram and a summary.
+- Every part of a reset point carries flag 2.
+
+A new fuzz target, `tel_otlp`, hands its bytes to both readers and records each export twice,
+so later exports' resets and stales are reached. `make seed-fuzz` seeds it from the fixture.
+`smysl-tel` joins `make crate-features`.
+
+### `zabbix/1` history (TL-P3 step 4)
+
+**The reader** (`smysl_tel::readers::zabbix_history`) reads `history.get` together with the
+`item.get` it belongs to. A history row names its item by `itemid`, which §6 rejects as
+identity because it changes when templates are re-imported. A row also does not say what type
+its value is. The item export supplies both: the key `host:<host>/item:<key_>` and the
+`value_type`.
+
+- **Only numeric items become samples:** `value_type` 0 (float) and 3 (unsigned).
+  - Values are decimal strings, read exactly. `18446744073709551615` stays exact.
+  - A value outside `dec`'s range is kept with flag 4.
+- **Character, log, text and binary rows** are counted (`not_numeric`) and left out.
+- **A row whose item the export lacks** is counted by `itemid` (`unknown_items`), rather than
+  refusing the whole export. History is usually exported for a time range, and items for a
+  selection.
+- **Time** is `clock` and `ns`, kept to the nanosecond.
+- **The API version is required**, as for hosts and items.
+- **Refused:** an item without `value_type` or without its host, one `itemid` given as two
+  different items, and a malformed row.
+
+`zabbix/1`'s version check, JSON-RPC unwrapping and item-host lookup are now shared between
+the two readers.
+
+**Recording** (`smysl_tel::zabbix_history`) gives each numeric item three things:
+
+- its `x.tel/series`, class `gauge`;
+- its rows as samples;
+- an `x.tel/series-meta`, `cited`, with `tel:native_id` the `itemid` and `tel:text` the item's
+  name.
+
+An item re-imported under a new `itemid` keeps its series and gains a second meta unit. There
+is no reset and no stale: Zabbix states neither a start time nor a stale marker, and does not
+say whether an item counts up. The instrument is `zabbix-server:<name>`, role `collector`, with
+the name given by the caller.
+
+**`fixtures/tel/zabbix/`** holds four exports:
+
+- an item export with three numeric items on two hosts (one named `DB 01`) and a character
+  item;
+- two history exports of five minutes that share the third minute, the second newest first;
+- the character item's history.
+
+The test checks three ways of recording:
+
+- in order as API 7.0 into memory;
+- in reverse as API 6.0 into redb, reopened between exports;
+- recording the first export again.
+
+All three give the pinned digests: the overlap and the repeat add nothing. `tel_json`'s fuzz
+target reads history and items split at a `---` line, and `make seed-fuzz` seeds it with the
+fixture.
+
+### `smysl tel read` for series, `smysl tel at`, and GE-M4 (TL-P3 step 5)
+
+**`tel read prom/1|otlp/1|otlp-json/1 FILE...`** and **`tel read zabbix/1 FILE... --items
+FILE`** read series into `<library>/index/series.redb`.
+
+- **With `--yes`:** the samples are added to the substrate. The units are committed: series,
+  instrument, reset, stale and series-meta, with each reset's and stale's `x.tel/of-series`
+  relation.
+- **Without `--yes`:** nothing is written, not even `series.redb`. The units are staged.
+- **Each file is judged after the ones before it**, in a review as in a write. A review reads
+  the store and its own earlier files as one (`smysl_tel::scrape::Layered`), so the facts it
+  stages are the ones `--yes` commits.
+- **What each reader needs:**
+  - `prom/1` needs `--job` and `--instance`, the target labels every key includes. It takes
+    one scrape per run, at `--at`, because text exposition carries no instant.
+  - OTLP and Zabbix history need `--instrument`, the key of what the export was read from.
+- **Reports:**
+  - samples that are not values;
+  - exponential-histogram buckets not split into series;
+  - non-numeric Zabbix rows;
+  - Zabbix rows of items missing from `--items`;
+  - `SMY-W615` for two samples at one instant.
+- Reading an export twice adds nothing.
+
+**`tel at SERIES MS [--instrument UID]`** prints the value in force at an instant, the last
+sample at or before it, for each instrument the series has samples from.
+
+- `SERIES` is a uid or `<scheme>:<key>`.
+- A stale or no-value sample prints as `stale` or `no-value`, never as a number. A reset
+  sample is marked `(reset)`.
+- It exits 1 when there is nothing, or when the library has no substrate.
+
+**The substrate** gains `Substrate::instruments(series)`, one seek per instrument rather than a
+step per chunk. `RedbBackend::open` now opens a file already in its format with a read
+transaction only. Before, every open committed a write transaction, a durable flush, and that
+was a third of `tel at`'s time.
+
+**GE-M4** (D-T6: is record 16, `hold`, needed?).
+
+- **The harness:** `make ge-m4` runs `crates/smysl-series/examples/ge_m4.rs`.
+  - It writes six months of 20 gauges scraped every minute with jitter, 5.2 million samples
+    in 68 MB, with plateaus and occasional stale gaps.
+  - It keeps every run of one value as a hold record would, 108,847 holds.
+  - It asks both "value in force at t" 237,694 times: at random, and at and one millisecond
+    before every hold's start.
+- **Results:**
+  - Every answer agreed.
+  - `Substrate::at` took 2 µs at p50 and 4 µs at p95, with the page cache warm.
+  - `smysl tel at` as a process took 18 ms at p50 and 21 ms at p95 over 200 runs against
+    the same file, including process start and opening it.
+  - The bar is 50 ms at p95.
+- **Not run:** the RFC's run is on GE-M1's data, a real cluster extended to six months. That
+  data is not available, so this run is simulated, and its report says so.
+
+GE-M4 on simulated data says the substrate answers what a hold would. D-T6's release of record
+16 stays the owner's decision, on the RFC's data.
+
+**Determinism** gains `tel_read_series` (three protobuf exports into a fresh library) and
+`tel_at` (the restart the third export states, read back). Both are identical across the 16
+environment permutations. `tel read` no longer prints the substrate's path, because stdout is
+rule D's.
+
+**Feature `tel`** now brings `smysl-series` with its redb backend, and `smysl-tel/reader-otlp`.
+Unlike `substrate-redb`, the series substrate has no file-less fallback: one that forgets every
+sample at exit answers no "value in force at t". `smysl::series` re-exports the crate.
+
+Chapter 38 has a section on samples and the facts about them, and Appendix A documents the new
+readers, flags and `tel at`. `tests/cmd_tel_series.rs` holds the commands against the binary.
+
 ---
 
 ## 1.16.0 — 2026-11-16

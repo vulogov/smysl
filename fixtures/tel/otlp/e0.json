@@ -1,0 +1,196 @@
+{
+ "resourceMetrics": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "cart"
+      }
+     },
+     {
+      "key": "service.instance.id",
+      "value": {
+       "stringValue": "c1"
+      }
+     }
+    ]
+   },
+   "scopeMetrics": [
+    {
+     "scope": {
+      "name": "io.opentelemetry.http",
+      "version": "1.2.0"
+     },
+     "metrics": [
+      {
+       "name": "http.server.requests",
+       "unit": "{request}",
+       "description": "the http.server.requests",
+       "sum": {
+        "dataPoints": [
+         {
+          "attributes": [
+           {
+            "key": "route",
+            "value": {
+             "stringValue": "/a"
+            }
+           }
+          ],
+          "startTimeUnixNano": "1768554000000000000",
+          "timeUnixNano": "1768557600000000000",
+          "asInt": "100"
+         },
+         {
+          "attributes": [
+           {
+            "key": "route",
+            "value": {
+             "stringValue": "/b"
+            }
+           }
+          ],
+          "startTimeUnixNano": "1768554000000000000",
+          "timeUnixNano": "1768557600000000000",
+          "asInt": "7"
+         }
+        ],
+        "aggregationTemporality": 2,
+        "isMonotonic": true
+       }
+      },
+      {
+       "name": "cpu.temp",
+       "unit": "Cel",
+       "description": "the cpu.temp",
+       "gauge": {
+        "dataPoints": [
+         {
+          "attributes": [
+           {
+            "key": "cpu",
+            "value": {
+             "intValue": "0"
+            }
+           }
+          ],
+          "timeUnixNano": "1768557600000123456",
+          "asDouble": 41.5
+         }
+        ]
+       }
+      },
+      {
+       "name": "http.server.duration",
+       "unit": "s",
+       "description": "the http.server.duration",
+       "histogram": {
+        "dataPoints": [
+         {
+          "startTimeUnixNano": "1768554000000000000",
+          "timeUnixNano": "1768557600000000000",
+          "count": "4",
+          "sum": 0.9,
+          "bucketCounts": [
+           "1",
+           "2",
+           "1"
+          ],
+          "explicitBounds": [
+           0.1,
+           0.5
+          ]
+         }
+        ],
+        "aggregationTemporality": 2
+       }
+      },
+      {
+       "name": "gc.pause",
+       "unit": "s",
+       "description": "the gc.pause",
+       "summary": {
+        "dataPoints": [
+         {
+          "startTimeUnixNano": "1768554000000000000",
+          "timeUnixNano": "1768557600000000000",
+          "count": "3",
+          "sum": 0.03,
+          "quantileValues": [
+           {
+            "quantile": 0.5,
+            "value": 0.01
+           },
+           {
+            "quantile": 0.99,
+            "value": 0.015
+           }
+          ]
+         }
+        ]
+       }
+      },
+      {
+       "name": "legacy.hits",
+       "unit": "1",
+       "description": "the legacy.hits",
+       "sum": {
+        "dataPoints": [
+         {
+          "timeUnixNano": "1768557600000000000",
+          "asInt": "50"
+         }
+        ],
+        "aggregationTemporality": 2,
+        "isMonotonic": true
+       }
+      },
+      {
+       "name": "bytes.sent",
+       "unit": "By",
+       "description": "the bytes.sent",
+       "sum": {
+        "dataPoints": [
+         {
+          "startTimeUnixNano": "1768557585000000000",
+          "timeUnixNano": "1768557600000000000",
+          "asInt": "2048"
+         }
+        ],
+        "aggregationTemporality": 1,
+        "isMonotonic": true
+       }
+      },
+      {
+       "name": "rpc.size",
+       "unit": "By",
+       "description": "the rpc.size",
+       "exponentialHistogram": {
+        "dataPoints": [
+         {
+          "startTimeUnixNano": "1768557585000000000",
+          "timeUnixNano": "1768557600000000000",
+          "count": "3",
+          "sum": 1.5,
+          "scale": 2,
+          "zeroCount": "1",
+          "positive": {
+           "offset": 1,
+           "bucketCounts": [
+            "1",
+            "1"
+           ]
+          }
+         }
+        ],
+        "aggregationTemporality": 1
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -539,7 +539,7 @@ jobs:
       # and rides here rather than in a step of its own.
       - name: algebra
         run: |
-          for t in merge_algebra pack_constraints pipeline pack_exact store_union dec tel_json series_chunk; do
+          for t in merge_algebra pack_constraints pipeline pack_exact store_union dec tel_json series_chunk tel_otlp; do
             ls fuzz/artifacts/$t > /tmp/before-$t.txt 2>/dev/null || true
             cargo +nightly fuzz run $t -- -max_total_time=60 || {
               ls fuzz/artifacts/$t > /tmp/after-$t.txt 2>/dev/null || true

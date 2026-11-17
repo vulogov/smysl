@@ -1,0 +1,100 @@
+// The metrics subset of OTLP (opentelemetry-proto v1: collector/metrics, metrics, common,
+// resource), with the upstream field numbers and types, as one file. `protoc --encode` writes
+// the fixture's .pb exports from their .txtpb text with it, so the bytes `otlp/1` reads in the
+// fixture are not produced by smysl. Fields the fixture does not use are left out; on the wire
+// that changes nothing. Upstream: https://github.com/open-telemetry/opentelemetry-proto
+// (Apache-2.0).
+syntax = "proto3";
+package smysl.fixture.otlp;
+
+message ExportMetricsServiceRequest { repeated ResourceMetrics resource_metrics = 1; }
+message ResourceMetrics { Resource resource = 1; repeated ScopeMetrics scope_metrics = 2; string schema_url = 3; }
+message Resource { repeated KeyValue attributes = 1; uint32 dropped_attributes_count = 2; }
+message ScopeMetrics { InstrumentationScope scope = 1; repeated Metric metrics = 2; string schema_url = 3; }
+message InstrumentationScope { string name = 1; string version = 2; repeated KeyValue attributes = 3; }
+
+message Metric {
+  string name = 1;
+  string description = 2;
+  string unit = 3;
+  oneof data {
+    Gauge gauge = 5;
+    Sum sum = 7;
+    Histogram histogram = 9;
+    ExponentialHistogram exponential_histogram = 10;
+    Summary summary = 11;
+  }
+}
+
+enum AggregationTemporality {
+  AGGREGATION_TEMPORALITY_UNSPECIFIED = 0;
+  AGGREGATION_TEMPORALITY_DELTA = 1;
+  AGGREGATION_TEMPORALITY_CUMULATIVE = 2;
+}
+
+message Gauge { repeated NumberDataPoint data_points = 1; }
+message Sum { repeated NumberDataPoint data_points = 1; AggregationTemporality aggregation_temporality = 2; bool is_monotonic = 3; }
+message Histogram { repeated HistogramDataPoint data_points = 1; AggregationTemporality aggregation_temporality = 2; }
+message ExponentialHistogram { repeated ExponentialHistogramDataPoint data_points = 1; AggregationTemporality aggregation_temporality = 2; }
+message Summary { repeated SummaryDataPoint data_points = 1; }
+
+message NumberDataPoint {
+  repeated KeyValue attributes = 7;
+  fixed64 start_time_unix_nano = 2;
+  fixed64 time_unix_nano = 3;
+  oneof value { double as_double = 4; sfixed64 as_int = 6; }
+  uint32 flags = 8;
+}
+
+message HistogramDataPoint {
+  repeated KeyValue attributes = 9;
+  fixed64 start_time_unix_nano = 2;
+  fixed64 time_unix_nano = 3;
+  fixed64 count = 4;
+  optional double sum = 5;
+  repeated fixed64 bucket_counts = 6;
+  repeated double explicit_bounds = 7;
+  uint32 flags = 10;
+  optional double min = 11;
+  optional double max = 12;
+}
+
+message ExponentialHistogramDataPoint {
+  repeated KeyValue attributes = 1;
+  fixed64 start_time_unix_nano = 2;
+  fixed64 time_unix_nano = 3;
+  fixed64 count = 4;
+  optional double sum = 5;
+  sint32 scale = 6;
+  fixed64 zero_count = 7;
+  message Buckets { sint32 offset = 1; repeated uint64 bucket_counts = 2; }
+  Buckets positive = 8;
+  Buckets negative = 9;
+  uint32 flags = 10;
+}
+
+message SummaryDataPoint {
+  repeated KeyValue attributes = 7;
+  fixed64 start_time_unix_nano = 2;
+  fixed64 time_unix_nano = 3;
+  fixed64 count = 4;
+  double sum = 5;
+  message ValueAtQuantile { double quantile = 1; double value = 2; }
+  repeated ValueAtQuantile quantile_values = 6;
+  uint32 flags = 8;
+}
+
+message AnyValue {
+  oneof value {
+    string string_value = 1;
+    bool bool_value = 2;
+    int64 int_value = 3;
+    double double_value = 4;
+    ArrayValue array_value = 5;
+    KeyValueList kvlist_value = 6;
+    bytes bytes_value = 7;
+  }
+}
+message ArrayValue { repeated AnyValue values = 1; }
+message KeyValueList { repeated KeyValue values = 1; }
+message KeyValue { string key = 1; AnyValue value = 2; }

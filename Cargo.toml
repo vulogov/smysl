@@ -123,6 +123,9 @@ flate2                = { version = "=1.1.10", default-features = false, feature
 # `cache_metrics` and `python` are all opt-in. Its only normal dependency on Linux and macOS is
 # `libc` — no `cc`, no C toolchain, which is what §13 asks for and `make crate-features` checks.
 redb                  = { version = "=2.6.4", default-features = false }
+# `otlp/1` (RFC SMYSL-3 §20.1). 0.14.4 declares rustc 1.85, the pure tier's base; derive and std
+# only. Pinned like the other readers' parsers: a reader's output is identity.
+prost                 = { version = "=0.14.4", default-features = false, features = ["derive", "std"] }
 
 # ---------------------------------------------------------------------------
 # Facade crate: [lib] + [[bin]] (RFC SMYSL-1 §12.1)
@@ -229,7 +232,13 @@ lang-detect = ["text", "smysl-text/detect"]
 # Telemetry (RFC SMYSL-3): `smysl::tel`, the readers, profiles and canonical diff. `text` for the
 # library its snapshots are kept in, `stage` for staging what they say, and nothing that talks
 # to a provider: a reader reads files.
-tel       = ["dep:smysl-tel", "text", "stage"]
+#
+# The series readers (TL-P3) write `<library>/index/series.redb`, so `tel` brings `smysl-series`
+# with its redb backend. Unlike `substrate-redb`, there is no file-less fallback to keep the
+# default: a substrate that forgets every sample when the process ends answers no "value in
+# force at t". `redb` is pinned for both, so this adds a feature of a crate already pinned, and
+# `prost` for `otlp/1`.
+tel       = ["dep:smysl-tel", "dep:smysl-series", "smysl-series/store-redb", "smysl-tel/reader-otlp", "text", "stage"]
 # The substrate index's backing store (SMYSL-2.4 §3.8). Off by default, and the default is the
 # decision rather than an oversight: it puts `redb` in the tree of a binary that runs perfectly
 # well without it, and what it buys shows up on a corpus large enough for 1.1 KB a unit to
@@ -291,6 +300,8 @@ smysl-lib      = { workspace = true, optional = true }
 # Telemetry (RFC SMYSL-3). Pure, and two dependencies deep: `smysl-core` and
 # `unicode-normalization`, both already here.
 smysl-tel      = { workspace = true, optional = true }
+# The series substrate (RFC SMYSL-3 §19), for `tel read`'s series readers and `tel at`.
+smysl-series   = { workspace = true, optional = true }
 smysl-thread   = { workspace = true }
 smysl-render   = { workspace = true }
 smysl-provider = { workspace = true, optional = true }

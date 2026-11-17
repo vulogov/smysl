@@ -25,8 +25,12 @@ use smysl_core::ids::is_alias;
 use crate::json::{Json, JsonError};
 
 pub mod k8s;
+pub mod otlp;
+#[cfg(feature = "reader-otlp")]
+mod otlp_pb;
 pub mod prom;
 pub mod zabbix;
+pub mod zabbix_history;
 
 /// One object a reader selected.
 #[derive(Debug, Clone, PartialEq, Eq)]

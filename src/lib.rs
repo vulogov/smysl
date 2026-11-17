@@ -428,6 +428,11 @@ pub use smysl_text as text;
 #[cfg(feature = "tel")]
 pub use smysl_tel as tel;
 
+/// The series substrate (RFC SMYSL-3 §19): chunks, windows and the value in force at an
+/// instant, over redb. Behind `tel`.
+#[cfg(feature = "tel")]
+pub use smysl_series as series;
+
 /// The crate version, as a convenience for embedders recording provenance.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

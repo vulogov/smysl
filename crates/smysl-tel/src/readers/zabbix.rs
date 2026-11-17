@@ -1,8 +1,8 @@
 //! `zabbix/1` — Zabbix API exports: hosts and items (RFC SMYSL-3 §20.1, TL-P2).
 //!
 //! The input is what the API returned to `host.get` or `item.get`, either the whole JSON-RPC
-//! response (`{"jsonrpc": "2.0", "result": [...]}`) or its `result` array alone. History,
-//! trends, problems and events are TL-P3's and later: this step reads configuration.
+//! response (`{"jsonrpc": "2.0", "result": [...]}`) or its `result` array alone. History is
+//! [`super::zabbix_history`]'s (TL-P3); trends, problems and events are later.
 //!
 //! **The API version is required.** §20.1: the caller records the version it saw
 //! (`apiinfo.version`, 6.x, 7.x or 8.x) beside the export, and the reader refuses an export
@@ -33,15 +33,24 @@ pub fn version_is_supported(v: &str) -> bool {
 /// Read every host or item in `input` that `profile` selects, from an export of API
 /// `api_version`.
 pub fn read(input: &str, profile: &Profile, api_version: &str) -> Result<Read, ReadError> {
-    if !version_is_supported(api_version) {
-        return Err(shape(format!(
-            "`{api_version}` is not a Zabbix API version this reader reads; record the \
-             `apiinfo.version` the export was taken from: 6.x, 7.x or 8.x"
-        )));
-    }
+    require_version(api_version)?;
     let mut out = Read::default();
+    for obj in results(input)? {
+        if !profile.selects(&obj) {
+            out.skipped += 1;
+            continue;
+        }
+        out.objects.push(object(obj)?);
+    }
+    Ok(out)
+}
+
+/// The objects of one or more API responses: each a whole JSON-RPC response or its `result`
+/// array alone.
+pub(crate) fn results(input: &str) -> Result<Vec<Json>, ReadError> {
+    let mut out = Vec::new();
     for v in parse_seq(input)? {
-        let items = match v {
+        out.extend(match v {
             Json::Array(items) => items,
             Json::Object(members) => match members.into_iter().find(|(k, _)| k == "result") {
                 Some((_, Json::Array(items))) => items,
@@ -49,34 +58,45 @@ pub fn read(input: &str, profile: &Profile, api_version: &str) -> Result<Read, R
                 None => return Err(shape("not a Zabbix API response: no `result`")),
             },
             _ => return Err(shape("not a Zabbix API export")),
-        };
-        for obj in items {
-            if !profile.selects(&obj) {
-                out.skipped += 1;
-                continue;
-            }
-            out.objects.push(object(obj)?);
-        }
+        });
     }
     Ok(out)
+}
+
+/// The version check every `zabbix/1` read makes first.
+pub(crate) fn require_version(api_version: &str) -> Result<(), ReadError> {
+    if version_is_supported(api_version) {
+        Ok(())
+    } else {
+        Err(shape(format!(
+            "`{api_version}` is not a Zabbix API version this reader reads; record the \
+             `apiinfo.version` the export was taken from: 6.x, 7.x or 8.x"
+        )))
+    }
+}
+
+/// An item's host and key, which every item export must carry (`selectHosts: ["host"]`).
+pub(crate) fn item_host<'a>(doc: &'a Json, key_: &str) -> Result<&'a str, ReadError> {
+    let host = doc
+        .get("hosts")
+        .and_then(|h| match h {
+            Json::Array(hs) => hs.first(),
+            _ => None,
+        })
+        .map(|h| text(h, "host"))
+        .unwrap_or("");
+    if host.is_empty() {
+        return Err(shape(format!(
+            "item `{key_}` does not name its host; export items with `selectHosts: [\"host\"]`"
+        )));
+    }
+    Ok(host)
 }
 
 fn object(doc: Json) -> Result<Object, ReadError> {
     let key_ = text(&doc, "key_");
     if !key_.is_empty() {
-        let host = doc
-            .get("hosts")
-            .and_then(|h| match h {
-                Json::Array(hs) => hs.first(),
-                _ => None,
-            })
-            .map(|h| text(h, "host"))
-            .unwrap_or("");
-        if host.is_empty() {
-            return Err(shape(format!(
-                "item `{key_}` does not name its host; export items with `selectHosts: [\"host\"]`"
-            )));
-        }
+        let host = item_host(&doc, key_)?;
         let key = format!("host:{host}/item:{key_}");
         let alias = alias_for("zabbix", &["item", host, key_], &key);
         return Ok(Object {

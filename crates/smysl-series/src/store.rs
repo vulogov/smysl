@@ -51,6 +51,11 @@ pub fn chunk_key(series: &Uid, inst: &Uid, start: u64) -> ChunkKey {
     k
 }
 
+/// The instrument of a chunk key.
+pub fn key_inst(k: &ChunkKey) -> Uid {
+    Uid::from_bytes(k[32..64].try_into().expect("thirty-two bytes"))
+}
+
 fn key_start(k: &ChunkKey) -> u64 {
     u64::from_be_bytes(k[64..].try_into().expect("eight bytes"))
 }
@@ -74,6 +79,8 @@ pub trait Backend {
         inst: &Uid,
         before: u64,
     ) -> Result<Option<(u64, Vec<u8>)>, Error>;
+    /// The instruments the substrate holds chunks of `series` from, in uid order.
+    fn instruments(&self, series: &Uid) -> Result<Vec<Uid>, Error>;
     /// The span starts of `(series, inst)` in `[lo, hi]` recorded as evicted (§13; written from
     /// TL-P8).
     fn evicted(&self, series: &Uid, inst: &Uid, lo: u64, hi: u64) -> Result<Vec<u64>, Error>;
@@ -127,6 +134,20 @@ impl Backend for MemBackend {
             .range(chunk_key(series, inst, 0)..chunk_key(series, inst, before))
             .next_back()
             .map(|(k, v)| (key_start(k), v.clone())))
+    }
+
+    fn instruments(&self, series: &Uid) -> Result<Vec<Uid>, Error> {
+        use core::ops::Bound::{Excluded, Included};
+        let end = chunk_key(series, &Uid::from_bytes([0xff; 32]), u64::MAX);
+        let mut out = Vec::new();
+        let mut from = Included(chunk_key(series, &Uid::from_bytes([0; 32]), 0));
+        // One seek per instrument, not one step per chunk.
+        while let Some((k, _)) = self.chunks.range((from, Included(end))).next() {
+            let inst = key_inst(k);
+            out.push(inst);
+            from = Excluded(chunk_key(series, &inst, u64::MAX));
+        }
+        Ok(out)
     }
 
     fn evicted(&self, series: &Uid, inst: &Uid, lo: u64, hi: u64) -> Result<Vec<u64>, Error> {
@@ -357,6 +378,11 @@ impl<B: Backend> Substrate<B> {
             Some((_, bytes)) => Ok(chunk::decode(&bytes)?.pop()),
             None => Ok(None),
         }
+    }
+
+    /// The instruments `series` has samples from, in uid order.
+    pub fn instruments(&self, series: &Uid) -> Result<Vec<Uid>, Error> {
+        self.backend.instruments(series)
     }
 
     /// Which spans of `[from, to)` the substrate holds for `(series, inst)`.

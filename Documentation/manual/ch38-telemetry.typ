@@ -4,8 +4,8 @@
 #part(number: "XI", title: "Telemetry (SMYSL-3)")
 // ═══════════════════════════════════════════════════════════════════════
 //
-// SMYSL-3 is the telemetry RFC. 1.17 builds its format phase, TL-P1, and its object snapshots,
-// TL-P2. This part says what exists, so that a reader of the format knows it, and what
+// SMYSL-3 is the telemetry RFC. 1.17 builds its format phase, TL-P1, its object snapshots,
+// TL-P2, and its series substrate, TL-P3. This part says what exists, so that a reader of the format knows it, and what
 // does not. Every terminal block below was produced by the smysl 1.17 binary.
 
 #chapter(number: 38, title: "What 1.17 has of SMYSL-3")
@@ -17,9 +17,13 @@ a 200-host fleet was 6.8 million change units, and all but 6,566 were gauge nois
 outside the log, and units are made for what is *asserted* about them: a configuration change, a
 reset, an anomaly, a hypothesis, an action.
 
-The RFC is delivered in ten phases. 1.17 builds the first, TL-P1, which is the format, and the
-second, TL-P2, which reads object snapshots: Kubernetes objects and Zabbix hosts and items, and
-what changed between two reads of one.
+The RFC is delivered in ten phases. 1.17 builds the first three:
+
+- TL-P1, the format;
+- TL-P2, which reads object snapshots: Kubernetes objects and Zabbix hosts and items, and what
+  changed between two reads of one;
+- TL-P3, the series substrate: samples from Prometheus, OTLP and Zabbix history, kept outside
+  the log, and the few facts about them that are units.
 
 #section("dec: a number that is one value")
 
@@ -160,10 +164,101 @@ A Deployment deleted and recreated under the same name continues its manifest ch
 the alias leaves out the uid. The snapshot after the gap therefore records an
 `x.tel/recreate`, and the object's series, whose key has the uid in it, is a new one.
 
+#section("Samples, and the facts about them")
+
+TL-P3 reads *series*: Prometheus scrapes (`prom/1`, text 0.0.4 and OpenMetrics), OTLP metrics
+exports (`otlp/1` protobuf and `otlp-json/1`), and Zabbix history (`zabbix/1` with `--items`).
+Their samples go to the *series substrate*, `<library>/index/series.redb`, and never become
+units. What does become a unit is what a sample shows about its series:
+
+- `x.tel/reset`, when a counter starts again. It is `measured` when the source states a new
+  start time (a moved `_created`, an OTLP start time) and `derived` when only a decrease shows
+  it.
+- `x.tel/stale`, `measured`, when the source says a series ended: a Prometheus series gone from
+  the target, an OTLP point flagged `FLAG_NO_RECORDED_VALUE`.
+- `x.tel/series-meta`, `cited`, for a Zabbix item's `itemid`, which is metadata, never identity.
+
+Each reset and stale is joined to its series by `x.tel/of-series`. A gauge reading is never a
+unit.
+
+A scrape has no instant of its own, so `--at` gives it, and the target's `job` and `instance`
+are part of every series key. The first scrape is samples and no facts. The NaN in it is kept
+as a sample with no value, and counted:
+
+#screen(caption: "$ smysl tel read prom/1 s0.prom --job node --instance h:9100 --at 1768557600000 -s lib --yes")[
+```
+smysl tel read: s0.prom: 1 sample(s) not a value (NaN, ±Inf or out of range), kept with flag 4
+read      s0.prom: 10 series, 10 sample(s), 0 fact(s)
+series    10 sample(s) added to the substrate, 0 already there
+11 record(s) committed
+```
+]
+
+Fifteen seconds later one temperature sensor is gone. Without `--yes` nothing is written, and
+the fact is staged:
+
+#screen(caption: "$ smysl tel read prom/1 s1.prom --job node --instance h:9100 --at 1768557615000 -s lib")[
+```
+read      s1.prom: 10 series, 10 sample(s), 1 fact(s)
+series    10 sample(s) would be added; 1 fact(s)
+12 record(s) staged in ./.smysl/staged.smy for review; nothing was written to the library -
+  run again with --yes to add the samples and commit them
+```
+]
+
+#screen(caption: "$ grep -A1 x.tel/stale .smysl/staged.smy")[
+```
+@x.tel/stale { status: measured, source: { kind: metric, ref: "series:prom:node_temperature_celsius{…}",
+  observed: 1768557615000 }, "tel:at_ms": 1768557615000, "tel:marker": stale-nan,
+  "tel:series": b3:inw6b5ighd2lrkgvmnrhygno6xsqg35k6zud2gquvx5uwu2mn3pq }
+```
+]
+
+Committed, and followed by a scrape in which every counter fell, it gives three `derived`
+resets. `tel at` gives the value in force at an instant: the last sample at or before it, read
+from the substrate. A series is named by its uid, or by its scheme and key:
+
+#screen(caption: "$ smysl tel at 'prom:http_requests_total{code=\"200\",instance=\"h:9100\",job=\"node\",method=\"get\"}' 1768557630000 -s lib")[
+```
+series    b3:y43mgnsmlhmxzker7l2bpvp5kb7k342dh5wi3xi7i5ydzohfmgbq  prom:http_requests_total{…}
+value     b3:qmeztdgxzzr5sg7fowwamvyf5vl3vdmcbmrjmnshvclsjoreesfq  1768557630000  12
+```
+]
+
+The second uid is the instrument, the scraper `prom-scrape:node/h:9100`. A series that went
+away is not its last number. What is in force past a stale marker is for you to decide:
+
+#screen(caption: "$ smysl tel at 'prom:node_temperature_celsius{instance=\"h:9100\",job=\"node\",sensor=\"b\"}' 1768557620000 -s lib")[
+```
+series    b3:inw6b5ighd2lrkgvmnrhygno6xsqg35k6zud2gquvx5uwu2mn3pq  prom:node_temperature_celsius{…}
+value     b3:qmeztdgxzzr5sg7fowwamvyf5vl3vdmcbmrjmnshvclsjoreesfq  1768557615000  stale
+```
+]
+
+Samples are a set, so reading one scrape or export twice adds nothing. The same OTLP export as
+protobuf and as JSON is the same samples. OTLP and Zabbix name what they were read from with
+`--instrument` (`otel-collector:c1`, `zabbix-server:main`).
+
+*Is a "hold" record needed?* Record 16 was reserved for "value v held from t1 to t2", in case
+the substrate could not answer "value in force at t" well enough (GE-M4). `make ge-m4` asks it:
+
+- It writes six months of 20 gauges scraped every minute, 5.2 million samples.
+- It keeps each run of one value as a hold would, and asks both 237,694 times: at random, and
+  at and just before every hold's start.
+- Every answer agreed. The substrate's p95 was 4 µs in process, and 50 ms is the bar.
+- `tel at` as a command took 21 ms at p95 over 200 runs against that file. That includes
+  starting the process and opening the 68 MB file.
+
+The data is simulated, and the report says so. The RFC's run is on GE-M1's data, a real cluster
+extended to six months, which 1.17 does not have.
+
 #callout(label: "Not yet")[
-  This part covers what reads object snapshots. The series substrate and its readers
-  (Prometheus, OTLP, Zabbix history), window evidence, detectors, investigations and the rest
-  of `smysl tel` are the RFC's later phases, TL-P3 to TL-P9. So are ConfigMaps (whose values a
-  profile cannot yet hide), a generic JSON object profile, and what a deleted object becomes
-  as a unit.
+  This part covers object snapshots and the series substrate. Window evidence, detectors,
+  investigations, eviction and the rest of `smysl tel` are the RFC's later phases, TL-P4 to
+  TL-P9. So are:
+  - ConfigMaps, whose values a profile cannot yet hide;
+  - a generic JSON object profile;
+  - what a deleted object becomes as a unit;
+  - exponential-histogram buckets as series;
+  - Zabbix trends, problems and events.
 ]

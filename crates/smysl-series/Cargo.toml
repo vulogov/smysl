@@ -22,3 +22,9 @@ store-redb = ["dep:redb"]
 # `dec`, deterministic CBOR, uids and BLAKE3.
 smysl-core = { workspace = true }
 redb       = { workspace = true, optional = true }
+
+# GE-M4 (RFC SMYSL-3 §14): the value in force at t against simulated holds, over six months.
+# `make ge-m4` runs it.
+[[example]]
+name = "ge_m4"
+required-features = ["store-redb"]

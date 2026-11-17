@@ -1009,7 +1009,7 @@ migrate    --shard
 migrate    --seed-check
 migrate    --help
 tel        <ACTION>
-tel        [possible values: read, profile]
+tel        [possible values: read, at, profile]
 tel        [ARG]
 tel        --config
 tel        --profile
@@ -1019,13 +1019,17 @@ tel        --licence
 tel        --output
 tel        --format
 tel        [possible values: surface, cbor, pack]
-tel        --zabbix-api
+tel        --job
+tel        --instance
 tel        --strict
-tel        --yes
+tel        --instrument
 tel        --offline
+tel        --items
 tel        --no-color
 tel        --noprogress
+tel        --zabbix-api
 tel        --json
+tel        --yes
 tel        --quiet
 tel        --verbose
 tel        --backend
