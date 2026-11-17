@@ -30,7 +30,9 @@ use crate::evidence::counted;
 use crate::scrape::{ms, payload};
 use crate::sketch::to_f64;
 
+pub mod baro;
 pub mod cusum;
+pub mod episode;
 pub mod mad;
 pub mod pelt;
 

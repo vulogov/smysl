@@ -1036,6 +1036,37 @@ declared baseline window of the same series and instrument.
     constant is anomalous.
 - An empty baseline scores nothing.
 
+### Episodes and a BARO-style ranking (TL-P5 step 4)
+
+**`episode/1`** groups what happened close together, deterministically.
+
+- **Members** are changes, recreates, resets, stales, anomalies and alerts. Each has a time:
+  - an anomaly's start;
+  - a reset's or stale's `at_ms`;
+  - otherwise the reading that showed it (`source.observed`).
+- **Grouping:** members are ordered by (time, uid), and a new episode begins wherever the gap
+  to the previous member exceeds `gap` (default 5 min).
+- **Output:** a group of at least `min` (default 2) becomes an `x.tel/episode`,
+  `[first, last + 1 ms)`, with a label counting its kinds. It is `derived`, grounded on its
+  members, and each member joins it by `x.tel/during`.
+- Input order does not change the uid.
+
+**`baro/1`** is BARO's robust scorer: which series moved most when something went wrong.
+
+- **The score** of a series is the largest `|x − median(pre)| / IQR(pre)` over
+  `[t, t + post)`. `pre` is `[t − pre, t)`, by default an hour before and ten minutes after.
+- **No change-point step:** BARO estimates `t` with a Bayesian change point. Here `t` is given:
+  an anomaly's start, an episode's, or an alert's.
+- **Edge cases:**
+  - An IQR of zero falls back to the robust z's scale.
+  - A series with nothing before or after `t` is not ranked.
+  - Ties go to the series uid.
+- **Output:** the top `top` (default 5) become `derived` `x.tel/hypothesis` units, as §21's
+  table has it.
+  - Each targets its series and is grounded on it, and on the trigger when one is given.
+  - Each claim states the rank, the score and the windows, as a sentence a person can check
+    against the samples.
+
 ---
 
 ## 1.16.0 — 2026-11-16
