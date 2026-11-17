@@ -450,6 +450,59 @@ object. There are 163 codes.
 (behind `providers`), and until today no build had one without the other. The helper is now
 built with either.
 
+### `smysl-series`, the series substrate (TL-P3 step 1)
+
+A new pure crate (unpublished), `smysl-series`. It holds samples well enough to answer what
+TL-P3 and TL-P4 ask of them: "the value in force at t", and the samples and digest of a window.
+It is not a time-series database (§19.1).
+
+- **`Sample`** is §9.1's tuple: (`ts_ms`, `ns`, value as a `dec`, flags). Every value of the
+  type is well formed:
+  - flag 8 is set exactly when `ns` is present;
+  - a stale or no-recorded-value sample's value is `[0, 0]`.
+
+  So two equal samples are one sample. Sample order is §9.1's, and the value's CBOR is computed
+  only when two instants tie.
+- **`digest`** is §9.1's window digest, `BLAKE3("smysl/tel-window/1" ‖ 0x00 ‖ cbor_array(…))`.
+  A test spells out the preimage byte for byte.
+- **Chunks** (§19.2) are one (series, instrument) stream over an epoch-aligned span of 1 min,
+  15 min or 2 h. The span is chosen by the median interval of the series' first batch, aiming
+  for 60 samples a chunk. The format is versioned:
+  - timestamps as delta-of-delta;
+  - the `ns` column only when a sample has one;
+  - integral values within `i64` as deltas, any other `dec` as its CBOR pair;
+  - flags run-length encoded.
+
+  The decoder refuses what the encoder would not write rather than misreading it. §19.2's
+  mantissa XOR stream is left to a later chunk version. It is a layout, and changes no sample.
+- **`Substrate`** over a `Backend` holds §19.3's tables. `MemBackend` keeps them in memory, and
+  `RedbBackend` (feature `store-redb`) in a redb file. The operations:
+  - `add` merges samples into their chunks as a set. Adding twice changes nothing, and two
+    values at one instant are both kept and reported (`SMY-W615`'s condition).
+  - `window` reads `[from, to)` with its digest.
+  - `at` finds the value in force with one key lookup and one chunk decode, plus one more of
+    each when t falls before its span's first sample.
+  - `present` reports which spans a window has, for `SMY-W605`.
+
+**One addition to §19.3.** The `series` row also keeps the series' `scheme` and `key`, so the
+substrate can list its series and `tel at` can name one by key without the unit store. The table
+is local, as chunks are, so this changes no identity.
+
+**Tests.**
+
+- One backend contract runs against both backends. It covers set semantics, late data across a
+  span boundary, the open end of a window, the value in force before a span's first sample,
+  coverage, and the series table.
+- A property test adds 300 samples in five different orders and batchings, some repeated. Every
+  round gives the same window and the digest of the sorted set.
+- A new fuzz target, `series_chunk`, runs in `make fuzz` and CI. It checks that a chunk decodes
+  or is refused without a panic, and that what decodes round-trips. 3.35 million runs found
+  nothing.
+
+The crate is on the purity list with `smysl-tel`'s PRNG ban, and the purity gate now checks
+13 crates. The backend contract lives in `tests/` because it needs a directory, and the gate
+keeps `std::env` out of the crate's own source.
+
 ---
 
 ## 1.16.0 — 2026-11-16

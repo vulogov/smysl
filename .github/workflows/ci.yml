@@ -390,7 +390,7 @@ jobs:
       - run: >
           cargo check --locked --no-default-features
           -p smysl-core -p smysl-graph -p smysl-check -p smysl-pack -p smysl-thread
-          -p smysl-render -p smysl-retrieve -p smysl-eval -p smysl-tel
+          -p smysl-render -p smysl-retrieve -p smysl-eval -p smysl-tel -p smysl-series
 
   # Internal requirements name the workspace version. Every build here uses paths, so a
   # requirement left at 1.1.0 while `smysl-ingest` calls a 1.3 item is invisible until a
@@ -539,7 +539,7 @@ jobs:
       # and rides here rather than in a step of its own.
       - name: algebra
         run: |
-          for t in merge_algebra pack_constraints pipeline pack_exact store_union dec tel_json; do
+          for t in merge_algebra pack_constraints pipeline pack_exact store_union dec tel_json series_chunk; do
             ls fuzz/artifacts/$t > /tmp/before-$t.txt 2>/dev/null || true
             cargo +nightly fuzz run $t -- -max_total_time=60 || {
               ls fuzz/artifacts/$t > /tmp/after-$t.txt 2>/dev/null || true

@@ -2272,6 +2272,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "smysl-series"
+version = "1.17.0"
+dependencies = [
+ "redb",
+ "smysl-core",
+]
+
+[[package]]
 name = "smysl-tel"
 version = "1.17.0"
 dependencies = [

@@ -1,0 +1,24 @@
+[package]
+name        = "smysl-series"
+description = "smysl's series substrate (RFC SMYSL-3 §19): samples, window digests, chunks and the series store"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+# The substrate on disk, `<library>/index/series.redb` (§19.3). Off by default for the reason
+# `smysl-graph`'s `store-redb` is: a default build of the pure tier links no database. The same
+# workspace pin, so one redb version writes every file a library holds.
+store-redb = ["dep:redb"]
+
+[dependencies]
+# `dec`, deterministic CBOR, uids and BLAKE3.
+smysl-core = { workspace = true }
+redb       = { workspace = true, optional = true }

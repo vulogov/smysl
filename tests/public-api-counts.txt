@@ -40,3 +40,4 @@ smysl-measure    3608
 smysl-lib        1651
 smysl-embed-candle 140
 smysl-tel        879
+smysl-series     639

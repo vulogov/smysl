@@ -459,6 +459,7 @@ crates/smysl-query     sq/1: parser, planner, executor, saved queries, dossiers
 crates/smysl-measure   text, graph, channel and dialogue measures; assessment
 crates/smysl-lib       library export, import and verify
 crates/smysl-tel       SMYSL-3 telemetry: exact JSON, leaf values, pointers (not published yet)
+crates/smysl-series    SMYSL-3 series substrate: samples, window digests, chunks (not published yet)
 crates/smysl-tui       seven-pane terminal UI, with a live pack simulator
 crates/smysl-eval      evaluation harness E1-E9 (not published)
 examples/              simple_demo and information_theory

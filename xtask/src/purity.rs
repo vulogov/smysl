@@ -187,6 +187,10 @@ const PURE_CRATES: &[&str] = &[
     // as `smysl-text`'s do. `CRATE_SYMBOLS` adds the RFC's PRNG ban (H-7) for it now rather
     // than at TL-P0, because a list obeyed from the start is a list nobody has to argue with.
     "smysl-tel",
+    // The series substrate (RFC SMYSL-3 §19, TL-P3 step 1). Pure, with redb behind
+    // `store-redb` as `smysl-graph`'s store is: a window's digest is a function of its
+    // samples, so the same ban as `smysl-tel`'s.
+    "smysl-series",
 ];
 
 /// Symbols forbidden in one pure crate's source beyond [`FORBIDDEN_SYMBOLS`], each list with
@@ -197,9 +201,9 @@ const PURE_CRATES: &[&str] = &[
 /// generator anywhere in the crate would let one recipe write two units. `rand_core` without
 /// `os_rng` already cannot draw an unseeded number; the scan is for whoever adds the feature.
 ///
-/// `smysl-tel`: RFC SMYSL-3 §17's PRNG ban (H-7) and the same clock and environment as
-/// `smysl-measure`'s. A change, window or anomaly unit's uid is a function of its inputs, so
-/// nothing on a record path may draw from an unseeded generator, read a clock, or iterate a
+/// `smysl-tel` and `smysl-series`: RFC SMYSL-3 §17's PRNG ban (H-7) and the same clock and
+/// environment as `smysl-measure`'s. A change, window or anomaly unit's uid is a function of
+/// its inputs, and a window's digest of its samples, so nothing on a record path may draw from an unseeded generator, read a clock, or iterate a
 /// `HashMap` or `HashSet` in the order a random hasher gives it — `BTreeMap` replaces both.
 const CRATE_SYMBOLS: &[(&str, &[&str])] = &[
     (
@@ -215,6 +219,22 @@ const CRATE_SYMBOLS: &[(&str, &[&str])] = &[
     ),
     (
         "smysl-tel",
+        &[
+            "thread_rng",
+            "rand::random",
+            "StdRng",
+            "SmallRng",
+            "OsRng",
+            "from_entropy",
+            "HashMap",
+            "HashSet",
+            "SystemTime",
+            "Instant",
+            "std::env",
+        ],
+    ),
+    (
+        "smysl-series",
         &[
             "thread_rng",
             "rand::random",

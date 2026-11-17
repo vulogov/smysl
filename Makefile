@@ -138,8 +138,8 @@ PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-re
 # join PUBLISHED at the release that first publishes them.
 #
 # Empty from 1.10.0, which first published `smysl-text`, `smysl-query`, `smysl-measure`,
-# `smysl-lib` and `smysl-embed-candle`, until `smysl-tel` (RFC SMYSL-3, TL-P2) in 1.17.
-UNPUBLISHED := smysl-tel
+# `smysl-lib` and `smysl-embed-candle`, until `smysl-tel` and `smysl-series` (RFC SMYSL-3) in 1.17.
+UNPUBLISHED := smysl-tel smysl-series
 
 # The library crates behind the facade: everything published except the facade itself, plus
 # the ones not published yet. Their *surface* is watched from the first commit — `api-check`
@@ -324,7 +324,7 @@ test-matrix: ## Every feature combination CI builds
 		RUSTFLAGS="-D warnings" $(CARGO) test --workspace $$args; \
 	done
 
-FEATURED := smysl-graph smysl-provider smysl-ingest smysl-render smysl-pack smysl-text
+FEATURED := smysl-graph smysl-provider smysl-ingest smysl-render smysl-pack smysl-text smysl-series
 
 crate-features: ## Each crate with features, alone, at its defaults and with none
 	@set -e; for c in $(FEATURED); do \
@@ -521,7 +521,7 @@ live-hosted: ## Live ingest gate against whichever hosted providers have keys se
 # than from the minutes a cold run spends discovering that `find` is a word.
 FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact readers \
                 redaction_merge edtf time_engine sq_parse lib_roundtrip lib_import lens_laws \
-                store_union dec tel_json
+                store_union dec tel_json series_chunk
 
 # Seeds, not a corpus. The repo already holds inputs worth starting from — the corpus
 # fixtures are real `.smy` documents, and `fuzz/artifacts/` holds every input that has ever
