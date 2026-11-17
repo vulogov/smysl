@@ -85,10 +85,8 @@ pub struct HistoryRead {
     pub not_values: usize,
 }
 
-/// Read `history` (one or more `history.get` responses) against `items` (`item.get` with
-/// `selectHosts: ["host"]`), both from an API of `api_version`.
-pub fn read(history: &str, items: &str, api_version: &str) -> Result<HistoryRead, ReadError> {
-    require_version(api_version)?;
+/// The item export, by `itemid`.
+pub fn items_by_id(items: &str) -> Result<BTreeMap<String, Item>, ReadError> {
     let mut by_id: BTreeMap<String, Item> = BTreeMap::new();
     for doc in results(items)? {
         let key_ = text(&doc, "key_");
@@ -130,6 +128,14 @@ pub fn read(history: &str, items: &str, api_version: &str) -> Result<HistoryRead
             }
         }
     }
+    Ok(by_id)
+}
+
+/// Read `history` (one or more `history.get` responses) against `items` (`item.get` with
+/// `selectHosts: ["host"]`), both from an API of `api_version`.
+pub fn read(history: &str, items: &str, api_version: &str) -> Result<HistoryRead, ReadError> {
+    require_version(api_version)?;
+    let by_id = items_by_id(items)?;
 
     let mut out = HistoryRead::default();
     let mut rows: BTreeMap<String, Vec<Row>> = BTreeMap::new();
@@ -195,6 +201,115 @@ pub fn read(history: &str, items: &str, api_version: &str) -> Result<HistoryRead
     out.items = rows
         .into_iter()
         .map(|(id, rows)| ItemHistory {
+            item: by_id[&id].clone(),
+            rows,
+        })
+        .collect();
+    Ok(out)
+}
+
+/// One hour of one item, as `trend.get` gives it: Zabbix's own aggregate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrendRow {
+    /// The hour's start, epoch ms.
+    pub from_ms: u64,
+    /// `num`: how many values Zabbix aggregated.
+    pub num: u64,
+    /// `None` for a value outside `dec`'s range.
+    pub min: Option<Decimal>,
+    pub avg: Option<Decimal>,
+    pub max: Option<Decimal>,
+}
+
+/// One item's trends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemTrends {
+    pub item: Item,
+    /// In the export's order.
+    pub rows: Vec<TrendRow>,
+}
+
+/// What a trends read produced.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TrendsRead {
+    pub items: Vec<ItemTrends>,
+    /// Rows of non-numeric items (Zabbix keeps no trends of them; an export that has some is
+    /// counted, not trusted).
+    pub not_numeric: usize,
+    pub unknown_items: BTreeSet<String>,
+    /// `value_min`, `value_avg` or `value_max` outside `dec`'s range, left out of its window.
+    pub not_values: usize,
+}
+
+/// The length of a Zabbix trend period: one hour.
+pub const TREND_MS: u64 = 3_600_000;
+
+/// Read `trends` (one or more `trend.get` responses) against `items`, from an API of
+/// `api_version` (RFC SMYSL-3 §20.1). A trend is Zabbix's aggregate of an hour, not samples:
+/// it becomes a `cited` platform window, never substrate.
+pub fn read_trends(trends: &str, items: &str, api_version: &str) -> Result<TrendsRead, ReadError> {
+    require_version(api_version)?;
+    let by_id = items_by_id(items)?;
+    let mut out = TrendsRead::default();
+    let mut rows: BTreeMap<String, Vec<TrendRow>> = BTreeMap::new();
+    for doc in results(trends)? {
+        let itemid = text(&doc, "itemid");
+        if itemid.is_empty() {
+            return Err(shape("a trend row without `itemid`"));
+        }
+        let Some(item) = by_id.get(itemid) else {
+            out.unknown_items.insert(itemid.to_string());
+            continue;
+        };
+        if !item.is_numeric() {
+            out.not_numeric += 1;
+            continue;
+        }
+        let clock = integer(&doc, "clock")?;
+        let from_ms = clock.checked_mul(1000).ok_or_else(|| {
+            shape(format!(
+                "a trend row of item {itemid}: clock {clock} is out of range"
+            ))
+        })?;
+        if from_ms.checked_add(TREND_MS).is_none() {
+            return Err(shape(format!(
+                "a trend row of item {itemid}: clock {clock} is out of range"
+            )));
+        }
+        let num = integer(&doc, "num")?;
+        let mut value = |name: &str| -> Result<Option<Decimal>, ReadError> {
+            let token = match doc.get(name) {
+                Some(Json::String(s)) => s.as_str(),
+                Some(Json::Number(t)) => t.as_str(),
+                _ => {
+                    return Err(shape(format!(
+                        "a trend row of item {itemid} has no `{name}`"
+                    )))
+                }
+            };
+            match Decimal::parse_token(token) {
+                Ok(d) => Ok(Some(d)),
+                Err(DecError::OutOfRange) => {
+                    out.not_values += 1;
+                    Ok(None)
+                }
+                Err(_) => Err(shape(format!(
+                    "a trend row of item {itemid}: `{name}` `{token}` is not a number"
+                ))),
+            }
+        };
+        let row = TrendRow {
+            from_ms,
+            num,
+            min: value("value_min")?,
+            avg: value("value_avg")?,
+            max: value("value_max")?,
+        };
+        rows.entry(itemid.to_string()).or_default().push(row);
+    }
+    out.items = rows
+        .into_iter()
+        .map(|(id, rows)| ItemTrends {
             item: by_id[&id].clone(),
             rows,
         })

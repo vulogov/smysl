@@ -20,7 +20,8 @@ use smysl_core::{
 };
 use smysl_series::{flags, Sample, SeriesInfo};
 
-use crate::readers::zabbix_history::{HistoryRead, Item};
+use crate::evidence::{Basis, Summary, Window};
+use crate::readers::zabbix_history::{HistoryRead, Item, TrendsRead, TREND_MS};
 use crate::scrape::{payload, ScrapeError, Scraped, SeriesSamples};
 
 /// The scheme every Zabbix series has.
@@ -73,6 +74,71 @@ pub fn record(read: &HistoryRead, instrument_key: &str) -> Result<Scraped, Scrap
         units,
         not_values: read.not_values,
     })
+}
+
+/// The recipe a Zabbix trend window records: what computed it, which is Zabbix.
+pub const TREND_RECIPE: &str = "zabbix/trend.get";
+
+/// What a trends read became.
+#[derive(Debug, Clone)]
+pub struct Trended {
+    pub instrument: UnitCore,
+    pub inst: smysl_core::Uid,
+    /// Each item's series unit and series-meta, in `itemid` order.
+    pub series: Vec<UnitCore>,
+    pub metas: Vec<UnitCore>,
+    /// One `cited` platform window per trend row (§9.4, §20.1).
+    pub windows: Vec<Window>,
+    pub not_values: usize,
+}
+
+/// Record a trends read from the Zabbix server keyed `instrument_key` as platform windows.
+///
+/// Each hour is a `cited` `x.tel/window` with `basis: platform`: `count` is Zabbix's `num`,
+/// `min`, `max` and `mean` its `value_min`, `value_max` and `value_avg`, and there is no digest
+/// and no sum. Zabbix computed these, not us, from samples we may never have had; rule TW
+/// (§9.4) makes them a document, transcribed.
+pub fn record_trends(read: &TrendsRead, instrument_key: &str) -> Result<Trended, ScrapeError> {
+    let unit_err = |e: tel::TelError| ScrapeError::Unit(e.to_string());
+    let instrument = tel::instrument("collector", instrument_key).map_err(unit_err)?;
+    let inst = canonical_uid(&instrument);
+    let mut out = Trended {
+        instrument,
+        inst,
+        series: Vec::new(),
+        metas: Vec::new(),
+        windows: Vec::new(),
+        not_values: read.not_values,
+    };
+    for it in &read.items {
+        let key = it.item.key();
+        let unit = tel::series(SCHEME, &key).map_err(unit_err)?;
+        let uid = canonical_uid(&unit);
+        out.metas.push(meta(&key, &uid.canonical(), &it.item));
+        out.series.push(unit);
+        for r in &it.rows {
+            out.windows.push(Window {
+                series: uid,
+                scheme: SCHEME.into(),
+                key: key.clone(),
+                instrument: inst,
+                from_ms: r.from_ms,
+                to_ms: r.from_ms + TREND_MS,
+                recipe: TREND_RECIPE.into(),
+                basis: Basis::Platform,
+                digest: None,
+                summary: Summary {
+                    count: r.num,
+                    min: r.min,
+                    max: r.max,
+                    mean: r.avg,
+                    ..Summary::default()
+                },
+                sketch: None,
+            });
+        }
+    }
+    Ok(out)
 }
 
 fn meta(key: &str, series: &str, item: &Item) -> UnitCore {
@@ -139,5 +205,56 @@ mod tests {
         assert_eq!(a.series[0].samples, b.series[0].samples);
         assert_eq!(a.series[0].samples[1].flags(), flags::NO_VALUE);
         assert_eq!(a.not_values, 1);
+    }
+
+    #[test]
+    fn a_trend_is_a_cited_platform_window_by_rule_tw() {
+        use crate::readers::zabbix_history::read_trends;
+        let trends = r#"[{"itemid":"42","clock":"3600","num":"60","value_min":"0.1",
+            "value_avg":"0.4250","value_max":"1.5"}]"#;
+        let r = read_trends(trends, ITEMS, "7.0").unwrap();
+        let t = record_trends(&r, "zabbix-server:z").unwrap();
+        assert_eq!(t.windows.len(), 1);
+        let w = &t.windows[0];
+        assert_eq!(
+            (w.from_ms, w.to_ms, w.summary.count),
+            (3_600_000, 7_200_000, 60)
+        );
+        assert_eq!(w.summary.mean, Some(Decimal::parse_token("0.425").unwrap()));
+        assert_eq!(
+            w.summary.sum, None,
+            "Zabbix gives no sum, and avg x num is not one"
+        );
+        let u = w.unit();
+        assert_eq!(u.status, Status::Cited);
+        let fields = tel::window_fields(u.payload.as_deref().unwrap()).unwrap();
+        assert_eq!(fields.basis.as_deref(), Some("platform"));
+        assert!(fields.digest.is_none());
+        let att = smysl_core::Attestation::new(
+            canonical_uid(&u),
+            smysl_core::AgentId::new("tool:smysl-tel").unwrap(),
+            smysl_core::Op::Imported,
+            smysl_core::Rung::Document,
+            smysl_core::Hlc::new(1, 0, smysl_core::AgentId::new("tool:smysl-tel").unwrap()),
+        );
+        assert!(tel::rule_tw_violations(&u, &[att]).is_empty());
+
+        // The series is the history's series: one item, one series, both kinds of evidence.
+        let h = zabbix_history::read(
+            r#"[{"itemid":"42","clock":"3600","value":"1"}]"#,
+            ITEMS,
+            "7.0",
+        )
+        .unwrap();
+        let rec = record(&h, "zabbix-server:z").unwrap();
+        assert_eq!(rec.series[0].uid, w.series);
+
+        for bad in [
+            r#"[{"itemid":"42","clock":"1","num":"1","value_min":"x","value_avg":"1","value_max":"1"}]"#,
+            r#"[{"itemid":"42","clock":"1","value_min":"1","value_avg":"1","value_max":"1"}]"#,
+            r#"[{"itemid":"42","clock":"1","num":"1","value_avg":"1","value_max":"1"}]"#,
+        ] {
+            assert!(read_trends(bad, ITEMS, "7.0").is_err(), "{bad}");
+        }
     }
 }

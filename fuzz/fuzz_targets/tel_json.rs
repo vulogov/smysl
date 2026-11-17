@@ -14,7 +14,8 @@
 //! reads records against an empty substrate without a panic.
 //!
 //! So does `zabbix/1` history (TL-P3 step 4): an input with a `\n---\n` line is history above
-//! it and the item export below, read together and recorded.
+//! it and the item export below, read together and recorded. The same input is read as
+//! trends too (TL-P4 step 4), and every platform window it becomes must keep rule TW.
 
 #![no_main]
 use libfuzzer_sys::fuzz_target;
@@ -63,6 +64,15 @@ fuzz_target!(|data: &[u8]| {
     if let Some((history, items)) = text.split_once("\n---\n") {
         if let Ok(h) = zabbix_history::read(history, items, "7.0") {
             let _ = smysl_tel::zabbix_history::record(&h, "zabbix-server:f");
+        }
+        // And as trends (TL-P4 step 4): every window a trend becomes is cited, by rule TW.
+        if let Ok(t) = zabbix_history::read_trends(history, items, "7.0") {
+            if let Ok(r) = smysl_tel::zabbix_history::record_trends(&t, "zabbix-server:f") {
+                for w in &r.windows {
+                    let u = w.unit();
+                    assert!(smysl_core::schemas::tel::rule_tw_violations(&u, &[]).is_empty());
+                }
+            }
         }
     }
 });

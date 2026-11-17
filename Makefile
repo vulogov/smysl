@@ -584,6 +584,7 @@ seed-fuzz: ## Copy the repo's own inputs into each fuzz corpus
 	@mkdir -p fuzz/corpus/tel_json; cp -f fixtures/tel/diff/*.json fixtures/tel/diff/*/*.json fixtures/tel/prom/*.prom fixtures/tel/prom/*.om fuzz/corpus/tel_json/ 2>/dev/null || true
 	@# Zabbix history is read with its items: history, a `---` line, the item export.
 	@{ cat fixtures/tel/zabbix/history-a.json; printf '\n---\n'; cat fixtures/tel/zabbix/items.json; } > fuzz/corpus/tel_json/zabbix-history-a
+	@{ cat fixtures/tel/zabbix/trends.json; printf '\n---\n'; cat fixtures/tel/zabbix/items.json; } > fuzz/corpus/tel_json/zabbix-trends
 	@# `tel_otlp` takes the OTLP fixture's exports in both encodings (TL-P3 step 3).
 	@mkdir -p fuzz/corpus/tel_otlp; cp -f fixtures/tel/otlp/*.json fixtures/tel/otlp/*.pb fuzz/corpus/tel_otlp/ 2>/dev/null || true
 	@echo "seeded from fixtures/corpus, fixtures/library/readers, fixtures/sq, fixtures/schema/fc9, fixtures/tel and fuzz/artifacts"

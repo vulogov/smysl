@@ -887,6 +887,34 @@ window and either reports why it cannot recompute it, or recomputes it.
 wrongly, and disagreeing after late data. `tel_otlp`'s fuzz target also reads its bytes as a
 window payload.
 
+### Zabbix trends as cited evidence (TL-P4 step 4)
+
+**`readers::zabbix_history::read_trends`** reads `trend.get` against its item export, as
+history is read.
+
+- Each row is one item's hour: `clock`, `num`, `value_min`, `value_avg` and `value_max`.
+- Values are read exactly. One outside `dec`'s range is left out of its window and counted.
+- Rows of non-numeric items and of items not in the export are counted, not read.
+- The API version is required.
+- The item-export parsing is now shared with history (`items_by_id`).
+
+**`zabbix_history::record_trends`** makes each hour a platform window (§9.4, §20.1).
+
+- **The unit:** a `cited` `x.tel/window` with `basis: platform` and recipe `zabbix/trend.get`.
+  It covers `[clock, clock + 1 h)` on the item's series, which is the same series its history
+  feeds.
+- **Its fields:** `count` is `num`. `min`, `max` and `mean` are the trend's minimum, maximum
+  and average.
+- **Left out:** there is no digest, because the samples are Zabbix's and may never have
+  reached the substrate. There is no sum, because `avg × num` is not one.
+- **Status:** Zabbix computed these numbers, not us, so rule TW makes them a document,
+  transcribed. Every trend window keeps rule TW with an imported, document-rung attestation.
+
+**`fixtures/tel/zabbix/trends.json`** holds three hours of three items, with one maximum out of
+range and one unknown item. `expected-trends.tsv` pins the nine windows by uid, the same whether
+read as API 6.0 or 7.0. `tel_json`'s fuzz target reads trends too and requires rule TW of every
+window. `make seed-fuzz` seeds it with the fixture.
+
 ---
 
 ## 1.16.0 — 2026-11-16

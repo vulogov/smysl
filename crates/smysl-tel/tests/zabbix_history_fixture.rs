@@ -145,3 +145,52 @@ fn the_zabbix_history_fixture_reproduces_and_round_trips() {
     let want = std::fs::read_to_string(&path).expect("expected.tsv; SMYSL_BLESS=1 writes it");
     assert_eq!(got, want, "fixtures/tel/zabbix/expected.tsv moved");
 }
+
+/// `trends.json` (TL-P4 step 4): three hours of `trend.get` for the three numeric items, each
+/// hour a `cited` platform window, pinned by uid in `expected-trends.tsv`. One `value_max` is
+/// outside `dec`'s range and left out of its window; one row is of an item not exported.
+#[test]
+fn the_zabbix_trends_fixture_is_cited_windows_by_uid() {
+    use smysl_core::schemas::tel;
+    use smysl_tel::zabbix_history::record_trends;
+    let items = read("items.json");
+    let t = zabbix_history::read_trends(&read("trends.json"), &items, "7.0").unwrap();
+    // The same export as API 6.0 is the same windows.
+    let t6 = zabbix_history::read_trends(&read("trends.json"), &items, "6.0.30").unwrap();
+    assert_eq!(t, t6);
+    let r = record_trends(&t, &instrument_key("zbx-main")).unwrap();
+    let mut out = format!(
+        "# RFC SMYSL-3 §9.4, §20.1: fixtures/tel/zabbix/trends.json as cited platform windows.\n\
+         # Written by crates/smysl-tel/tests/zabbix_history_fixture.rs; SMYSL_BLESS=1 rewrites it.\n\
+         export\ttrends.json\t{} windows\t{} not values\tunknown {:?}\n",
+        r.windows.len(),
+        r.not_values,
+        t.unknown_items
+    );
+    for w in &r.windows {
+        let u = w.unit();
+        assert_eq!(u.status, smysl_core::Status::Cited);
+        assert!(
+            tel::rule_tw(&tel::window_fields(u.payload.as_deref().unwrap()).unwrap())
+                .is_some_and(|(s, _, _)| s == smysl_core::Status::Cited)
+        );
+        writeln!(
+            out,
+            "window\t{}\t{}\t{}\tcount {}\tmax {}",
+            canonical_uid(&u).canonical(),
+            w.key,
+            w.from_ms,
+            w.summary.count,
+            w.summary.max.map_or("-".into(), |m| m.to_string())
+        )
+        .unwrap();
+    }
+    let path = dir().join("expected-trends.tsv");
+    if std::env::var_os("SMYSL_BLESS").is_some() {
+        std::fs::write(&path, &out).unwrap();
+        return;
+    }
+    let want =
+        std::fs::read_to_string(&path).expect("expected-trends.tsv; SMYSL_BLESS=1 writes it");
+    assert_eq!(out, want, "fixtures/tel/zabbix/expected-trends.tsv moved");
+}
