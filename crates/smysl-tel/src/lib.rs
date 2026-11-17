@@ -23,6 +23,7 @@
 pub mod detect;
 pub mod diff;
 pub mod evidence;
+pub mod investigate;
 pub mod jcs;
 pub mod json;
 pub mod leaf;

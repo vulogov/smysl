@@ -1123,6 +1123,31 @@ export. `tests/cmd_tel_detect.rs` reads it, commits every detector's output, and
 uids from a second run into a fresh library. Determinism gains `tel_detect`, PELT committed into
 a scratch library.
 
+### Investigations: the ledger's units (TL-P6 step 1)
+
+**`smysl_tel::investigate`** builds §11's shape: an investigation, what it looked at, and what
+happened in it.
+
+- **`open(question, opened_ms, rotation)`** is an `x.tel/investigation`, `measured`: that a
+  question was opened, and when, is a recorded event. **`close`** makes the closed investigation
+  and its `supersedes` edge to the open one, because a unit is not changed but superseded.
+- **`hypothesis(claim, quotes, target, grounds)`** is `inferred` with grounds and
+  `speculative` without (§3). Numeric quotes go in `tel:quotes` as `<uid>#<field>=<value>`.
+  Rule TQ checks them when a store is read, not when the unit is made, because whether a quote
+  verifies depends on records that can arrive later.
+- **`probe` and `action`** are `measured`: that the command ran, and what it printed. An
+  action's `confirmed_by` names the human who confirmed an unsafe command. `output` names the
+  part that holds the redacted output.
+- **Edges:**
+  - `consulted`: the investigation looked at a unit;
+  - `during`: a hypothesis, probe or action happened in it;
+  - `explains`: a hypothesis explains a target.
+- **`view`** is the View a TUI opens (D-T8): rooted at the investigation, requiring `x.tel/v1`.
+
+The builders make units and edges, and the caller attests them. Who acted, a human handle or a
+model agent by provider and model hash, is the attestation's to say (§24).
+`tests/tel_investigate.rs` stages an investigation through the facade, and it checks clean.
+
 ---
 
 ## 1.16.0 — 2026-11-16
