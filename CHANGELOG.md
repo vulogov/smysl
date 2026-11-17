@@ -965,6 +965,34 @@ facade root, since rule A keeps the CLI to the facade. Chapter 38 has a section 
 evidence, with transcripts, and Appendix A documents `window`, `check`, `--sketch`, `--qs` and
 `--trends`.
 
+### Detectors: the framework, and CUSUM (TL-P5 step 1)
+
+**`smysl_tel::detect`** is where §21's detectors live, built so GE-M3 can replay them.
+
+- **Every output records its recipe:** the detector and its version, its parameters, and the
+  window it ran over, as `detector?name=value&…` with names in order. That text is the unit's
+  `tel:recipe`, and its hash goes in the attestation.
+  - One recipe over one sample set gives one set of uids.
+  - A changed parameter is a different recipe, not a different answer to the same one.
+- **Built to replay:**
+  - Detectors read counted samples in sample order and reduce in that order.
+  - They use only `+ − × ÷` and `sqrt`, which IEEE 754 rounds correctly on every machine,
+    never the platform libm's `ln`, `exp` or `pow`.
+  - They write numbers by §5.3 and draw no randomness.
+- **Status:** detector outputs are `derived` and grounded on what they came from. `segment` and
+  `anomaly` build §4.1's units, observed at the window's end.
+
+**CUSUM (`cusum/1`)** is Page's two-sided cumulative sum over values standardised by each
+regime's baseline.
+
+- **Parameters:** `k` is the slack in σ (default 0.5), `h` is the threshold in σ (default 5),
+  and `baseline` is the number of samples per regime estimate (default 10).
+- **The change point** is where the alarming sum last left zero, which is where the drift
+  began, not where it became certain. The detector then restarts against the new level.
+- **Output:** each regime is an `x.tel/segment` `[first sample, next regime)`, with `level` its
+  mean. A window with no change is one segment.
+- **A constant baseline** takes σ = 10⁻⁹·max(1, |μ|), so any departure from it is a change.
+
 ---
 
 ## 1.16.0 — 2026-11-16
