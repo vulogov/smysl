@@ -764,6 +764,44 @@ sample at exit answers no "value in force at t". `smysl::series` re-exports the 
 Chapter 38 has a section on samples and the facts about them, and Appendix A documents the new
 readers, flags and `tel at`. `tests/cmd_tel_series.rs` holds the commands against the binary.
 
+### Window evidence, exact (TL-P4 step 1)
+
+`smysl_tel::evidence` materialises `x.tel/window` units (§9): what a window `[from, to)` of one
+series and instrument contained.
+
+- **One uid per sample set.** The payload holds:
+  - the window: series, instrument, from, to, recipe and basis;
+  - the §9.1 digest of its samples;
+  - their summary.
+
+  The same window over the same samples gives the same uid. Late data gives another uid, and
+  both are true (§9.2). `preferred` picks one window of a key: the largest count, then the
+  smallest digest, a function of the set. `disagree` is `SMY-W614`'s test.
+- **The summary is exact** (§9.3):
+  - `count` excludes stale and no-value samples. `min`, `max`, `first` and `last` are over the
+    counted samples.
+  - The sum is computed as an exact big decimal, so no order of addition can change it.
+  - An integer series' `sum` is that exact integer, omitted with `SMY-W616` when it is
+    outside `dec`'s range. Any other `sum` is rounded once to binary64, half to even.
+  - `mean` is the exact sum divided by the count, rounded once, never derived from a rounded
+    sum. The quotient is carried to 800 significant digits plus a sticky digit, more than
+    the 767 a binary64 halfway point can need, so the rounding is that of the exact quotient.
+  - `0.1 + 0.2` sums to `0.3`. `1e300 + 1.5 − 1e300` sums to `1.5`.
+- **Status follows rule TW** (§9.4):
+  - exact over the substrate is `measured`;
+  - approximate is `derived`, grounded on its series;
+  - a platform aggregate is `cited`.
+- **The digest is `bytes32`**, a 32-byte CBOR byte string, and the payload is canonical CBOR
+  built directly. The surface syntax has no byte string, and the RFC adds no kernel change, so
+  a window unit travels as CBOR only, as a payload with a `dec` beyond `i64` already does.
+
+**`fixtures/tel/window/cases.json`** holds 400 windows of 1 to 40 samples, with exponents from
+−400 to 400 and mantissas up to 2⁶⁴ − 1. Their sums and means were computed independently by
+`gen_cases.py` with Python's exact rationals. Every one agrees.
+
+`SMY-W614`, `SMY-W615` and `SMY-W616` are registered, bringing the registry to 166 codes. W615
+was already printed by `tel read`.
+
 ---
 
 ## 1.16.0 — 2026-11-16

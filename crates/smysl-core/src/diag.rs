@@ -521,6 +521,9 @@ registry! {
         E611 = "SMY-E611", Error, "A record 6 of a detection kind that is derived and never written (6 or 7)";
         E612 = "SMY-E612", Error, "A writer emitted a reserved number: source key 7 or record 16";
         W613 = "SMY-W613", Warn,  "A number outside dec's range, kept as its token (vtype text)";
+        W614 = "SMY-W614", Warn,  "The windows of one window key disagree: several sample sets, each window true of its own";
+        W615 = "SMY-W615", Warn,  "Two samples at one series, instrument and instant, with different values or flags; both are kept";
+        W616 = "SMY-W616", Warn,  "An integer window sum outside dec's range; the sum is omitted";
     }
 }
 
@@ -1048,9 +1051,11 @@ mod tests {
     /// keyed, and a number outside `dec`'s range. 163 with `SMY-W610` in step 5, raised by
     /// `smysl_tel::snapshot::record` when an object's previous snapshot was read under another
     /// profile.
+    /// 166 with `SMY-W614`, `SMY-W615` and `SMY-W616` in TL-P4 step 1: windows of one key that
+    /// disagree, two samples at one instant, and an integer sum outside `dec`'s range.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 163);
+        assert_eq!(Code::ALL.len(), 166);
     }
 
     #[test]

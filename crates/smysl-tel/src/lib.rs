@@ -21,6 +21,7 @@
 #![deny(rust_2018_idioms)]
 
 pub mod diff;
+pub mod evidence;
 pub mod jcs;
 pub mod json;
 pub mod leaf;
