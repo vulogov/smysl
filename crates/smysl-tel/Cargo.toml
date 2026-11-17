@@ -19,5 +19,13 @@ default = []
 # dependency TL-P2 step 1 needs: a canonical leaf value is a function of JSON text and a
 # profile, and nothing about a store.
 smysl-core = { workspace = true }
+# The series substrate (§19): a scrape's samples go there, and a scrape's resets and stales are
+# decided against what it holds (TL-P3).
+smysl-series = { workspace = true }
 # Strings are NFC (§5.5), as every text field the kernel hashes is.
 unicode-normalization = { workspace = true }
+
+[dev-dependencies]
+# `tests/prom_fixture.rs` records the fixture into the redb backend as well as memory: the
+# substrate round trip TL-P3's exit criterion names.
+smysl-series = { workspace = true, features = ["store-redb"] }

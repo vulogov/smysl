@@ -25,6 +25,7 @@ use smysl_core::ids::is_alias;
 use crate::json::{Json, JsonError};
 
 pub mod k8s;
+pub mod prom;
 pub mod zabbix;
 
 /// One object a reader selected.

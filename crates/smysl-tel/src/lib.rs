@@ -27,6 +27,7 @@ pub mod leaf;
 pub mod pointer;
 pub mod profile;
 pub mod readers;
+pub mod scrape;
 pub mod snapshot;
 
 pub use diff::{diff, leaves, part_text, Diff, Note, Snapshot};

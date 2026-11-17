@@ -1,0 +1,31 @@
+# RFC SMYSL-3 §9.1, §20.1: fixtures/tel/prom/ recorded into the series substrate.
+# Written by crates/smysl-tel/tests/prom_fixture.rs; SMYSL_BLESS=1 rewrites it.
+# Scrapes every 15 s from 1768557600000; windows [1768557600000, 1768557660000).
+instrument	prom-scrape:node/h:9100	b3:qmeztdgxzzr5sg7fowwamvyf5vl3vdmcbmrjmnshvclsjoreesfq
+scrape	s0.prom	1768557600000	10 series	1 not values
+scrape	s1.prom	1768557615000	10 series	0 not values
+unit	x.tel/stale	measured	b3:bfodmprfi4eysstywg76tw7rofsxm7c57eztzg2tlxfeliymb5bq	stale node_temperature_celsius{instance="h:9100",job="node",sen…
+scrape	s2.prom	1768557630000	9 series	0 not values
+unit	x.tel/reset	derived	b3:qeipn6z2dlbgoukc2wilhvnc3bws5n3qd6ofm22wwpb5hajuoqdq	reset http_requests_total{code="200",instance="h:9100",job="nod…
+unit	x.tel/reset	derived	b3:ssnlfgnih52yin2bd4kzlus74pcwfnbymsuur665bsclebea2jwq	reset http_requests_total{code="500",instance="h:9100",job="nod…
+unit	x.tel/reset	derived	b3:mu3srk6mswmecuqqkazxr3sk46p7leeqnlkscika445lg2qfqcqa	reset http_request_duration_seconds_count{instance="h:9100",job…
+scrape	s3.prom	1768557645000	10 series	0 not values
+instrument	prom-scrape:cart/c:8080	b3:2krjrttrzgk4ijwyjnjxvlnpby5x3ka2yy3blyurh5tpk6vfzjva
+scrape	o0.om	1768557600000	5 series	0 not values
+scrape	o1.om	1768557615000	5 series	0 not values
+unit	x.tel/reset	measured	b3:qch22ndwzqhali2lkflc4ryrdmulpte7dwxhsg7b5xen6bxlmtfa	reset rpc_seconds_count{instance="c:8080",job="cart",service="c…
+series	http_request_duration_seconds_bucket{instance="h:9100",job="node",le="+Inf"}	4	7469aff2bb99b1cec4ec483e6f3f88cc6d301b3a3a36ca4bb8ccb58f71362739
+series	http_request_duration_seconds_bucket{instance="h:9100",job="node",le="0.05"}	4	95227aeee445f653682d1379db43e7c698c9ffa8b6a2576abc9a4390ae986036
+series	http_request_duration_seconds_bucket{instance="h:9100",job="node",le="0.5"}	4	142da1091248d38740361c5185b4e95427608cf7e806a5d1a8f44844c75f3d8b
+series	http_request_duration_seconds_count{instance="h:9100",job="node"}	4	7469aff2bb99b1cec4ec483e6f3f88cc6d301b3a3a36ca4bb8ccb58f71362739
+series	http_request_duration_seconds_sum{instance="h:9100",job="node"}	4	cea04344e8dfc039c7b1831e9276aac17e248040828c685d4288b42444a27f2e
+series	http_requests_total{code="200",instance="h:9100",job="node",method="get"}	4	958f484f13c728b621a1ca5971dd7e5161375f9979edde55fd862e5162d0f0e1
+series	http_requests_total{code="500",instance="h:9100",job="node",method="get"}	4	02273679df8caf41a6e04e6b09c2e6085c0fbf2cfbed6a59e0e5c22ead6f21ef
+series	jobs_created{instance="c:8080",job="cart"}	2	c5490508cf2dca102631818b7b91399b4938471f3de3a9765cdaf68c1019bf86
+series	jobs_total{instance="c:8080",job="cart"}	2	db1277818fedb60de76427c4c36a541bbd97247aa1f0a91ba39b39a5915be48e
+series	node_load_ratio{instance="h:9100",job="node"}	4	152b229ac7c159913f4d59c8d7a6564b4222fb043d129e0655d4b7862aef45c7
+series	node_temperature_celsius{instance="h:9100",job="node",sensor="a"}	4	126d90afc26f5b3c4f273267ea84bec6e0ed7e147264ab58424af9cd7a3a94b7
+series	node_temperature_celsius{instance="h:9100",job="node",sensor="b"}	3	315957159e03c86452a92366a52e5b7b7b701b9021bf9c5ca1adea43511ef4d5
+series	rpc_seconds_count{instance="c:8080",job="cart",service="cart"}	2	5d1cd43a443953d59feb51bcd23f610ff3e61575fb5e8018e4c6812f2fad6439
+series	rpc_seconds_created{instance="c:8080",job="cart",service="cart"}	2	3e8706f1f8082cdb51de4bbbeda52242ab6a337ec7e28343f4b9b9703f1060c8
+series	rpc_seconds_sum{instance="c:8080",job="cart",service="cart"}	2	eb36a8cb0205abb883dd92e66f19ab0475a5239d33012fd6f13395f013eeb49d

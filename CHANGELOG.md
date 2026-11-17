@@ -503,6 +503,63 @@ The crate is on the purity list with `smysl-tel`'s PRNG ban, and the purity gate
 13 crates. The backend contract lives in `tests/` because it needs a directory, and the gate
 keeps `std::env` out of the crate's own source.
 
+### `prom/1`, and what a scrape establishes (TL-P3 step 2)
+
+**The reader** (`smysl_tel::readers::prom`) reads one scrape, in Prometheus text 0.0.4 or
+OpenMetrics 1.0. The last line decides the format: OpenMetrics ends with `# EOF`.
+
+- **Families** come from `# TYPE`. A sample's family is its name, or its name less a known
+  suffix (`_total`, `_bucket`, `_count`, `_sum`, `_created`, …), whichever is typed.
+- **Values are read exactly** (§5.3). `NaN` and `±Inf` are not values (§5.2). They are kept as
+  samples with flag 4 and counted, rather than stopping the read or being invented.
+- **Timestamps:**
+  - 0.0.4 timestamps are integer ms.
+  - OpenMetrics timestamps are seconds, read exactly to the nanosecond, and a digit finer than
+    that is refused.
+  - Instants before 1970 are refused, since an instant here is unsigned epoch ms, as `observed`
+    is. The format's own example has one.
+- **Identity** (§6) is `name{l1="v1",…}`, labels sorted, with Prometheus' escaping:
+  - The target's labels (`job`, `instance`) are the caller's to give, and are part of it.
+  - A scraped label with a target label's name becomes `exported_<name>`.
+  - An empty label value is the label's absence, as it is to Prometheus.
+- Exemplars are passed over. A malformed line is refused with its line number.
+
+**Recording** (`smysl_tel::scrape`) turns a scrape into substrate samples and the few units it
+establishes. It reads what came before from a `History`, which is the substrate as this
+instrument left it, never a cache of the last run.
+
+- **`x.tel/reset`, `start-time`.** The family's `_created` moved since the last scrape. The
+  source says so, so the unit is `measured`, its `at_ms` is the new start time, and the
+  counter's samples carry flag 2.
+- **`x.tel/reset`, `decrease`.** There is no `_created`, and the counter fell. We inferred it,
+  so the unit is `derived`, grounded on the series unit (`SMY-E031` requires grounds), at the
+  sample's instant, with no flag.
+
+  One reset unit per counter, on its headline series: the counter itself, or a histogram's or
+  summary's `_count`. Not one per bucket. `_sum` is never a counter, since a negative
+  observation lowers it.
+- **`x.tel/stale`.** A series this instrument served last time is absent now. That is exactly
+  when Prometheus writes its stale NaN, so the marker is `stale-nan`, and the substrate gets a
+  stale sample at the scrape instant. §20.1 says `prom/1` takes stale from the stale NaN
+  `0x7ff0000000000002`. Text exposition cannot carry that bit pattern, so absence, the
+  condition Prometheus marks with it, is what is read.
+- **The instrument** is `x.tel/instrument`, role `scraper`, keyed `prom-scrape:<job>/<instance>`
+  (§7).
+
+**`fixtures/tel/prom/`** pins two targets' scrapes:
+
+- A text target goes stale on a gauge, then all its counters fall at once.
+- An OpenMetrics target has a summary whose `_created` moves.
+- `expected.tsv` holds every unit's uid and status, and each series' sample count and window
+  digest.
+
+TL-P3's "substrate fixture round trip" is the test: recorded into memory, recorded into redb
+and reopened after every scrape, and the same samples added in reverse order all give the pinned
+digests. Recording the same scrape twice gives the same units and no new samples.
+
+`tel_json`'s fuzz target now reads and records scrapes too, and `make seed-fuzz` seeds it from
+`fixtures/tel/`. `smysl-tel` depends on `smysl-series`.
+
 ---
 
 ## 1.16.0 — 2026-11-16

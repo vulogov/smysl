@@ -9,11 +9,16 @@
 //! The readers ride along (TL-P2 step 4): `k8s/1` and `zabbix/1` take exports from systems the
 //! caller does not control, so whatever they are handed they refuse or read, without a panic,
 //! and every object they read records without one.
+//!
+//! So does `prom/1` (TL-P3 step 2): a scrape is a target's bytes, read or refused, and what it
+//! reads records against an empty substrate without a panic.
 
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use smysl_tel::profile::builtin;
-use smysl_tel::readers::{k8s, zabbix};
+use smysl_series::{MemBackend, Substrate};
+use smysl_tel::readers::{k8s, prom, zabbix};
+use smysl_tel::scrape::{self, SubstrateHistory};
 use smysl_tel::snapshot::record;
 use smysl_tel::{jcs, json};
 
@@ -41,5 +46,15 @@ fuzz_target!(|data: &[u8]| {
         for o in &r.objects {
             let _ = record(o, None, &items, zabbix::ID, "unknown", None, 0);
         }
+    }
+    if let Ok(s) = prom::read(text, &[("job", "j"), ("instance", "i")]) {
+        let sub = Substrate::new(MemBackend::default());
+        let key = scrape::instrument_key("j", "i");
+        let h = SubstrateHistory {
+            substrate: &sub,
+            instrument: smysl_core::Uid::from_bytes([0; 32]),
+            scheme: scrape::SCHEME,
+        };
+        let _ = scrape::record(&s, 1, &key, &h);
     }
 });

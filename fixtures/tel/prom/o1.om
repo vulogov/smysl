@@ -1,0 +1,9 @@
+# TYPE rpc_seconds summary
+# UNIT rpc_seconds seconds
+rpc_seconds_count{service="cart"} 5
+rpc_seconds_sum{service="cart"} 0.25
+rpc_seconds_created{service="cart"} 1768557610.25
+# TYPE jobs counter
+jobs_total 9 1768557615.5
+jobs_created 1768550000
+# EOF

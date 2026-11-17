@@ -573,7 +573,10 @@ seed-fuzz: ## Copy the repo's own inputs into each fuzz corpus
 	@# `lens_laws` reads an input that decodes as records as records, so the FC-9 fixtures
 	@# are seeds as they stand: every op tag, a widening, an unknown op and an opaque key 5.
 	@mkdir -p fuzz/corpus/lens_laws; cp -f fixtures/schema/fc9/*.cbor fuzz/corpus/lens_laws/ 2>/dev/null || true
-	@echo "seeded from fixtures/corpus, fixtures/library/readers, fixtures/sq, fixtures/schema/fc9 and fuzz/artifacts"
+	@# `tel_json` reads its input as JSON, as `k8s/1` and `zabbix/1` exports, and as a
+	@# Prometheus scrape, so the telemetry fixtures are seeds as they stand (TL-P3 step 2).
+	@mkdir -p fuzz/corpus/tel_json; cp -f fixtures/tel/diff/*.json fixtures/tel/diff/*/*.json fixtures/tel/prom/*.prom fixtures/tel/prom/*.om fuzz/corpus/tel_json/ 2>/dev/null || true
+	@echo "seeded from fixtures/corpus, fixtures/library/readers, fixtures/sq, fixtures/schema/fc9, fixtures/tel and fuzz/artifacts"
 
 fuzz: seed-fuzz ## Fuzz every target for 60s each, as CI does (nightly)
 	@echo "The parser targets existed from the start and nothing ran them, which is how two"
