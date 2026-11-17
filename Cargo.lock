@@ -2110,6 +2110,7 @@ dependencies = [
  "smysl-query",
  "smysl-render",
  "smysl-retrieve",
+ "smysl-tel",
  "smysl-text",
  "smysl-thread",
  "smysl-tui",

@@ -216,6 +216,38 @@ const OPS: &[Op] = &[
         setup: None,
     },
     Op {
+        name: "tel_read",
+        // RFC SMYSL-3's object reader, profile, part text and canonical diff (TL-P2), in one
+        // run: the base snapshot and an image bump, read in that order into a fresh library.
+        // stdout carries both manifests' mids, which hash the parts and the chain, and the
+        // change count. A `HashMap` anywhere on that path would show here first, which is
+        // why `smysl-tel` bans them by name in `check-purity` as well.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "tel",
+            "read",
+            "k8s/1",
+            "fixtures/tel/diff/base.json",
+            "fixtures/tel/diff/image-bump/s1.json",
+            "--profile",
+            "k8s-deployments/1",
+            "--at",
+            "1768557600000",
+            "--licence",
+            "unknown",
+            "-s",
+            SCRATCH,
+            "--yes",
+        ],
+        setup: None,
+    },
+    Op {
         name: "text_show",
         // Resolving a locator and printing the passage: the reading's segment table read back
         // as a tree, the range it names, and the bytes sliced out of the part.

@@ -1108,6 +1108,50 @@ migrate or under `--dry-run`, and 1 when the store does not declare the target r
 (`SMY-E466`) or a unit lacks a key the target requires and no `default` supplies
 (`SMY-E473`, which a model recipe would be needed for and this build does not offer).
 
+#section("tel")
+
+*Read telemetry snapshots into a library; check a profile.* Pure · TL-P2.
+
+`tel read READER FILE...` reads platform exports with one of SMYSL-3's object readers. `k8s/1`
+reads `kubectl get -o json` lists, objects and watch events; `zabbix/1` reads `host.get` and
+`item.get` exports. Each object the profile selects becomes a snapshot in the library:
+
+- a part (the object with noise removed and keyed arrays keyed);
+- a manifest under the object's alias, chained to the one before;
+- the object's `x.tel/series` unit;
+- the `x.tel/change` and `x.tel/recreate` units that say what changed since the previous
+  snapshot of that object.
+
+A snapshot that differs from its predecessor only in noise is nothing: no part, no manifest. A
+Secret's `data` and `stringData` are never read. Chapter 38 explains what a snapshot is.
+
+Without `--yes` nothing is written to the library, not even the directory. The units are
+staged in `.smysl/staged.smy` for review, and the manifests that would be written are printed.
+The same command with `--yes` writes those manifests, by the same ids, and commits the units.
+`tel profile check FILE|NAME` validates a profile and prints its name, scheme and hash, the
+hash every manifest it reads records.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`read` or `profile`.]),
+    ([`ARG…`], [positional], [`read`: the reader, `k8s/1` or `zabbix/1`, then the files. `profile`: `check` and a profile file or shipped name.]),
+    ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for `read`; it must be for the reader's scheme.]),
+    ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds. Required: nothing here reads a clock, and the change units' `observed` is this instant.]),
+    ([`--licence`], [`SPDX`], [The manifests' licence. Required, as `text add` requires it.]),
+    ([`--zabbix-api`], [`VERSION`], [The Zabbix API version the export came from (`apiinfo.version`). Required for `zabbix/1`: 6.x, 7.x or 8.x.]),
+    ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing.]),
+    ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),
+  ),
+)
+
+`tel read` exits 0 when it commits, 10 when it stages, and 2 when a required flag is missing,
+the reader is not a telemetry reader, or the profile is for another scheme. It reports
+`SMY-W608` for a keyed array it could not key, `SMY-W613` for a number out of `dec`'s range,
+and `SMY-W610` for an object whose previous snapshot was read under another profile. That
+boundary is recorded and not diffed.
+
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference
 // ═══════════════════════════════════════════════════════════════════════
@@ -1276,6 +1320,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-E602`], [error], [A `dec`, SMYSL-3's canonical decimal, that is not canonical: not an array of two shortest-form integers, a mantissa with a trailing zero, zero with a non-zero exponent, an exponent outside −400 to 400, or a mantissa of −2#super[64]. One value has exactly one encoding, so the decoder refuses the others rather than normalising them; normalising would give one value two uids. From 1.17.]),
     ([`SMY-E607`], [error], [An `x.tel/series` or `x.tel/instrument` unit carries what its identity forbids: a span, a manifest, a published or observed time, grounds, a source of another kind or reference than `series:<scheme>:<key>` (metric) or `instrument:<key>` (tool), or any other source key. The message names the fields. A series is what is measured, not when, so one series seen at fifty instants is one unit; what varies over time goes in its `-meta` unit. From 1.17.]),
     ([`SMY-W608`], [warning], [A keyed array in a telemetry snapshot could not be keyed: an element that is not an object, a key that is missing or not a scalar, or a key value that repeats (Kubernetes admits two `env` entries with one name). The whole array is diffed as one `json` leaf, and the message names its pointer. From 1.17.]),
+    ([`SMY-W610`], [warning], [An object's previous snapshot was read under another profile, by the profile hash its manifest's reader field records. The new snapshot is recorded and not diffed against the old one: a leaf the profile reclassified would otherwise read as a change to the object. From 1.17.]),
     ([`SMY-E611`], [error], [A record 6 of detection kind 6 (a rival explanation) or 7 (a witness conflict). SMYSL-3 derives both from the record set and never writes them, so a store refuses one at the door, as it refuses rule E's kinds 4 and 5; this is what `check` says of one that arrived some other way, a document as written or a log from an older peer. From 1.17.]),
     ([`SMY-E612`], [error], [A reserved number was written: record 16 (`hold`), or `source` key 7 (a sub-millisecond remainder). SMYSL-3 keeps both reserved behind experiments. Both are carried, not refused: record 16 is kept verbatim, and key 7 is inside the uid, so dropping it would change the unit's identity. Record 16 reports this instead of `SMY-W014`. From 1.17.]),
     ([`SMY-W613`], [warning], [A number in a telemetry snapshot is outside `dec`'s range: a mantissa over 2#super[64] − 1 or an exponent past ±400. It is kept as its token, as `vtype text`, so it is recorded, but two spellings of it are no longer one value. From 1.17.]),

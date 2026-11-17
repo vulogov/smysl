@@ -39,11 +39,42 @@ pub const POLICY: &str = "smysl/tel-snapshot/1";
 /// The language of a snapshot: none. BCP-47's code for "no linguistic content".
 pub const LANG: &str = "zxx";
 
-/// The previous snapshot of the same object: its stored part, parsed, and its manifest.
+/// The previous snapshot of the same object: its stored part, parsed, its manifest, and the
+/// manifest's reader field, which says what profile it was read under.
 #[derive(Debug, Clone, Copy)]
 pub struct Prev<'a> {
     pub doc: &'a Json,
     pub mid: Mid,
+    pub reader: &'a str,
+}
+
+/// A manifest's reader field (key 3) for a snapshot: the reader id, then its parameters as
+/// `key=value`, sorted, as SMYSL-2.4's reader fields are spelled (`whatsapp/1 date-format=dmy`).
+///
+/// `profile` is always one of them. §20.2 puts the profile's hash in every recipe that uses
+/// it, and the reader field is where a manifest records how its parts were read — so a later
+/// snapshot can tell whether its predecessor was read the same way (`SMY-W610`).
+pub fn reader_field(id: &str, profile: &Profile, params: &[(&str, &str)]) -> String {
+    let hash = profile.hash_text();
+    let mut all: Vec<(&str, &str)> = params.to_vec();
+    all.push(("profile", hash.as_str()));
+    all.sort();
+    let mut out = id.to_string();
+    for (k, v) in all {
+        out.push(' ');
+        out.push_str(k);
+        out.push('=');
+        out.push_str(v);
+    }
+    out
+}
+
+/// The `profile=` parameter of a reader field, if it has one.
+pub fn profile_of(reader: &str) -> Option<&str> {
+    reader
+        .split(' ')
+        .skip(1)
+        .find_map(|kv| kv.strip_prefix("profile="))
 }
 
 /// What one snapshot became.
@@ -79,7 +110,8 @@ impl core::fmt::Display for RecordError {
 
 impl std::error::Error for RecordError {}
 
-/// Record `obj`, read by `reader` at `at_ms`, under `profile`, after `prev`.
+/// Record `obj`, read under `profile` at `at_ms`, after `prev`. `reader` is the whole reader
+/// field, [`reader_field`]'s.
 ///
 /// `licence` is the manifest's (key 4): what the snapshot's owner says may be done with it,
 /// usually `unknown` for one's own systems. `raw` is the reader's metadata for the manifest
@@ -129,7 +161,12 @@ pub fn record(
     }
     let mid = manifest.mid();
 
+    let now = profile.hash_text();
     let (diff, notes) = match prev {
+        Some(p) if profile_of(p.reader).is_some_and(|was| was != now) => {
+            let was = profile_of(p.reader).unwrap_or_default().to_string();
+            (None, vec![Note::ProfileChanged(was, now)])
+        }
         Some(p) => {
             let s1 = Snapshot {
                 doc: &obj.doc,
@@ -186,12 +223,16 @@ mod tests {
             .remove(0)
     }
 
+    fn field() -> String {
+        reader_field(k8s::ID, &Profile::parse(PROFILE).unwrap(), &[])
+    }
+
     fn rec(obj: &Object, prev: Option<Prev<'_>>) -> Recorded {
         record(
             obj,
             prev,
             &Profile::parse(PROFILE).unwrap(),
-            k8s::ID,
+            &field(),
             "unknown",
             None,
             1_000,
@@ -205,7 +246,8 @@ mod tests {
         let r = rec(&o, None);
         let m = r.manifest.as_ref().expect("a manifest");
         assert_eq!(m.alias, "k8s/apps/v1/deployment/a/web");
-        assert_eq!(m.reader, "k8s/1");
+        assert_eq!(m.reader, field());
+        assert!(m.reader.starts_with("k8s/1 profile=b3:"), "{}", m.reader);
         assert_eq!(m.part_policy, POLICY);
         assert_eq!(m.lang.as_str(), "zxx");
         assert_eq!(m.parts.len(), 1);
@@ -225,7 +267,14 @@ mod tests {
         let stored = parse(std::str::from_utf8(&first.part.text).unwrap()).unwrap();
         let mid = first.manifest.as_ref().unwrap().mid();
         let b = read_one(&deploy(2, "3.0", "web:1", "u-1"));
-        let r = rec(&b, Some(Prev { doc: &stored, mid }));
+        let r = rec(
+            &b,
+            Some(Prev {
+                doc: &stored,
+                mid,
+                reader: &field(),
+            }),
+        );
         assert!(r.manifest.is_none() && r.diff.is_none());
         assert_eq!(r.part.tid, first.part.tid);
     }
@@ -241,7 +290,14 @@ mod tests {
         let mid = first.manifest.as_ref().unwrap().mid();
 
         let b = read_one(&deploy(5, "4", "web:2", "u-1"));
-        let r = rec(&b, Some(Prev { doc: &stored, mid }));
+        let r = rec(
+            &b,
+            Some(Prev {
+                doc: &stored,
+                mid,
+                reader: &field(),
+            }),
+        );
         let m = r.manifest.as_ref().unwrap();
         assert_eq!(m.supersedes, Some(mid), "the chain");
         let d = r.diff.as_ref().unwrap();
@@ -265,12 +321,50 @@ mod tests {
     }
 
     #[test]
+    fn a_reader_field_is_sorted_and_names_its_profile() {
+        let p = Profile::parse(PROFILE).unwrap();
+        let f = reader_field("zabbix/1", &p, &[("api", "7.0.3")]);
+        assert_eq!(f, format!("zabbix/1 api=7.0.3 profile={}", p.hash_text()));
+        assert_eq!(profile_of(&f), Some(p.hash_text().as_str()));
+        assert_eq!(profile_of("k8s/1"), None);
+    }
+
+    /// A profile change is reported at the boundary and not diffed (`SMY-W610`).
+    #[test]
+    fn a_snapshot_under_another_profile_is_w610_and_no_diff() {
+        let first = rec(&read_one(&deploy(1, "3", "web:1", "u-1")), None);
+        let stored = parse(std::str::from_utf8(&first.part.text).unwrap()).unwrap();
+        let mid = first.manifest.as_ref().unwrap().mid();
+        let old = "k8s/1 profile=b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let b = read_one(&deploy(2, "4", "web:2", "u-1"));
+        let r = rec(
+            &b,
+            Some(Prev {
+                doc: &stored,
+                mid,
+                reader: old,
+            }),
+        );
+        assert!(r.manifest.is_some(), "the snapshot is still recorded");
+        assert!(r.diff.is_none());
+        assert_eq!(r.notes.len(), 1);
+        assert_eq!(r.notes[0].code(), smysl_core::Code::W610);
+    }
+
+    #[test]
     fn a_recreated_object_continues_its_chain_and_is_a_new_series() {
         let first = rec(&read_one(&deploy(1, "3", "web:1", "u-1")), None);
         let stored = parse(std::str::from_utf8(&first.part.text).unwrap()).unwrap();
         let mid = first.manifest.as_ref().unwrap().mid();
         let again = read_one(&deploy(1, "3", "web:1", "u-2"));
-        let r = rec(&again, Some(Prev { doc: &stored, mid }));
+        let r = rec(
+            &again,
+            Some(Prev {
+                doc: &stored,
+                mid,
+                reader: &field(),
+            }),
+        );
         assert_eq!(
             r.manifest.as_ref().unwrap().alias,
             first.manifest.as_ref().unwrap().alias

@@ -422,6 +422,12 @@ pub mod translate {
 #[cfg(feature = "text")]
 pub use smysl_text as text;
 
+/// Telemetry (RFC SMYSL-3): exact JSON, canonical leaf values, profiles, the canonical diff,
+/// the `k8s/1` and `zabbix/1` readers and the snapshot recorder. Behind `tel`, which `cli`
+/// turns on.
+#[cfg(feature = "tel")]
+pub use smysl_tel as tel;
+
 /// The crate version, as a convenience for embedders recording provenance.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -574,8 +580,9 @@ mod tests {
         // and a reserved number, raised by `check`'s extension pass; 159 with `SMY-E602` (TL-P1
         // step 2), a non-canonical `dec`, refused by `smysl_core::Decimal`'s decoder; 160 with
         // `SMY-E607` (step 3), a series or instrument unit breaking the entity-like rule; 162
-        // with `SMY-W608` and `SMY-W613` (TL-P2 step 3), raised by `smysl_tel::diff`.
-        assert_eq!(Code::ALL.len(), 162);
+        // with `SMY-W608` and `SMY-W613` (TL-P2 step 3), raised by `smysl_tel::diff`; 163 with
+        // `SMY-W610` (step 5), a profile changed within one snapshot chain.
+        assert_eq!(Code::ALL.len(), 163);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

@@ -52,6 +52,10 @@ pub enum Note {
     Unkeyable(Pointer, &'static str),
     /// A number outside `dec`'s range, kept as its token (`SMY-W613`).
     OutOfRange(Pointer),
+    /// The previous snapshot of this object was read under another profile (`SMY-W610`), so
+    /// the boundary is reported and not diffed: a leaf a profile reclassified would otherwise
+    /// read as a change to the object. Carries the two profile hashes, previous first.
+    ProfileChanged(String, String),
 }
 
 impl Note {
@@ -59,12 +63,15 @@ impl Note {
         match self {
             Note::Unkeyable(..) => Code::W608,
             Note::OutOfRange(_) => Code::W613,
+            Note::ProfileChanged(..) => Code::W610,
         }
     }
 
-    pub fn pointer(&self) -> &Pointer {
+    /// The leaf the note is about; the whole object for a profile change.
+    pub fn pointer(&self) -> Pointer {
         match self {
-            Note::Unkeyable(p, _) | Note::OutOfRange(p) => p,
+            Note::Unkeyable(p, _) | Note::OutOfRange(p) => p.clone(),
+            Note::ProfileChanged(..) => Pointer::root(),
         }
     }
 }

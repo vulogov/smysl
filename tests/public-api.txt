@@ -366,6 +366,7 @@ pub use smysl::script_of_lang
 pub use smysl::stage
 pub use smysl::supersession_heads
 pub use smysl::surface
+pub use smysl::tel
 pub use smysl::text
 pub use smysl::to_cbor
 pub use smysl::to_cbor_seq

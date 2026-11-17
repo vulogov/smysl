@@ -153,7 +153,7 @@ LIBRARIES := $(filter-out smysl,$(PUBLISHED)) $(UNPUBLISHED)
 # absence as if it were the intent.
 COMMAND_NAMES := fmt check pack merge diff trace view bundle thread salience find retract \
                  withdraw resolve review commit render import relink compact ingest attest providers \
-                 usage reindex ui text date same-as link summarise q ask measure assess lib schema migrate
+                 usage reindex ui text date same-as link summarise q ask measure assess lib schema migrate tel
 
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 

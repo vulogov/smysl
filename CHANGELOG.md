@@ -404,6 +404,52 @@ Still to come from TL-P2's list:
   a deletion becomes as a unit (a stale series, or a recreate's first half) is TL-P3's, with
   `x.tel/stale`.
 
+
+### `smysl tel` (TL-P2 step 5)
+
+The facade gains a `tel` feature, which `cli` turns on, and `smysl::tel`. The command has two
+actions.
+
+- **`tel read READER FILE... --profile P --at MS --licence L -s LIB`** reads `k8s/1` or
+  `zabbix/1` exports into a library. Each selected object becomes a snapshot (part, reading,
+  chained manifest), its series unit, and the change and recreate units against the previous
+  snapshot of the same object. The previous snapshot is this run's, if the object appeared
+  earlier in it, and otherwise the catalog's head for the alias.
+  - **`--at`, `--licence` and `--profile` are required.** Nothing reads a clock (§23), and a
+    licence nobody gave is not `unknown`, as `text add` already says.
+  - **Without `--yes` nothing is written to the library**, not even its directory. The units
+    are staged and the manifests that would be written are printed. With `--yes`, the same run
+    writes those manifests by the same ids and commits the units.
+
+    The first design wrote the snapshots and staged only the units. It fails twice:
+    `merge --staged` has no way into a library, so the batch could never land, and the catalog
+    would already have moved on, so running again with `--yes` would find nothing changed.
+  - **The units are attested `Imported` at `Computed`** by `tool:smysl-tel`, which is rule T's
+    one path to `measured`. The recipe is the hash of the reader field.
+- **`tel profile check FILE|NAME`** validates a profile and prints its hash.
+
+**The profile's hash is in every manifest.** A snapshot manifest's reader field is
+`k8s/1 profile=b3:…` (`zabbix/1 api=7.0.3 profile=b3:…`), in SMYSL-2.4's `key=value` reader
+grammar, which is where §20.2 wants it. So a later snapshot can tell when its predecessor was
+read under another profile. **`SMY-W610`** reports that boundary, and the snapshot is recorded
+without being diffed: a leaf the profile reclassified would otherwise read as a change to the
+object. There are 163 codes.
+
+**Tests and gates.**
+
+- `tests/cmd_tel.rs` holds, against the binary:
+  - a review writes nothing and `--yes` writes what it said;
+  - a chain is diffed once and noise is nothing;
+  - the three required flags, the scheme check and `zabbix/1`'s API version are refusals.
+- `xtask determinism` gains `tel_read`, the base snapshot and an image bump read into a fresh
+  library, and it is identical across all 16 runs.
+- The command is the 39th in the table, and Appendix A documents it.
+
+**Found on the way:** a `--no-default-features --features cli` build did not compile once
+`tel` turned on `stage` without `providers`. `migrate` (behind `stage`) called `root_beside`
+(behind `providers`), and until today no build had one without the other. The helper is now
+built with either.
+
 ---
 
 ## 1.16.0 — 2026-11-16

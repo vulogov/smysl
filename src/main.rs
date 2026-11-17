@@ -193,6 +193,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "lib",       about: "Import smysl files into the library; export it as files", purity: Purity::Pure,  phase: "TX-P11" , impure_when: None , forms: LIB_FORMS },
     Cmd { name: "schema",    about: "Show schema revisions; check the naming rule and lens totality", purity: Purity::Pure,  phase: "TX-P12" , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "migrate",   about: "Re-derive a schema's units under a newer revision; staged", purity: Purity::Pure,  phase: "TX-P12" , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "tel",       about: "Read telemetry snapshots into a library; check a profile", purity: Purity::Pure,  phase: "TL-P2"  , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -2512,6 +2513,58 @@ fn cli() -> Command {
                     Arg::new("force")
                         .long("force")
                         .help("Write into an output directory that is not empty (`export`)")
+                        .action(ArgAction::SetTrue),
+                ),
+            "tel" => sub
+                .arg(
+                    Arg::new("action")
+                        .required(true)
+                        .value_name("ACTION")
+                        .value_parser(["read", "profile"])
+                        .help(
+                            "read snapshots with a reader into a library, or check a profile \
+                             and print its hash",
+                        ),
+                )
+                .arg(
+                    Arg::new("args")
+                        .value_name("ARG")
+                        .num_args(1..)
+                        .action(ArgAction::Append)
+                        .help(
+                            "`read READER FILE...` (k8s/1, zabbix/1); `profile check \
+                             FILE|NAME`",
+                        ),
+                )
+                .arg(
+                    Arg::new("profile")
+                        .long("profile")
+                        .value_name("P")
+                        .help("A shipped profile's name, or an HJSON profile file"),
+                )
+                .arg(
+                    Arg::new("at")
+                        .long("at")
+                        .value_name("MS")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("The instant the snapshots were taken, epoch milliseconds; required"),
+                )
+                .arg(
+                    Arg::new("licence")
+                        .long("licence")
+                        .value_name("SPDX")
+                        .help("The snapshots' licence, as `text add` takes it; required"),
+                )
+                .arg(
+                    Arg::new("zabbix-api")
+                        .long("zabbix-api")
+                        .value_name("VERSION")
+                        .help("The Zabbix API version the export came from (`apiinfo.version`)"),
+                )
+                .arg(
+                    Arg::new("yes")
+                        .long("yes")
+                        .help("Commit the units rather than staging them")
                         .action(ArgAction::SetTrue),
                 ),
             _ => sub.arg(
@@ -10636,7 +10689,10 @@ fn project_file(global: &ArgMatches, name: &str) -> std::path::PathBuf {
 /// in `project_root` and `project_file`. The rule it encodes is small and worth stating: a
 /// store named with no directory part (`smysl --store notes.smy`) has a *parent* of `""`,
 /// which is not the current directory and would put the sidecar at the filesystem root.
-#[cfg(feature = "providers")]
+// `stage` too: `migrate` stages beside its store and is built with `stage` alone. Until `tel`
+// turned `stage` on in a build without `providers`, no build had one without the other, so a
+// `--no-default-features --features cli` build stopped compiling the day one did.
+#[cfg(any(feature = "providers", feature = "stage"))]
 fn root_beside(store: Option<&str>) -> std::path::PathBuf {
     store
         .map(std::path::PathBuf::from)
@@ -12493,6 +12549,7 @@ fn main() -> ProcExitCode {
         "lib" => cmd_lib(sub, &matches),
         "schema" => cmd_schema(sub, &matches),
         "migrate" => cmd_migrate(sub, &matches),
+        "tel" => cmd_tel(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -13379,6 +13436,408 @@ fn text_show(m: &ArgMatches, root: &std::path::Path) -> ExitCode {
 #[cfg(not(feature = "text"))]
 fn cmd_text(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     eprintln!("smysl text: this build has no library layer (build with --features text)");
+    ExitCode::Usage
+}
+
+// ---------------------------------------------------------------------------
+// `tel` (RFC SMYSL-3 §23, TL-P2 step 5)
+// ---------------------------------------------------------------------------
+
+/// `smysl tel read READER FILE... --profile P --at MS --licence L -s LIB` and `smysl tel profile
+/// check FILE|NAME`.
+///
+/// **What `read` writes, and when.** Each object a reader selects becomes a snapshot (§3, §8.3):
+/// a part and a reading in the object store, a manifest in the catalog, its series unit, and
+/// the change and recreate units of §8.1 against the previous snapshot of the same object.
+///
+/// - **With `--yes`** all of it is written: the snapshots, and the units committed with their
+///   attestations. A collection loop passes it.
+/// - **Without it nothing is written to the library.** The units are staged in `staged.smy` for
+///   review, and the manifests that would be written are printed. Writing the snapshots and
+///   only staging the units was the first design, and it fails twice: `merge --staged` has no
+///   way into a library, so the batch could never land; and the catalog would have moved on,
+///   so running again with `--yes` would find nothing changed. A review that writes nothing can
+///   be repeated, and `--yes` is the same run with the writes made.
+///
+/// **Nothing reads a clock.** `--at` is required (§23): a snapshot's instant is when it was
+/// taken, which only the caller knows, and the change units' `observed` is that instant.
+#[cfg(feature = "tel")]
+fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let action = m
+        .get_one::<String>("action")
+        .map(String::as_str)
+        .unwrap_or("");
+    let args: Vec<&String> = m
+        .get_many::<String>("args")
+        .map(|v| v.collect())
+        .unwrap_or_default();
+    match action {
+        "profile" => tel_profile(&args),
+        "read" => tel_read(m, global, &args),
+        other => {
+            eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
+            ExitCode::Usage
+        }
+    }
+}
+
+/// A shipped profile by name, or an HJSON file by path.
+#[cfg(feature = "tel")]
+fn tel_load_profile(spec: &str) -> Result<smysl::tel::Profile, String> {
+    if let Some(p) = smysl::tel::profile::builtin(spec) {
+        return Ok(p);
+    }
+    let text = std::fs::read_to_string(spec).map_err(|e| {
+        let names: Vec<&str> = smysl::tel::profile::BUILTIN
+            .iter()
+            .map(|(n, _)| *n)
+            .collect();
+        format!(
+            "`{spec}` is neither a shipped profile ({}) nor a readable file: {e}",
+            names.join(", ")
+        )
+    })?;
+    smysl::tel::Profile::parse(&text).map_err(|e| format!("{spec}: {e}"))
+}
+
+#[cfg(feature = "tel")]
+fn tel_profile(args: &[&String]) -> ExitCode {
+    let (Some(sub), Some(spec)) = (args.first(), args.get(1)) else {
+        eprintln!("smysl tel profile: `check FILE|NAME`");
+        return ExitCode::Usage;
+    };
+    if sub.as_str() != "check" {
+        eprintln!("smysl tel profile: `{sub}` is not an action; it is check");
+        return ExitCode::Usage;
+    }
+    match tel_load_profile(spec) {
+        Ok(p) => {
+            println!("profile   {}", p.name);
+            println!("scheme    {}", p.scheme);
+            println!("hash      {}", p.hash_text());
+            println!(
+                "patterns  {} noise, {} keyed, {} classed, {} int",
+                p.noise.len(),
+                p.keys.len(),
+                p.classes.len(),
+                p.ints.len()
+            );
+            ExitCode::Success
+        }
+        Err(e) => {
+            eprintln!("smysl tel profile: {e}");
+            ExitCode::Usage
+        }
+    }
+}
+
+#[cfg(feature = "tel")]
+fn tel_read(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::tel::readers::{k8s, zabbix};
+    use smysl::tel::snapshot::{reader_field, record, Prev};
+    use smysl::text::library::Library;
+
+    let Some((reader, files)) = args.split_first() else {
+        eprintln!("smysl tel read: `READER FILE...`");
+        return ExitCode::Usage;
+    };
+    if files.is_empty() {
+        eprintln!("smysl tel read: no file given");
+        return ExitCode::Usage;
+    }
+    let (Some(spec), Some(&at), Some(licence)) = (
+        m.get_one::<String>("profile"),
+        m.get_one::<u64>("at"),
+        m.get_one::<String>("licence"),
+    ) else {
+        eprintln!("smysl tel read: --profile, --at and --licence are required");
+        eprintln!("  the profile decides what a leaf is, and its hash is recorded; the instant is");
+        eprintln!("  when the snapshot was taken, which nothing here can know; and a licence");
+        eprintln!("  nobody gave is not `unknown` - it is a decision nobody made");
+        return ExitCode::Usage;
+    };
+    let profile = match tel_load_profile(spec) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("smysl tel read: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let api = m.get_one::<String>("zabbix-api");
+    let (scheme, params): (&str, Vec<(&str, &str)>) = match reader.as_str() {
+        k8s::ID => ("k8s", Vec::new()),
+        zabbix::ID => match api {
+            Some(v) => ("zabbix", vec![("api", v.as_str())]),
+            None => {
+                eprintln!("smysl tel read: zabbix/1 needs --zabbix-api, the `apiinfo.version` the");
+                eprintln!(
+                    "  export was taken from; an export of unknown version cannot be read twice"
+                );
+                eprintln!("  the same way");
+                return ExitCode::Usage;
+            }
+        },
+        other => {
+            eprintln!(
+                "smysl tel read: `{other}` is not a telemetry reader; it is k8s/1 or zabbix/1"
+            );
+            return ExitCode::Usage;
+        }
+    };
+    if profile.scheme != scheme {
+        eprintln!(
+            "smysl tel read: {reader} reads `{scheme}` objects and profile `{}` is for `{}`",
+            profile.name, profile.scheme
+        );
+        return ExitCode::Usage;
+    }
+    let yes = m.get_flag("yes");
+    let stage_root = std::path::PathBuf::from(".");
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let field = reader_field(reader, &profile, &params);
+
+    // Created only by a run that writes. A review of a library that does not exist yet reads
+    // every object as a first snapshot and leaves no directory behind.
+    let opened = if yes {
+        Library::create(&root).map(Some)
+    } else if Library::is_library(&root) {
+        Library::open(&root).map(Some)
+    } else {
+        Ok(None)
+    };
+    let mut library = match opened {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel read: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let _locks = match &library {
+        Some(l) => match smysl::text::lock::acquire_all(&root, &l.shards(), "tel read") {
+            Ok(locks) => Some(locks),
+            Err(e) => {
+                eprintln!("smysl tel read: {e}");
+                return ExitCode::Failure;
+            }
+        },
+        None => None,
+    };
+
+    // The head of each chain this run has moved, so a watch stream that names one object five
+    // times diffs each snapshot against the one before it rather than against the catalog.
+    let mut heads: std::collections::BTreeMap<String, (smysl::tel::Json, smysl::Mid, String)> =
+        std::collections::BTreeMap::new();
+    let mut manifests: Vec<Record> = Vec::new();
+    let mut units: std::collections::BTreeMap<Uid, smysl::UnitCore> =
+        std::collections::BTreeMap::new();
+    let (mut read_n, mut written, mut unchanged, mut skipped, mut changes) =
+        (0usize, 0usize, 0usize, 0usize, 0usize);
+    let raw = api.map(|v| {
+        smysl::surface::object_to_payload(&{
+            let mut o = smysl::surface::HObject::new();
+            let span = smysl::Span::new(0, 0);
+            o.insert(
+                smysl::surface::Spanned::new("zabbix:api".to_string(), span),
+                smysl::surface::Spanned::new(smysl::surface::HValue::Str(v.clone()), span),
+            );
+            o
+        })
+        .unwrap_or_default()
+    });
+
+    for file in files {
+        let text = match std::fs::read_to_string(file.as_str()) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("smysl tel read: {file}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let read = match reader.as_str() {
+            k8s::ID => k8s::read(&text, &profile),
+            _ => zabbix::read(&text, &profile, api.map(String::as_str).unwrap_or("")),
+        };
+        let read = match read {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("smysl tel read: {file}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        skipped += read.skipped;
+        for obj in &read.objects {
+            read_n += 1;
+            // The previous snapshot: this run's, else the catalog's head for the alias.
+            let from_catalog = match library.as_ref() {
+                Some(_) if heads.contains_key(&obj.alias) => None,
+                None => None,
+                Some(library) => match library.head(&obj.alias) {
+                    Ok(mid) => {
+                        let Some(man) = StoreRead::library(library.store()).manifest(&mid).cloned()
+                        else {
+                            eprintln!(
+                                "smysl tel read: {}: the head manifest is missing",
+                                obj.alias
+                            );
+                            return ExitCode::Failure;
+                        };
+                        let Some(entry) = man.parts.first() else {
+                            eprintln!(
+                                "smysl tel read: {}: the head manifest has no part",
+                                obj.alias
+                            );
+                            return ExitCode::Failure;
+                        };
+                        let part = match library.part(&entry.tid) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                eprintln!("smysl tel read: {}: {e}", obj.alias);
+                                return ExitCode::Failure;
+                            }
+                        };
+                        let doc = std::str::from_utf8(&part.text)
+                            .map_err(|e| e.to_string())
+                            .and_then(|t| smysl::tel::json::parse(t).map_err(|e| e.to_string()));
+                        match doc {
+                            Ok(d) => Some((d, mid, man.reader.clone())),
+                            Err(e) => {
+                                eprintln!(
+                                    "smysl tel read: {}: the previous snapshot is not JSON ({e}); \
+                                     was it written by another reader?",
+                                    obj.alias
+                                );
+                                return ExitCode::Failure;
+                            }
+                        }
+                    }
+                    Err(_) => None,
+                },
+            };
+            if let Some(h) = from_catalog {
+                heads.insert(obj.alias.clone(), h);
+            }
+            let prev = heads.get(&obj.alias).map(|(doc, mid, reader)| Prev {
+                doc,
+                mid: *mid,
+                reader,
+            });
+            let rec = match record(obj, prev, &profile, &field, licence, raw.clone(), at) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("smysl tel read: {}: {e}", obj.alias);
+                    return ExitCode::Failure;
+                }
+            };
+            for n in &rec.notes {
+                let detail = match n {
+                    smysl::tel::Note::ProfileChanged(was, now) => {
+                        format!("the previous snapshot was read under {was}, this one under {now}")
+                    }
+                    other => other.pointer().to_string(),
+                };
+                eprintln!("smysl tel read: {}: {}: {detail}", obj.alias, n.code());
+            }
+            units.insert(smysl::canonical_uid(&rec.series), rec.series.clone());
+            let Some(manifest) = rec.manifest else {
+                unchanged += 1;
+                continue;
+            };
+            if let (true, Some(library)) = (yes, library.as_ref()) {
+                if let Err(e) = library.objects().put_part(&rec.part) {
+                    eprintln!("smysl tel read: {}: {e}", obj.alias);
+                    return ExitCode::Failure;
+                }
+                if let Err(e) = library.objects().put_reading(&rec.reading) {
+                    eprintln!("smysl tel read: {}: {e}", obj.alias);
+                    return ExitCode::Failure;
+                }
+            }
+            if let Some(d) = &rec.diff {
+                changes += d.units.len();
+                for u in &d.units {
+                    units.insert(smysl::canonical_uid(u), u.clone());
+                }
+            }
+            written += 1;
+            let mid = manifest.mid();
+            let verb = if yes { "manifest" } else { "would add" };
+            println!("{verb:<9} {}  {}", mid.canonical(), obj.alias);
+            let stored = smysl::tel::json::parse(std::str::from_utf8(&rec.part.text).unwrap_or(""))
+                .unwrap_or(smysl::tel::Json::Null);
+            heads.insert(obj.alias.clone(), (stored, mid, field.clone()));
+            manifests.push(Record::Manifest(manifest));
+        }
+    }
+    if let (true, Some(library)) = (yes, library.as_mut()) {
+        if let Err(e) = library.append_records(&manifests) {
+            eprintln!("smysl tel read: {e}");
+            return ExitCode::Failure;
+        }
+    }
+    println!(
+        "read      {read_n} object(s), {skipped} not selected; {written} new snapshot(s), \
+         {unchanged} unchanged; {changes} change(s)"
+    );
+
+    let agent = match AgentId::new("tool:smysl-tel") {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl tel read: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    // The recipe is the reader field: the reader, its parameters and the profile's hash, which
+    // is everything the units are a function of besides the snapshots themselves.
+    let recipe = smysl::hash_bytes(field.as_bytes());
+    let attest = smysl::stage::Attest::new(
+        agent.clone(),
+        smysl::Rung::Computed,
+        smysl::Hlc::new(at, 0, agent),
+    )
+    .with_recipe(recipe, recipe);
+    let empty = Store::new();
+    let staged = smysl::stage::prepare_declared(
+        library.as_ref().map_or(&empty, |l| l.store()),
+        units.into_values().collect(),
+        Vec::new(),
+        std::collections::BTreeMap::new(),
+        vec![smysl::schemas::tel::decl()],
+        &attest,
+    );
+    if staged.has_errors() {
+        eprintln!("smysl tel read: the batch did not check clean");
+        for d in &staged.report.diagnostics {
+            eprintln!("  {d}");
+        }
+        return ExitCode::Failure;
+    }
+    let n = staged.len();
+    if let (true, Some(library)) = (yes, library.as_mut()) {
+        if let Err(e) = library.append_records(&staged.records()) {
+            eprintln!("smysl tel read: {e}");
+            return ExitCode::Failure;
+        }
+        println!("{n} record(s) committed");
+        return ExitCode::Success;
+    }
+    if let Err(e) = smysl::stage::write(&stage_root, &staged) {
+        eprintln!("smysl tel read: {e}");
+        return ExitCode::Failure;
+    }
+    println!(
+        "{n} record(s) staged in {} for review; nothing was written to the library - run again \
+         with --yes to write the snapshots and commit them",
+        stage_root.join(smysl::stage::PATH).display()
+    );
+    ExitCode::Staged
+}
+
+#[cfg(not(feature = "tel"))]
+fn cmd_tel(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl tel: this build has no telemetry layer (build with --features tel)");
     ExitCode::Usage
 }
 
@@ -14658,7 +15117,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 38);
+        assert_eq!(COMMANDS.len(), 39);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -14700,7 +15159,8 @@ mod tests {
                 "assess",
                 "lib",
                 "schema",
-                "migrate"
+                "migrate",
+                "tel"
             ]
         );
     }
@@ -14797,10 +15257,12 @@ mod tests {
     #[test]
     fn every_command_names_the_phase_that_wires_it() {
         for c in COMMANDS {
-            // Two phase vocabularies, because there are two RFCs: `SM-P*` is SMYSL-1's
-            // delivery plan and `TX-P*` is SMYSL-2.4's. A release number is the third form,
-            // for a command that arrived outside either plan.
-            let phase = c.phase.starts_with("SM-P") || c.phase.starts_with("TX-P");
+            // Three phase vocabularies, because there are three RFCs: `SM-P*` is SMYSL-1's
+            // delivery plan, `TX-P*` is SMYSL-2.4's and `TL-P*` is SMYSL-3's. A release
+            // number is the fourth form, for a command that arrived outside any plan.
+            let phase = ["SM-P", "TX-P", "TL-P"]
+                .iter()
+                .any(|p| c.phase.starts_with(p));
             let cycle = c
                 .phase
                 .split('.')

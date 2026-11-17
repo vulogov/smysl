@@ -204,6 +204,10 @@ cli       = [
     # Stemming. Free here and nowhere else: `reader-json` has already put `serde` in this
     # tree, so the one thing `smysl-text/stem` costs a CLI build is the stemmer itself.
     "smysl-text/stem",
+    # `smysl tel` (RFC SMYSL-3 §23). In `cli` because it costs one pure crate whose two
+    # dependencies are already in the tree, and a command that only exists in some builds of
+    # the CLI is a command nobody's script can rely on.
+    "tel",
 ]
 # `dep:getrandom` is here and not in `smysl-text`, and the reason is the whole shape of
 # pseudonymisation (SMYSL-2.4 §3.2): the key under `<library>/secrets/pseudonym.key` is
@@ -221,6 +225,10 @@ text      = ["dep:smysl-text", "dep:getrandom", "dep:smysl-measure", "dep:smysl-
 # that only some builds had would have made a mid depend on a feature flag. Here so that a
 # library consumer who wants `smysl::text::lang` can have it by name.
 lang-detect = ["text", "smysl-text/detect"]
+# Telemetry (RFC SMYSL-3): `smysl::tel`, the readers, profiles and canonical diff. `text` for the
+# library its snapshots are kept in, `stage` for staging what they say, and nothing that talks
+# to a provider: a reader reads files.
+tel       = ["dep:smysl-tel", "text", "stage"]
 # The substrate index's backing store (SMYSL-2.4 §3.8). Off by default, and the default is the
 # decision rather than an oversight: it puts `redb` in the tree of a binary that runs perfectly
 # well without it, and what it buys shows up on a corpus large enough for 1.1 KB a unit to
@@ -279,6 +287,9 @@ smysl-measure  = { workspace = true, optional = true }
 # TX-P11 step 5: `lib` imports into a library and exports from one (SMYSL-2.7). Behind
 # `text`, because an import writes manifests into a library and the library is `smysl-text`'s.
 smysl-lib      = { workspace = true, optional = true }
+# Telemetry (RFC SMYSL-3). Pure, and two dependencies deep: `smysl-core` and
+# `unicode-normalization`, both already here.
+smysl-tel      = { workspace = true, optional = true }
 smysl-thread   = { workspace = true }
 smysl-render   = { workspace = true }
 smysl-provider = { workspace = true, optional = true }
