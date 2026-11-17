@@ -289,11 +289,19 @@ impl Profile {
         Uid::from_bytes(self.hash()).canonical()
     }
 
-    /// Whether an object is this profile's: every `select` field present, a string, and equal.
+    /// Whether an object is this profile's: every `select` field present and, unless the wanted
+    /// value is `*`, a string equal to it.
+    ///
+    /// `*` means "present, with any value". A Kubernetes object says what it is (`kind`), and a
+    /// Zabbix one does not: a host is the object with a `host` field and an item the one with a
+    /// `key_`, so `zabbix-items/1` selects `{ key_: "*" }`. A literal `*` value cannot be
+    /// selected, which no object this reads would want.
     pub fn selects(&self, object: &Json) -> bool {
-        self.select
-            .iter()
-            .all(|(k, want)| object.get(k).and_then(Json::as_str) == Some(want.as_str()))
+        self.select.iter().all(|(k, want)| match object.get(k) {
+            None => false,
+            Some(_) if want == "*" => true,
+            Some(v) => v.as_str() == Some(want.as_str()),
+        })
     }
 
     /// Whether a leaf is noise, removed before anything is stored (§8.3). A noise pattern on
@@ -332,6 +340,48 @@ impl Profile {
     pub fn route_of(&self, class: &str) -> Option<&str> {
         self.route.get(class).map(String::as_str)
     }
+}
+
+/// The profiles that ship (RFC SMYSL-3 §20.2), by name, as HJSON in `profiles/`.
+///
+/// Compiled in, so a profile is a name a recipe can record and a reader can resolve with no
+/// file beside it. ConfigMaps ("keys only by default") are not here: keeping a key while
+/// hiding its value is something a profile cannot yet say.
+pub const BUILTIN: &[(&str, &str)] = &[
+    (
+        "k8s-deployments/1",
+        include_str!("../profiles/k8s-deployments.hjson"),
+    ),
+    (
+        "k8s-statefulsets/1",
+        include_str!("../profiles/k8s-statefulsets.hjson"),
+    ),
+    (
+        "k8s-daemonsets/1",
+        include_str!("../profiles/k8s-daemonsets.hjson"),
+    ),
+    ("k8s-pods/1", include_str!("../profiles/k8s-pods.hjson")),
+    (
+        "k8s-services/1",
+        include_str!("../profiles/k8s-services.hjson"),
+    ),
+    ("k8s-nodes/1", include_str!("../profiles/k8s-nodes.hjson")),
+    (
+        "zabbix-hosts/1",
+        include_str!("../profiles/zabbix-hosts.hjson"),
+    ),
+    (
+        "zabbix-items/1",
+        include_str!("../profiles/zabbix-items.hjson"),
+    ),
+];
+
+/// A shipped profile by name.
+pub fn builtin(name: &str) -> Option<Profile> {
+    BUILTIN
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, text)| Profile::parse(text).expect("a shipped profile parses; a test says so"))
 }
 
 /// The classification order as a key to minimise: longest first, then fewest `*`, then
@@ -406,6 +456,14 @@ mod tests {
         let no = crate::json::parse(r#"{"apiVersion":"apps/v1","kind":"StatefulSet"}"#).unwrap();
         assert!(p.selects(&yes));
         assert!(!p.selects(&no));
+        let items =
+            Profile::parse(r#"{ profile: "z/1", scheme: zabbix, select: { key_: "*" } }"#).unwrap();
+        assert!(items.selects(&crate::json::parse(r#"{"key_": "system.cpu.load"}"#).unwrap()));
+        assert!(
+            items.selects(&crate::json::parse(r#"{"key_": 3}"#).unwrap()),
+            "any value"
+        );
+        assert!(!items.selects(&crate::json::parse(r#"{"host": "web-1"}"#).unwrap()));
     }
 
     /// The hash is a function of meaning: comments, whitespace, key order and pattern spelling
@@ -446,6 +504,38 @@ mod tests {
         )
         .unwrap();
         assert_eq!(q.class_of(&ptr("/a/b")), "membership", "fewer stars");
+    }
+
+    /// Every shipped profile parses, is the name it is listed under, and is selective: a
+    /// profile that selected everything would read every object as its kind.
+    #[test]
+    fn the_shipped_profiles_are_what_they_say() {
+        for (name, text) in BUILTIN {
+            let p = Profile::parse(text).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(p.name, *name);
+            assert!(!p.select.is_empty(), "{name} selects everything");
+            if p.scheme == "k8s" {
+                // §8.3's MUST list, on every Kubernetes profile.
+                for must in [
+                    "/metadata/managedFields",
+                    "/metadata/resourceVersion",
+                    "/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration",
+                    "/status/conditions/*/lastHeartbeatTime",
+                    "/status/conditions/*/lastProbeTime",
+                ] {
+                    assert!(
+                        p.noise.contains(&Pattern::parse(must).unwrap()),
+                        "{name} does not filter {must}"
+                    );
+                }
+            }
+        }
+        assert!(builtin("k8s-deployments/1").is_some());
+        assert!(builtin("k8s-configmaps/1").is_none());
+        // The root pattern classifies everything a Zabbix export holds.
+        let hosts = builtin("zabbix-hosts/1").unwrap();
+        assert_eq!(hosts.class_of(&ptr("/status")), "config");
+        assert_eq!(hosts.class_of(&ptr("/host")), "identity");
     }
 
     #[test]

@@ -1,0 +1,43 @@
+# Pods, spec only (RFC SMYSL-3 §20.2): a Pod's status is its containers' lives, which is
+# telemetry for the substrate and not configuration, so `/status` is noise here and never stored.
+{
+  profile: "k8s-pods/1"
+  scheme: k8s
+  select: { apiVersion: "v1", kind: "Pod" }
+  noise: [
+    "/metadata/managedFields"
+    "/metadata/resourceVersion"
+    "/metadata/generation"
+    "/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration"
+    "/status/observedGeneration"
+    "/status/conditions/*/lastHeartbeatTime"
+    "/status/conditions/*/lastProbeTime"
+    "/status/conditions/*/lastUpdateTime"
+    "/status"
+  ]
+  keys: {
+    "/spec/containers": "name"
+    "/spec/initContainers": "name"
+    "/spec/containers/*/env": "name"
+    "/spec/initContainers/*/env": "name"
+    "/spec/containers/*/ports": "containerPort"
+    "/spec/containers/*/volumeMounts": "mountPath"
+    "/spec/volumes": "name"
+  }
+  classes: {
+    "/spec": config
+    "/metadata/labels": membership
+    "/metadata/annotations": config
+    "/metadata/ownerReferences": config
+    "/metadata/uid": identity
+    "/metadata/name": identity
+    "/metadata/namespace": identity
+    "/metadata/creationTimestamp": identity
+    "/apiVersion": identity
+    "/kind": identity
+  }
+  ints: [
+    "/spec/containers/*/ports/*/containerPort"
+    "/spec/terminationGracePeriodSeconds"
+  ]
+}

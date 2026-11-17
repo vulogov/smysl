@@ -1,0 +1,12 @@
+# Zabbix hosts from `host.get` (RFC SMYSL-3 §20.2). Everything a host export holds is
+# configuration unless it names the host; `hostid` is the platform's id, which §6 keeps out of
+# identity because template re-imports change it, so it is configuration here too.
+{
+  profile: "zabbix-hosts/1"
+  scheme: zabbix
+  select: { host: "*" }
+  classes: {
+    "": config
+    "/host": identity
+  }
+}

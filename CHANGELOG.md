@@ -348,6 +348,62 @@ still round-trip it, and its `tel:digest` stays bytes, because a digest isn't a 
 **For TL-P3:** a routed `gauge` can be text. `/status/conditions/Available/status` is `"True"`,
 and the substrate stores `dec`s, so TL-P3 decides what a non-numeric routed leaf becomes.
 
+
+### Readers, and recording a snapshot (TL-P2 step 4)
+
+Readers read files, never the network (§20.1). Collecting is the caller's job, which keeps
+`smysl-tel` pure and every reader replayable from a fixture. A reader returns each object its
+profile selects, with two names:
+
+- its **series key** (§6), the identity a series unit is built from;
+- its **alias**, the library name its manifests chain under.
+
+The alias leaves out the Kubernetes uid. A Deployment deleted and recreated under one name
+therefore continues one chain, and the diff across the gap is a recreate, while the series
+(which has the uid) is a new one. An alias that wouldn't satisfy A-3's grammar, such as a
+Zabbix host called `Web 01`, becomes the reader's prefix and a hash of the series key, not a
+lowercased name, because `Web-01` and `web-01` are two hosts.
+
+- **`k8s/1`** reads a List, single objects and watch events, back to back. `json::parse_seq`
+  reads concatenated JSON, which is what `kubectl get -w -o json` writes.
+  - `BOOKMARK` events are passed over, and an `ERROR` event is refused.
+  - A `Secret`'s `data` and `stringData` are removed the moment the object is recognised, before
+    selection or the profile, and no profile can opt back in (§8.3's MUST NOT). A test holds
+    that the values reach neither the object nor its part.
+- **`zabbix/1`** reads `host.get` and `item.get` exports, as a JSON-RPC response or its `result`
+  array, and refuses one without a supported API version (6.x, 7.x, 8.x).
+  - An item must name its host (`selectHosts: ["host"]`). The alternative, `hostid`, is the
+    identity §6 rejects.
+  - `select` gains `"*"`, meaning "present, with any value", since a Zabbix object has no
+    `kind`: an item is what has a `key_`.
+- **`snapshot::record`** turns one object read at one instant into:
+  - its part;
+  - a reading with an empty segment table (a unit addresses a leaf by pointer);
+  - a manifest: one part, `lang: zxx`, policy `smysl/tel-snapshot/1`, its origin naming the
+    object and the instant, and `supersedes` the previous snapshot's;
+  - the object's series unit;
+  - and, against the previous snapshot, the diff.
+
+  A snapshot whose part is its predecessor's is no manifest and no diff (§8.3). The previous
+  snapshot is its *stored* part, not a raw object, which D-T1 asks of bytes. A test holds that
+  diffing the stored part gives the same uids as diffing the raw object it was stored from:
+  storing only filters noise and keys arrays, and the diff does both again.
+- **Eight profiles ship** in `crates/smysl-tel/profiles/`: Deployments, StatefulSets,
+  DaemonSets, Pods (spec only), Services, Nodes, and Zabbix hosts and items. They're compiled
+  in as `profile::builtin`, and a test holds that every Kubernetes profile applies §8.3's MUST
+  filters. They're a starting point that GE-M1 measures, not a calibration.
+- **Fuzzing:** the `tel_json` fuzz target now drives both readers and the recorder too.
+
+Still to come from TL-P2's list:
+
+- **ConfigMaps**, which the RFC wants "keys only by default". Keeping a key while hiding its
+  value is something a profile can't say yet.
+- **The generic `json/1` profile.** `json/1` is already a SMYSL-2 text reader's id, and a
+  generic object needs identity fields that a profile has no way to declare.
+- **A `DELETED` watch event** is read and marked, and its snapshot recorded like any other. What
+  a deletion becomes as a unit (a stale series, or a recreate's first half) is TL-P3's, with
+  `x.tel/stale`.
+
 ---
 
 ## 1.16.0 — 2026-11-16

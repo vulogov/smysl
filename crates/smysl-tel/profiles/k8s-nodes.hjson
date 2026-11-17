@@ -1,0 +1,37 @@
+# Nodes (RFC SMYSL-3 §20.2). The image list is noise: it is every image cached on the node,
+# it changes with every pull, and it is neither configuration nor a reading.
+{
+  profile: "k8s-nodes/1"
+  scheme: k8s
+  select: { apiVersion: "v1", kind: "Node" }
+  noise: [
+    "/metadata/managedFields"
+    "/metadata/resourceVersion"
+    "/metadata/generation"
+    "/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration"
+    "/status/observedGeneration"
+    "/status/conditions/*/lastHeartbeatTime"
+    "/status/conditions/*/lastProbeTime"
+    "/status/conditions/*/lastUpdateTime"
+    "/status/images"
+  ]
+  keys: {
+    "/status/conditions": "type"
+    "/spec/taints": "key"
+  }
+  classes: {
+    "/spec": config
+    "/metadata/labels": membership
+    "/metadata/annotations": config
+    "/metadata/ownerReferences": config
+    "/metadata/uid": identity
+    "/metadata/name": identity
+    "/metadata/namespace": identity
+    "/metadata/creationTimestamp": identity
+    "/apiVersion": identity
+    "/kind": identity
+    "/status/nodeInfo": config
+    "/status": gauge
+  }
+  route: { gauge: series }
+}

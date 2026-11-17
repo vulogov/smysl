@@ -1,0 +1,38 @@
+# Services (RFC SMYSL-3 §20.2). Ports are keyed by port number: a single-port Service may leave
+# the port unnamed, and a name key would make every such Service an unkeyable array.
+{
+  profile: "k8s-services/1"
+  scheme: k8s
+  select: { apiVersion: "v1", kind: "Service" }
+  noise: [
+    "/metadata/managedFields"
+    "/metadata/resourceVersion"
+    "/metadata/generation"
+    "/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration"
+    "/status/observedGeneration"
+    "/status/conditions/*/lastHeartbeatTime"
+    "/status/conditions/*/lastProbeTime"
+    "/status/conditions/*/lastUpdateTime"
+  ]
+  keys: {
+    "/spec/ports": "port"
+  }
+  classes: {
+    "/spec": config
+    "/metadata/labels": membership
+    "/metadata/annotations": config
+    "/metadata/ownerReferences": config
+    "/metadata/uid": identity
+    "/metadata/name": identity
+    "/metadata/namespace": identity
+    "/metadata/creationTimestamp": identity
+    "/apiVersion": identity
+    "/kind": identity
+    "/status": gauge
+  }
+  ints: [
+    "/spec/ports/*/port"
+    "/spec/ports/*/nodePort"
+  ]
+  route: { gauge: series }
+}

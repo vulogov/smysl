@@ -100,6 +100,24 @@ pub fn parse_lines(text: &str) -> Result<Vec<Json>, JsonError> {
     Ok(out)
 }
 
+/// Parse a sequence of JSON texts separated by whitespace: what `kubectl get -w -o json` writes,
+/// one pretty-printed object after another with no delimiter but the newline between them.
+/// [`parse_lines`] reads only one value per line, which that output is not.
+pub fn parse_seq(text: &str) -> Result<Vec<Json>, JsonError> {
+    let mut p = Parser {
+        b: text.as_bytes(),
+        src: text,
+        i: 0,
+    };
+    let mut out = Vec::new();
+    p.ws();
+    while p.i < p.b.len() {
+        out.push(p.value(0)?);
+        p.ws();
+    }
+    Ok(out)
+}
+
 struct Parser<'a> {
     b: &'a [u8],
     src: &'a str,
@@ -430,6 +448,16 @@ mod tests {
         assert_eq!(parse(&deep).unwrap_err().why, "nested too deeply");
         let ok = format!("{}{}", "[".repeat(MAX_DEPTH), "]".repeat(MAX_DEPTH));
         assert!(parse(&ok).is_ok());
+    }
+
+    #[test]
+    fn a_sequence_is_values_back_to_back() {
+        let vs = parse_seq("{\n  \"a\": 1\n}\n{\n  \"a\": 2\n}\n").unwrap();
+        assert_eq!(vs.len(), 2);
+        assert!(parse_seq("").unwrap().is_empty());
+        assert!(parse_seq("{} {").is_err());
+        // Two numbers need whitespace between them, or they are one token.
+        assert_eq!(parse_seq("1 2").unwrap().len(), 2);
     }
 
     #[test]
