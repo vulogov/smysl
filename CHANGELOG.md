@@ -1067,6 +1067,62 @@ declared baseline window of the same series and instrument.
   - Each claim states the rank, the score and the windows, as a sentence a person can check
     against the samples.
 
+### `smysl tel detect`, and GE-M3 (TL-P5 step 5)
+
+**Recipes are files.** `smysl_tel::detect::Spec` reads an HJSON recipe: `{ detector: cusum/1,
+k: 0.5, h: 5, baseline: 20 }`, and likewise for `pelt/1`, `mad/1`, `episode/1` and `baro/1`.
+
+- A parameter left out takes its default.
+- A decimal may be a string, so `0.10` is read as written.
+- An unknown key is refused, because a parameter nobody reads is one somebody believes is in
+  force.
+
+**`detect::run_on`** runs a recipe over a substrate, the one path the CLI and GE-M3 share.
+
+- CUSUM, PELT and the robust z run per series and instrument. The robust z reads its baseline
+  window from the same substrate.
+- The ranking takes every series as a candidate.
+- Episodes group units from a store.
+- Segments and anomalies get `x.tel/of-series` edges, and episode members get `x.tel/during`.
+
+**`tel detect RECIPE --series S… --during FROM-TO -s LIB [--trigger UID] [--at MS --yes]`**
+runs a detector.
+
+- **The output** is `derived`, attested as transformed at the computed rung, with the hash of
+  the recipe and window.
+- **Detector units have a surface form,** unlike windows. So a run without `--yes` stages them
+  for review and exits 10, as `tel read` does, and `--yes` commits them.
+- **What each detector reads:** episodes take the library's changes, resets, stales, anomalies
+  and alerts. The ranking takes its `at` from the recipe and its trigger from `--trigger`.
+
+**GE-M3** (§26, H-7) asks whether the analysis layer can be replayed. It now runs for every
+detector TL-P5 ships.
+
+- **The data** is `fixtures/tel/detect/series.tsv`: four series of 240 one-minute samples from
+  `gen_series.py`, with a level shift, a spike, a dip and a constant that changes. There is one
+  recipe file per detector.
+- **The test** is `tests/ge_m3.rs`. It runs every detector twice in one process, compares the
+  units byte for byte, and pins each output by uid in `expected.tsv`, written on aarch64.
+  Episodes group the robust z's anomalies. The ranking is taken at the spike, and its trigger is
+  the episode.
+- **Results:**
+  - PELT finds every change at its sample: cpu at minute 150, errors at 170 and 173, latency at
+    160 and 165, queue at 180.
+  - The robust z flags all four series.
+  - The episode groups them.
+  - The ranking puts latency first.
+  - CUSUM finds the changes and some extra segments where uniform noise crossed `h`. GE-M3
+    measures replay, not accuracy.
+- **CI runs it on four platforms.** `ge_m3` and TL-P4's `window_cases` (the sketch pins) run in
+  the `measure-platforms` job: x86_64 Linux on glibc and musl, x86_64 Windows, and aarch64
+  macOS. A detector whose bytes differ on any of them fails there, which is GE-M3's stop
+  condition.
+
+**End to end:** `series.otlp.json` (from `gen_otlp.py`) is the same samples as one OTLP/JSON
+export. `tests/cmd_tel_detect.rs` reads it, commits every detector's output, and gets the same
+uids from a second run into a fresh library. Determinism gains `tel_detect`, PELT committed into
+a scratch library.
+
 ---
 
 ## 1.16.0 — 2026-11-16

@@ -1046,7 +1046,7 @@ asserts byte-identical output across all sixteen runs per operation:
 ```
 xtask determinism (rule D)
   matrix: 8 permutations
-  18 operations registered: rule D's five, and 13 since
+  19 operations registered: rule D's five, and 14 since
   pack: identical across 16 runs
   salience: identical across 16 runs
   merge: identical across 16 runs
@@ -1057,6 +1057,7 @@ xtask determinism (rule D)
   tel_at: identical across 16 runs
   tel_window: identical across 16 runs
   tel_window_sketch: identical across 16 runs
+  tel_detect: identical across 16 runs
   text_show: identical across 16 runs
   text_redact: identical across 16 runs
   text_append: identical across 16 runs

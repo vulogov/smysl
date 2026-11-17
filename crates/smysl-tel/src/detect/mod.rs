@@ -205,3 +205,292 @@ pub fn anomaly(
 pub fn uids(units: &[UnitCore]) -> Vec<Uid> {
     units.iter().map(canonical_uid).collect()
 }
+
+/// A detector recipe file (RFC SMYSL-3 §21, §23): which detector, and its parameters, as HJSON.
+///
+/// ```hjson
+/// { detector: cusum/1, k: 0.5, h: 5, baseline: 10 }
+/// { detector: pelt/1, penalty: 10, min_size: 2 }
+/// { detector: mad/1, threshold: 3.5, baseline: "1768550400000-1768554000000" }
+/// { detector: episode/1, gap: 300000, min: 2 }
+/// { detector: baro/1, at: 1768557600000, pre: 3600000, post: 600000, top: 5 }
+/// ```
+///
+/// A parameter left out takes its default. A decimal parameter may be a string, so that `0.10`
+/// is read as written rather than through a binary64; either way its §5.3 spelling is what the
+/// recipe records. An unknown key is refused, because a parameter nobody reads is a parameter
+/// somebody believes is in force.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Spec {
+    Cusum(cusum::Params),
+    Pelt(pelt::Params),
+    Mad(mad::Params),
+    Episode(episode::Params),
+    Baro(baro::Params),
+}
+
+impl Spec {
+    pub fn parse(text: &str) -> Result<Spec, String> {
+        let o = smysl_core::surface::parse_object(text, 0)
+            .map_err(|e| e.to_string())?
+            .value;
+        let get = |k: &str| o.get(k).map(|v| &v.value);
+        let detector = match get("detector") {
+            Some(HValue::Str(s)) => s.as_str(),
+            _ => return Err("a recipe names its `detector`".into()),
+        };
+        let known: &[&str] = match detector {
+            cusum::ID => &["k", "h", "baseline"],
+            pelt::ID => &["penalty", "min_size"],
+            mad::ID => &["threshold", "baseline"],
+            episode::ID => &["gap", "min"],
+            baro::ID => &["at", "pre", "post", "top"],
+            other => {
+                return Err(format!(
+                    "`{other}` is not a detector: {}, {}, {}, {} or {}",
+                    cusum::ID,
+                    pelt::ID,
+                    mad::ID,
+                    episode::ID,
+                    baro::ID
+                ))
+            }
+        };
+        for (k, _) in o.iter() {
+            if k.value != "detector" && !known.contains(&k.value.as_str()) {
+                return Err(format!("`{}` is not a parameter of {detector}", k.value));
+            }
+        }
+        let decimal = |k: &str| -> Result<Option<Decimal>, String> {
+            match get(k) {
+                None => Ok(None),
+                Some(HValue::Str(s)) => Decimal::parse_token(s)
+                    .map(Some)
+                    .map_err(|e| format!("`{k}`: {e}")),
+                Some(HValue::Int(n)) => Ok(Some(Decimal::from_i64(*n))),
+                Some(HValue::Float(x)) => Decimal::from_f64(*x)
+                    .map(Some)
+                    .map_err(|e| format!("`{k}`: {e}")),
+                Some(_) => Err(format!("`{k}` is a number")),
+            }
+        };
+        let count = |k: &str| -> Result<Option<u64>, String> {
+            match get(k) {
+                None => Ok(None),
+                Some(HValue::Int(n)) if *n >= 0 => Ok(Some(*n as u64)),
+                Some(_) => Err(format!("`{k}` is a non-negative integer")),
+            }
+        };
+        let positive = |k: &str, d: Option<Decimal>| -> Result<Option<Decimal>, String> {
+            match d {
+                Some(v) if v.mantissa() <= 0 => Err(format!("`{k}` is positive")),
+                other => Ok(other),
+            }
+        };
+        Ok(match detector {
+            cusum::ID => {
+                let d = cusum::Params::default();
+                Spec::Cusum(cusum::Params {
+                    k: decimal("k")?.unwrap_or(d.k),
+                    h: positive("h", decimal("h")?)?.unwrap_or(d.h),
+                    baseline: count("baseline")?.map_or(d.baseline, |n| n as usize),
+                })
+            }
+            pelt::ID => {
+                let d = pelt::Params::default();
+                Spec::Pelt(pelt::Params {
+                    penalty: positive("penalty", decimal("penalty")?)?.unwrap_or(d.penalty),
+                    min_size: count("min_size")?.map_or(d.min_size, |n| n as usize),
+                })
+            }
+            mad::ID => {
+                let (from, to) = match get("baseline") {
+                    Some(HValue::Str(s)) => s
+                        .split_once('-')
+                        .and_then(|(a, b)| Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?)))
+                        .filter(|(a, b)| a < b)
+                        .ok_or_else(|| format!("`baseline` is \"FROM-TO\", epoch ms, not {s:?}"))?,
+                    _ => return Err("mad/1 needs `baseline: \"FROM-TO\"`, epoch ms".into()),
+                };
+                let mut p = mad::Params::new(from, to);
+                if let Some(t) = positive("threshold", decimal("threshold")?)? {
+                    p.threshold = t;
+                }
+                Spec::Mad(p)
+            }
+            episode::ID => {
+                let d = episode::Params::default();
+                Spec::Episode(episode::Params {
+                    gap_ms: count("gap")?.unwrap_or(d.gap_ms),
+                    min_members: count("min")?.map_or(d.min_members, |n| n as usize),
+                })
+            }
+            _ => {
+                let at =
+                    count("at")?.ok_or("baro/1 needs `at`, the anomaly instant in epoch ms")?;
+                let d = baro::Params::new(at);
+                Spec::Baro(baro::Params {
+                    at_ms: at,
+                    pre_ms: count("pre")?.unwrap_or(d.pre_ms),
+                    post_ms: count("post")?.unwrap_or(d.post_ms),
+                    top: count("top")?.map_or(d.top, |n| n as usize),
+                })
+            }
+        })
+    }
+
+    /// The detector's id.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Spec::Cusum(_) => cusum::ID,
+            Spec::Pelt(_) => pelt::ID,
+            Spec::Mad(_) => mad::ID,
+            Spec::Episode(_) => episode::ID,
+            Spec::Baro(_) => baro::ID,
+        }
+    }
+}
+
+#[cfg(test)]
+mod spec_tests {
+    use super::*;
+
+    #[test]
+    fn recipes_parse_with_defaults_and_refuse_what_nobody_reads() {
+        assert_eq!(
+            Spec::parse("{ detector: cusum/1 }").unwrap(),
+            Spec::Cusum(cusum::Params::default())
+        );
+        let Spec::Cusum(p) = Spec::parse(r#"{ detector: cusum/1, k: "0.10", h: 4 }"#).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(p.k.to_string(), "0.1");
+        let Spec::Mad(m) =
+            Spec::parse(r#"{ detector: mad/1, baseline: "100-200", threshold: 3 }"#).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!((m.baseline_from, m.baseline_to), (100, 200));
+        for bad in [
+            "{ }",
+            "{ detector: lstm/1 }",
+            "{ detector: cusum/1, kk: 1 }",
+            "{ detector: cusum/1, h: -1 }",
+            "{ detector: mad/1 }",
+            r#"{ detector: mad/1, baseline: "200-100" }"#,
+            "{ detector: baro/1 }",
+            "{ detector: pelt/1, min_size: -2 }",
+        ] {
+            assert!(Spec::parse(bad).is_err(), "{bad}");
+        }
+    }
+}
+
+/// What a run of a recipe produced: its units, and their edges (`x.tel/of-series` from each
+/// segment and anomaly to its series, `x.tel/during` from each episode member to its episode).
+#[derive(Debug, Clone, Default)]
+pub struct Detected {
+    pub units: Vec<UnitCore>,
+    pub relations: Vec<smysl_core::Relation>,
+}
+
+/// Run `spec` over `substrate` (RFC SMYSL-3 §23 `tel detect`), the one path the CLI and GE-M3
+/// share.
+///
+/// - CUSUM, PELT and robust z run over each of `series`, per instrument it has samples from, in
+///   `[from_ms, to_ms)`; robust z reads its baseline window from the same substrate.
+/// - The BARO-style ranking takes every `(series, instrument)` as a candidate, around its `at`.
+/// - Episodes group `members` (units from a store) in `[from_ms, to_ms)`.
+///
+/// Series are taken in the order given and instruments in uid order, so the output's order is a
+/// function of the arguments too.
+pub fn run_on<B: smysl_series::Backend>(
+    spec: &Spec,
+    substrate: &smysl_series::Substrate<B>,
+    series: &[Uid],
+    from_ms: u64,
+    to_ms: u64,
+    members: &[UnitCore],
+    trigger: Option<Uid>,
+) -> Result<Detected, String> {
+    let mut out = Detected::default();
+    if let Spec::Episode(p) = spec {
+        for e in episode::run(members, from_ms, to_ms, p) {
+            out.relations.extend(e.relations);
+            out.units.push(e.unit);
+        }
+        return Ok(out);
+    }
+    // Every (series, instrument) and its row.
+    let mut streams = Vec::new();
+    for s in series {
+        let row = substrate
+            .row(s)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("the substrate holds no sample of series {}", s.canonical()))?;
+        for inst in substrate.instruments(s).map_err(|e| e.to_string())? {
+            streams.push((*s, inst, row.scheme.clone(), row.key.clone()));
+        }
+    }
+    let read = |s: &Uid, i: &Uid, a: u64, b: u64| -> Result<Vec<Sample>, String> {
+        if a >= b {
+            return Ok(Vec::new());
+        }
+        Ok(substrate
+            .window(s, i, a, b)
+            .map_err(|e| e.to_string())?
+            .samples)
+    };
+    if let Spec::Baro(p) = spec {
+        let (a, b) = (
+            p.at_ms.saturating_sub(p.pre_ms),
+            p.at_ms.saturating_add(p.post_ms),
+        );
+        let reads: Vec<Vec<Sample>> = streams
+            .iter()
+            .map(|(s, i, _, _)| read(s, i, a, b))
+            .collect::<Result<_, _>>()?;
+        let inputs: Vec<Input<'_>> = streams
+            .iter()
+            .zip(&reads)
+            .map(|((s, i, scheme, key), samples)| Input {
+                series: *s,
+                scheme,
+                key,
+                instrument: *i,
+                samples,
+            })
+            .collect();
+        out.units = baro::run(&inputs, trigger, p);
+        return Ok(out);
+    }
+    for (s, i, scheme, key) in &streams {
+        let samples = read(s, i, from_ms, to_ms)?;
+        let input = Input {
+            series: *s,
+            scheme,
+            key,
+            instrument: *i,
+            samples: &samples,
+        };
+        let units = match spec {
+            Spec::Cusum(p) => cusum::run(&input, from_ms, to_ms, p),
+            Spec::Pelt(p) => pelt::run(&input, from_ms, to_ms, p),
+            Spec::Mad(p) => {
+                let base = read(s, i, p.baseline_from, p.baseline_to)?;
+                mad::run(&input, &base, from_ms, to_ms, p)
+            }
+            Spec::Episode(_) | Spec::Baro(_) => unreachable!("handled above"),
+        };
+        for u in units {
+            out.relations.push(smysl_core::Relation::new(
+                smysl_core::RelKind::Extension(tel::OF_SERIES.to_string()),
+                canonical_uid(&u),
+                *s,
+            ));
+            out.units.push(u);
+        }
+    }
+    Ok(out)
+}

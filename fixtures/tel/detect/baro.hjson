@@ -1,0 +1,2 @@
+// Minute 160, the latency spike.
+{ detector: baro/1, at: 1768560000000, pre: 3600000, post: 600000, top: 4 }

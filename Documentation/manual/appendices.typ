@@ -1110,8 +1110,8 @@ migrate or under `--dry-run`, and 1 when the store does not declare the target r
 
 #section("tel")
 
-*Read telemetry into a library; the value in force at an instant; window evidence; check a
-profile.* Pure · TL-P2, TL-P3, TL-P4.
+*Read telemetry into a library; the value in force at an instant; window evidence; detectors;
+check a profile.* Pure · TL-P2, TL-P3, TL-P4, TL-P5.
 
 `tel read READER FILE...` reads platform exports with one of SMYSL-3's object readers. `k8s/1`
 reads `kubectl get -o json` lists, objects and watch events; `zabbix/1` reads `host.get` and
@@ -1158,12 +1158,24 @@ platform window the same way.
 (`SMY-W614`), and each window recomputed from the substrate (`SMY-E604` if it is another unit,
 `SMY-W605` if its samples are gone). It exits 3 on an error.
 
+`tel detect RECIPE` runs a detector. `RECIPE` is an HJSON file naming it and its parameters, for
+example `{ detector: pelt/1, penalty: 10, min_size: 3 }`. A parameter left out takes its default,
+and an unknown one is refused. The detectors are:
+
+- `cusum/1` and `pelt/1`, regimes of a series' level, as `x.tel/segment`;
+- `mad/1`, points far from a declared baseline window, as `x.tel/anomaly`;
+- `episode/1`, the library's changes and anomalies close in time, as `x.tel/episode`;
+- `baro/1`, the series that moved most after an instant, as ranked `x.tel/hypothesis`.
+
+Every output is `derived`. Without `--yes` the outputs are staged for review (exit 10), and with
+`--yes --at MS` they are committed with their edges.
+
 #dtable(
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check` or `profile`.]),
-    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `profile`: `check` and a profile file or shipped name.]),
+    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect` or `profile`.]),
+    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `profile`: `check` and a profile file or shipped name.]),
     ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for the object readers; it must be for the reader's scheme.]),
     ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds, and for `prom/1` the scrape instant. Required for `read`: nothing here reads a clock.]),
     ([`--licence`], [`SPDX`], [The manifests' licence. Required for the object readers, as `text add` requires it.]),
@@ -1174,6 +1186,9 @@ platform window the same way.
     ([`--trends`], [—], [`zabbix/1` with `--items`: the files are `trend.get` exports, each hour a `cited` window.]),
     ([`--sketch`], [`ALPHA`], [`window`: a DDSketch of this relative accuracy, 0.001 to 0.5, rather than the exact summary.]),
     ([`--qs`], [`Q,…`], [`window --sketch`: the quantile ranks. Default `0.5,0.9,0.95,0.99`.]),
+    ([`--series`], [`SERIES` (repeatable)], [`detect`: a series to run over, as a uid or `<scheme>:<key>`. Required, except for `episode/1`.]),
+    ([`--during`], [`FROM-TO`], [`detect`: the window, epoch ms. Required, except for `baro/1`, which takes its window from its `at`.]),
+    ([`--trigger`], [`UID`], [`detect` with `baro/1`: the unit the ranking answers, such as an episode or an alert. Each hypothesis is grounded on it.]),
     ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing.]),
     ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),
   ),

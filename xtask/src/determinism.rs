@@ -411,6 +411,54 @@ const OPS: &[Op] = &[
         ]),
     },
     Op {
+        name: "tel_detect",
+        // A detector end to end (TL-P5): PELT over the GE-M3 cpu series, read as an OTLP/JSON
+        // export into a fresh library, committed. stdout carries every segment's uid, which
+        // hashes its level and bounds: a libm call, a `HashMap` or a float sum in another order
+        // anywhere on the path would show here. GE-M3 itself pins every detector.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "tel",
+            "detect",
+            "fixtures/tel/detect/pelt.hjson",
+            "--series",
+            r#"otel:{"attributes":{},"kind":"gauge","monotonic":false,"name":"ge_m3_cpu","resource":{"service.name":"ge-m3"},"scope":{"name":"sim","version":"1"},"temporality":"unspecified","unit":"1"}"#,
+            "--during",
+            "1768550400000-1768564800000",
+            "-s",
+            SCRATCH,
+            "--at",
+            "1768564800000",
+            "--yes",
+        ],
+        setup: Some(&[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "tel",
+            "read",
+            "otlp-json/1",
+            "fixtures/tel/detect/series.otlp.json",
+            "--instrument",
+            "otel-collector:ge-m3",
+            "--at",
+            "1768550400000",
+            "-s",
+            SCRATCH,
+            "--yes",
+        ]),
+    },
+    Op {
         name: "text_show",
         // Resolving a locator and printing the passage: the reading's segment table read back
         // as a tree, the range it names, and the bytes sliced out of the part.

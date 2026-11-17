@@ -348,6 +348,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: every measure golden on ${{ matrix.target }}
         run: cargo test -p smysl-measure --target ${{ matrix.target }}
+      # GE-M3 (RFC SMYSL-3 §26): every TL-P5 detector's output pinned by uid, and the DDSketch
+      # quantiles TL-P4 pinned, compared on each platform. The pins were written on aarch64
+      # macOS; a detector or sketch whose bytes differ here is off the pure path until fixed.
+      - name: GE-M3 and the sketch pins on ${{ matrix.target }}
+        run: cargo test -p smysl-tel --test ge_m3 --test window_cases --target ${{ matrix.target }}
 
   # Proposition classes (SMYSL-2.3 A-12.4), which is normative for the same reason the tables
   # above are checked: the number of classes is the number of propositions, and every corpus

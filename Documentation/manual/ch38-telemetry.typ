@@ -5,7 +5,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 //
 // SMYSL-3 is the telemetry RFC. 1.17 builds its format phase, TL-P1, its object snapshots,
-// TL-P2, its series substrate, TL-P3, and its window evidence, TL-P4. This part says what exists, so that a reader of the format knows it, and what
+// TL-P2, its series substrate, TL-P3, its window evidence, TL-P4, and its detectors, TL-P5. This part says what exists, so that a reader of the format knows it, and what
 // does not. Every terminal block below was produced by the smysl 1.17 binary.
 
 #chapter(number: 38, title: "What 1.17 has of SMYSL-3")
@@ -17,7 +17,7 @@ a 200-host fleet was 6.8 million change units, and all but 6,566 were gauge nois
 outside the log, and units are made for what is *asserted* about them: a configuration change, a
 reset, an anomaly, a hypothesis, an action.
 
-The RFC is delivered in ten phases. 1.17 builds the first four:
+The RFC is delivered in ten phases. 1.17 builds the first five:
 
 - TL-P1, the format;
 - TL-P2, which reads object snapshots: Kubernetes objects and Zabbix hosts and items, and what
@@ -25,6 +25,7 @@ The RFC is delivered in ten phases. 1.17 builds the first four:
 - TL-P3, the series substrate: samples from Prometheus, OTLP and Zabbix history, kept outside
   the log, and the few facts about them that are units.
 - TL-P4, window evidence: what a span of samples contained, as a unit anyone can recompute.
+- TL-P5, detectors: regimes, anomalies, episodes and a ranking, each one replayable to the byte.
 
 #section("dec: a number that is one value")
 
@@ -326,9 +327,72 @@ would commit and writes nothing.
 exports read in any order give the same samples and the same window uids. Prometheus staleness
 is the one exception: a series that disappeared can only be seen by reading scrapes in order.
 
+#section("Detectors")
+
+A detector reads samples and writes what it finds as `derived` units. Each unit records its
+*recipe*: the detector and its version, its parameters, and the window it ran over. A recipe is
+an HJSON file:
+
+#screen(caption: "$ cat pelt.hjson")[
+```
+{ detector: pelt/1, penalty: 10, min_size: 3 }
+```
+]
+
+Five detectors ship:
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Recipe], [Writes], [Finds]),
+    ([`cusum/1`], [`x.tel/segment`], [Shifts in level, by Page's cumulative sum.]),
+    ([`pelt/1`], [`x.tel/segment`], [The best segmentation of the level, exactly, for a recorded penalty per change.]),
+    ([`mad/1`], [`x.tel/anomaly`], [Points far from a declared baseline window, by the modified z-score.]),
+    ([`episode/1`], [`x.tel/episode`], [Changes and anomalies close in time, grouped.]),
+    ([`baro/1`], [`x.tel/hypothesis`], [The series that moved most after an instant, ranked.]),
+  ),
+)
+
+Over a cpu series whose level rises at 10:30, PELT finds two regimes:
+
+#screen(caption: "$ smysl tel detect pelt.hjson --series 'otel:{…ge_m3_cpu…}' --during 1768550400000-1768564800000 -s lib --at 1768564800000 --yes")[
+```
+x.tel/segment     b3:zwvcmgpwvzffxudokb5a5nyuqrytxvzu24hxghm43mieiiz2et4a  segment {…ge_m3_cpu…} [1768550400000, …
+x.tel/segment     b3:lxu2c3lg2ymkytaqs4zjabkfoei6rts5or2r2dfnghe6mddwpl6q  segment {…ge_m3_cpu…} [1768559400000, …
+detect    pelt/1: 2 unit(s), 2 edge(s)
+2 record(s) committed
+```
+]
+
+The robust z, scored against the two hours before, flags the cpu shift and a latency spike, and
+`episode/1` groups the two anomalies. The ranking then asks, at the spike, which series moved
+most, and grounds each answer on the episode:
+
+#screen(caption: "$ smysl tel detect baro.hjson --series 'otel:{…cpu…}' --series 'otel:{…latency…}' --trigger b3:dskbng2mxmjznghzwcfq6minyfpomz6n3ug6fybgqzg4rqk4zswq -s lib --at 1768564800000 --yes")[
+```
+x.tel/hypothesis  b3:jinfgmntif56t6catscbv4np4ud3swtk4ze6hojymtwirwq2ys3q  rank 1 of 2: {…ge_m3_latency…} moved …
+x.tel/hypothesis  b3:ovwbgge6bkoyviht2n475fe2mjjn3crudzmgjlmqddowjjuhvqba  rank 2 of 2: {…ge_m3_cpu…} moved …
+detect    baro/1: 2 unit(s), 0 edge(s)
+2 record(s) committed
+```
+]
+
+Without `--yes`, a detector's units are staged for review in `.smysl/staged.smy`, as `tel read`
+stages, and nothing is written.
+
+*Replayed to the byte.* A detector here uses only addition, subtraction, multiplication,
+division and square roots, which every machine rounds the same way. It never uses a logarithm or
+an exponential from the platform's maths library, and it draws no randomness. GE-M3 is the check:
+
+- every detector runs twice over `fixtures/tel/detect/`;
+- each output is pinned by uid;
+- the pins are compared on x86_64 Linux, Windows and aarch64 macOS.
+
+A detector whose bytes differ anywhere does not ship.
+
 #callout(label: "Not yet")[
-  This part covers object snapshots, the series substrate and window evidence. Detectors,
-  investigations, eviction and the rest of `smysl tel` are the RFC's later phases, TL-P5 to
+  This part covers object snapshots, the series substrate, window evidence and detectors.
+  Investigations, eviction and the rest of `smysl tel` are the RFC's later phases, TL-P6 to
   TL-P9. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
