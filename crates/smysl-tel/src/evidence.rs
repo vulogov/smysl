@@ -41,9 +41,21 @@ use smysl_core::{
 use smysl_series::{flags, Backend, Sample, Substrate};
 
 use crate::scrape::numeric_cmp;
+use crate::sketch::{Mapping, Sketch, SketchError};
 
 /// The recipe of an exact summary.
 pub const RECIPE_EXACT: &str = "tel-window/exact/1";
+
+/// The recipe of a sketched summary, before its parameters: `tel-window/ddsketch/1?alpha=…&qs=…`.
+/// The parameters are in the recipe because they are in the question: two sketches of one window
+/// at different accuracies are different windows, not two answers to one.
+pub const RECIPE_SKETCH: &str = "tel-window/ddsketch/1";
+
+/// The quantile ranks a sketched window reports unless asked for others.
+pub const DEFAULT_QS: &[&str] = &["0.5", "0.9", "0.95", "0.99"];
+
+/// The relative accuracy a sketched window has unless asked for another.
+pub const DEFAULT_ALPHA: &str = "0.01";
 
 /// Where a window's numbers came from (§4.1 `basis`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -137,6 +149,28 @@ impl BigDec {
             .map(|v| i32::from(v.exponent()))
             .min()
             .unwrap_or(0);
+        // Most windows fit 128 bits: a counter, a gauge with two decimals. Checked, so the first
+        // overflow falls through to the digits, and the result is the same either way.
+        let fast = values.iter().try_fold(0i128, |acc, v| {
+            let mut m = v.mantissa();
+            for _ in 0..(i32::from(v.exponent()) - exp) {
+                m = m.checked_mul(10)?;
+            }
+            acc.checked_add(m)
+        });
+        if let Some(total) = fast {
+            let mut digits = Vec::new();
+            let mut m = total.unsigned_abs();
+            while m > 0 {
+                digits.push((m % 10) as u8);
+                m /= 10;
+            }
+            return BigDec {
+                negative: total < 0,
+                digits,
+                exp,
+            };
+        }
         let mut acc = BigDec {
             negative: false,
             digits: Vec::new(),
@@ -479,6 +513,9 @@ pub enum EvidenceError {
     NoSeries(Uid),
     /// `from_ms ≥ to_ms`.
     Empty,
+    /// A sketch was asked of a window with no counted sample: it has no quantiles.
+    NothingToSketch,
+    Sketch(SketchError),
     Series(smysl_series::Error),
 }
 
@@ -493,6 +530,10 @@ impl core::fmt::Display for EvidenceError {
                 )
             }
             EvidenceError::Empty => f.write_str("a window is [from, to) with from < to"),
+            EvidenceError::NothingToSketch => {
+                f.write_str("the window has no counted sample, so no quantiles to sketch")
+            }
+            EvidenceError::Sketch(e) => write!(f, "{e}"),
             EvidenceError::Series(e) => write!(f, "{e}"),
         }
     }
@@ -534,6 +575,107 @@ pub fn materialise<B: Backend>(
         summary: summarize(&read.samples),
         sketch: None,
     };
+    let unit = window.unit();
+    Ok(Materialised {
+        window,
+        unit,
+        conflicts: read.conflicts,
+    })
+}
+
+/// The recipe text of a sketch at `alpha` reporting ranks `qs`.
+pub fn sketch_recipe(alpha: &Decimal, qs: &[Decimal]) -> String {
+    let qs: Vec<String> = qs.iter().map(Decimal::to_string).collect();
+    format!("{RECIPE_SKETCH}?alpha={alpha}&qs={}", qs.join(","))
+}
+
+/// The sketch of `samples`' counted values.
+pub fn sketch_of(samples: &[Sample], mapping: &Mapping) -> Sketch {
+    let mut s = Sketch::new(mapping.clone());
+    for x in samples.iter().filter(|s| counted(s)) {
+        s.add(x.value_dec());
+    }
+    s
+}
+
+/// A sketched window from `sketch` (of the window's counted samples, however it was assembled:
+/// whole, or merged from shards) and the window's own digest.
+#[allow(clippy::too_many_arguments)]
+pub fn sketched_window(
+    series: Uid,
+    scheme: &str,
+    key: &str,
+    instrument: Uid,
+    from_ms: u64,
+    to_ms: u64,
+    digest: [u8; 32],
+    sketch: &Sketch,
+    qs: &[Decimal],
+) -> Result<Window, EvidenceError> {
+    if sketch.count() == 0 {
+        return Err(EvidenceError::NothingToSketch);
+    }
+    let mut q = Vec::with_capacity(qs.len());
+    for rank in qs {
+        let v = sketch
+            .quantile(crate::sketch::to_f64(*rank))
+            .map_err(EvidenceError::Sketch)?
+            .ok_or(EvidenceError::NothingToSketch)?;
+        q.push(v);
+    }
+    Ok(Window {
+        series,
+        scheme: scheme.to_string(),
+        key: key.to_string(),
+        instrument,
+        from_ms,
+        to_ms,
+        recipe: sketch_recipe(&sketch.mapping.alpha, qs),
+        basis: Basis::Substrate,
+        digest: Some(digest),
+        summary: Summary {
+            count: sketch.count(),
+            ..Summary::default()
+        },
+        sketch: Some(Sketched {
+            qs: qs.to_vec(),
+            q,
+            alpha: sketch.mapping.alpha,
+        }),
+    })
+}
+
+/// Materialise the sketched window `[from_ms, to_ms)`: `count`, the digest, and the quantiles
+/// at `qs` from a DDSketch of relative accuracy `alpha`. `derived` by rule TW.
+pub fn materialise_sketched<B: Backend>(
+    substrate: &Substrate<B>,
+    series: &Uid,
+    instrument: &Uid,
+    from_ms: u64,
+    to_ms: u64,
+    alpha: Decimal,
+    qs: &[Decimal],
+) -> Result<Materialised, EvidenceError> {
+    if from_ms >= to_ms {
+        return Err(EvidenceError::Empty);
+    }
+    let mapping = Mapping::new(alpha).map_err(EvidenceError::Sketch)?;
+    let row = substrate
+        .row(series)?
+        .ok_or(EvidenceError::NoSeries(*series))?;
+    let read = substrate.window(series, instrument, from_ms, to_ms)?;
+    let sketch = sketch_of(&read.samples, &mapping);
+    let window = sketched_window(
+        *series,
+        &row.scheme,
+        &row.key,
+        *instrument,
+        from_ms,
+        to_ms,
+        read.digest,
+        &sketch,
+        qs,
+    )?;
     let unit = window.unit();
     Ok(Materialised {
         window,
@@ -692,5 +834,58 @@ mod tests {
         assert!(digest_at.is_some(), "a 32-byte byte string");
         // 41.0 is [41, 0].
         assert!(p.windows(3).any(|x| x == [0x82, 0x18, 41]));
+    }
+
+    #[test]
+    fn a_sketched_window_is_derived_and_a_sharded_sketch_is_the_same_unit() {
+        let mut sub = Substrate::new(MemBackend::default());
+        let (series, inst) = (Uid::from_bytes([1; 32]), Uid::from_bytes([2; 32]));
+        let info = SeriesInfo {
+            scheme: "prom".into(),
+            key: "lat".into(),
+            class: "gauge".into(),
+        };
+        let samples: Vec<Sample> = (0..500u64)
+            .map(|i| v(i * 1_000, &format!("{}e-3", (i * 7919) % 2000 + 1)))
+            .collect();
+        sub.add(&series, &inst, &info, &samples).unwrap();
+        let qs: Vec<Decimal> = DEFAULT_QS.iter().map(|q| d(q)).collect();
+        let alpha = d(DEFAULT_ALPHA);
+        let whole = materialise_sketched(&sub, &series, &inst, 0, 500_000, alpha, &qs).unwrap();
+        assert_eq!(whole.unit.status, Status::Derived);
+        assert_eq!(whole.unit.grounds.len(), 1);
+        assert_eq!(
+            whole.window.recipe,
+            "tel-window/ddsketch/1?alpha=0.01&qs=0.5,0.9,0.95,0.99"
+        );
+
+        // Sharded: five sub-windows sketched apart and merged, in reverse.
+        let m = Mapping::new(alpha).unwrap();
+        let mut merged = Sketch::new(m.clone());
+        for k in (0..5u64).rev() {
+            let r = sub
+                .window(&series, &inst, k * 100_000, (k + 1) * 100_000)
+                .unwrap();
+            merged.merge(&sketch_of(&r.samples, &m));
+        }
+        let digest = sub.window(&series, &inst, 0, 500_000).unwrap().digest;
+        let sharded = sketched_window(
+            series, "prom", "lat", inst, 0, 500_000, digest, &merged, &qs,
+        )
+        .unwrap();
+        assert_eq!(canonical_uid(&sharded.unit()), canonical_uid(&whole.unit));
+
+        // The exact and the sketched are two windows of two keys, not two answers to one.
+        let exact = materialise(&sub, &series, &inst, 0, 500_000).unwrap();
+        assert_ne!(exact.window.window_key(), whole.window.window_key());
+
+        assert_eq!(
+            materialise_sketched(&sub, &series, &inst, 900_000, 901_000, alpha, &qs).unwrap_err(),
+            EvidenceError::NothingToSketch
+        );
+        assert!(matches!(
+            materialise_sketched(&sub, &series, &inst, 0, 1, d("0.9"), &qs),
+            Err(EvidenceError::Sketch(_))
+        ));
     }
 }

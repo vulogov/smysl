@@ -802,6 +802,51 @@ series and instrument contained.
 `SMY-W614`, `SMY-W615` and `SMY-W616` are registered, bringing the registry to 166 codes. W615
 was already printed by `tel read`.
 
+### Window evidence, sketched (TL-P4 step 2)
+
+**`smysl_tel::sketch`** is a DDSketch whose buckets are the same on every machine.
+
+- **Why not `sketches-ddsketch`,** which §21 names. Its bucket index is `ceil(ln x / ln γ)`,
+  and `f64::ln` comes from the platform's libm, which IEEE 754 does not require to be correctly
+  rounded. Two machines could put one value in two buckets, and GE-M3 compares x86_64 and
+  aarch64 byte for byte.
+- **The mapping:**
+  - A value is split exactly into `f × 2^E`, with `f` in `[1, 2)`.
+  - Each octave is cut at `g^0 … g^K = 2`. `g` is found by bisection, and `K` is the smallest
+    value for which `g ≤ (1 + α)/(1 − α)`. So the buckets are at least as fine as DDSketch's,
+    for example 35 an octave at α = 0.01.
+  - Every float operation is a correctly rounded multiplication, division or addition. There
+    is no logarithm and no power function.
+- **Merging adds integer counts**, so sketches of shards merge to the sketch of the whole, bit
+  for bit, in any order.
+- **Quantiles** follow DDSketch's rank rule, and each bucket's value is within α of
+  everything in it.
+- **Range:** α runs from 0.001 to 0.5. A value beyond binary64's range is clamped to the
+  largest finite binary64 of its sign, and one below the smallest subnormal counts as zero.
+
+**Sketched windows.**
+
+- **The unit:** `materialise_sketched` builds a `derived` `x.tel/window` grounded on its
+  series. It holds `count`, the digest, `qs`, `q` and `alpha`, by default ranks 0.5, 0.9, 0.95
+  and 0.99 at α = 0.01.
+- **The recipe carries the parameters:**
+  `tel-window/ddsketch/1?alpha=0.01&qs=0.5,0.9,0.95,0.99`. Two accuracies are therefore two
+  window keys, not two answers to one question. The exact and the sketched window of one span
+  are two units, as §9.4 has it.
+- **Sharding:** `sketch_of` and `sketched_window` build the same unit from a sketch merged
+  from shards. A test sketches five sub-windows separately, merges them in reverse, and gets
+  the whole window's uid.
+
+**Pinned:** `fixtures/tel/window/sketch.tsv` holds the sketch quantiles of all 400 cases at α
+of 0.001, 0.01 and 0.05, at ranks 0 to 1. It was written on aarch64 and is compared wherever the
+tests run, including CI's x86_64. That is GE-M3's cross-architecture check for the first
+detector TL-P4 ships.
+
+The exact sum gains a checked `i128` fast path, falling back to the digits at the first
+overflow, so it gives the same result either way. `tel_otlp`'s fuzz target now materialises
+exact and sketched windows over everything it records, and requires one uid for one window
+materialised twice.
+
 ---
 
 ## 1.16.0 — 2026-11-16

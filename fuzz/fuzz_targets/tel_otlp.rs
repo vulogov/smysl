@@ -5,12 +5,17 @@
 //! The bytes go to the protobuf reader as they are, and to the JSON reader when they are UTF-8.
 //! Each export read is also recorded twice over, the second time against the first's samples,
 //! so the resets and stales a later export decides are reached as well as the first sight.
+//!
+//! Then every series recorded is materialised as window evidence (TL-P4), exact and sketched,
+//! over all time: the summaries, the exact sum and mean, and the sketch see whatever values an
+//! export can carry. A window is materialised twice and must have one uid.
 
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use smysl_series::{MemBackend, Substrate};
 use smysl_tel::otel::{self, SCHEME};
 use smysl_tel::readers::otlp::{self, Export};
+use smysl_tel::evidence::{self, DEFAULT_QS};
 use smysl_tel::scrape::SubstrateHistory;
 
 fn twice(e: &Export) {
@@ -32,6 +37,22 @@ fn twice(e: &Export) {
         for ss in &r.series {
             let _ = sub.add(&ss.uid, &r.inst, &ss.info, &ss.samples);
         }
+    }
+    let qs: Vec<smysl_core::Decimal> = DEFAULT_QS
+        .iter()
+        .map(|q| smysl_core::Decimal::parse_token(q).expect("a rank"))
+        .collect();
+    let alpha = smysl_core::Decimal::parse_token(evidence::DEFAULT_ALPHA).expect("an alpha");
+    for (series, _) in sub.series(None).unwrap_or_default() {
+        if let Ok(a) = evidence::materialise(&sub, &series, &inst, 0, u64::MAX) {
+            let b = evidence::materialise(&sub, &series, &inst, 0, u64::MAX).expect("again");
+            assert_eq!(
+                smysl_core::canonical_uid(&a.unit),
+                smysl_core::canonical_uid(&b.unit),
+                "one window, one uid"
+            );
+        }
+        let _ = evidence::materialise_sketched(&sub, &series, &inst, 0, u64::MAX, alpha, &qs);
     }
 }
 
