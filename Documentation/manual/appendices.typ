@@ -1110,8 +1110,8 @@ migrate or under `--dry-run`, and 1 when the store does not declare the target r
 
 #section("tel")
 
-*Read telemetry into a library; the value in force at an instant; check a profile.* Pure ·
-TL-P2, TL-P3.
+*Read telemetry into a library; the value in force at an instant; window evidence; check a
+profile.* Pure · TL-P2, TL-P3, TL-P4.
 
 `tel read READER FILE...` reads platform exports with one of SMYSL-3's object readers. `k8s/1`
 reads `kubectl get -o json` lists, objects and watch events; `zabbix/1` reads `host.get` and
@@ -1142,22 +1142,38 @@ file is still judged after the ones before it. Reading an export twice adds noth
 
 `tel at SERIES MS` prints the value in force at `MS`, the last sample at or before it, for each
 instrument the series has samples from. `SERIES` is a series uid or `<scheme>:<key>`. A stale
-or no-value sample is printed as `stale` or `no-value`, and one that began a counter afresh is
-marked `(reset)`.
+or no-value sample is printed as `stale` or `no-value`, and one its source marked as a reset is
+marked `(reset)`. A reset that `tel read` found is a unit, `x.tel/reset`, not a mark on a
+sample.
+
+`tel window SERIES FROM TO` materialises window evidence over `[FROM, TO)`: one `x.tel/window`
+per instrument, carrying the digest of its samples and their exact summary (`measured`). With
+`--sketch ALPHA` it carries a DDSketch's quantiles at `--qs` instead (`derived`). A window has
+no surface form, so nothing is staged: without `--yes` the uids it would commit are printed,
+and with `--yes --at MS` they are committed with their `x.tel/of-series` edges, attested as
+rule TW requires. `tel read zabbix/1 --trends` makes each hour of a `trend.get` export a `cited`
+platform window the same way.
+
+`tel check` checks a library's windows: rule TW (`SMY-E603`), windows of one key that disagree
+(`SMY-W614`), and each window recomputed from the substrate (`SMY-E604` if it is another unit,
+`SMY-W605` if its samples are gone). It exits 3 on an error.
 
 #dtable(
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`read`, `at` or `profile`.]),
-    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `profile`: `check` and a profile file or shipped name.]),
+    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check` or `profile`.]),
+    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `profile`: `check` and a profile file or shipped name.]),
     ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for the object readers; it must be for the reader's scheme.]),
     ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds, and for `prom/1` the scrape instant. Required for `read`: nothing here reads a clock.]),
     ([`--licence`], [`SPDX`], [The manifests' licence. Required for the object readers, as `text add` requires it.]),
     ([`--zabbix-api`], [`VERSION`], [The Zabbix API version the export came from (`apiinfo.version`). Required for `zabbix/1`: 6.x, 7.x or 8.x.]),
     ([`--job`, `--instance`], [`JOB`, `INSTANCE`], [`prom/1`: the target's labels, which the exposition does not carry and every series key includes. Required.]),
-    ([`--instrument`], [`I`], [`read`: the key of what an OTLP or Zabbix export was read from, such as `otel-collector:c1` or `zabbix-server:main`. Required for those readers. `at`: an instrument uid, to ask one instrument only.]),
+    ([`--instrument`], [`I`], [`read`: the key of what an OTLP or Zabbix export was read from, such as `otel-collector:c1` or `zabbix-server:main`. Required for those readers. `at` and `window`: an instrument uid, to ask one instrument only.]),
     ([`--items`], [`FILE`], [`zabbix/1`: the `item.get` export (with `selectHosts`) the files' history belongs to. With it, the files are `history.get` exports.]),
+    ([`--trends`], [—], [`zabbix/1` with `--items`: the files are `trend.get` exports, each hour a `cited` window.]),
+    ([`--sketch`], [`ALPHA`], [`window`: a DDSketch of this relative accuracy, 0.001 to 0.5, rather than the exact summary.]),
+    ([`--qs`], [`Q,…`], [`window --sketch`: the quantile ranks. Default `0.5,0.9,0.95,0.99`.]),
     ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing.]),
     ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),
   ),
@@ -1166,7 +1182,8 @@ marked `(reset)`.
 `tel read` exits 0 when it commits, 10 when it stages, and 2 when a required flag is missing,
 the reader is not a telemetry reader, or the profile is for another scheme. `tel at` exits 0
 when some instrument has a sample at or before the instant, and 1 when none has or the library
-has no substrate. It reports
+has no substrate. `tel window` exits 0 when it printed or committed, and 1 when the series has
+no sample or the accuracy is out of range. `tel check` exits 3 when any window is in error. It reports
 `SMY-W608` for a keyed array it could not key, `SMY-W613` for a number out of `dec`'s range,
 and `SMY-W610` for an object whose previous snapshot was read under another profile. That
 boundary is recorded and not diffed.

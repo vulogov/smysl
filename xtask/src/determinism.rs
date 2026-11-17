@@ -280,8 +280,8 @@ const OPS: &[Op] = &[
     Op {
         name: "tel_at",
         // The value in force at an instant (§19.3), read back from the substrate the exports
-        // above wrote: the series uid its key names, the instrument's uid, the sample's
-        // instant and value, and its reset flag — the restart the third export states.
+        // above wrote: the series uid its key names, the instrument's uid, and the sample's
+        // instant and value after the restart the third export states.
         argv: &[
             "cargo",
             "run",
@@ -296,6 +296,96 @@ const OPS: &[Op] = &[
             "1768557645000",
             "-s",
             SCRATCH,
+        ],
+        setup: Some(&[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "tel",
+            "read",
+            "otlp/1",
+            "fixtures/tel/otlp/e0.pb",
+            "fixtures/tel/otlp/e1.pb",
+            "fixtures/tel/otlp/e2.pb",
+            "--instrument",
+            "otel-collector:c1",
+            "--at",
+            "1768557600000",
+            "-s",
+            SCRATCH,
+            "--yes",
+        ]),
+    },
+    Op {
+        name: "tel_window",
+        // Window evidence (§9, TL-P4) over the substrate three OTLP exports wrote: the exact
+        // summary's uid, which hashes the digest, count, min, max, first, last, the exact sum
+        // and the once-rounded mean. A running float sum or a `HashMap` would show here.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "tel",
+            "window",
+            r#"otel:{"attributes":{},"kind":"histogram","monotonic":false,"name":"http.server.duration","part":"sum","resource":{"service.instance.id":"c1","service.name":"cart"},"scope":{"name":"io.opentelemetry.http","version":"1.2.0"},"temporality":"cumulative","unit":"s"}"#,
+            "1768557600000",
+            "1768557660000",
+            "-s",
+            SCRATCH,
+        ],
+        setup: Some(&[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "tel",
+            "read",
+            "otlp/1",
+            "fixtures/tel/otlp/e0.pb",
+            "fixtures/tel/otlp/e1.pb",
+            "fixtures/tel/otlp/e2.pb",
+            "--instrument",
+            "otel-collector:c1",
+            "--at",
+            "1768557600000",
+            "-s",
+            SCRATCH,
+            "--yes",
+        ]),
+    },
+    Op {
+        name: "tel_window_sketch",
+        // The same window as a DDSketch at 1 %: the quantiles come from a mapping built by
+        // multiplication alone, so the bucket a value lands in is the same on every machine,
+        // and so is the window's uid.
+        argv: &[
+            "cargo",
+            "run",
+            "--quiet",
+            "--no-default-features",
+            "--features",
+            "cli",
+            "--",
+            "tel",
+            "window",
+            r#"otel:{"attributes":{},"kind":"histogram","monotonic":false,"name":"http.server.duration","part":"sum","resource":{"service.instance.id":"c1","service.name":"cart"},"scope":{"name":"io.opentelemetry.http","version":"1.2.0"},"temporality":"cumulative","unit":"s"}"#,
+            "1768557600000",
+            "1768557660000",
+            "-s",
+            SCRATCH,
+            "--sketch",
+            "0.01",
         ],
         setup: Some(&[
             "cargo",

@@ -58,6 +58,8 @@ pub use smysl::Date
 pub use smysl::Dating
 pub use smysl::DatingTarget
 pub use smysl::DatingValue
+pub use smysl::DecError
+pub use smysl::Decimal
 pub use smysl::DeriveOptions
 pub use smysl::DeriveReport
 pub use smysl::Detected

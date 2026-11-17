@@ -2520,10 +2520,11 @@ fn cli() -> Command {
                     Arg::new("action")
                         .required(true)
                         .value_name("ACTION")
-                        .value_parser(["read", "at", "profile"])
+                        .value_parser(["read", "at", "window", "check", "profile"])
                         .help(
                             "read exports with a reader into a library, the value in force at \
-                             an instant, or check a profile and print its hash",
+                             an instant, materialise window evidence, recompute it, or check a \
+                             profile and print its hash",
                         ),
                 )
                 .arg(
@@ -2533,7 +2534,8 @@ fn cli() -> Command {
                         .action(ArgAction::Append)
                         .help(
                             "`read READER FILE...` (k8s/1, zabbix/1, prom/1, otlp/1, \
-                             otlp-json/1); `at SERIES MS`; `profile check FILE|NAME`",
+                             otlp-json/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
+                             `profile check FILE|NAME`",
                         ),
                 )
                 .arg(
@@ -2576,6 +2578,27 @@ fn cli() -> Command {
                              (`otel-collector:<id>`, `zabbix-server:<name>`); `at`: an \
                              instrument uid",
                         ),
+                )
+                .arg(
+                    Arg::new("sketch")
+                        .long("sketch")
+                        .value_name("ALPHA")
+                        .help(
+                            "window: a DDSketch of this relative accuracy (0.001 to 0.5) rather \
+                             than the exact summary",
+                        ),
+                )
+                .arg(
+                    Arg::new("qs")
+                        .long("qs")
+                        .value_name("Q,…")
+                        .help("window --sketch: the quantile ranks (default 0.5,0.9,0.95,0.99)"),
+                )
+                .arg(
+                    Arg::new("trends")
+                        .long("trends")
+                        .help("zabbix/1 with --items: the FILEs are trend.get exports")
+                        .action(ArgAction::SetTrue),
                 )
                 .arg(
                     Arg::new("items")
@@ -13502,6 +13525,8 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     match action {
         "profile" => tel_profile(&args),
         "at" => tel_at(m, global, &args),
+        "window" => tel_window(m, global, &args),
+        "check" => tel_check(m, global),
         "read" => tel_read(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
@@ -13901,6 +13926,9 @@ fn tel_read_series(
     use smysl::tel::scrape::{self, Layered, Scraped, SubstrateHistory};
     use smysl::text::library::Library;
 
+    if reader == "zabbix/1" && m.get_flag("trends") {
+        return tel_read_trends(m, global, files);
+    }
     let Some(&at) = m.get_one::<u64>("at") else {
         eprintln!("smysl tel read: --at is required: the attestation clock, and for prom/1 the");
         eprintln!("  scrape instant, which a text scrape does not carry");
@@ -14333,6 +14361,512 @@ fn tel_at(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
         ExitCode::Success
     } else {
         ExitCode::Failure
+    }
+}
+
+/// Attests each window as rule TW requires (RFC SMYSL-3 §9.4), and everything else as `base`.
+///
+/// The op and rung come from `smysl_core::schemas::tel::rule_tw`, the function `check` holds
+/// windows to, so what this commits is what `check` accepts.
+#[cfg(feature = "tel")]
+struct TwAttest {
+    base: smysl::stage::Attest,
+    windows: std::collections::BTreeMap<Uid, (smysl::Op, smysl::Rung)>,
+}
+
+#[cfg(feature = "tel")]
+impl smysl::Attesting for TwAttest {
+    fn for_unit(&self, uid: Uid) -> smysl::Attestation {
+        match self.windows.get(&uid) {
+            Some((op, rung)) => {
+                let a = smysl::Attestation::new(
+                    uid,
+                    self.base.agent.clone(),
+                    *op,
+                    *rung,
+                    self.base.now.clone(),
+                );
+                match self.base.recipe {
+                    Some((r, f)) => a.with_recipe(r, f),
+                    None => a,
+                }
+            }
+            None => self.base.for_unit(uid),
+        }
+    }
+
+    fn for_relation(&self, rid: Uid) -> smysl::Attestation {
+        self.base.for_relation(rid)
+    }
+}
+
+/// Commit window evidence and what it rests on into the library at `root`: the units, their
+/// `x.tel/of-series` edges, each window attested by rule TW. Window units have no surface form
+/// (their digest is `bytes32`), so there is no staged review of them: the caller prints what a
+/// run would commit, and `--yes` commits it.
+#[cfg(feature = "tel")]
+fn tel_commit_evidence(
+    who: &str,
+    root: &std::path::Path,
+    units: Vec<smysl::UnitCore>,
+    windows: &[smysl::UnitCore],
+    at: u64,
+    recipe_text: &str,
+) -> ExitCode {
+    use smysl::text::library::Library;
+    let mut library = match Library::create(root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel {who}: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let _locks = match smysl::text::lock::acquire_all(root, &library.shards(), "tel") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel {who}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let agent = match AgentId::new("tool:smysl-tel") {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl tel {who}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let recipe = smysl::hash_bytes(recipe_text.as_bytes());
+    let base = smysl::stage::Attest::new(
+        agent.clone(),
+        smysl::Rung::Computed,
+        smysl::Hlc::new(at, 0, agent),
+    )
+    .with_recipe(recipe, recipe);
+    let mut tw = std::collections::BTreeMap::new();
+    let mut relations = Vec::new();
+    for w in windows {
+        let Some(f) = w
+            .payload
+            .as_deref()
+            .and_then(|p| smysl::schemas::tel::window_fields(p).ok())
+        else {
+            continue;
+        };
+        if let Some((_, op, rung)) = smysl::schemas::tel::rule_tw(&f) {
+            tw.insert(smysl::canonical_uid(w), (op, rung));
+        }
+        if let Some(series) = f.series.as_deref().and_then(|s| s.parse::<Uid>().ok()) {
+            relations.push(smysl::Relation::new(
+                smysl::RelKind::Extension(smysl::schemas::tel::OF_SERIES.to_string()),
+                smysl::canonical_uid(w),
+                series,
+            ));
+        }
+    }
+    let mut all = units;
+    all.extend(windows.iter().cloned());
+    let attest = TwAttest { base, windows: tw };
+    let staged = smysl::stage::prepare_attested(
+        library.store(),
+        all,
+        relations,
+        std::collections::BTreeMap::new(),
+        vec![smysl::schemas::tel::decl()],
+        &attest,
+    );
+    if staged.has_errors() {
+        eprintln!("smysl tel {who}: the batch did not check clean");
+        for d in &staged.report.diagnostics {
+            eprintln!("  {d}");
+        }
+        return ExitCode::Failure;
+    }
+    let n = staged.len();
+    if let Err(e) = library.append_records(&staged.records()) {
+        eprintln!("smysl tel {who}: {e}");
+        return ExitCode::Failure;
+    }
+    println!("{n} record(s) committed");
+    ExitCode::Success
+}
+
+/// One line per window: its uid, instrument, and what it says.
+#[cfg(feature = "tel")]
+fn tel_print_window(w: &smysl::tel::evidence::Window) {
+    let s = &w.summary;
+    let opt = |d: &Option<smysl::Decimal>| d.map_or("-".to_string(), |d| d.to_string());
+    let what = match &w.sketch {
+        Some(k) => {
+            k.qs.iter()
+                .zip(&k.q)
+                .map(|(r, v)| format!("q{r}={v}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+        None => format!(
+            "min {} max {} mean {} sum {}",
+            opt(&s.min),
+            opt(&s.max),
+            opt(&s.mean),
+            opt(&s.sum)
+        ),
+    };
+    let unit = w.unit();
+    println!(
+        "window    {}  {}  [{}, {})  {} {}  count {}  {what}",
+        smysl::canonical_uid(&unit).canonical(),
+        w.instrument.canonical(),
+        w.from_ms,
+        w.to_ms,
+        w.basis.as_str(),
+        unit.status.as_str(),
+        s.count
+    );
+}
+
+/// A series argument: a uid, or `<scheme>:<key>`.
+#[cfg(feature = "tel")]
+fn tel_series_arg(series: &str) -> Result<Uid, String> {
+    if let Ok(u) = series.parse::<Uid>() {
+        return Ok(u);
+    }
+    let Some((scheme, key)) = series.split_once(':') else {
+        return Err(format!(
+            "`{series}` is neither a series uid nor `<scheme>:<key>`"
+        ));
+    };
+    smysl::schemas::tel::series(scheme, key)
+        .map(|u| smysl::canonical_uid(&u))
+        .map_err(|e| format!("`{series}`: {e}"))
+}
+
+/// `smysl tel window SERIES FROM TO [--sketch ALPHA [--qs Q,…]] [--instrument UID] -s LIB
+/// [--at MS --yes]`: window evidence (RFC SMYSL-3 §9, §23).
+///
+/// One window per instrument the series has samples from, or the one `--instrument` names:
+/// the exact summary (`measured`), or with `--sketch` a DDSketch's quantiles (`derived`). Each
+/// line is the window's uid and what it says. With `--yes` the windows are committed, with
+/// their series' `x.tel/of-series` edges and rule TW's attestations, at `--at`; without it
+/// nothing is written. A window has no surface form, so there is nothing to stage for review:
+/// it is a function of the samples, and the uid printed is the uid `--yes` commits.
+#[cfg(feature = "tel")]
+fn tel_window(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::Substrate;
+    use smysl::tel::evidence::{self, DEFAULT_QS};
+
+    let (Some(series), Some(from), Some(to), None) =
+        (args.first(), args.get(1), args.get(2), args.get(3))
+    else {
+        eprintln!("smysl tel window: `SERIES FROM TO`, epoch milliseconds, [FROM, TO)");
+        return ExitCode::Usage;
+    };
+    let (Ok(from), Ok(to)) = (from.parse::<u64>(), to.parse::<u64>()) else {
+        eprintln!("smysl tel window: FROM and TO are epoch milliseconds");
+        return ExitCode::Usage;
+    };
+    let uid = match tel_series_arg(series) {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("smysl tel window: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let dec = |s: &str| smysl::Decimal::parse_token(s.trim());
+    let sketch = match m.get_one::<String>("sketch").map(|a| dec(a)).transpose() {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl tel window: --sketch: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let qs_text = m
+        .get_one::<String>("qs")
+        .cloned()
+        .unwrap_or_else(|| DEFAULT_QS.join(","));
+    let qs = match qs_text.split(',').map(dec).collect::<Result<Vec<_>, _>>() {
+        Ok(q) => q,
+        Err(e) => {
+            eprintln!("smysl tel window: --qs: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    if m.contains_id("qs") && sketch.is_none() {
+        eprintln!("smysl tel window: --qs is for a sketch; give --sketch ALPHA");
+        return ExitCode::Usage;
+    }
+    let yes = m.get_flag("yes");
+    let at = m.get_one::<u64>("at").copied();
+    if yes && at.is_none() {
+        eprintln!("smysl tel window: --yes needs --at, the attestation clock");
+        return ExitCode::Usage;
+    }
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let path = tel_series_path(&root);
+    if !path.exists() {
+        eprintln!(
+            "smysl tel window: {} has no series substrate; `tel read --yes` writes one",
+            root.display()
+        );
+        return ExitCode::Failure;
+    }
+    let sub = match RedbBackend::open(&path) {
+        Ok(b) => Substrate::new(b),
+        Err(e) => {
+            eprintln!("smysl tel window: {}: {e}", path.display());
+            return ExitCode::Failure;
+        }
+    };
+    let insts = match m.get_one::<String>("instrument") {
+        Some(i) => match i.parse::<Uid>() {
+            Ok(u) => vec![u],
+            Err(_) => {
+                eprintln!(
+                    "smysl tel window: --instrument takes an instrument uid; `{i}` is not one"
+                );
+                return ExitCode::Usage;
+            }
+        },
+        None => match sub.instruments(&uid) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("smysl tel window: {e}");
+                return ExitCode::Failure;
+            }
+        },
+    };
+    if insts.is_empty() {
+        eprintln!(
+            "smysl tel window: the substrate holds no sample of {}",
+            uid.canonical()
+        );
+        return ExitCode::Failure;
+    }
+    let mut windows = Vec::new();
+    let mut series_unit = None;
+    for inst in insts {
+        let made = match sketch {
+            Some(alpha) => evidence::materialise_sketched(&sub, &uid, &inst, from, to, alpha, &qs),
+            None => evidence::materialise(&sub, &uid, &inst, from, to),
+        };
+        let made = match made {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("smysl tel window: {}: {e}", inst.canonical());
+                return ExitCode::Failure;
+            }
+        };
+        for (ms, ns) in &made.conflicts {
+            eprintln!(
+                "smysl tel window: SMY-W615: two samples at {ms}.{ns:06}; both are in the digest"
+            );
+        }
+        if made.window.summary.sum_out_of_range {
+            eprintln!(
+                "smysl tel window: SMY-W616: the exact integer sum is outside dec's range; omitted"
+            );
+        }
+        if series_unit.is_none() {
+            series_unit = smysl::schemas::tel::series(&made.window.scheme, &made.window.key).ok();
+        }
+        tel_print_window(&made.window);
+        windows.push(made.unit);
+    }
+    drop(sub);
+    if !yes {
+        println!(
+            "{} window(s); nothing was written - run again with --yes --at MS to commit them",
+            windows.len()
+        );
+        return ExitCode::Success;
+    }
+    let recipe = format!(
+        "tel window {}",
+        match sketch {
+            Some(a) => evidence::sketch_recipe(&a, &qs),
+            None => evidence::RECIPE_EXACT.to_string(),
+        }
+    );
+    tel_commit_evidence(
+        "window",
+        &root,
+        series_unit.into_iter().collect(),
+        &windows,
+        at.unwrap_or(0),
+        &recipe,
+    )
+}
+
+/// `smysl tel read zabbix/1 FILE... --items FILE --trends --zabbix-api V --instrument KEY`:
+/// Zabbix trends as `cited` platform windows (RFC SMYSL-3 §9.4, §20.1).
+#[cfg(feature = "tel")]
+fn tel_read_trends(m: &ArgMatches, global: &ArgMatches, files: &[&String]) -> ExitCode {
+    use smysl::tel::readers::zabbix_history;
+    let arg = |n: &str| m.get_one::<String>(n).map(String::as_str);
+    let (Some(items), Some(api), Some(key)) = (arg("items"), arg("zabbix-api"), arg("instrument"))
+    else {
+        eprintln!("smysl tel read: zabbix/1 --trends needs --items, --zabbix-api and --instrument");
+        return ExitCode::Usage;
+    };
+    let yes = m.get_flag("yes");
+    let at = m.get_one::<u64>("at").copied();
+    if at.is_none() {
+        eprintln!("smysl tel read: --at is required: the attestation clock");
+        return ExitCode::Usage;
+    }
+    let items = match std::fs::read_to_string(items) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("smysl tel read: --items: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let mut units: std::collections::BTreeMap<Uid, smysl::UnitCore> =
+        std::collections::BTreeMap::new();
+    let mut windows = Vec::new();
+    for file in files {
+        let text = match std::fs::read_to_string(file.as_str()) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("smysl tel read: {file}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let t = match zabbix_history::read_trends(&text, &items, api) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("smysl tel read: {file}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        if !t.unknown_items.is_empty() {
+            let ids: Vec<&str> = t.unknown_items.iter().map(String::as_str).collect();
+            eprintln!(
+                "smysl tel read: {file}: rows of item(s) not in --items: {}",
+                ids.join(", ")
+            );
+        }
+        if t.not_values > 0 {
+            eprintln!(
+                "smysl tel read: {file}: {} trend value(s) outside dec's range, left out",
+                t.not_values
+            );
+        }
+        let r = match smysl::tel::zabbix_history::record_trends(&t, key) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("smysl tel read: {file}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        println!("read      {file}: {} trend window(s)", r.windows.len());
+        units.insert(r.inst, r.instrument.clone());
+        for u in r.series.iter().chain(&r.metas) {
+            units.insert(smysl::canonical_uid(u), u.clone());
+        }
+        for w in &r.windows {
+            tel_print_window(w);
+            windows.push(w.unit());
+        }
+    }
+    if !yes {
+        println!(
+            "{} window(s); nothing was written - run again with --yes to commit them",
+            windows.len()
+        );
+        return ExitCode::Success;
+    }
+    tel_commit_evidence(
+        "read",
+        &root,
+        units.into_values().collect(),
+        &windows,
+        at.unwrap_or(0),
+        &format!("zabbix/1 trends {key}"),
+    )
+}
+
+/// `smysl tel check -s LIB`: the library's window evidence, checked (RFC SMYSL-3 §9.2–§9.5).
+///
+/// - `SMY-E603`: a window whose status or attestations break rule TW.
+/// - `SMY-W614`: windows of one key that disagree.
+/// - `SMY-E604`: a window recomputed from `series.redb` that is another unit.
+/// - `SMY-W605`: a window whose samples are not in `series.redb`, or all of them when the
+///   library has no substrate.
+///
+/// Exit 0 with no error, 3 with any.
+#[cfg(feature = "tel")]
+fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::{MemBackend, Substrate};
+    use smysl::text::library::Library;
+
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let library = match Library::open(&root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel check: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let store = library.store();
+    let windows: Vec<(Uid, smysl::UnitCore, Vec<smysl::Attestation>)> = StoreRead::units(store)
+        .filter(|(_, u)| u.core.schema.as_str() == smysl::schemas::tel::WINDOW)
+        .map(|(uid, u)| {
+            (
+                *uid,
+                u.core.clone(),
+                u.attestations.iter().cloned().collect(),
+            )
+        })
+        .collect();
+    let mut diags: Vec<smysl::Diagnostic> = smysl::check(store, smysl::CheckOptions::default())
+        .diagnostics
+        .into_iter()
+        .filter(|d| [smysl::Code::E603, smysl::Code::W614].contains(&d.code))
+        .collect();
+    let path = tel_series_path(&root);
+    let cores: Vec<&smysl::UnitCore> = windows.iter().map(|(_, u, _)| u).collect();
+    if path.exists() {
+        match RedbBackend::open(&path) {
+            Ok(b) => diags.extend(smysl::tel::evidence::verify(cores, &Substrate::new(b))),
+            Err(e) => {
+                eprintln!("smysl tel check: {}: {e}", path.display());
+                return ExitCode::Failure;
+            }
+        }
+    } else {
+        diags.extend(smysl::tel::evidence::verify(
+            cores,
+            &Substrate::new(MemBackend::default()),
+        ));
+    }
+    for d in &diags {
+        println!("{d}");
+    }
+    let errors = diags
+        .iter()
+        .filter(|d| d.code.severity() == smysl::Severity::Error)
+        .count();
+    println!(
+        "checked   {} window(s): {errors} error(s), {} warning(s)",
+        windows.len(),
+        diags.len() - errors
+    );
+    if errors > 0 {
+        ExitCode::CheckErrors
+    } else {
+        ExitCode::Success
     }
 }
 

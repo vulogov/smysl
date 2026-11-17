@@ -6,11 +6,15 @@
 //!
 //! - **`x.tel/reset`**, a counter reset. Two ways of knowing it, two statuses:
 //!   - **`start-time`**: the family's `_created` sample changed since the last scrape. The
-//!     source states it, so the unit is `measured`, its `at_ms` is the new start time, and the
-//!     counter's samples in this scrape carry flag 2.
+//!     source states it, so the unit is `measured`, and its `at_ms` is the new start time.
 //!   - **`decrease`**: no `_created`, and the counter is below its last value. We inferred it, so
-//!     the unit is `derived`, grounded on the series unit, at the sample's instant. No flag:
-//!     flag 2 is a start-time change (§9.1), which nobody stated.
+//!     the unit is `derived`, grounded on the series unit, at the sample's instant.
+//!
+//!   **No sample carries flag 2 for it** (TL-P4). A sample is a function of its source record
+//!   alone, so the same scrapes give the same samples whatever order they are read in, and a
+//!   window over them has one digest. A reset is a fact about two readings, so it is a unit,
+//!   found when both are known. Flag 2 stays defined for a source that marks a reset on the
+//!   sample itself.
 //!
 //!   A reset is one unit per counter, on its headline series (a counter's own samples, a
 //!   histogram's or summary's `_count`), not one per bucket: the buckets reset with it, and the
@@ -251,16 +255,7 @@ pub fn record(
             if !t.is_monotonic() || group(t) != g {
                 continue;
             }
-            let ss = series.get_mut(tuid).expect("every sample has its series");
-            for sample in &mut ss.samples {
-                *sample = Sample::new(
-                    sample.ts_ms(),
-                    sample.ns(),
-                    sample.value_dec(),
-                    sample.flags() | flags::RESET,
-                )
-                .expect("the flags it had, and one more");
-            }
+            let ss = &series[tuid];
             if is_headline(t) {
                 units.push(reset(
                     SCHEME,
@@ -527,11 +522,7 @@ mod tests {
         assert_eq!(kinds(&r), [("x.tel/reset".into(), "derived".into())]);
         assert_eq!(r.units[0].grounds.len(), 1, "grounded on its series");
         assert!(r.units[0].grounds.contains(&r.series[0].uid));
-        assert_eq!(
-            r.series[0].samples[0].flags(),
-            0,
-            "flag 2 is a start-time's"
-        );
+        assert_eq!(r.series[0].samples[0].flags(), 0, "a reset is a unit");
         // A gauge falling is a gauge.
         scrape(&mut sub, "# TYPE g gauge\ng 5\n", T0 + 45_000);
         assert!(scrape(&mut sub, "# TYPE g gauge\ng 1\n", T0 + 60_000)
@@ -571,13 +562,11 @@ mod tests {
             .iter()
             .find(|s| s.info.key.starts_with("rq_count"))
             .unwrap();
-        assert_eq!(count.samples[0].flags(), flags::RESET);
-        let sum = r
-            .series
-            .iter()
-            .find(|s| s.info.key.starts_with("rq_sum"))
-            .unwrap();
-        assert_eq!(sum.samples[0].flags(), 0, "_sum is not a counter");
+        assert_eq!(
+            count.samples[0].flags(),
+            0,
+            "a reset is a unit, not a flag: the sample is the source's alone"
+        );
     }
 
     #[test]

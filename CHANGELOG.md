@@ -534,8 +534,7 @@ establishes. It reads what came before from a `History`, which is the substrate 
 instrument left it, never a cache of the last run.
 
 - **`x.tel/reset`, `start-time`.** The family's `_created` moved since the last scrape. The
-  source says so, so the unit is `measured`, its `at_ms` is the new start time, and the
-  counter's samples carry flag 2.
+  source says so, so the unit is `measured`, and its `at_ms` is the new start time.
 - **`x.tel/reset`, `decrease`.** There is no `_created`, and the counter fell. We inferred it,
   so the unit is `derived`, grounded on the series unit (`SMY-E031` requires grounds), at the
   sample's instant, with no flag.
@@ -610,9 +609,8 @@ list of crates allowed only through a feature, here `reader-otlp`.
 - **`x.tel/reset`, `start-time`, `measured`.** The count is a cumulative one: a monotonic sum,
   or a histogram's or summary's `count`. While it accumulates, its start time stays before the
   previous point's time. A point whose start is at or after the previous point's time began
-  again since then. The unit's `at_ms` is the new start, and every sample of the point (each
-  bucket, the sum) carries flag 2. Comparing against the previous point's time, not its start,
-  means the substrate does not need to store start times.
+  again since then. The unit's `at_ms` is the new start. Comparing against the previous
+  point's time, not its start, means the substrate does not need to store start times.
 - **`x.tel/reset`, `decrease`, `derived`.** A cumulative count with no start time (`0`) fell.
 - **`x.tel/stale`, `no-recorded-value`, `measured`.** A point carries
   `FLAG_NO_RECORDED_VALUE`. An export is pushed, not polled, so absence is never staleness
@@ -637,7 +635,6 @@ third the process restarts.
 - `expected.tsv` holds the units the exports establish:
   - in the second export, a stale and a derived reset;
   - in the third, three measured resets: a sum, a histogram and a summary.
-- Every part of a reset point carries flag 2.
 
 A new fuzz target, `tel_otlp`, hands its bytes to both readers and records each export twice,
 so later exports' resets and stales are reached. `make seed-fuzz` seeds it from the fixture.
@@ -723,8 +720,8 @@ FILE`** read series into `<library>/index/series.redb`.
 sample at or before it, for each instrument the series has samples from.
 
 - `SERIES` is a uid or `<scheme>:<key>`.
-- A stale or no-value sample prints as `stale` or `no-value`, never as a number. A reset
-  sample is marked `(reset)`.
+- A stale or no-value sample prints as `stale` or `no-value`, never as a number. A sample
+  its source marked as a reset (flag 2) is marked `(reset)`.
 - It exits 1 when there is nothing, or when the library has no substrate.
 
 **The substrate** gains `Substrate::instruments(series)`, one seek per instrument rather than a
@@ -914,6 +911,59 @@ history is read.
 range and one unknown item. `expected-trends.tsv` pins the nine windows by uid, the same whether
 read as API 6.0 or 7.0. `tel_json`'s fuzz target reads trends too and requires rule TW of every
 window. `make seed-fuzz` seeds it with the fixture.
+
+### `smysl tel window`, `tel check`, and TL-P4's exit runs (TL-P4 step 5)
+
+**`tel window SERIES FROM TO -s LIB`** materialises window evidence over `[FROM, TO)`.
+
+- It makes one `x.tel/window` per instrument the series has samples from, or the one
+  `--instrument` names.
+- By default the summary is exact. `--sketch ALPHA [--qs Q,…]` gives DDSketch quantiles
+  instead.
+- Each line printed is the window's uid and what it says.
+- **With `--yes --at MS`** the windows are committed with their `x.tel/of-series` edges. Each
+  is attested as rule TW requires, by `rule_tw`, the same function `check` applies.
+- **Without `--yes`** nothing is written. A window has no surface form, so there is nothing to
+  stage for review: it is a function of the samples, and the uid printed is the uid `--yes`
+  commits.
+
+**`tel read zabbix/1 FILE... --items FILE --trends`** makes each `trend.get` hour a `cited`
+platform window, committed the same way.
+
+**`tel check -s LIB`** checks a library's windows:
+
+- rule TW (`SMY-E603`);
+- windows of one key that disagree (`SMY-W614`);
+- each window recomputed from `series.redb` (`SMY-E604` and `SMY-W605`).
+
+It exits 3 on an error.
+
+**TL-P4's exit criterion holds:** window uids are reproduced by a second run and by a sharded
+run (`tests/cmd_tel_window.rs`).
+
+- The same three OTLP exports were read into a fresh library, and so were the exact and the
+  sketched windows: the same uids.
+- The exports were read one per invocation, last first: the same uids again.
+
+**A sample is its source's alone.** The sharded run failed at first, and the cause was in TL-P3:
+a sample got flag 2 (reset) by comparison with the sample before it. Read out of order, the same
+export made other samples, other digests and other window uids.
+
+- Readers no longer set flag 2. A reset is a fact about two readings, so it is a unit,
+  `x.tel/reset`, found when both readings are known. Flag 2 stays defined for a source that marks
+  a reset on the sample itself.
+- OTLP and Zabbix samples are now a function of their source record alone. The OTLP fixture
+  test adds the exports read last first, which gives the pinned digests.
+- The fixtures re-blessed: the reset series' flags went from 2 to 0 and their digests moved,
+  and every unit stayed the same.
+- Prometheus staleness is the one exception, and stays: a series that disappeared is seen only
+  by reading scrapes in order.
+
+**Determinism** gains `tel_window` and `tel_window_sketch`, both identical across the 16
+environment permutations. `smysl::Decimal` and `smysl::DecError` are re-exported from the
+facade root, since rule A keeps the CLI to the facade. Chapter 38 has a section on window
+evidence, with transcripts, and Appendix A documents `window`, `check`, `--sketch`, `--qs` and
+`--trends`.
 
 ---
 

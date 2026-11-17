@@ -5,7 +5,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 //
 // SMYSL-3 is the telemetry RFC. 1.17 builds its format phase, TL-P1, its object snapshots,
-// TL-P2, and its series substrate, TL-P3. This part says what exists, so that a reader of the format knows it, and what
+// TL-P2, its series substrate, TL-P3, and its window evidence, TL-P4. This part says what exists, so that a reader of the format knows it, and what
 // does not. Every terminal block below was produced by the smysl 1.17 binary.
 
 #chapter(number: 38, title: "What 1.17 has of SMYSL-3")
@@ -17,13 +17,14 @@ a 200-host fleet was 6.8 million change units, and all but 6,566 were gauge nois
 outside the log, and units are made for what is *asserted* about them: a configuration change, a
 reset, an anomaly, a hypothesis, an action.
 
-The RFC is delivered in ten phases. 1.17 builds the first three:
+The RFC is delivered in ten phases. 1.17 builds the first four:
 
 - TL-P1, the format;
 - TL-P2, which reads object snapshots: Kubernetes objects and Zabbix hosts and items, and what
   changed between two reads of one;
 - TL-P3, the series substrate: samples from Prometheus, OTLP and Zabbix history, kept outside
   the log, and the few facts about them that are units.
+- TL-P4, window evidence: what a span of samples contained, as a unit anyone can recompute.
 
 #section("dec: a number that is one value")
 
@@ -252,13 +253,86 @@ the substrate could not answer "value in force at t" well enough (GE-M4). `make 
 The data is simulated, and the report says so. The RFC's run is on GE-M1's data, a real cluster
 extended to six months, which 1.17 does not have.
 
+#section("Evidence: what a window held")
+
+Samples are not units, but an assertion about them can be. `tel window` materialises
+*window evidence*: one `x.tel/window` unit saying what `[from, to)` of one series contained, as
+one instrument recorded it.
+
+#screen(caption: "$ smysl tel window 'otel:{…\"part\":\"sum\"…}' 1768557600000 1768557660000 -s lib")[
+```
+window    b3:vny6wgxqxqxzx6h4we4qj2z5ripqovilz2cwy6oc65zdoxlfcw2q  b3:fy3jdo…  [1768557600000,
+  1768557660000)  substrate measured  count 3  min 0.05 max 1.4 mean 0.7833333333333333 sum 2.35
+1 window(s); nothing was written - run again with --yes --at MS to commit them
+```
+]
+
+Its payload carries the BLAKE3 digest of the samples it was computed from, so the same window
+over the same samples is one uid, wherever and whenever it is computed. The summary is exact:
+
+- The sum is an exact decimal, so `0.1 + 0.2` is `0.3`.
+- The mean is the exact quotient, rounded once to the nearest binary64.
+- The order the samples arrived in cannot change either.
+
+`--sketch 0.01` asks instead for quantiles from a DDSketch accurate to 1 %. A sketch is a
+transformation, so its window is `derived`, where the exact one is `measured`:
+
+#screen(caption: "$ smysl tel window 'otel:{…}' 1768557600000 1768557660000 -s lib --sketch 0.01 --at 1768557660000 --yes")[
+```
+window    b3:aaagnggqhfq5efawqhpuks26xfsdylc7aqvcdjbksrgp2pqf3kwa  b3:fy3jdo…  [1768557600000,
+  1768557660000)  substrate derived  count 3  q0.5=0.8967553887478583 q0.9=0.8967553887478583 …
+2 record(s) committed
+```
+]
+
+The sketch's buckets are computed without a logarithm, from a value's own binary exponent and a
+table built by multiplication. So a value lands in the same bucket on every machine, and
+sketches of shards merge to the sketch of the whole.
+
+*Rule TW* fixes what a window may claim:
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Window], [Status], [Because]),
+    ([exact, from the substrate], [`measured`], [Computed from samples, recomputable from them.]),
+    ([sketched, from the substrate], [`derived`], [An approximation of what was measured.]),
+    ([a platform's aggregate], [`cited`], [Transcribed: a Zabbix trend (`tel read zabbix/1 --trends`) was computed by Zabbix, from samples smysl may never have had.]),
+  ),
+)
+
+`tel check` holds a library's windows to rule TW and recomputes each from the substrate. A
+window materialised before late samples arrived is still true of the samples it saw, and its
+digest says which those were. The substrate no longer agrees with it, and that is what
+`SMY-E604` reports. Here a window over three Prometheus scrapes was committed, and a fourth
+scrape inside it was read afterwards:
+
+#screen(caption: "$ smysl tel check -s lib")[
+```
+error: SMY-E604: recomputed from the substrate, the window's digest, count differ(s) (at b3:6yklrb74zgteqpsvijg3qvpvja)
+checked   1 window(s): 1 error(s), 0 warning(s)
+```
+]
+
+A window whose samples are gone is `SMY-W605`, "not re-derivable", and nothing more. Its status
+does not depend on the substrate being there.
+
+A window has no text form, because its digest is 32 bytes and the surface syntax has no byte
+string. So there is nothing to stage for review: without `--yes`, `tel window` prints the uid it
+would commit and writes nothing.
+
+*A sample is its source's alone.* A reset is a fact about two readings, so it is a unit,
+`x.tel/reset`, found when both are known. It is never a mark on the later sample. So the same
+exports read in any order give the same samples and the same window uids. Prometheus staleness
+is the one exception: a series that disappeared can only be seen by reading scrapes in order.
+
 #callout(label: "Not yet")[
-  This part covers object snapshots and the series substrate. Window evidence, detectors,
-  investigations, eviction and the rest of `smysl tel` are the RFC's later phases, TL-P4 to
+  This part covers object snapshots, the series substrate and window evidence. Detectors,
+  investigations, eviction and the rest of `smysl tel` are the RFC's later phases, TL-P5 to
   TL-P9. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
   - what a deleted object becomes as a unit;
   - exponential-histogram buckets as series;
-  - Zabbix trends, problems and events.
+  - Zabbix problems and events.
 ]

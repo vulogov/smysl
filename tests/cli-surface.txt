@@ -1009,7 +1009,7 @@ migrate    --shard
 migrate    --seed-check
 migrate    --help
 tel        <ACTION>
-tel        [possible values: read, at, profile]
+tel        [possible values: read, at, window, check, profile]
 tel        [ARG]
 tel        --config
 tel        --profile
@@ -1024,16 +1024,19 @@ tel        --instance
 tel        --strict
 tel        --instrument
 tel        --offline
-tel        --items
 tel        --no-color
+tel        --sketch
 tel        --noprogress
-tel        --zabbix-api
+tel        --qs
 tel        --json
-tel        --yes
+tel        --trends
+tel        --items
 tel        --quiet
 tel        --verbose
+tel        --zabbix-api
 tel        --backend
 tel        [possible values: memory, redb]
+tel        --yes
 tel        --shard
 tel        --seed-check
 tel        --help

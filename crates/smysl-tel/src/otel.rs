@@ -8,8 +8,9 @@
 //!   histogram's or summary's `count`) states the start of its accumulation in every point. While
 //!   it accumulates, the start stays where it was, before the previous point; a point whose start
 //!   is at or after the previous point's time began accumulating afresh since then. The unit's
-//!   `at_ms` is the new start, and every sample of the point (each bucket, the sum) carries
-//!   flag 2.
+//!   `at_ms` is the new start. No sample carries flag 2 for it: a sample is a function of its
+//!   point alone, so exports read in any order give the same samples (TL-P4), and a reset is a
+//!   fact about two points, found when both are known.
 //! - **`x.tel/reset`, `decrease`, `derived`.** A cumulative count with no start time (`0`, which
 //!   OTLP allows) that fell below its previous value. Grounded on the series unit.
 //! - **`x.tel/stale`, `no-recorded-value`, `measured`.** A point flagged
@@ -105,7 +106,6 @@ pub fn record(
         };
         let key = &series[&huid].info.key;
 
-        let mut extra = 0;
         if head.stale {
             units.push(stale(SCHEME, key, &huid, ts_ms, "no-recorded-value"));
         } else if let (true, Some(now), Some(prev)) =
@@ -113,7 +113,6 @@ pub fn record(
         {
             if head.start_ns != 0 {
                 if u128::from(head.start_ns) >= as_ns(&prev) {
-                    extra = flags::RESET;
                     let at = head.start_ns / 1_000_000;
                     units.push(reset(SCHEME, key, &huid, at, ts_ms, "start-time"));
                 }
@@ -127,8 +126,8 @@ pub fn record(
             let (ts_ms, ns) = instant(p.time_ns);
             let (value, f) = match (p.stale, p.value) {
                 (true, _) => (Decimal::ZERO, flags::STALE),
-                (false, Some(v)) => (v, extra),
-                (false, None) => (Decimal::ZERO, flags::NO_VALUE | extra),
+                (false, Some(v)) => (v, 0),
+                (false, None) => (Decimal::ZERO, flags::NO_VALUE),
             };
             let s = Sample::new(ts_ms, ns, value, f).expect("ns below 10^6 and known flags");
             if i == h {
@@ -195,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_start_time_is_a_measured_reset_with_flag_2() {
+    fn a_new_start_time_is_a_measured_reset_and_the_sample_is_unchanged() {
         let mut sub = Substrate::new(MemBackend::default());
         let r = rec(&mut sub, &sum(&pt(T0 - 3_600_000 * MS, T0, 100)));
         assert!(r.units.is_empty(), "first seen is not a reset");
@@ -206,7 +205,11 @@ mod tests {
         assert!(r.units.is_empty(), "same start: accumulating");
         let r = rec(&mut sub, &sum(&pt(T0 + 20_000 * MS, T0 + 30_000 * MS, 3)));
         assert_eq!(kinds(&r), [("x.tel/reset".into(), "measured".into())]);
-        assert_eq!(r.series[0].samples[0].flags(), flags::RESET);
+        assert_eq!(
+            r.series[0].samples[0].flags(),
+            0,
+            "a reset is a unit, not a flag"
+        );
     }
 
     #[test]

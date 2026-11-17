@@ -11,7 +11,8 @@
 //! 1. the JSON exports, in order, into memory;
 //! 2. the protobuf exports, in order, into redb reopened after each: the same units and digests,
 //!    so the two encodings are one reading;
-//! 3. the samples of (1) again, last export first: the same digests.
+//! 3. the samples of (1) again, last export first: the same digests;
+//! 4. the exports read last first: the same digests, because a sample is its point's alone.
 //!
 //! `SMYSL_BLESS=1` rewrites `expected.tsv`.
 
@@ -57,14 +58,23 @@ fn hex(b: &[u8]) -> String {
 type Batch = (Uid, Uid, SeriesInfo, Vec<Sample>);
 
 fn record<B: Backend>(
+    sub: Substrate<B>,
+    export: impl Fn(usize) -> Export,
+    reopen: impl Fn(Substrate<B>) -> Substrate<B>,
+) -> (String, Vec<Batch>, Substrate<B>) {
+    record_in(sub, &[0, 1, 2], export, reopen)
+}
+
+fn record_in<B: Backend>(
     mut sub: Substrate<B>,
+    order: &[usize],
     export: impl Fn(usize) -> Export,
     reopen: impl Fn(Substrate<B>) -> Substrate<B>,
 ) -> (String, Vec<Batch>, Substrate<B>) {
     let inst = canonical_uid(&tel::instrument(ROLE, KEY).unwrap());
     let mut out = format!("instrument\t{ROLE}\t{KEY}\t{}\n", inst.canonical());
     let mut batches = Vec::new();
-    for n in 0..3 {
+    for &n in order {
         let e = export(n);
         let r = {
             let h = SubstrateHistory {
@@ -158,6 +168,21 @@ fn the_otlp_fixture_reproduces_in_both_encodings_and_round_trips() {
         digests(&again, &batches),
         pinned,
         "nor the order of arrival"
+    );
+
+    // 4. The exports themselves read last first (TL-P4): a sample is a function of its point
+    //    alone, so the substrate is the same and so is every digest. The units are not: a reset
+    //    is found only when the readings on both sides of it are known in order.
+    let (_, rev_batches, rev) = record_in(
+        Substrate::new(MemBackend::default()),
+        &[2, 1, 0],
+        json,
+        |s| s,
+    );
+    assert_eq!(
+        digests(&rev, &rev_batches),
+        pinned,
+        "nor the order of reading"
     );
 
     let got = format!(

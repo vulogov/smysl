@@ -68,14 +68,14 @@ pub use smysl_core::{
     canonical_uid, format_version_supported, from_cbor, from_cbor_seq, hash_bytes, json_escape,
     kernel_major, quantise, to_cbor, to_cbor_seq, tokens, unit_core_bytes, verify, Admission,
     AgentId, AgentKind, Attestation, Code, CodecError, Commit, Commitment, Contention,
-    ContentionId, ContentionStatus, Date, Detected, DetectionKind, Diagnostic, DropReason,
-    ExitCode, Extra, Fidelity, GranularityProfile, Group, Hlc, IdError, IntegrityError, KernelType,
-    Label, LabelBinding, LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode,
-    ParseError, ProfileEstimator, Record, RelKind, Relation, Report, Resolution, ResolutionTarget,
-    Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind, SourcePolicy, SourceRef,
-    Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema, TokenEstimator, Uid, UidPrefix,
-    Unit, UnitCore, UnitCoreBuilder, View, ViewId, Withdrawal, FORMAT_VERSIONS_SUPPORTED,
-    FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
+    ContentionId, ContentionStatus, Date, DecError, Decimal, Detected, DetectionKind, Diagnostic,
+    DropReason, ExitCode, Extra, Fidelity, GranularityProfile, Group, Hlc, IdError, IntegrityError,
+    KernelType, Label, LabelBinding, LangTag, Lod, NonDetReason, Op, Optimality, PackInfo,
+    PackMode, ParseError, ProfileEstimator, Record, RelKind, Relation, Report, Resolution,
+    ResolutionTarget, Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind,
+    SourcePolicy, SourceRef, Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema,
+    TokenEstimator, Uid, UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId, Withdrawal,
+    FORMAT_VERSIONS_SUPPORTED, FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
 };
 
 /// The library records, and the four identities over them (RFC SMYSL-2.4, TX-P1).

@@ -26,6 +26,6 @@ series	jobs_total{instance="c:8080",job="cart"}	2	db1277818fedb60de76427c4c36a54
 series	node_load_ratio{instance="h:9100",job="node"}	4	152b229ac7c159913f4d59c8d7a6564b4222fb043d129e0655d4b7862aef45c7
 series	node_temperature_celsius{instance="h:9100",job="node",sensor="a"}	4	126d90afc26f5b3c4f273267ea84bec6e0ed7e147264ab58424af9cd7a3a94b7
 series	node_temperature_celsius{instance="h:9100",job="node",sensor="b"}	3	315957159e03c86452a92366a52e5b7b7b701b9021bf9c5ca1adea43511ef4d5
-series	rpc_seconds_count{instance="c:8080",job="cart",service="cart"}	2	5d1cd43a443953d59feb51bcd23f610ff3e61575fb5e8018e4c6812f2fad6439
+series	rpc_seconds_count{instance="c:8080",job="cart",service="cart"}	2	7c906178295d66dddde2a4766eff25482563d9c81648825571bf6cc2cd172e90
 series	rpc_seconds_created{instance="c:8080",job="cart",service="cart"}	2	3e8706f1f8082cdb51de4bbbeda52242ab6a337ec7e28343f4b9b9703f1060c8
 series	rpc_seconds_sum{instance="c:8080",job="cart",service="cart"}	2	eb36a8cb0205abb883dd92e66f19ab0475a5239d33012fd6f13395f013eeb49d
