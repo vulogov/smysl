@@ -31,6 +31,8 @@ use crate::scrape::{ms, payload};
 use crate::sketch::to_f64;
 
 pub mod cusum;
+pub mod mad;
+pub mod pelt;
 
 /// A detector's recipe (§21): which detector, its parameters, and what it ran over.
 #[derive(Debug, Clone, PartialEq, Eq)]

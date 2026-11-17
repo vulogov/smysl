@@ -993,6 +993,49 @@ regime's baseline.
   mean. A window with no change is one segment.
 - **A constant baseline** takes σ = 10⁻⁹·max(1, |μ|), so any departure from it is a change.
 
+### PELT (TL-P5 step 2)
+
+**`pelt/1`** is Killick, Fearnhead and Eckley's pruned exact search. It finds the segmentation
+that minimises the total cost of its segments plus β per change, exactly.
+
+- **Cost** is L2, from prefix sums of values centred on the window's mean, so the subtraction
+  in `Σx² − (Σx)²/n` does not cancel the answer away.
+- **Penalty** is `β = penalty · σ̂²`. σ̂ is the median absolute first difference over
+  0.6745·√2, a noise scale a change in level hardly moves. BIC's `2σ² ln n` would need `ln`, so
+  the multiplier is a parameter instead, recorded in the recipe. The default is 10, BIC's value
+  near n = 100.
+- **`min_size`** (default 2) is the shortest segment.
+- **Ties** go to the earliest candidate.
+- **Output:** one `x.tel/segment` per regime, with its mean as `level`.
+
+**A pruning bug found and fixed before it shipped.** With a minimum segment length, the pruning
+theorem holds only once the candidate that beat another is itself admissible, `min_size` samples
+later.
+
+- **How it was found:** the first version pruned at once. A test comparing it with a brute-force
+  search over every segmentation found a series it got wrong.
+- **The fix:** a candidate pruned at `t` is kept until `t + min_size`.
+- **Now tested:** the brute force agrees on 600 series, 200 pseudo-random ones at minimum lengths
+  1, 2 and 3.
+
+### Robust z (TL-P5 step 3)
+
+**`mad/1`** is Iglewicz and Hoaglin's modified z-score, `0.6745 · (x − median) / MAD`, against a
+declared baseline window of the same series and instrument.
+
+- **The baseline is in the recipe** (`baseline=from-to`), because a score means nothing
+  without what it was scored against.
+- **Threshold:** `|z|` above `threshold` is anomalous. The default is 3.5, theirs.
+- **A run is one anomaly.** Consecutive anomalous samples with one direction make one
+  `x.tel/anomaly`, `[its first sample, the next sample)`. It carries the run's largest `|z|` as
+  `score`, and `up` or `down` as `direction`. It is `derived` and grounded on its series.
+- **When the MAD is zero:**
+  - If more than half the baseline is one value, the scale falls back to `1.2533 ×` the mean
+    absolute deviation, as Iglewicz and Hoaglin do.
+  - A baseline with no spread at all takes `10⁻⁹·max(1, |median|)`, so any departure from a
+    constant is anomalous.
+- An empty baseline scores nothing.
+
 ---
 
 ## 1.16.0 — 2026-11-16
