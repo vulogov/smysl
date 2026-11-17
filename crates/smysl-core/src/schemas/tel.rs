@@ -575,6 +575,138 @@ fn instrument_reference(unit: &UnitCore) -> Option<String> {
     Some(format!("{INSTRUMENT_REF}{}", payload_str(unit, "tel:key")?))
 }
 
+/// What an `x.tel/window` payload says (§4.1), read from its CBOR.
+///
+/// Read directly rather than through the surface payload model, which has no byte string: a
+/// window's `digest` is `bytes32`, so a window payload has no surface form (§9, TL-P4). Fields
+/// this reader does not know are skipped, as rule X asks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WindowFields {
+    pub series: Option<String>,
+    pub instrument: Option<String>,
+    pub from_ms: Option<u64>,
+    pub to_ms: Option<u64>,
+    pub recipe: Option<String>,
+    pub basis: Option<String>,
+    pub count: Option<u64>,
+    pub digest: Option<[u8; 32]>,
+    /// `qs`, `q` or `alpha` is present: the window carries an approximate field (§9.3).
+    pub approximate: bool,
+}
+
+/// Read a window payload. `Err` names what is malformed.
+pub fn window_fields(payload: &[u8]) -> Result<WindowFields, String> {
+    use crate::cbor::major;
+    use crate::cbor::reader::Dec;
+    let mut d = Dec::new(payload);
+    let n = d.map_head().map_err(|e| format!("not a map: {e}"))?;
+    let mut w = WindowFields::default();
+    for _ in 0..n {
+        let key = d
+            .text()
+            .map_err(|e| format!("a key that is not text: {e}"))?;
+        let what = |e: crate::error::CodecError| format!("`{key}`: {e}");
+        match key {
+            "tel:series" => w.series = Some(d.text().map_err(what)?.to_string()),
+            "tel:instrument" => w.instrument = Some(d.text().map_err(what)?.to_string()),
+            "tel:recipe" => w.recipe = Some(d.text().map_err(what)?.to_string()),
+            "tel:basis" => w.basis = Some(d.text().map_err(what)?.to_string()),
+            "tel:from_ms" => w.from_ms = Some(d.uint().map_err(what)?),
+            "tel:to_ms" => w.to_ms = Some(d.uint().map_err(what)?),
+            "tel:count" => w.count = Some(d.uint().map_err(what)?),
+            "tel:digest" => {
+                if d.peek_major().map_err(what)? != major::BYTES {
+                    return Err("`tel:digest` is not a byte string".into());
+                }
+                let b = d.bytes().map_err(what)?;
+                w.digest = Some(
+                    b.try_into()
+                        .map_err(|_| format!("`tel:digest` is {} bytes, not 32", b.len()))?,
+                );
+            }
+            "tel:qs" | "tel:q" | "tel:alpha" => {
+                w.approximate = true;
+                d.skip_item().map_err(what)?;
+            }
+            _ => {
+                d.skip_item().map_err(what)?;
+            }
+        }
+    }
+    if !d.is_done() {
+        return Err("bytes after the map".into());
+    }
+    Ok(w)
+}
+
+/// Rule TW (§9.4): what a window's status and attestations must be, given its basis and fields.
+///
+/// | basis | fields | status | attestation |
+/// |---|---|---|---|
+/// | `substrate` | exact only | `measured` | `Op::Imported`, `Rung::Computed` |
+/// | `substrate` | any approximate | `derived` | `Op::Transformed`, `Rung::Computed` |
+/// | `platform` | — (no `digest`) | `cited` | `Op::Imported`, `Rung::Document` |
+///
+/// `None` for a payload without a known basis, which is a violation of its own.
+pub fn rule_tw(w: &WindowFields) -> Option<(Status, crate::Op, crate::Rung)> {
+    use crate::{Op, Rung};
+    match (w.basis.as_deref()?, w.approximate) {
+        ("substrate", false) => Some((Status::Measured, Op::Imported, Rung::Computed)),
+        ("substrate", true) => Some((Status::Derived, Op::Transformed, Rung::Computed)),
+        ("platform", _) => Some((Status::Cited, Op::Imported, Rung::Document)),
+        _ => None,
+    }
+}
+
+/// How a window unit, with these attestations, breaks rule TW (`SMY-E603`); empty when it does
+/// not. Not a window, nothing.
+pub fn rule_tw_violations(unit: &UnitCore, attestations: &[crate::Attestation]) -> Vec<String> {
+    if unit.schema.as_str() != WINDOW {
+        return Vec::new();
+    }
+    let Some(payload) = unit.payload.as_deref() else {
+        return vec!["it has no payload".into()];
+    };
+    let w = match window_fields(payload) {
+        Ok(w) => w,
+        Err(e) => return vec![format!("its payload is not a window's: {e}")],
+    };
+    let Some((status, op, rung)) = rule_tw(&w) else {
+        return vec![format!(
+            "its basis is {}, not substrate or platform",
+            w.basis.as_deref().unwrap_or("absent")
+        )];
+    };
+    let mut out = Vec::new();
+    let basis = w.basis.as_deref().unwrap_or("");
+    let kind = if w.approximate {
+        "approximate"
+    } else {
+        "exact"
+    };
+    if unit.status != status {
+        out.push(format!(
+            "a {kind} window of basis {basis} is {}, not {}",
+            status.as_str(),
+            unit.status.as_str()
+        ));
+    }
+    match (basis, w.digest.is_some()) {
+        ("substrate", false) => out.push("a substrate window has no digest".into()),
+        ("platform", true) => out.push("a platform window carries a digest".into()),
+        _ => {}
+    }
+    for a in attestations {
+        if a.op != op || a.rung != rung {
+            out.push(format!(
+                "attested {:?} at {:?} by {}; rule TW asks {op:?} at {rung:?}",
+                a.op, a.rung, a.agent
+            ));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -847,6 +847,46 @@ overflow, so it gives the same result either way. `tel_otlp`'s fuzz target now m
 exact and sketched windows over everything it records, and requires one uid for one window
 materialised twice.
 
+### Rule TW and the `tel-evidence` pass (TL-P4 step 3)
+
+**A window payload is read from its CBOR.** `smysl_core::schemas::tel::window_fields` reads it,
+because the surface payload model has no byte string for the digest. Fields it does not know are
+skipped, under rule X.
+
+**Rule TW, in one place.** `rule_tw` maps a window's basis and fields to the status, op and rung
+§9.4 requires:
+
+| Window | Status | Op | Rung | Digest |
+|---|---|---|---|---|
+| exact, from the substrate | `measured` | imported | computed | required |
+| sketched, from the substrate | `derived` | transformed | computed | required |
+| from a platform | `cited` | imported | document | absent |
+
+`rule_tw_violations` says how a unit and its attestations break it. The producer will attest by
+the same function, so the two cannot drift.
+
+**`check`** raises:
+
+- `SMY-E603` for each window that breaks rule TW. The message says what the window is and
+  what it should be.
+- `SMY-W614` for windows of one key with different digests. Each is true of its own samples,
+  so this is a report, not a contention.
+
+**`smysl_tel::evidence::verify`** is the `tel-evidence` pass (§9.5). It takes each substrate
+window and either reports why it cannot recompute it, or recomputes it.
+
+- **It cannot:** if no chunk of the window is held, or a span was recorded as evicted, it
+  reports `SMY-W605` and nothing else. Status does not depend on the substrate being present.
+- **It can:** the window is recomputed by its recipe, exact or sketched, with α and ranks
+  read back from the recipe. If the result is another unit, it reports `SMY-E604` and names the
+  fields that differ.
+- **It skips** platform windows and recipes this build does not know.
+
+`SMY-E603`, `SMY-E604` and `SMY-W605` are registered, bringing the registry to 169 codes.
+`tests/tel_window_check.rs` runs `check` on materialised windows attested correctly, attested
+wrongly, and disagreeing after late data. `tel_otlp`'s fuzz target also reads its bytes as a
+window payload.
+
 ---
 
 ## 1.16.0 — 2026-11-16

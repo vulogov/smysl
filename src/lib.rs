@@ -587,8 +587,9 @@ mod tests {
         // `SMY-E607` (step 3), a series or instrument unit breaking the entity-like rule; 162
         // with `SMY-W608` and `SMY-W613` (TL-P2 step 3), raised by `smysl_tel::diff`; 163 with
         // `SMY-W610` (step 5), a profile changed within one snapshot chain; 166 with `SMY-W614`,
-        // `SMY-W615` and `SMY-W616` (TL-P4 step 1), window evidence and samples.
-        assert_eq!(Code::ALL.len(), 166);
+        // `SMY-W615` and `SMY-W616` (TL-P4 step 1), window evidence and samples; 169 with
+        // `SMY-E603`, `SMY-E604` and `SMY-W605` (step 3), rule TW and recomputation.
+        assert_eq!(Code::ALL.len(), 169);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

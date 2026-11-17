@@ -515,6 +515,9 @@ registry! {
     // registered; the rest arrive with what raises them.
     Telemetry => {
         E602 = "SMY-E602", Error, "A non-canonical dec: not two shortest integers, a trailing-zero mantissa, zero with an exponent, out of range, or -2^64";
+        E603 = "SMY-E603", Error, "A window unit's status or attestation is not the one rule TW gives its basis and fields";
+        E604 = "SMY-E604", Error, "Window evidence recomputed from the substrate does not match the unit";
+        W605 = "SMY-W605", Warn,  "Window evidence refers to samples the substrate does not hold (evicted or never received): not re-derivable";
         E607 = "SMY-E607", Error, "A series or instrument unit carries what its identity forbids: time, grounds, or another source";
         W608 = "SMY-W608", Warn,  "A declared keyed array could not be keyed (missing, non-scalar or repeated key); diffed as one json leaf";
         W610 = "SMY-W610", Warn,  "The profile changed between two snapshots of one manifest chain; the boundary is reported, not diffed";
@@ -1053,9 +1056,11 @@ mod tests {
     /// profile.
     /// 166 with `SMY-W614`, `SMY-W615` and `SMY-W616` in TL-P4 step 1: windows of one key that
     /// disagree, two samples at one instant, and an integer sum outside `dec`'s range.
+    /// 169 with `SMY-E603`, `SMY-E604` and `SMY-W605` in TL-P4 step 3: rule TW, and window
+    /// evidence recomputed from the substrate or found without it.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 166);
+        assert_eq!(Code::ALL.len(), 169);
     }
 
     #[test]

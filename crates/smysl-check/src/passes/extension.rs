@@ -144,6 +144,7 @@ pub fn run(
 
     reserved(store, report);
     entity_like(store, report);
+    windows(store, report);
 
     // `SMY-W409` - an enumeration *code* this build does not know, which is W014's argument
     // one level down. 1.9 opened four enumerations so that an unrecognised code no longer
@@ -311,6 +312,69 @@ fn entity_like(store: &(impl StoreRead + ?Sized), report: &mut Report) {
                         .to_string(),
                 ),
         );
+    }
+}
+
+/// SMYSL-3's window evidence (TL-P4): rule TW per window, and the windows of one key.
+///
+/// - `SMY-E603`: a window whose status or attestation is not the one rule TW gives its basis
+///   and fields (§9.4). The rule is `smysl_core::schemas::tel::rule_tw_violations`, which the
+///   producer attests by, so the two cannot drift.
+/// - `SMY-W614`: several windows of one window key with different digests (§9.2). Each is true
+///   of its own sample set, so this is a report, not a contention.
+///
+/// Recomputing a window against the substrate (`SMY-E604`, `SMY-W605`) needs the substrate,
+/// which a store does not hold; that is `smysl_tel::evidence::verify`'s, and `tel check`'s.
+fn windows(store: &(impl StoreRead + ?Sized), report: &mut Report) {
+    use smysl_core::schemas::tel;
+    type Key = (String, String, u64, u64, String);
+    let mut by_key: std::collections::BTreeMap<Key, BTreeSet<[u8; 32]>> =
+        std::collections::BTreeMap::new();
+    for (uid, unit) in store.units() {
+        if unit.core.schema.as_str() != tel::WINDOW {
+            continue;
+        }
+        let atts: Vec<smysl_core::Attestation> = unit.attestations.iter().cloned().collect();
+        let broken = tel::rule_tw_violations(&unit.core, &atts);
+        if !broken.is_empty() {
+            report.push(
+                Diagnostic::on(Code::E603, *uid)
+                    .with_message(format!("a window breaks rule TW: {}", broken.join("; ")))
+                    .with_suggestion(
+                        "exact evidence from the substrate is measured (imported, computed); \
+                         sketched is derived (transformed, computed); a platform's aggregate is \
+                         cited (imported, document) and has no digest"
+                            .to_string(),
+                    ),
+            );
+        }
+        let Some(w) = unit
+            .core
+            .payload
+            .as_deref()
+            .and_then(|p| tel::window_fields(p).ok())
+        else {
+            continue;
+        };
+        if let (Some(s), Some(i), Some(f), Some(t), Some(r), Some(d)) = (
+            w.series,
+            w.instrument,
+            w.from_ms,
+            w.to_ms,
+            w.recipe,
+            w.digest,
+        ) {
+            by_key.entry((s, i, f, t, r)).or_default().insert(d);
+        }
+    }
+    for ((series, _, from, to, recipe), digests) in by_key {
+        if digests.len() > 1 {
+            report.push(Diagnostic::new(Code::W614).with_message(format!(
+                "{} windows of series {series} over [{from}, {to}) by {recipe} disagree: \
+                 each describes a different sample set",
+                digests.len()
+            )));
+        }
     }
 }
 

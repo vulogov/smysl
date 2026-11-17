@@ -9,6 +9,9 @@
 //! Then every series recorded is materialised as window evidence (TL-P4), exact and sketched,
 //! over all time: the summaries, the exact sum and mean, and the sketch see whatever values an
 //! export can carry. A window is materialised twice and must have one uid.
+//!
+//! The bytes are also read as a window payload, as `check`'s rule TW pass reads one from a
+//! store it did not write.
 
 #![no_main]
 use libfuzzer_sys::fuzz_target;
@@ -57,6 +60,10 @@ fn twice(e: &Export) {
 }
 
 fuzz_target!(|data: &[u8]| {
+    // A window payload as `check` reads it from a store (TL-P4 step 3): read or refused.
+    if let Ok(w) = smysl_core::schemas::tel::window_fields(data) {
+        let _ = smysl_core::schemas::tel::rule_tw(&w);
+    }
     if let Ok(e) = otlp::read_proto(data) {
         twice(&e);
     }

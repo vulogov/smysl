@@ -684,6 +684,132 @@ pub fn materialise_sketched<B: Backend>(
     })
 }
 
+/// The `tel-evidence` pass (§9.5): every window of the substrate recomputed from it.
+///
+/// - `SMY-W605` when its samples are not all here: no chunk of the window, or a span of it
+///   recorded as evicted. Nothing else is said: a window's status does not depend on the
+///   substrate being present (rule TL's half of the bargain).
+/// - `SMY-E604` when they are, and the window recomputed by its recipe is another unit. The
+///   message names the fields that differ.
+///
+/// A platform window has nothing here to recompute from, and a recipe this build does not know
+/// is not recomputed; neither is reported.
+pub fn verify<'a, B: Backend>(
+    windows: impl IntoIterator<Item = &'a UnitCore>,
+    substrate: &Substrate<B>,
+) -> Vec<smysl_core::Diagnostic> {
+    use smysl_core::{Code, Diagnostic};
+    let mut out = Vec::new();
+    for unit in windows {
+        if unit.schema.as_str() != tel::WINDOW {
+            continue;
+        }
+        let uid = canonical_uid(unit);
+        let Some(w) = unit
+            .payload
+            .as_deref()
+            .and_then(|p| tel::window_fields(p).ok())
+        else {
+            continue;
+        };
+        if w.basis.as_deref() != Some("substrate") {
+            continue;
+        }
+        let parsed = (
+            w.series.as_deref().and_then(|s| s.parse::<Uid>().ok()),
+            w.instrument.as_deref().and_then(|s| s.parse::<Uid>().ok()),
+            w.from_ms,
+            w.to_ms,
+            w.recipe.as_deref(),
+        );
+        let (Some(series), Some(inst), Some(from), Some(to), Some(recipe)) = parsed else {
+            continue;
+        };
+        let absent = |why: String| Diagnostic::on(Code::W605, uid).with_message(why);
+        let coverage = match substrate.present(&series, &inst, from, to) {
+            Ok(c) => c,
+            Err(e) => {
+                out.push(absent(format!("the substrate could not be read: {e}")));
+                continue;
+            }
+        };
+        if coverage.is_absent() {
+            out.push(absent(format!(
+                "the substrate holds no sample of this window [{from}, {to}): not re-derivable"
+            )));
+            continue;
+        }
+        if !coverage.evicted.is_empty() {
+            out.push(absent(format!(
+                "{} span(s) of this window [{from}, {to}) were evicted: not re-derivable",
+                coverage.evicted.len()
+            )));
+            continue;
+        }
+        let again = if recipe == RECIPE_EXACT {
+            materialise(substrate, &series, &inst, from, to)
+        } else if let Some((alpha, qs)) = parse_sketch_recipe(recipe) {
+            materialise_sketched(substrate, &series, &inst, from, to, alpha, &qs)
+        } else {
+            continue;
+        };
+        let again = match again {
+            Ok(m) => m,
+            Err(e) => {
+                out.push(
+                    Diagnostic::on(Code::E604, uid)
+                        .with_message(format!("the window could not be recomputed: {e}")),
+                );
+                continue;
+            }
+        };
+        if canonical_uid(&again.unit) == uid {
+            continue;
+        }
+        let now = again
+            .unit
+            .payload
+            .as_deref()
+            .and_then(|p| tel::window_fields(p).ok())
+            .unwrap_or_default();
+        let mut differ = Vec::new();
+        if now.digest != w.digest {
+            differ.push("digest");
+        }
+        if now.count != w.count {
+            differ.push("count");
+        }
+        if differ.is_empty() {
+            differ.push("a summary field");
+        }
+        out.push(Diagnostic::on(Code::E604, uid).with_message(format!(
+            "recomputed from the substrate, the window's {} differ(s)",
+            differ.join(", ")
+        )));
+    }
+    out
+}
+
+/// A sketch recipe's `alpha` and `qs`, as [`sketch_recipe`] writes them.
+pub fn parse_sketch_recipe(recipe: &str) -> Option<(Decimal, Vec<Decimal>)> {
+    let params = recipe.strip_prefix(RECIPE_SKETCH)?.strip_prefix('?')?;
+    let (mut alpha, mut qs) = (None, None);
+    for kv in params.split('&') {
+        match kv.split_once('=')? {
+            ("alpha", a) => alpha = Some(Decimal::parse_token(a).ok()?),
+            ("qs", q) => {
+                qs = Some(
+                    q.split(',')
+                        .map(|x| Decimal::parse_token(x).ok())
+                        .collect::<Option<Vec<_>>>()?,
+                )
+            }
+            _ => return None,
+        }
+    }
+    Some((alpha?, qs?))
+}
+
 /// The uid a window unit has, for callers that only need to compare.
 pub fn window_uid(w: &Window) -> Uid {
     canonical_uid(&w.unit())
@@ -887,5 +1013,48 @@ mod tests {
             materialise_sketched(&sub, &series, &inst, 0, 1, d("0.9"), &qs),
             Err(EvidenceError::Sketch(_))
         ));
+    }
+
+    #[test]
+    fn verify_recomputes_what_it_can_and_says_what_it_cannot() {
+        use smysl_core::Code;
+        let mut sub = Substrate::new(MemBackend::default());
+        let (series, inst) = (Uid::from_bytes([1; 32]), Uid::from_bytes([2; 32]));
+        let info = SeriesInfo {
+            scheme: "prom".into(),
+            key: "up".into(),
+            class: "gauge".into(),
+        };
+        sub.add(&series, &inst, &info, &[v(1_000, "1"), v(2_000, "3")])
+            .unwrap();
+        let qs: Vec<Decimal> = DEFAULT_QS.iter().map(|q| d(q)).collect();
+        let exact = materialise(&sub, &series, &inst, 0, 10_000).unwrap().unit;
+        let sketched = materialise_sketched(&sub, &series, &inst, 0, 10_000, d("0.01"), &qs)
+            .unwrap()
+            .unit;
+        assert_eq!(
+            parse_sketch_recipe(&sketch_recipe(&d("0.01"), &qs)),
+            Some((d("0.01"), qs.clone()))
+        );
+        assert!(
+            verify([&exact, &sketched], &sub).is_empty(),
+            "both recompute"
+        );
+
+        // Late data: the old window is still true of its samples, but no longer what the
+        // substrate gives.
+        sub.add(&series, &inst, &info, &[v(3_000, "5")]).unwrap();
+        let r = verify([&exact], &sub);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].code, Code::E604);
+        assert!(r[0].message.contains("digest, count"), "{}", r[0].message);
+
+        // No samples at all: not re-derivable, and nothing else.
+        let empty = Substrate::new(MemBackend::default());
+        let r = verify([&exact, &sketched], &empty);
+        assert_eq!(
+            r.iter().map(|d| d.code).collect::<Vec<_>>(),
+            [Code::W605, Code::W605]
+        );
     }
 }
