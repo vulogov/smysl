@@ -503,6 +503,11 @@ The crate is on the purity list with `smysl-tel`'s PRNG ban, and the purity gate
 13 crates. The backend contract lives in `tests/` because it needs a directory, and the gate
 keeps `std::env` out of the crate's own source.
 
+CI's fuzz run found a crash in the chunk decoder after TL-P3 was pushed. A corrupt chunk whose
+flags run was near 2⁶⁴ overflowed `len + run`. The run is now checked as `run > n − len`, and
+the input is a regression test. The other accumulators are `i128` sums bounded by the chunk's
+length, and cannot overflow.
+
 ### `prom/1`, and what a scrape establishes (TL-P3 step 2)
 
 **The reader** (`smysl_tel::readers::prom`) reads one scrape, in Prometheus text 0.0.4 or

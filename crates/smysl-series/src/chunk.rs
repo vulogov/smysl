@@ -209,7 +209,8 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Sample>, Error> {
     while fl.len() < n {
         let f = r.byte()?;
         let run = usize::try_from(r.uint()?).map_err(|_| corrupt("a run beyond usize"))?;
-        if run == 0 || fl.len() + run > n {
+        // `run > n - len`, not `len + run > n`: a corrupt run near 2^64 overflows the sum.
+        if run == 0 || run > n - fl.len() {
             return Err(corrupt("a flags run that does not fit"));
         }
         fl.extend(std::iter::repeat_n(f, run));
@@ -381,6 +382,14 @@ mod tests {
         let mut v2 = good;
         v2[0] = 2;
         assert!(decode(&v2).is_err());
+
+        // CI's `series_chunk` fuzz run (TL-P3): a flags run near 2^64 overflowed `len + run`.
+        let crash = [
+            0x01, 0x04, 0xfd, 0x00, 0x0a, 0x72, 0x38, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0xfe, 0xfe, 0xf8, 0x0a, 0x01, 0x01, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0x01, 0x72, 0x01, 0x01, 0x01,
+        ];
+        assert!(decode(&crash).is_err());
     }
 
     #[test]
