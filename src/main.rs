@@ -2520,7 +2520,15 @@ fn cli() -> Command {
                     Arg::new("action")
                         .required(true)
                         .value_name("ACTION")
-                        .value_parser(["read", "at", "window", "check", "detect", "profile"])
+                        .value_parser([
+                            "read",
+                            "at",
+                            "window",
+                            "check",
+                            "detect",
+                            "investigate",
+                            "profile",
+                        ])
                         .help(
                             "read exports with a reader into a library, the value in force at \
                              an instant, materialise window evidence, recompute it, run a \
@@ -2535,7 +2543,8 @@ fn cli() -> Command {
                         .help(
                             "`read READER FILE...` (k8s/1, zabbix/1, prom/1, otlp/1, \
                              otlp-json/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
-                             `detect RECIPE`; `profile check FILE|NAME`",
+                             `detect RECIPE`; `investigate open|consult|hypothesis|probe|action|\
+                             close|show …`; `profile check FILE|NAME`",
                         ),
                 )
                 .arg(
@@ -2612,6 +2621,67 @@ fn cli() -> Command {
                         .long("trigger")
                         .value_name("UID")
                         .help("detect baro/1: the unit the ranking answers, grounding each hypothesis"),
+                )
+                .arg(
+                    Arg::new("as")
+                        .long("as")
+                        .value_name("AGENT")
+                        .help("investigate: who did it, `human:<handle>` or a model agent"),
+                )
+                .arg(
+                    Arg::new("rotation")
+                        .long("rotation")
+                        .value_name("NAME")
+                        .help("investigate open: the on-call rotation it belongs to"),
+                )
+                .arg(
+                    Arg::new("explains")
+                        .long("explains")
+                        .value_name("UID")
+                        .action(ArgAction::Append)
+                        .help("investigate hypothesis: a unit it explains; repeatable"),
+                )
+                .arg(
+                    Arg::new("target")
+                        .long("target")
+                        .value_name("UID")
+                        .help(
+                            "investigate hypothesis: what it is about, usually a series \
+                             (default: the first --explains)",
+                        ),
+                )
+                .arg(
+                    Arg::new("ground")
+                        .long("ground")
+                        .value_name("UID")
+                        .action(ArgAction::Append)
+                        .help("investigate hypothesis: evidence it rests on; repeatable"),
+                )
+                .arg(
+                    Arg::new("quote")
+                        .long("quote")
+                        .value_name("UID#FIELD=VALUE")
+                        .action(ArgAction::Append)
+                        .help("investigate hypothesis: a numeric quote (rule TQ); repeatable"),
+                )
+                .arg(
+                    Arg::new("output")
+                        .long("output")
+                        .value_name("TID")
+                        .help("investigate probe|action: the part holding its redacted output"),
+                )
+                .arg(
+                    Arg::new("confirmed-by")
+                        .long("confirmed-by")
+                        .value_name("HANDLE")
+                        .help("investigate action: who confirmed an unsafe command"),
+                )
+                .arg(
+                    Arg::new("lookback")
+                        .long("lookback")
+                        .value_name("MS")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("investigate show: how far before the opening to look for unexplored evidence (default 1 h)"),
                 )
                 .arg(
                     Arg::new("trends")
@@ -13555,6 +13625,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "window" => tel_window(m, global, &args),
         "check" => tel_check(m, global),
         "detect" => tel_detect(m, global, &args),
+        "investigate" => tel_investigate(m, global, &args),
         "read" => tel_read(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
@@ -15084,6 +15155,375 @@ fn tel_detect(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode
         stage_root.join(smysl::stage::PATH).display()
     );
     ExitCode::Staged
+}
+
+/// Attests everything of one ledger operation the same way: who did it, by what op, at what
+/// rung (RFC SMYSL-3 §11.3, §24).
+#[cfg(feature = "tel")]
+struct LedgerAttest {
+    agent: AgentId,
+    op: smysl::Op,
+    rung: smysl::Rung,
+    now: smysl::Hlc,
+}
+
+#[cfg(feature = "tel")]
+impl smysl::Attesting for LedgerAttest {
+    fn for_unit(&self, uid: Uid) -> smysl::Attestation {
+        smysl::Attestation::new(
+            uid,
+            self.agent.clone(),
+            self.op,
+            self.rung,
+            self.now.clone(),
+        )
+    }
+}
+
+/// `smysl tel investigate ACTION … -s LIB --as AGENT --at MS`: the ledger operations (RFC SMYSL-3
+/// §11, §23), for people, scripts and OKO.
+///
+/// | action | writes |
+/// |---|---|
+/// | `open QUESTION [--rotation R]` | an `x.tel/investigation` |
+/// | `consult INV UNIT…` | an `x.tel/consulted` edge per unit looked at |
+/// | `hypothesis INV CLAIM [--explains U]… [--ground U]… [--quote Q]…` | an `x.tel/hypothesis`, `during` the investigation, `explains` each target |
+/// | `probe INV WHAT [--output TID]` | an `x.tel/probe`, `during` it |
+/// | `action INV WHAT [--confirmed-by H] [--output TID]` | an `x.tel/action`, `during` it |
+/// | `close INV` | the closed investigation, superseding the open one |
+/// | `show INV [--lookback MS]` | nothing: the report (§11.2, §22.2) |
+///
+/// A ledger is written as it happens, so these commit at once, attested by `--as`. A probe or an
+/// action is attested as imported at the computed rung, because the tool that ran it says what
+/// it printed (§11.3); everything else a person or an agent writes is authored, at the document
+/// rung.
+#[cfg(feature = "tel")]
+fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::tel::investigate as inv;
+    use smysl::text::library::Library;
+
+    let Some((action, rest)) = args.split_first() else {
+        eprintln!("smysl tel investigate: open|consult|hypothesis|probe|action|close|show");
+        return ExitCode::Usage;
+    };
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let uid_arg = |s: &str| -> Result<Uid, ExitCode> {
+        s.parse::<Uid>().map_err(|_| {
+            eprintln!("smysl tel investigate: `{s}` is not a unit uid");
+            ExitCode::Usage
+        })
+    };
+    let uids_of = |name: &str| -> Result<Vec<Uid>, ExitCode> {
+        m.get_many::<String>(name)
+            .into_iter()
+            .flatten()
+            .map(|s| uid_arg(s))
+            .collect()
+    };
+
+    if action.as_str() == "show" {
+        let Some(id) = rest.first() else {
+            eprintln!("smysl tel investigate show: `INV`, the investigation's uid");
+            return ExitCode::Usage;
+        };
+        let id = match uid_arg(id) {
+            Ok(u) => u,
+            Err(c) => return c,
+        };
+        let library = match Library::open(&root) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("smysl tel investigate: {}: {e}", root.display());
+                return ExitCode::Failure;
+            }
+        };
+        let store = library.store();
+        let units: std::collections::BTreeMap<Uid, &smysl::UnitCore> = StoreRead::units(store)
+            .map(|(u, x)| (*u, &x.core))
+            .collect();
+        if !units.contains_key(&id) {
+            eprintln!(
+                "smysl tel investigate: no investigation {} here",
+                id.canonical()
+            );
+            return ExitCode::Failure;
+        }
+        let relations: Vec<&smysl::Relation> = store.relations().collect();
+        let effective = smysl::effective_status(store, smysl::RetractionPolicy::default());
+        let lookback = m.get_one::<u64>("lookback").copied().unwrap_or(3_600_000);
+        let r = inv::report(
+            id,
+            &units,
+            &relations,
+            |u| effective.get(u).unwrap_or(smysl::Status::Unfounded),
+            lookback,
+        );
+        let list = |v: &[Uid]| {
+            if v.is_empty() {
+                "-".to_string()
+            } else {
+                v.iter()
+                    .map(|u| u.canonical())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
+        };
+        println!("investigation {}  {}", id.canonical(), r.question);
+        println!(
+            "opened        {}  closed {}",
+            r.opened_ms,
+            r.closed_ms.map_or("(open)".to_string(), |c| c.to_string())
+        );
+        println!("hypotheses    {}", r.hypotheses.len());
+        for (h, status, failed) in &r.hypotheses {
+            let gist = units.get(h).map_or("", |u| u.gist.as_str());
+            println!("  {}  {}  {gist}", h.canonical(), status.as_str());
+            for (q, why) in failed {
+                println!("    SMY-W606 {q}: {why}");
+            }
+        }
+        println!("probes        {}  {}", r.probes.len(), list(&r.probes));
+        println!("actions       {}  {}", r.actions.len(), list(&r.actions));
+        println!("consulted     {}", r.consulted.len());
+        println!("unused        {}  {}", r.unused.len(), list(&r.unused));
+        println!(
+            "unexplored    {}  {}  (from {} ms before the opening)",
+            r.unexplored.len(),
+            list(&r.unexplored),
+            r.lookback_ms
+        );
+        let agent = AgentId::new("tool:smysl-tel").expect("a valid literal");
+        let rivals = smysl::schemas::tel::rival_explanations(
+            units.iter().map(|(u, c)| (u, *c)),
+            relations.iter().copied(),
+            |u| effective.get(u).unwrap_or(smysl::Status::Unfounded),
+            |u| units.get(u).map(|c| c.payload.clone().unwrap_or_default()),
+            smysl::Hlc::new(0, 0, agent),
+        );
+        let ours: std::collections::BTreeSet<Uid> = r.hypotheses.iter().map(|h| h.0).collect();
+        let mine: Vec<_> = rivals
+            .iter()
+            .filter(|c| c.positions.iter().any(|p| ours.contains(p)))
+            .collect();
+        println!("rivals        {}", mine.len());
+        for c in mine {
+            println!(
+                "  {}  over {}  ({:?})",
+                c.id.as_str(),
+                c.over.canonical(),
+                StoreRead::contention_status(store, c)
+            );
+        }
+        return ExitCode::Success;
+    }
+
+    let (Some(agent), Some(&at)) = (m.get_one::<String>("as"), m.get_one::<u64>("at")) else {
+        eprintln!(
+            "smysl tel investigate {action}: --as AGENT and --at MS are required: who did it,"
+        );
+        eprintln!("  and when; a ledger is nothing if it does not say");
+        return ExitCode::Usage;
+    };
+    let agent = match AgentId::new(agent) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl tel investigate: --as: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let investigation = |rest: &[&String]| -> Result<Uid, ExitCode> {
+        match rest.first() {
+            Some(s) => uid_arg(s),
+            None => {
+                eprintln!("smysl tel investigate {action}: `INV`, the investigation's uid");
+                Err(ExitCode::Usage)
+            }
+        }
+    };
+    let text_arg = |i: usize, what: &str| -> Result<String, ExitCode> {
+        match rest.get(i) {
+            Some(s) if !s.is_empty() => Ok(s.to_string()),
+            _ => {
+                eprintln!("smysl tel investigate {action}: {what} is required");
+                Err(ExitCode::Usage)
+            }
+        }
+    };
+    let mut library = match Library::create(&root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel investigate: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let (units, relations, op, rung) = match action.as_str() {
+        "open" => {
+            let q = match text_arg(0, "QUESTION") {
+                Ok(q) => q,
+                Err(c) => return c,
+            };
+            let u = inv::open(&q, at, m.get_one::<String>("rotation").map(String::as_str));
+            (
+                vec![u],
+                Vec::new(),
+                smysl::Op::Authored,
+                smysl::Rung::Document,
+            )
+        }
+        "consult" => {
+            let i = match investigation(rest) {
+                Ok(i) => i,
+                Err(c) => return c,
+            };
+            if rest.len() < 2 {
+                eprintln!("smysl tel investigate consult: `INV UNIT…`, at least one unit");
+                return ExitCode::Usage;
+            }
+            let mut rels = Vec::new();
+            for u in &rest[1..] {
+                match uid_arg(u) {
+                    Ok(u) => rels.push(inv::consulted(i, u)),
+                    Err(c) => return c,
+                }
+            }
+            (Vec::new(), rels, smysl::Op::Authored, smysl::Rung::Document)
+        }
+        "hypothesis" => {
+            let (i, claim) = match (investigation(rest), text_arg(1, "CLAIM")) {
+                (Ok(i), Ok(c)) => (i, c),
+                (Err(c), _) | (_, Err(c)) => return c,
+            };
+            let (explains, grounds) = match (uids_of("explains"), uids_of("ground")) {
+                (Ok(e), Ok(g)) => (e, g),
+                (Err(c), _) | (_, Err(c)) => return c,
+            };
+            let quotes: Vec<String> = m
+                .get_many::<String>("quote")
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect();
+            for q in &quotes {
+                if let Err(e) = smysl::schemas::tel::parse_quote(q) {
+                    eprintln!("smysl tel investigate hypothesis: --quote {e}");
+                    return ExitCode::Usage;
+                }
+            }
+            let target = match m.get_one::<String>("target").map(|t| uid_arg(t)) {
+                Some(Ok(t)) => Some(t),
+                Some(Err(c)) => return c,
+                None => explains.first().copied(),
+            };
+            let h = inv::hypothesis(&claim, &quotes, target, grounds);
+            let hu = smysl::canonical_uid(&h);
+            let mut rels = vec![inv::during(hu, i)];
+            rels.extend(explains.iter().map(|t| inv::explains(hu, *t)));
+            (vec![h], rels, smysl::Op::Authored, smysl::Rung::Document)
+        }
+        "probe" | "action" => {
+            let (i, what) = match (investigation(rest), text_arg(1, "WHAT")) {
+                (Ok(i), Ok(w)) => (i, w),
+                (Err(c), _) | (_, Err(c)) => return c,
+            };
+            let output = m.get_one::<String>("output").map(String::as_str);
+            let u = if action.as_str() == "probe" {
+                inv::probe(&what, at, output)
+            } else {
+                inv::action(
+                    &what,
+                    at,
+                    m.get_one::<String>("confirmed-by").map(String::as_str),
+                    output,
+                )
+            };
+            let rel = inv::during(smysl::canonical_uid(&u), i);
+            (
+                vec![u],
+                vec![rel],
+                smysl::Op::Imported,
+                smysl::Rung::Computed,
+            )
+        }
+        "close" => {
+            let i = match investigation(rest) {
+                Ok(i) => i,
+                Err(c) => return c,
+            };
+            let Some(open) = StoreRead::get(library.store(), &i).map(|u| u.core.clone()) else {
+                eprintln!(
+                    "smysl tel investigate close: no investigation {} here",
+                    i.canonical()
+                );
+                return ExitCode::Failure;
+            };
+            let Some((closed, sup)) = inv::close(&open, at) else {
+                eprintln!(
+                    "smysl tel investigate close: {} is not an investigation",
+                    i.canonical()
+                );
+                return ExitCode::Usage;
+            };
+            (
+                vec![closed],
+                vec![sup],
+                smysl::Op::Authored,
+                smysl::Rung::Document,
+            )
+        }
+        other => {
+            eprintln!(
+                "smysl tel investigate: `{other}` is not an action: open, consult, hypothesis, \
+                 probe, action, close or show"
+            );
+            return ExitCode::Usage;
+        }
+    };
+    let _locks = match smysl::text::lock::acquire_all(&root, &library.shards(), "tel investigate") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel investigate: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    for u in &units {
+        println!(
+            "{:<20} {}  {}",
+            u.schema.as_str(),
+            smysl::canonical_uid(u).canonical(),
+            u.gist
+        );
+    }
+    let (n_units, n_edges) = (units.len(), relations.len());
+    let attest = LedgerAttest {
+        agent: agent.clone(),
+        op,
+        rung,
+        now: smysl::Hlc::new(at, 0, agent),
+    };
+    let staged = smysl::stage::prepare_attested(
+        library.store(),
+        units,
+        relations,
+        std::collections::BTreeMap::new(),
+        vec![smysl::schemas::tel::decl()],
+        &attest,
+    );
+    if staged.has_errors() {
+        eprintln!("smysl tel investigate: the record did not check clean");
+        for d in &staged.report.diagnostics {
+            eprintln!("  {d}");
+        }
+        return ExitCode::Failure;
+    }
+    if let Err(e) = library.append_records(&staged.records()) {
+        eprintln!("smysl tel investigate: {e}");
+        return ExitCode::Failure;
+    }
+    println!("committed {n_units} unit(s), {n_edges} edge(s)");
+    ExitCode::Success
 }
 
 /// `smysl tel check -s LIB`: the library's window evidence, checked (RFC SMYSL-3 §9.2–§9.5).

@@ -5,7 +5,8 @@
 // ═══════════════════════════════════════════════════════════════════════
 //
 // SMYSL-3 is the telemetry RFC. 1.17 builds its format phase, TL-P1, its object snapshots,
-// TL-P2, its series substrate, TL-P3, its window evidence, TL-P4, and its detectors, TL-P5. This part says what exists, so that a reader of the format knows it, and what
+// TL-P2, its series substrate, TL-P3, its window evidence, TL-P4, its detectors, TL-P5, and
+// its investigations, TL-P6. This part says what exists, so that a reader of the format knows it, and what
 // does not. Every terminal block below was produced by the smysl 1.17 binary.
 
 #chapter(number: 38, title: "What 1.17 has of SMYSL-3")
@@ -17,7 +18,7 @@ a 200-host fleet was 6.8 million change units, and all but 6,566 were gauge nois
 outside the log, and units are made for what is *asserted* about them: a configuration change, a
 reset, an anomaly, a hypothesis, an action.
 
-The RFC is delivered in ten phases. 1.17 builds the first five:
+The RFC is delivered in ten phases. 1.17 builds the first six:
 
 - TL-P1, the format;
 - TL-P2, which reads object snapshots: Kubernetes objects and Zabbix hosts and items, and what
@@ -26,6 +27,8 @@ The RFC is delivered in ten phases. 1.17 builds the first five:
   the log, and the few facts about them that are units.
 - TL-P4, window evidence: what a span of samples contained, as a unit anyone can recompute.
 - TL-P5, detectors: regimes, anomalies, episodes and a ranking, each one replayable to the byte.
+- TL-P6, investigations: the ledger an on-call rotation keeps, and the checks that hold its
+  hypotheses to the evidence.
 
 #section("dec: a number that is one value")
 
@@ -392,13 +395,76 @@ an exponential from the platform's maths library, and it draws no randomness. GE
 
 A detector whose bytes differ anywhere does not ship.
 
+#section("Investigations")
+
+An investigation is a ledger:
+
+- the question that was asked, and when;
+- what was looked at;
+- what was proposed, probed and done.
+
+Each operation is a record, written as it happens. `--as` names who did it, a person by handle
+or a model agent, and `--at` says when:
+
+#screen(caption: "$ smysl tel investigate open 'why did requests drop?' --rotation sre-eu -s lib --as human:alice --at 1768557670000")[
+```
+x.tel/investigation  b3:22pvtdrvtq4mhpllu7rqcw3gd2huxnt7cvpjfvlenq3okanje7oq  why did requests drop?
+committed 1 unit(s), 0 edge(s)
+```
+]
+
+`consult INV UNIT…` records each unit looked at. `hypothesis INV CLAIM` proposes an
+explanation:
+
+- `--explains` names what it explains;
+- `--ground` names the evidence it rests on;
+- `--quote` lists each number it quotes, as `<uid>#<field>=<value>`.
+
+*Rule TQ* holds a quote to the evidence. A quote verifies only when the cited unit is among the
+hypothesis's grounds and holds that value, spelt as it holds it. A hypothesis whose quote does
+not verify is at most `speculative`, whoever wrote it. Here a model agent claimed the window's
+maximum was 4000, and it was 40:
+
+#screen(caption: "$ smysl tel investigate show b3:22pvtdrvtq4mhpllu7rqcw3gd2huxnt7cvpjfvlenq3okanje7oq -s lib")[
+```
+investigation b3:22pvtdrvtq4mhpllu7rqcw3gd2huxnt7cvpjfvlenq3okanje7oq  why did requests drop?
+opened        1768557670000  closed (open)
+hypotheses    3
+  b3:jzm73arfdlfutd3mikbo54tijix6nbyfudlklkiixxcdxqtaneeq  inferred  a deploy at 10:00
+  b3:ux5lu7gz4ra2btug355cy72gvqlpd2ywbaqakrrpuohrximxflxa  inferred  the counter reset: a restart
+  b3:6fwg72yj4thjfrnrpafkktbmrlnjwgbddor4kg2c76hchrsvuvpa  speculative  traffic moved to another pod
+    SMY-W606 b3:lecz7w2nblrwjtlnmxawgdocl2mgnsfqqwjp5f2qvlx5ueglmnna#max=4000: the cited unit holds 40, not 4000
+probes        0  -
+actions       0  -
+consulted     1
+unused        0  -
+unexplored    0  -  (from 3600000 ms before the opening)
+rivals        1
+  k/cdhlgou2wwnbrmmjqgznatugrdu  over b3:lecz7w2nblrwjtlnmxawgdocl2mgnsfqqwjp5f2qvlx5ueglmnna  (Open)
+```
+]
+
+The two hypotheses that stand explain the same window, and neither rebuts the other, so they
+are a *rival explanation*. That is a contention like any other: derived from the records,
+named by its content, and resolved by a person. The speculative one is not a rival. The report
+also counts the two failure modes an investigation can be measured by:
+
+- *unused* evidence: looked at, and cited by no hypothesis;
+- *unexplored* evidence: windows and changes about a series a hypothesis targets (`--target`),
+  from shortly before the question was asked, that nobody looked at.
+
+`probe` and `action` record a command that was run, and what it printed, by the part that holds
+it. `close` closes the investigation. `thread --derive timeline` lays the ledger out as a
+timeline (Chapter 18).
+
 #callout(label: "Not yet")[
-  This part covers object snapshots, the series substrate, window evidence and detectors.
-  Investigations, eviction and the rest of `smysl tel` are the RFC's later phases, TL-P6 to
-  TL-P9. So are:
+  This part covers object snapshots, the series substrate, window evidence, detectors and
+  investigations. Instruments and witnesses, eviction, exchange, traces and logs are the RFC's
+  later phases, TL-P7 to TL-P9. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
   - what a deleted object becomes as a unit;
   - exponential-histogram buckets as series;
-  - Zabbix problems and events.
+  - Zabbix problems and events;
+  - the incident dossier as a `dossier` template (`tel investigate show` reports its numbers).
 ]

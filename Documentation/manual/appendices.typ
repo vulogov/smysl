@@ -1111,7 +1111,7 @@ migrate or under `--dry-run`, and 1 when the store does not declare the target r
 #section("tel")
 
 *Read telemetry into a library; the value in force at an instant; window evidence; detectors;
-check a profile.* Pure · TL-P2, TL-P3, TL-P4, TL-P5.
+investigations; check a profile.* Pure · TL-P2 to TL-P6.
 
 `tel read READER FILE...` reads platform exports with one of SMYSL-3's object readers. `k8s/1`
 reads `kubectl get -o json` lists, objects and watch events; `zabbix/1` reads `host.get` and
@@ -1170,12 +1170,32 @@ and an unknown one is refused. The detectors are:
 Every output is `derived`. Without `--yes` the outputs are staged for review (exit 10), and with
 `--yes --at MS` they are committed with their edges.
 
+`tel investigate ACTION` keeps an investigation's ledger. Each operation commits at once,
+attested by `--as` at `--at`.
+
+- `open QUESTION [--rotation R]` writes an `x.tel/investigation`.
+- `consult INV UNIT…` writes an `x.tel/consulted` edge per unit.
+- `hypothesis INV CLAIM` writes an `x.tel/hypothesis`, `during` the investigation. It takes:
+  - `--explains U…`, what it explains;
+  - `--ground U…`, the evidence it rests on;
+  - `--quote Q…`, the numbers it quotes;
+  - `--target U`, what it is about.
+- `probe INV WHAT` and `action INV WHAT [--confirmed-by H]` write an `x.tel/probe` or
+  `x.tel/action`, with `--output TID`.
+- `close INV` writes the closed investigation, superseding the open one.
+- `show INV [--lookback MS]` writes nothing. It prints the report: hypotheses with their
+  effective status and any `SMY-W606`, probes, actions, consulted, unused and unexplored
+  evidence, and rival explanations.
+
+Probes and actions are attested as imported at the computed rung, because a tool ran them. The
+rest are authored at the document rung.
+
 #dtable(
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
     ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect` or `profile`.]),
-    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `profile`: `check` and a profile file or shipped name.]),
+    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `profile`: `check` and a profile file or shipped name.]),
     ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for the object readers; it must be for the reader's scheme.]),
     ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds, and for `prom/1` the scrape instant. Required for `read`: nothing here reads a clock.]),
     ([`--licence`], [`SPDX`], [The manifests' licence. Required for the object readers, as `text add` requires it.]),
@@ -1189,6 +1209,14 @@ Every output is `derived`. Without `--yes` the outputs are staged for review (ex
     ([`--series`], [`SERIES` (repeatable)], [`detect`: a series to run over, as a uid or `<scheme>:<key>`. Required, except for `episode/1`.]),
     ([`--during`], [`FROM-TO`], [`detect`: the window, epoch ms. Required, except for `baro/1`, which takes its window from its `at`.]),
     ([`--trigger`], [`UID`], [`detect` with `baro/1`: the unit the ranking answers, such as an episode or an alert. Each hypothesis is grounded on it.]),
+    ([`--as`], [`AGENT`], [`investigate`: who did it, `human:<handle>` or a model agent such as `model:<name>`. Required, except for `show`.]),
+    ([`--rotation`], [`NAME`], [`investigate open`: the on-call rotation the investigation belongs to.]),
+    ([`--explains`, `--ground`], [`UID` (repeatable)], [`investigate hypothesis`: what it explains, and the evidence it rests on.]),
+    ([`--quote`], [`UID#FIELD=VALUE` (repeatable)], [`investigate hypothesis`: a number it quotes, as rule TQ checks it.]),
+    ([`--target`], [`UID`], [`investigate hypothesis`: what it is about, usually a series. Default: the first `--explains`.]),
+    ([`--output`], [`TID`], [`investigate probe` and `action`: the part holding the redacted output.]),
+    ([`--confirmed-by`], [`HANDLE`], [`investigate action`: who confirmed an unsafe command.]),
+    ([`--lookback`], [`MS`], [`investigate show`: how far before the opening to look for unexplored evidence. Default one hour.]),
     ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing.]),
     ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),
   ),

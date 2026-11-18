@@ -1250,6 +1250,56 @@ refused. The first rule that matches wins:
 A new test derives one from a change, an anomaly, an alert, a probe and an action, plus a series
 that stays out: the five steps come out in time order with their roles.
 
+### `smysl tel investigate`, and the report (TL-P6 step 5)
+
+**`investigate::report`** gathers what one investigation holds and what it missed (§11.2,
+§22.2).
+
+- **Hypotheses `during` it,** each with its effective status after rule TQ and any quotes that
+  failed.
+- **Its probes and actions, and what it consulted.**
+- **Unused evidence:** consulted, and cited by no hypothesis in it, by grounds or by quote.
+- **Unexplored evidence:** windows and changes about a series a hypothesis targets, from
+  `lookback` before the opening to the close, that nobody consulted. The lookback is the
+  caller's, because how long before a question its cause came is not a constant.
+
+Like rule TQ, it is a function of the record set.
+
+**`tel investigate open|consult|hypothesis|probe|action|close|show`** is the ledger, for people,
+scripts and OKO.
+
+- **Each operation commits at once,** attested by `--as` at `--at`. A ledger is written as it
+  happens.
+- **Attestations:**
+  - Probes and actions are imported at the computed rung, because the tool that ran the command
+    says what it printed (§11.3).
+  - Everything else is authored at the document rung.
+- **An investigation is `cited`:** a person's statement that a question was opened. Measured
+  would need an import, and rule T refuses it at the document rung. The smoke test found this
+  before it shipped.
+- **`show`** prints the report and the rival explanations its hypotheses are part of.
+
+**`tests/cmd_tel_investigate.rs`** runs an investigation from opening to closing over Prometheus
+windows.
+
+- Three hypotheses explain one window. The one with a wrong quote is held at `speculative` with
+  `SMY-W606`. The other two are one rival explanation, in `show` and in `tel check`.
+- A consulted, uncited window is unused.
+- A window about the target that nobody consulted is unexplored, and a short enough lookback
+  leaves it out.
+
+Chapter 38 has a section on investigations, and Appendix A documents `investigate` and its
+flags.
+
+**TL-P6's exit criteria are not met here,** and say so:
+
+- OKO's proof of concept writing a rotation ledger is OKO's to run. `investigate` and
+  `smysl::tel::investigate` are the surface it writes through.
+- GE-M7's arms (a) and (b) need the Train-Ticket testbed and models, which this machine does
+  not have.
+
+The incident dossier is reported by `tel investigate show`, not yet as a `dossier` template.
+
 ---
 
 ## 1.16.0 — 2026-11-16
