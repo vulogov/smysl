@@ -413,8 +413,8 @@ fn quotes(store: &(impl StoreRead + ?Sized), report: &mut Report) {
 }
 
 /// `SMY-W609` (SMYSL-3 §7, TL-P7): a series with no `x.tel/measured-by`. Witness counting takes
-/// it as its own origin, which is the safe reading and also the uninformative one; the warning
-/// says which series are counted that way. The rule is `smysl_core::schemas::tel::unmeasured`.
+/// it as its own origin, so it counts as independent of every other series and can overcount
+/// witnesses; the warning says which series are counted that way. The rule is `smysl_core::schemas::tel::unmeasured`.
 fn unmeasured(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     use smysl_core::schemas::tel;
     let units: Vec<(smysl_core::Uid, smysl_core::UnitCore)> = store

@@ -2528,6 +2528,7 @@ fn cli() -> Command {
                             "detect",
                             "investigate",
                             "declare",
+                            "witnesses",
                             "profile",
                         ])
                         .help(
@@ -2545,7 +2546,7 @@ fn cli() -> Command {
                             "`read READER FILE...` (k8s/1, zabbix/1, prom/1, otlp/1, \
                              otlp-json/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
                              `detect RECIPE`; `investigate open|consult|hypothesis|probe|action|\
-                             close|show …`; `declare instrument|measured-by|via|same-quantity …`; \
+                             close|show …`; `declare instrument|measured-by|via|same-quantity …`; `witnesses SERIES`; \
                              `profile check FILE|NAME`",
                         ),
                 )
@@ -13629,6 +13630,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "detect" => tel_detect(m, global, &args),
         "investigate" => tel_investigate(m, global, &args),
         "declare" => tel_declare(m, global, &args),
+        "witnesses" => tel_witnesses(m, global, &args),
         "read" => tel_read(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
@@ -15711,6 +15713,107 @@ fn tel_declare(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCod
         return ExitCode::Failure;
     }
     println!("committed {n_units} unit(s), {n_edges} edge(s)");
+    ExitCode::Success
+}
+
+/// `smysl tel witnesses SERIES -s LIB`: how many independent witnesses the quantity `SERIES`
+/// measures has (RFC SMYSL-3 §7, TL-P7 step 3).
+///
+/// The quantity is the series and every series joined to it by `x.tel/same-quantity`. Two of
+/// them are independent witnesses when their origins differ and no `transform` lies on both
+/// lineages; dependence merges transitively, and each class is one witness. Also printed:
+/// common transport (D-T10), origins carried by more than one path, and series with no origin
+/// (`SMY-W609`). A report: it changes no status.
+#[cfg(feature = "tel")]
+fn tel_witnesses(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::schemas::tel;
+    use smysl::text::library::Library;
+
+    let [series] = args else {
+        eprintln!("smysl tel witnesses: SERIES, a uid or `<scheme>:<key>`");
+        return ExitCode::Usage;
+    };
+    let uid = match tel_series_arg(series) {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("smysl tel witnesses: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let library = match Library::open(&root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel witnesses: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let store = library.store();
+    let units: std::collections::BTreeMap<Uid, &smysl::UnitCore> = StoreRead::units(store)
+        .map(|(u, x)| (*u, &x.core))
+        .collect();
+    if units.get(&uid).map(|u| u.schema.as_str()) != Some(tel::SERIES) {
+        eprintln!("smysl tel witnesses: no series {series} here");
+        return ExitCode::Failure;
+    }
+    let g = tel::LineageGraph::of(units.iter().map(|(u, c)| (u, *c)), store.relations());
+    let w = g.witnesses(&uid);
+    let name = |u: &Uid| {
+        let key = units
+            .get(u)
+            .and_then(|c| tel::entity_key(c))
+            .unwrap_or_else(|| "?".to_string());
+        match g.role.get(u) {
+            Some(r) => format!("{}  {r} {key}", u.canonical()),
+            None => format!("{}  {key}", u.canonical()),
+        }
+    };
+    println!("quantity      {} series", w.quantity.len());
+    println!("witnesses     {}", w.count());
+    for (n, class) in w.witnesses.iter().enumerate() {
+        for (i, s) in class.iter().enumerate() {
+            let tag = if i == 0 {
+                format!("  {:<4}", n + 1)
+            } else {
+                "      ".to_string()
+            };
+            let origins: Vec<String> = g
+                .origins(s)
+                .iter()
+                .filter(|o| *o != s)
+                .map(|o| {
+                    units
+                        .get(o)
+                        .and_then(|c| tel::entity_key(c))
+                        .unwrap_or_default()
+                })
+                .collect();
+            let from = if origins.is_empty() {
+                "its own origin".to_string()
+            } else {
+                origins.join(", ")
+            };
+            println!("{tag}{}  (measured by {from})", name(s));
+        }
+    }
+    println!("common        {}", w.common_transport.len());
+    for i in &w.common_transport {
+        println!("  {}", name(i));
+    }
+    println!("duplicated    {}", w.duplicate_paths.len());
+    for (o, next) in &w.duplicate_paths {
+        println!("  {}", name(o));
+        for n in next {
+            println!("    via {}", name(n));
+        }
+    }
+    println!("unmeasured    {}", w.unmeasured.len());
+    for s in &w.unmeasured {
+        println!("  {}  SMY-W609", s.canonical());
+    }
     ExitCode::Success
 }
 

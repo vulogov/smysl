@@ -530,8 +530,9 @@ pub fn same_quantity(a: crate::Uid, b: crate::Uid) -> crate::Relation {
 
 /// The series units with no `x.tel/measured-by` (`SMY-W609`), in uid order.
 ///
-/// Witness counting (§7) takes such a series as its own origin: it is independent of every
-/// other series' evidence only as far as nothing says otherwise, which is to say not at all.
+/// Witness counting (§7) takes such a series as its own origin, so it counts as independent of
+/// every other series. That is what nothing-said-otherwise gives, and it can overcount: the
+/// warning is how a reader learns which counts rest on it.
 pub fn unmeasured<'a>(
     units: impl IntoIterator<Item = (&'a crate::Uid, &'a UnitCore)>,
     relations: impl IntoIterator<Item = &'a crate::Relation>,
@@ -600,6 +601,14 @@ pub fn entity_like_violations(unit: &UnitCore) -> Vec<&'static str> {
         out.push("grounds");
     }
     out
+}
+
+/// The `key` of a series or instrument unit: what it is, as its identity tuple spells it.
+pub fn entity_key(unit: &UnitCore) -> Option<String> {
+    match unit.schema.as_str() {
+        SERIES | INSTRUMENT => payload_str(unit, "tel:key"),
+        _ => None,
+    }
 }
 
 /// A payload's string field, if the payload decodes and carries it.
@@ -996,9 +1005,377 @@ pub fn rival_explanations<'a>(
     out
 }
 
+/// The roles that carry data without changing what it says (§7): an instrument of one of these
+/// on two lineages is **common transport**, reported and never merging witnesses.
+pub const TRANSPORT_ROLES: &[&str] = &["scraper", "collector", "pipeline", "store"];
+
+/// The role whose presence on two lineages makes them one witness (§7): a transform computes
+/// what it passes on, so two series out of one transform say one thing.
+pub const TRANSFORM_ROLE: &str = "transform";
+
+/// The lineage graph of a record set (§7): what measured each series at its origin, the `via`
+/// hops onwards, each instrument's role, and which series measure one quantity.
+#[derive(Debug, Clone, Default)]
+pub struct LineageGraph {
+    /// Every series unit.
+    pub series: std::collections::BTreeSet<crate::Uid>,
+    /// `x.tel/measured-by`: series → origin instruments.
+    pub measured_by: std::collections::BTreeMap<crate::Uid, std::collections::BTreeSet<crate::Uid>>,
+    /// `x.tel/via`: instrument → the instruments its data passed through next.
+    pub via: std::collections::BTreeMap<crate::Uid, std::collections::BTreeSet<crate::Uid>>,
+    /// Each instrument unit's role.
+    pub role: std::collections::BTreeMap<crate::Uid, String>,
+    /// `x.tel/same-quantity`, both ways.
+    pub same: std::collections::BTreeMap<crate::Uid, std::collections::BTreeSet<crate::Uid>>,
+}
+
+impl LineageGraph {
+    /// The graph of `units` and `relations`. Edges to units that are not series or instruments
+    /// are kept as they are: an edge says what it says whether or not its end is here.
+    pub fn of<'a>(
+        units: impl IntoIterator<Item = (&'a crate::Uid, &'a UnitCore)>,
+        relations: impl IntoIterator<Item = &'a crate::Relation>,
+    ) -> LineageGraph {
+        let mut g = LineageGraph::default();
+        for (uid, u) in units {
+            match u.schema.as_str() {
+                SERIES => {
+                    g.series.insert(*uid);
+                }
+                INSTRUMENT => {
+                    if let Some(r) = payload_str(u, "tel:role") {
+                        g.role.insert(*uid, r);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for r in relations {
+            let RelKind::Extension(k) = &r.kind else {
+                continue;
+            };
+            match k.as_str() {
+                MEASURED_BY => {
+                    g.measured_by.entry(r.from).or_default().insert(r.to);
+                }
+                VIA => {
+                    g.via.entry(r.from).or_default().insert(r.to);
+                }
+                SAME_QUANTITY if r.from != r.to => {
+                    g.same.entry(r.from).or_default().insert(r.to);
+                    g.same.entry(r.to).or_default().insert(r.from);
+                }
+                _ => {}
+            }
+        }
+        g
+    }
+
+    /// The origins of `series`: what measured it, or the series itself when nothing says
+    /// (`SMY-W609`).
+    pub fn origins(&self, series: &crate::Uid) -> std::collections::BTreeSet<crate::Uid> {
+        match self.measured_by.get(series) {
+            Some(o) if !o.is_empty() => o.clone(),
+            _ => std::collections::BTreeSet::from([*series]),
+        }
+    }
+
+    /// The lineage of `series`: its origins, and every instrument reachable from them by `via`.
+    /// A cycle of `via` edges is walked once.
+    pub fn lineage(&self, series: &crate::Uid) -> std::collections::BTreeSet<crate::Uid> {
+        let mut seen = self.origins(series);
+        let mut todo: Vec<crate::Uid> = seen.iter().copied().collect();
+        while let Some(i) = todo.pop() {
+            for n in self.via.get(&i).into_iter().flatten() {
+                if seen.insert(*n) {
+                    todo.push(*n);
+                }
+            }
+        }
+        seen
+    }
+
+    /// Whether the evidence of `a` and `b` counts as two witnesses (§7): their origins differ
+    /// and no `transform` lies on both lineages. A series is never independent of itself.
+    pub fn independent(&self, a: &crate::Uid, b: &crate::Uid) -> bool {
+        if a == b || !self.origins(a).is_disjoint(&self.origins(b)) {
+            return false;
+        }
+        let (la, lb) = (self.lineage(a), self.lineage(b));
+        !la.intersection(&lb)
+            .any(|i| self.role.get(i).map(String::as_str) == Some(TRANSFORM_ROLE))
+    }
+
+    /// The series that measure the same quantity as `series`, itself included, in uid order:
+    /// its component under `same-quantity`, which a person or a profile declares pairwise.
+    pub fn quantity(&self, series: &crate::Uid) -> Vec<crate::Uid> {
+        let mut seen = std::collections::BTreeSet::from([*series]);
+        let mut todo = vec![*series];
+        while let Some(s) = todo.pop() {
+            for n in self.same.get(&s).into_iter().flatten() {
+                if seen.insert(*n) {
+                    todo.push(*n);
+                }
+            }
+        }
+        seen.into_iter().collect()
+    }
+
+    /// The witness report of the quantity `series` measures (§7).
+    pub fn witnesses(&self, series: &crate::Uid) -> Witnesses {
+        use std::collections::{BTreeMap, BTreeSet};
+        let quantity = self.quantity(series);
+        // Union the series that are not independent; each class is one witness. Merging is
+        // transitive, so a series dependent on two others joins them: the count never exceeds
+        // what every pair would allow.
+        let mut class: BTreeMap<crate::Uid, crate::Uid> =
+            quantity.iter().map(|s| (*s, *s)).collect();
+        fn find(class: &BTreeMap<crate::Uid, crate::Uid>, mut s: crate::Uid) -> crate::Uid {
+            while class[&s] != s {
+                s = class[&s];
+            }
+            s
+        }
+        for (i, a) in quantity.iter().enumerate() {
+            for b in &quantity[i + 1..] {
+                if !self.independent(a, b) {
+                    let (ra, rb) = (find(&class, *a), find(&class, *b));
+                    if ra != rb {
+                        let (lo, hi) = if ra < rb { (ra, rb) } else { (rb, ra) };
+                        class.insert(hi, lo);
+                    }
+                }
+            }
+        }
+        let mut classes: BTreeMap<crate::Uid, Vec<crate::Uid>> = BTreeMap::new();
+        for s in &quantity {
+            classes.entry(find(&class, *s)).or_default().push(*s);
+        }
+        let witnesses: Vec<Vec<crate::Uid>> = classes.into_values().collect();
+        // Common transport: a transport instrument on the lineages of two witnesses.
+        let mut on: BTreeMap<crate::Uid, BTreeSet<usize>> = BTreeMap::new();
+        for (w, members) in witnesses.iter().enumerate() {
+            for s in members {
+                for i in self.lineage(s) {
+                    on.entry(i).or_default().insert(w);
+                }
+            }
+        }
+        let common_transport = on
+            .into_iter()
+            .filter(|(i, ws)| {
+                ws.len() > 1
+                    && self
+                        .role
+                        .get(i)
+                        .is_some_and(|r| TRANSPORT_ROLES.contains(&r.as_str()))
+            })
+            .map(|(i, _)| i)
+            .collect();
+        // Duplicate paths: an origin of the quantity whose data left it more than one way.
+        let origins: BTreeSet<crate::Uid> = quantity.iter().flat_map(|s| self.origins(s)).collect();
+        let duplicate_paths = origins
+            .into_iter()
+            .filter_map(|o| {
+                let next = self.via.get(&o)?;
+                (next.len() > 1).then(|| (o, next.iter().copied().collect()))
+            })
+            .collect();
+        let unmeasured = quantity
+            .iter()
+            .filter(|s| self.measured_by.get(s).is_none_or(|o| o.is_empty()))
+            .copied()
+            .collect();
+        Witnesses {
+            quantity,
+            witnesses,
+            common_transport,
+            duplicate_paths,
+            unmeasured,
+        }
+    }
+}
+
+/// What §7 reports about one quantity: how many independent witnesses its series are, and what
+/// they share.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Witnesses {
+    /// The series that measure the quantity, in uid order.
+    pub quantity: Vec<crate::Uid>,
+    /// The witnesses: classes of series that are not independent, each in uid order, the
+    /// classes in order of their first member. `witnesses.len()` is the count.
+    pub witnesses: Vec<Vec<crate::Uid>>,
+    /// Transport instruments (`scraper`, `collector`, `pipeline`, `store`) on the lineages of two
+    /// or more witnesses (D-T10). Reported; they merge nothing.
+    pub common_transport: Vec<crate::Uid>,
+    /// Origins whose data left them by more than one `via`: one witness carried twice.
+    pub duplicate_paths: Vec<(crate::Uid, Vec<crate::Uid>)>,
+    /// Series of the quantity with no `measured-by` (`SMY-W609`), each its own origin.
+    pub unmeasured: Vec<crate::Uid>,
+}
+
+impl Witnesses {
+    /// The number of independent witnesses.
+    pub fn count(&self) -> usize {
+        self.witnesses.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §7's lineage fixtures: instruments by role and key, series by key.
+    struct Lab {
+        units: Vec<(crate::Uid, UnitCore)>,
+        rels: Vec<crate::Relation>,
+    }
+
+    impl Lab {
+        fn new() -> Lab {
+            Lab {
+                units: Vec::new(),
+                rels: Vec::new(),
+            }
+        }
+        fn inst(&mut self, role: &str, key: &str) -> crate::Uid {
+            let u = instrument(role, key).unwrap();
+            let id = crate::canonical_uid(&u);
+            self.units.push((id, u));
+            id
+        }
+        fn series(&mut self, key: &str) -> crate::Uid {
+            let u = series("prom", key).unwrap();
+            let id = crate::canonical_uid(&u);
+            self.units.push((id, u));
+            id
+        }
+        fn graph(&self) -> LineageGraph {
+            LineageGraph::of(self.units.iter().map(|(u, c)| (u, c)), &self.rels)
+        }
+    }
+
+    /// Two scrapes of one node_exporter: one series, one witness, and the second path is
+    /// reported as a duplicate.
+    #[test]
+    fn two_scrapes_of_one_exporter_are_one_witness() {
+        let mut l = Lab::new();
+        let ne = l.inst("exporter", "prom-target:node/h1");
+        let (p1, p2) = (l.inst("scraper", "prom-a"), l.inst("scraper", "prom-b"));
+        let s = l.series("node_filesystem_avail_bytes");
+        l.rels
+            .extend([measured_by(s, ne), via(ne, p1), via(ne, p2)]);
+        let w = l.graph().witnesses(&s);
+        assert_eq!(w.count(), 1);
+        assert_eq!(
+            w.duplicate_paths,
+            vec![(ne, {
+                let mut v = vec![p1, p2];
+                v.sort();
+                v
+            })]
+        );
+        assert!(w.unmeasured.is_empty());
+    }
+
+    /// node_exporter's disk usage and the application's own disk metric, joined by
+    /// `same-quantity`: two witnesses, with the shared scraper and store as common transport.
+    #[test]
+    fn two_origins_of_one_quantity_are_two_witnesses() {
+        let mut l = Lab::new();
+        let (ne, app) = (
+            l.inst("exporter", "prom-target:node/h1"),
+            l.inst("exporter", "prom-target:app/h1"),
+        );
+        let (p, store) = (l.inst("scraper", "prom"), l.inst("store", "thanos"));
+        let (a, b) = (l.series("node_disk_used"), l.series("app_disk_used"));
+        l.rels.extend([
+            measured_by(a, ne),
+            measured_by(b, app),
+            via(ne, p),
+            via(app, p),
+            via(p, store),
+            same_quantity(a, b),
+        ]);
+        let g = l.graph();
+        assert!(g.independent(&a, &b));
+        let w = g.witnesses(&b);
+        assert_eq!(w.count(), 2);
+        let mut ct = vec![p, store];
+        ct.sort();
+        assert_eq!(w.common_transport, ct, "reported, merging nothing");
+        assert_eq!(
+            g.witnesses(&a),
+            w,
+            "the quantity's report, from either series"
+        );
+    }
+
+    /// Two series both produced by one recording rule: one witness, whatever their origins.
+    #[test]
+    fn one_transform_makes_one_witness() {
+        let mut l = Lab::new();
+        let (e1, e2) = (
+            l.inst("exporter", "prom-target:a/h1"),
+            l.inst("exporter", "prom-target:b/h2"),
+        );
+        let rule = l.inst("transform", "rule:job:disk_used:sum");
+        let (a, b) = (l.series("x"), l.series("y"));
+        l.rels.extend([
+            measured_by(a, e1),
+            measured_by(b, e2),
+            via(e1, rule),
+            via(e2, rule),
+            same_quantity(a, b),
+        ]);
+        let g = l.graph();
+        assert!(!g.independent(&a, &b));
+        assert_eq!(g.witnesses(&a).count(), 1);
+    }
+
+    /// Dependence merges transitively; an unmeasured series is its own origin and is reported;
+    /// a `via` cycle is walked once; one origin shared is one witness.
+    #[test]
+    fn classes_merge_transitively_and_unmeasured_series_stand_alone() {
+        let mut l = Lab::new();
+        let (e1, e2) = (
+            l.inst("exporter", "prom-target:a/h1"),
+            l.inst("exporter", "prom-target:b/h2"),
+        );
+        let (t1, t2) = (l.inst("transform", "r1"), l.inst("transform", "r2"));
+        let (a, b, c, d, u) = (
+            l.series("a"),
+            l.series("b"),
+            l.series("c"),
+            l.series("d"),
+            l.series("u"),
+        );
+        // a and b share r1; b and c share r2 (via a cycle); d shares a's origin; u has none.
+        let e3 = l.inst("exporter", "prom-target:c/h3");
+        l.rels.extend([
+            measured_by(a, e1),
+            measured_by(b, e2),
+            measured_by(c, e3),
+            measured_by(d, e1),
+            via(e1, t1),
+            via(e2, t1),
+            via(e2, t2),
+            via(e3, t2),
+            via(t2, e3),
+            same_quantity(a, b),
+            same_quantity(b, c),
+            same_quantity(c, d),
+            same_quantity(d, u),
+        ]);
+        let g = l.graph();
+        assert!(!g.independent(&a, &c) || !g.independent(&b, &c));
+        let w = g.witnesses(&u);
+        assert_eq!(w.quantity.len(), 5);
+        assert_eq!(w.count(), 2, "{{a, b, c, d}} and {{u}}: {w:?}");
+        assert_eq!(w.unmeasured, vec![u]);
+        assert!(w.witnesses.iter().any(|c| c == &vec![u]));
+        assert!(!g.independent(&a, &a));
+    }
 
     #[test]
     fn seventeen_types_and_eight_relations_all_well_formed() {

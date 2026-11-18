@@ -1357,6 +1357,41 @@ as the ledger is:
 `resolve`. `tests/cmd_tel_declare.rs` covers each declaration. It also clears an
 OTLP series' `SMY-W609` with `measured-by`, and checks each refusal and its exit code.
 
+### Witness counting, and `smysl tel witnesses` (TL-P7 step 3)
+
+§7's rule, computed. `smysl_core::schemas::tel::LineageGraph` reads the record set's
+`measured-by`, `via` and `same-quantity` edges and each instrument's role. It lives in core, so
+the dossier can use it later.
+
+- **Origins** of a series are what measured it. A series with no `measured-by` is its own
+  origin.
+- **Lineage** is the origins, and every instrument reachable from them by `via`. A cycle is
+  walked once.
+- **Independent:**
+  - the origins are disjoint;
+  - no `transform` is on both lineages.
+- **Witnesses** of a quantity, meaning a `same-quantity` component: series that are not
+  independent are merged, transitively, and each class is one witness. Merging transitively
+  never counts more witnesses than pairwise reading would.
+- **Reported, merging nothing:**
+  - common transport: a `scraper`, `collector`, `pipeline` or `store` on the lineages of two
+    witnesses (D-T10);
+  - duplicate paths: an origin whose data left it by more than one `via`;
+  - unmeasured series.
+
+`smysl tel witnesses SERIES` prints that report. The three cases §7 gives are unit tests:
+- two scrapes of one exporter are one witness, and the second path is reported;
+- an exporter and the application's own metric are two;
+- two series from one recording rule are one.
+
+`tests/cmd_tel_witnesses.rs` runs them through the binary, over a Prometheus series and a
+Zabbix item declared the same quantity.
+
+**A correction to step 1.** `SMY-W609`'s documentation said an unmeasured series "never counts
+as independent". §7 says the opposite: as its own origin it counts as independent of every
+other series, which can overcount. The warning exists because of that. The rustdoc, the check
+pass and Appendix A now say so.
+
 ---
 
 ## 1.16.0 — 2026-11-16

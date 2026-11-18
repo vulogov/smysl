@@ -1202,12 +1202,17 @@ rest are authored at the document rung.
 A series is a uid or `<scheme>:<key>`, and an instrument is a uid or its key. Both must already
 be in the library. A key that two roles share is refused, and you name the instrument by its uid.
 
+`tel witnesses SERIES` writes nothing. It prints the quantity the series measures (it and every
+series joined to it by `same-quantity`), and the quantity's independent witnesses, each with
+what measured it. It also prints common transport, origins carried by more than one path, and
+series with no origin (`SMY-W609`). It exits 1 when the series is not in the library.
+
 #dtable(
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare` or `profile`.]),
-    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `declare`: what is declared, then its arguments. `profile`: `check` and a profile file or shipped name.]),
+    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare`, `witnesses` or `profile`.]),
+    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `declare`: what is declared, then its arguments. `witnesses`: a series. `profile`: `check` and a profile file or shipped name.]),
     ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for the object readers; it must be for the reader's scheme.]),
     ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds, and for `prom/1` the scrape instant. Required for `read`: nothing here reads a clock.]),
     ([`--licence`], [`SPDX`], [The manifests' licence. Required for the object readers, as `text add` requires it.]),
@@ -1415,7 +1420,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W606`], [warning], [A hypothesis's numeric quote does not verify (rule TQ). A quote is `<uid>#<field>=<value>`, or `#<field>[<i>]=<value>` into a list. It verifies when the cited unit is among the hypothesis's grounds, is in the store, has that field, and holds that value in its canonical spelling (`0.90` does not verify a `0.9`). A hypothesis with a quote that does not verify has an effective status of at most `speculative`, whatever it was authored as. The message names the quote and says why. From 1.17.]),
     ([`SMY-E607`], [error], [An `x.tel/series` or `x.tel/instrument` unit carries what its identity forbids: a span, a manifest, a published or observed time, grounds, a source of another kind or reference than `series:<scheme>:<key>` (metric) or `instrument:<key>` (tool), or any other source key. The message names the fields. A series is what is measured, not when, so one series seen at fifty instants is one unit; what varies over time goes in its `-meta` unit. From 1.17.]),
     ([`SMY-W608`], [warning], [A keyed array in a telemetry snapshot could not be keyed: an element that is not an object, a key that is missing or not a scalar, or a key value that repeats (Kubernetes admits two `env` entries with one name). The whole array is diffed as one `json` leaf, and the message names its pointer. From 1.17.]),
-    ([`SMY-W609`], [warning], [An `x.tel/series` has no `x.tel/measured-by` relation to the instrument that measures it at its origin. Witness counting then takes the series as its own origin, so it never counts as independent of anything it is not. The readers emit the relation whenever the source names its origin: a Prometheus target, an OpenTelemetry resource with a `service.name`, a Zabbix host. The message names the series. From 1.17.]),
+    ([`SMY-W609`], [warning], [An `x.tel/series` has no `x.tel/measured-by` relation to the instrument that measures it at its origin. Witness counting then takes the series as its own origin, so it counts as independent of every other series, which can overcount witnesses. The readers emit the relation whenever the source names its origin: a Prometheus target, an OpenTelemetry resource with a `service.name`, a Zabbix host. The message names the series. From 1.17.]),
     ([`SMY-W610`], [warning], [An object's previous snapshot was read under another profile, by the profile hash its manifest's reader field records. The new snapshot is recorded and not diffed against the old one: a leaf the profile reclassified would otherwise read as a change to the object. From 1.17.]),
     ([`SMY-E611`], [error], [A record 6 of detection kind 6 (a rival explanation) or 7 (a witness conflict). SMYSL-3 derives both from the record set and never writes them, so a store refuses one at the door, as it refuses rule E's kinds 4 and 5; this is what `check` says of one that arrived some other way, a document as written or a log from an older peer. From 1.17.]),
     ([`SMY-E612`], [error], [A reserved number was written: record 16 (`hold`), or `source` key 7 (a sub-millisecond remainder). SMYSL-3 keeps both reserved behind experiments. Both are carried, not refused: record 16 is kept verbatim, and key 7 is inside the uid, so dropping it would change the unit's identity. Record 16 reports this instead of `SMY-W014`. From 1.17.]),

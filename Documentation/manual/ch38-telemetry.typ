@@ -476,7 +476,8 @@ to where smysl read it. Each reader says what it knows of that path, as relation
 An OpenTelemetry resource without a `service.name` does not say what measured it, and the
 reader does not guess: two unrelated processes would become one origin. Such a series has no
 `measured-by`, and `check` says so with `SMY-W609`. Counting witnesses takes it as its own
-origin.
+origin, so it counts as independent of every other series. That can overcount, which is why
+`check` warns.
 
 What no export says, a person declares with `tel declare`, authored by `--as` at `--at`.
 That covers a further hop, an origin the reader could not see, an instrument's version, and
@@ -494,10 +495,37 @@ KEY VERSION` adds an instrument, and its version as an `x.tel/instrument-meta` r
 `via` and `measured-by` name instruments by key. A key that two roles share is refused, and
 you name the instrument by its uid instead.
 
+*How many witnesses?* Two series are evidence about one quantity only when `same-quantity`
+joins them. They are *independent witnesses* when two things hold:
+
+- their origins differ;
+- no `transform`, such as a recording rule, lies on both lineages.
+
+Series that are not independent are merged, transitively, and each class counts as one
+witness. A scraper, collector, pipeline or store that both lineages pass through is *common
+transport*: it is reported, and merges nothing.
+
+#screen(caption: "$ smysl tel witnesses 'prom:http_requests_total{…}' -s lib")[
+```
+quantity      2 series
+witnesses     2
+  1   b3:lutau6…  host:DB 01/item:mysql.qps  (measured by zabbix-agent:DB 01)
+  2   b3:y43mgn…  http_requests_total{…}  (measured by prom-target:node/h:9100)
+common        1
+  b3:qzvqax…  store thanos:eu
+duplicated    0
+unmeasured    0
+```
+]
+
+`duplicated` lists an origin that reached smysl by more than one path, such as one target
+scraped by two Prometheus servers: one witness, carried twice. The count is a report. It
+changes no status unless GE-M6 shows that it changes a conclusion (D-T10).
+
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
-  investigations and instrument lineage. Witness counting, eviction, exchange, traces and logs
-  are the RFC's later phases, TL-P7 to TL-P9. So are:
+  investigations, instrument lineage and witness counting. Witness conflicts, eviction,
+  exchange, traces and logs are the RFC's later phases, TL-P7 to TL-P9. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
   - what a deleted object becomes as a unit;
