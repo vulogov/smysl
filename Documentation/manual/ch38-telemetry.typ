@@ -85,14 +85,16 @@ one.smy: 3 records, 1 units, 0 diagnostic(s)
   record set and never written, as rule E's 4 and 5 are. A store refuses a record 6 of either
   kind, and `check` reports one that arrived some other way as `SMY-E611`.
 - *Thread schema 5, `timeline`*, has eleven roles, from `trigger` to `follow-up` (Chapter 18).
-  It has no derivation rules yet:
+  `thread --derive timeline` proposes six of them from telemetry types, in time order:
+  - a change or recreate is the `trigger`;
+  - an anomaly, reset or stale is the `onset`;
+  - an alert, or an investigation being opened, is the `detection`;
+  - a hypothesis or probe is `diagnosis`;
+  - an action is `mitigation`;
+  - a closed investigation is `closure`.
 
-#screen(caption: "$ smysl thread --derive timeline one.smy")[
-```
-smysl thread: `timeline` cannot be derived from the graph; a timeline thread is
-  authored; its derivation is not built yet
-```
-]
+  `escalation`, `recovery`, `impact`, `communication` and `follow-up` are authored. Units with
+  no telemetry role, such as series, windows and kernel claims, are not steps of an incident.
 
 - *`source` key 7 and record 16* stay reserved, behind experiments that decide whether they are
   ever needed. Neither is refused, because key 7 is inside a uid, but `check` names either one

@@ -1212,6 +1212,44 @@ away:
 - a numeric quote that does not verify, which caps one at `speculative`;
 - a hypothesis without grounds.
 
+### The `timeline` thread, derived (TL-P6 step 4)
+
+**`thread --derive timeline`** now proposes roles from telemetry types (§12), where before it
+refused. The first rule that matches wins:
+
+| Unit | Role |
+|---|---|
+| an investigation that supersedes another (a closed one) | `closure` |
+| an investigation being opened, an alert | `detection` |
+| a change, a recreate | `trigger` |
+| an anomaly, a reset, a stale | `onset` |
+| a hypothesis, a probe | `diagnosis` |
+| an action | `mitigation` |
+
+- **Authored roles:** `escalation`, `recovery`, `impact`, `communication` and `follow-up` have
+  no type that names them, so people author them. `TIMELINE_AUTHORED` lists them.
+- **No catch-all:** the timeline is the one derived schema without one. A series, a window or a
+  kernel claim is not a step of an incident.
+- **Time order:** the steps follow the units' own order (`in_order`): observation time, then
+  the ordering chain, then uid.
+  - Rule E's effective said-time, which §12 names, needs `smysl-text`'s time engine, and a thread
+    does not depend on it.
+  - A telemetry unit's `observed` is its said-time unless a dating says otherwise.
+
+**Two new matchers in `smysl-thread`'s rule tables** let an extension's types take roles:
+
+- `Matcher::Schema(name)` matches a unit type by name, as `Type` does a kernel type;
+- `Matcher::All(&[…])` matches a conjunction.
+
+**The table invariants,** narrowed for a typed schema:
+
+- only schemas that assign everything (`assigns_everything`) must end in a catch-all;
+- a role on the authored list must not be assigned by a rule, and every other role must be;
+- a kernel-only store derives an empty timeline.
+
+A new test derives one from a change, an anomaly, an alert, a probe and an action, plus a series
+that stays out: the five steps come out in time order with their roles.
+
 ---
 
 ## 1.16.0 — 2026-11-16

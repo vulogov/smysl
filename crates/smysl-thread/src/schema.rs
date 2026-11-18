@@ -52,6 +52,11 @@ pub enum Matcher {
     SourceOfExt(&'static str),
     /// The target of an extension relation kind; see [`Matcher::SourceOfExt`].
     TargetOfExt(&'static str),
+    /// The unit's schema is this one, by name: `x.tel/alert`. How an extension's types take
+    /// roles (SMYSL-3 §12), as [`Matcher::Type`] is for the kernel's.
+    Schema(&'static str),
+    /// Every one of these matches.
+    All(&'static [Matcher]),
     /// The unit's status is at least this strong.
     StatusAtLeast(Status),
     /// The unit is among the n most salient in the view.
@@ -443,13 +448,45 @@ static DIALOGUE: SchemaDef = SchemaDef {
 };
 
 // ---------------------------------------------------------------------------
-// timeline: SMYSL-3 §12, and no rules yet
+// timeline: SMYSL-3 §12
 // ---------------------------------------------------------------------------
 //
-// The roles are TL-P1's, the derivation TL-P6's: proposing a role from a unit type needs the
-// `x.tel/v1` types to exist first. Until then a timeline is authored, as a dossier is
-// templated, and `derivable` says no. Its order is effective said-time (rule E), which is
-// not the order the roles are listed in, so `in_order` is false.
+// The roles are TL-P1's and the derivation TL-P6's: a role proposed from an `x.tel/v1` type, the
+// first rule that matches winning, as §12 has it ("thread derivation proposes roles from unit
+// types; humans and agents author them with an override").
+//
+// - An investigation that supersedes another is a closed one: `closure`. An open one is the
+//   moment somebody noticed: `detection`, as an alert is.
+// - A change or recreate is what may have started it: `trigger`.
+// - An anomaly, a reset or a stale is the first sign: `onset`.
+// - A hypothesis or a probe is `diagnosis`; an action `mitigation`.
+//
+// `recovery`, `impact`, `communication` and `follow-up` have no type that names them; they are
+// authored. A timeline is in time order, the units' own (`in_order`): observation time, then
+// the ordering chain, then uid. Rule E's effective said-time (§12) needs the time engine of
+// `smysl-text`, which a thread does not depend on; a telemetry unit's `observed` is its said-time
+// unless a dating says otherwise.
+
+/// The `timeline` roles no unit type names, so no rule assigns: people author them (§12).
+pub const TIMELINE_AUTHORED: &[Role] = &[
+    Role::Escalation,
+    Role::Recovery,
+    Role::Impact,
+    Role::Communication,
+    Role::FollowUp,
+];
+
+/// Whether a schema's table ends in a catch-all. Every derived schema's does but `timeline`'s:
+/// a timeline is typed, and a unit with no telemetry role (a series, a window, a kernel claim)
+/// is not a step of an incident.
+pub fn assigns_everything(schema: ThreadSchema) -> bool {
+    derivable(schema) && schema != ThreadSchema::Timeline
+}
+
+const CLOSED_INVESTIGATION: &[Matcher] = &[
+    Matcher::Schema("x.tel/investigation"),
+    Matcher::SourceOf(RelKind::Supersedes),
+];
 
 static TIMELINE: SchemaDef = SchemaDef {
     schema: ThreadSchema::Timeline,
@@ -481,7 +518,19 @@ static TIMELINE: SchemaDef = SchemaDef {
         (Role::Communication, 0..=20),
         (Role::FollowUp, 0..=10),
     ],
-    rules: &[],
+    rules: &[
+        (Matcher::All(CLOSED_INVESTIGATION), Role::Closure),
+        (Matcher::Schema("x.tel/investigation"), Role::Detection),
+        (Matcher::Schema("x.tel/alert"), Role::Detection),
+        (Matcher::Schema("x.tel/change"), Role::Trigger),
+        (Matcher::Schema("x.tel/recreate"), Role::Trigger),
+        (Matcher::Schema("x.tel/anomaly"), Role::Onset),
+        (Matcher::Schema("x.tel/reset"), Role::Onset),
+        (Matcher::Schema("x.tel/stale"), Role::Onset),
+        (Matcher::Schema("x.tel/hypothesis"), Role::Diagnosis),
+        (Matcher::Schema("x.tel/probe"), Role::Diagnosis),
+        (Matcher::Schema("x.tel/action"), Role::Mitigation),
+    ],
     weights: &[
         (Role::Trigger, 1.0),
         (Role::Onset, 0.9),
@@ -495,7 +544,7 @@ static TIMELINE: SchemaDef = SchemaDef {
         (Role::Communication, 0.3),
         (Role::FollowUp, 0.5),
     ],
-    in_order: false,
+    in_order: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -636,7 +685,7 @@ mod tests {
     fn every_table_ends_in_a_catch_all() {
         // Over the schemas a derivation can produce: a dossier has no rules at all, which is
         // the property `derivable` reads, and a catch-all would be a rule.
-        for def in all().into_iter().filter(|d| derivable(d.schema)) {
+        for def in all().into_iter().filter(|d| assigns_everything(d.schema)) {
             let last = def.rules.last().expect("a table has rules");
             assert_eq!(
                 last.0,
@@ -687,6 +736,13 @@ mod tests {
         // A dossier's roles are reached by its templates, not by rules (SMYSL-2.5 §3.13).
         for def in all().into_iter().filter(|d| derivable(d.schema)) {
             for role in def.roles {
+                if def.schema == ThreadSchema::Timeline && TIMELINE_AUTHORED.contains(role) {
+                    assert!(
+                        !def.rules.iter().any(|(_, r)| r == role),
+                        "timeline: {role} is listed as authored and a rule assigns it"
+                    );
+                    continue;
+                }
                 assert!(
                     def.rules.iter().any(|(_, r)| r == role),
                     "{}: no rule can ever assign {role}",

@@ -10430,12 +10430,11 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // A dossier has no matcher rules: its steps are slots a template filled, and only `ask`
     // fills them (SMYSL-2.5 §3.13). Deriving one from the graph would return an empty thread
     // — correct and useless — so it is refused here, with the command that does produce one.
-    // A timeline has none yet either (SMYSL-3 §12): its rules wait for the `x.tel/v1` types
-    // they read, so until TL-P6 one is authored.
+    // A timeline is derived from `x.tel/v1` types since TL-P6 (SMYSL-3 §12).
     if !smysl::derivable(schema) {
         let how = match schema {
             smysl::ThreadSchema::Dossier => "is produced by `ask` (TX-P8 step 3)",
-            _ => "is authored; its derivation is not built yet",
+            _ => "is authored",
         };
         eprintln!("smysl thread: `{raw}` cannot be derived from the graph; a {raw} thread {how}");
         return ExitCode::Usage;
@@ -10502,6 +10501,15 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     opts = opts.with_ts(Hlc::new(0, 0, owner));
 
     let (thread, report) = smysl::derive_thread(&store, schema, &opts);
+    // A timeline is typed (SMYSL-3 §12): only telemetry units take its roles, so over a store
+    // with none it derives nothing, and an empty thread is not an answer worth printing.
+    if schema == smysl::ThreadSchema::Timeline && thread.steps.is_empty() {
+        eprintln!(
+            "smysl thread: nothing here takes a timeline role; a timeline is derived from \
+             x.tel/v1 units (changes, anomalies, alerts, investigations, probes, actions)"
+        );
+        return ExitCode::Failure;
+    }
 
     if m.get_flag("explain") {
         for role in smysl::schema_definition(schema).roles {
