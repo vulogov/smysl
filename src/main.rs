@@ -15118,8 +15118,18 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let mut diags: Vec<smysl::Diagnostic> = smysl::check(store, smysl::CheckOptions::default())
         .diagnostics
         .into_iter()
-        .filter(|d| [smysl::Code::E603, smysl::Code::W614].contains(&d.code))
+        .filter(|d| [smysl::Code::E603, smysl::Code::W614, smysl::Code::W606].contains(&d.code))
         .collect();
+    // Detection kind 6 (§11.5): rival explanations, with whether a resolution has reviewed each.
+    let effective = smysl::effective_status(store, smysl::RetractionPolicy::default());
+    let agent = AgentId::new("tool:smysl-tel").expect("a valid literal");
+    let rivals = smysl::schemas::tel::rival_explanations(
+        StoreRead::units(store).map(|(uid, u)| (uid, &u.core)),
+        store.relations(),
+        |u| effective.get(u).unwrap_or(smysl::Status::Unfounded),
+        |u| StoreRead::get(store, u).map(|c| c.core.payload.clone().unwrap_or_default()),
+        smysl::Hlc::new(0, 0, agent),
+    );
     let path = tel_series_path(&root);
     let cores: Vec<&smysl::UnitCore> = windows.iter().map(|(_, u, _)| u).collect();
     if path.exists() {
@@ -15139,14 +15149,25 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     for d in &diags {
         println!("{d}");
     }
+    for c in &rivals {
+        let positions: Vec<String> = c.positions.iter().map(|p| p.canonical()).collect();
+        println!(
+            "contention {}  rival explanations of {}: {}  ({:?})",
+            c.id.as_str(),
+            c.over.canonical(),
+            positions.join(", "),
+            StoreRead::contention_status(store, c)
+        );
+    }
     let errors = diags
         .iter()
         .filter(|d| d.code.severity() == smysl::Severity::Error)
         .count();
     println!(
-        "checked   {} window(s): {errors} error(s), {} warning(s)",
+        "checked   {} window(s): {errors} error(s), {} warning(s); {} rival explanation(s)",
         windows.len(),
-        diags.len() - errors
+        diags.len() - errors,
+        rivals.len()
     );
     if errors > 0 {
         ExitCode::CheckErrors

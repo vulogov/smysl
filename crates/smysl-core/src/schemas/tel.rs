@@ -877,6 +877,77 @@ pub fn tq_capped(status: Status, failures: usize) -> Status {
     }
 }
 
+/// Detection kind 6, `RivalExplanation` (§11.5): two or more live hypotheses that each explain
+/// one target, none rebutting or superseding another, each at an effective status of at least
+/// `inferred` after rules M and TQ. One contention per target, `over` the target, `positions`
+/// the hypotheses.
+///
+/// Derived-only, like kinds 4 and 5: detected from the record set, never written. A function of
+/// the record set: the inputs are the store's units, its edges, the effective status a unit has
+/// after retraction and rule M (`effective`), and its payload for rule TQ (`payload_of`). `now`
+/// stamps the detection; it is not part of the id.
+///
+/// A hypothesis is **live** when nothing supersedes it.
+pub fn rival_explanations<'a>(
+    units: impl IntoIterator<Item = (&'a crate::Uid, &'a UnitCore)>,
+    relations: impl IntoIterator<Item = &'a crate::Relation>,
+    effective: impl Fn(&crate::Uid) -> Status,
+    payload_of: impl Fn(&crate::Uid) -> Option<Vec<u8>>,
+    now: crate::Hlc,
+) -> Vec<crate::Contention> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let explains = RelKind::Extension(EXPLAINS.to_string());
+    let relations: Vec<&crate::Relation> = relations.into_iter().collect();
+    let superseded: BTreeSet<crate::Uid> = relations
+        .iter()
+        .filter(|r| r.kind == RelKind::Supersedes)
+        .map(|r| r.to)
+        .collect();
+    // Hypotheses that stand: live, and inferred or better once TQ has capped them.
+    let mut standing: BTreeSet<crate::Uid> = BTreeSet::new();
+    for (uid, u) in units {
+        if u.schema.as_str() != HYPOTHESIS || superseded.contains(uid) {
+            continue;
+        }
+        let failures = rule_tq_violations(u, &payload_of).len();
+        if tq_capped(effective(uid), failures) >= Status::Inferred {
+            standing.insert(*uid);
+        }
+    }
+    let mut by_target: BTreeMap<crate::Uid, BTreeSet<crate::Uid>> = BTreeMap::new();
+    let mut against: BTreeSet<(crate::Uid, crate::Uid)> = BTreeSet::new();
+    for r in &relations {
+        if r.kind == explains && standing.contains(&r.from) {
+            by_target.entry(r.to).or_default().insert(r.from);
+        }
+        if r.kind == RelKind::Rebuts || r.kind == RelKind::Supersedes {
+            against.insert((r.from, r.to));
+            against.insert((r.to, r.from));
+        }
+    }
+    let mut out = Vec::new();
+    for (target, hyps) in by_target {
+        if hyps.len() < 2 {
+            continue;
+        }
+        let any_against = hyps
+            .iter()
+            .any(|a| hyps.iter().any(|b| a != b && against.contains(&(*a, *b))));
+        if any_against {
+            continue;
+        }
+        let positions: Vec<crate::Uid> = hyps.into_iter().collect();
+        let kind = crate::DetectionKind::RivalExplanation;
+        out.push(crate::Contention::new(
+            crate::ContentionId::derive(kind, &target, &positions),
+            target,
+            positions,
+            crate::Detected::new(kind, now.clone()),
+        ));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

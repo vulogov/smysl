@@ -1181,6 +1181,37 @@ payload and as a quote.
 The BARO-style ranking's claims (TL-P5) state their score in words and quote nothing. A score
 is not a field of any unit a hypothesis could cite, and TQ checks only what is listed.
 
+### Rival explanations: detection kind 6 (TL-P6 step 3)
+
+**`smysl_core::schemas::tel::rival_explanations`** detects `RivalExplanation` contentions
+(§11.5).
+
+- **When:** two or more live hypotheses each `x.tel/explains` one target. None of them rebuts
+  or supersedes another, and each has an effective status of at least `inferred` after
+  retraction, rule M and rule TQ. A live hypothesis is one nothing supersedes.
+- **One contention per target:** `over` is the target, and `positions` are the hypotheses. The
+  id is the normative §6.2 derivation, so two peers that find the same rivalry name it alike,
+  and a resolution naming it reads through.
+- **Derived-only, like kinds 4 and 5:** found from the record set, never written. The store
+  already refuses a written one (`SMY-E611`, TL-P1).
+- **In the core,** beside rules TW and TQ, taking records rather than a store, so `check`,
+  `smysl-tel` and the CLI can all call it without a new dependency between crates.
+
+**`tel check`** now also reports:
+
+- each hypothesis's `SMY-W606`;
+- each rival explanation, with its derived id, its target, its hypotheses, and whether a
+  resolution has reviewed it.
+
+**Tests:** two inferred hypotheses explaining one target are one contention, whichever order
+the records come in. A third joins the same contention under a new id. Each of these takes it
+away:
+
+- a rebuttal between two of them;
+- a supersession of one;
+- a numeric quote that does not verify, which caps one at `speculative`;
+- a hypothesis without grounds.
+
 ---
 
 ## 1.16.0 — 2026-11-16

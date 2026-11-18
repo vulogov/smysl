@@ -155,3 +155,67 @@ fn rule_tq_holds_quotes_to_the_evidence() {
         smysl::Status::Inferred
     );
 }
+
+/// Detection kind 6 (§11.5): rival explanations of one target, one contention per target, and
+/// what takes it away.
+#[test]
+fn rival_explanations_are_one_contention_per_target() {
+    use smysl::schemas::tel::rival_explanations;
+    use smysl::{DetectionKind, RelKind, Relation, Uid};
+
+    let target = Uid::from_bytes([9; 32]);
+    let g = Uid::from_bytes([1; 32]);
+    let a = investigate::hypothesis("the deploy did it", &[], Some(target), vec![g]);
+    let b = investigate::hypothesis("the disk filled", &[], Some(target), vec![g]);
+    let c = investigate::hypothesis("a noisy neighbour", &[], Some(target), vec![g]);
+    let (ua, ub, uc) = (canonical_uid(&a), canonical_uid(&b), canonical_uid(&c));
+    let hlc = || Hlc::new(1, 0, AgentId::new("tool:smysl-tel").unwrap());
+    let detect = |units: &[&smysl::UnitCore], rels: &[Relation]| {
+        let owned: Vec<(Uid, smysl::UnitCore)> = units
+            .iter()
+            .map(|u| (canonical_uid(u), (*u).clone()))
+            .collect();
+        let statuses: std::collections::BTreeMap<Uid, smysl::Status> =
+            owned.iter().map(|(k, u)| (*k, u.status)).collect();
+        rival_explanations(
+            owned.iter().map(|(k, u)| (k, u)),
+            rels.iter(),
+            |u| statuses.get(u).copied().unwrap_or(smysl::Status::Unfounded),
+            |_| None,
+            hlc(),
+        )
+    };
+    let ex = |h: Uid| investigate::explains(h, target);
+
+    let two = detect(&[&a, &b], &[ex(ua), ex(ub)]);
+    assert_eq!(two.len(), 1);
+    assert_eq!(two[0].detected.kind, DetectionKind::RivalExplanation);
+    assert_eq!(two[0].over, target);
+    // A function of the records: another order, the same id.
+    assert_eq!(detect(&[&b, &a], &[ex(ub), ex(ua)])[0].id, two[0].id);
+    // A third rival joins the one contention.
+    let three = detect(&[&a, &b, &c], &[ex(ua), ex(ub), ex(uc)]);
+    assert_eq!((three.len(), three[0].positions.len()), (1, 3));
+    assert_ne!(three[0].id, two[0].id);
+
+    // What takes it away: a rebuttal, a supersession, a failed quote, no grounds.
+    let rebut = Relation::new(RelKind::Rebuts, ub, ua);
+    assert!(detect(&[&a, &b], &[ex(ua), ex(ub), rebut]).is_empty());
+    let sup = Relation::new(RelKind::Supersedes, uc, ub);
+    assert!(
+        detect(&[&a, &b, &c], &[ex(ua), ex(ub), sup]).is_empty(),
+        "b is not live"
+    );
+    let bad = investigate::hypothesis(
+        "the disk filled to 100",
+        &[format!("{}#max=100", g.canonical())],
+        Some(target),
+        vec![g],
+    );
+    assert!(
+        detect(&[&a, &bad], &[ex(ua), ex(canonical_uid(&bad))]).is_empty(),
+        "an unverified quote caps it at speculative"
+    );
+    let bare = investigate::hypothesis("vibes", &[], Some(target), vec![]);
+    assert!(detect(&[&a, &bare], &[ex(ua), ex(canonical_uid(&bare))]).is_empty());
+}
