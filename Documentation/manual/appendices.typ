@@ -1156,7 +1156,14 @@ platform window the same way.
 
 `tel check` checks a library's windows: rule TW (`SMY-E603`), windows of one key that disagree
 (`SMY-W614`), and each window recomputed from the substrate (`SMY-E604` if it is another unit,
-`SMY-W605` if its samples are gone). It exits 3 on an error.
+`SMY-W605` if its samples are gone). It then lists the derived contentions, each with whether a
+resolution has reviewed it:
+
+- rival explanations (kind 6);
+- witness conflicts (kind 7): two independent series of one quantity whose preferred windows
+  over one span and recipe disagree.
+
+It exits 3 on an error.
 
 `tel detect RECIPE` runs a detector. `RECIPE` is an HJSON file naming it and its parameters, for
 example `{ detector: pelt/1, penalty: 10, min_size: 3 }`. A parameter left out takes its default,
@@ -1185,7 +1192,9 @@ attested by `--as` at `--at`.
 - `close INV` writes the closed investigation, superseding the open one.
 - `show INV [--lookback MS]` writes nothing. It prints the report: hypotheses with their
   effective status and any `SMY-W606`, probes, actions, consulted, unused and unexplored
-  evidence, and rival explanations.
+  evidence, and rival explanations. For each series the evidence is about, it prints how many
+  independent witnesses its quantity has and the common transport, followed by the witness
+  conflicts on that evidence.
 
 Probes and actions are attested as imported at the computed rung, because a tool ran them. The
 rest are authored at the document rung.

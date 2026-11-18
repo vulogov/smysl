@@ -15334,6 +15334,75 @@ fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> Exi
                 StoreRead::contention_status(store, c)
             );
         }
+        // The evidence it used, consulted or cited, and what measured it (§7, §22.2): per
+        // series, how many independent witnesses its quantity has, and kind 7 on its windows.
+        let mut evidence: std::collections::BTreeSet<Uid> = r.consulted.iter().copied().collect();
+        for (h, _, _) in &r.hypotheses {
+            if let Some(u) = units.get(h) {
+                evidence.extend(u.grounds.iter().copied());
+            }
+        }
+        let series_of = |u: &Uid| -> Option<Uid> {
+            let c = units.get(u)?;
+            match c.schema.as_str() {
+                smysl::schemas::tel::SERIES => Some(*u),
+                smysl::schemas::tel::WINDOW => {
+                    smysl::schemas::tel::window_fields(c.payload.as_deref()?)
+                        .ok()?
+                        .series?
+                        .parse()
+                        .ok()
+                }
+                _ => None,
+            }
+        };
+        let measured: std::collections::BTreeSet<Uid> =
+            evidence.iter().filter_map(series_of).collect();
+        let graph = smysl::schemas::tel::LineageGraph::of(
+            units.iter().map(|(u, c)| (u, *c)),
+            relations.iter().copied(),
+        );
+        println!("witnesses     {} series", measured.len());
+        for s in &measured {
+            let w = graph.witnesses(s);
+            let unmeasured = if w.unmeasured.contains(s) {
+                "  SMY-W609"
+            } else {
+                ""
+            };
+            println!(
+                "  {}  {} of {} series, {} common transport{unmeasured}",
+                s.canonical(),
+                w.count(),
+                w.quantity.len(),
+                w.common_transport.len()
+            );
+        }
+        let conflicts: Vec<_> = smysl::schemas::tel::witness_conflicts(
+            units.iter().map(|(u, c)| (u, *c)),
+            relations.iter().copied(),
+            smysl::Hlc::new(
+                0,
+                0,
+                AgentId::new("tool:smysl-tel").expect("a valid literal"),
+            ),
+        )
+        .into_iter()
+        .filter(|c| {
+            c.positions.iter().any(|p| {
+                evidence.contains(p) || series_of(p).is_some_and(|s| measured.contains(&s))
+            })
+        })
+        .collect();
+        println!("conflicts     {}", conflicts.len());
+        for c in &conflicts {
+            println!(
+                "  {}  over {}  ({:?})",
+                c.id.as_str(),
+                c.over.canonical(),
+                StoreRead::contention_status(store, c)
+            );
+        }
         return ExitCode::Success;
     }
 
@@ -15825,6 +15894,9 @@ fn tel_witnesses(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitC
 /// - `SMY-W605`: a window whose samples are not in `series.redb`, or all of them when the
 ///   library has no substrate.
 ///
+/// Then the derived contentions, each with whether a resolution has reviewed it: rival
+/// explanations (kind 6) and witness conflicts (kind 7, §11.5).
+///
 /// Exit 0 with no error, 3 with any.
 #[cfg(feature = "tel")]
 fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
@@ -15869,6 +15941,16 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         |u| StoreRead::get(store, u).map(|c| c.core.payload.clone().unwrap_or_default()),
         smysl::Hlc::new(0, 0, agent),
     );
+    // Detection kind 7 (§11.5): independent witnesses of one quantity whose windows disagree.
+    let conflicts = smysl::schemas::tel::witness_conflicts(
+        StoreRead::units(store).map(|(uid, u)| (uid, &u.core)),
+        store.relations(),
+        smysl::Hlc::new(
+            0,
+            0,
+            AgentId::new("tool:smysl-tel").expect("a valid literal"),
+        ),
+    );
     let path = tel_series_path(&root);
     let cores: Vec<&smysl::UnitCore> = windows.iter().map(|(_, u, _)| u).collect();
     if path.exists() {
@@ -15898,15 +15980,38 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             StoreRead::contention_status(store, c)
         );
     }
+    for c in &conflicts {
+        let positions: Vec<String> = c.positions.iter().map(|p| p.canonical()).collect();
+        let why = match (
+            StoreRead::get(store, &c.positions[0]),
+            StoreRead::get(store, &c.positions[1]),
+        ) {
+            (Some(a), Some(b)) => smysl::schemas::tel::windows_disagree(
+                a.core.payload.as_deref().unwrap_or_default(),
+                b.core.payload.as_deref().unwrap_or_default(),
+            )
+            .unwrap_or_default(),
+            _ => String::new(),
+        };
+        println!(
+            "contention {}  witness conflict over {}: {} disagree on {why}  ({:?})",
+            c.id.as_str(),
+            c.over.canonical(),
+            positions.join(", "),
+            StoreRead::contention_status(store, c)
+        );
+    }
     let errors = diags
         .iter()
         .filter(|d| d.code.severity() == smysl::Severity::Error)
         .count();
     println!(
-        "checked   {} window(s): {errors} error(s), {} warning(s); {} rival explanation(s)",
+        "checked   {} window(s): {errors} error(s), {} warning(s); {} rival explanation(s), {} \
+         witness conflict(s)",
         windows.len(),
         diags.len() - errors,
-        rivals.len()
+        rivals.len(),
+        conflicts.len()
     );
     if errors > 0 {
         ExitCode::CheckErrors

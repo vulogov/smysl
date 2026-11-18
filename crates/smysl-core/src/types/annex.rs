@@ -141,9 +141,9 @@ impl DetectionKind {
             // applicable, and `W413` names a set of records that cannot all be true.
             DetectionKind::DatingNotApplied => crate::diag::Code::W412,
             DetectionKind::TemporalInconsistency => crate::diag::Code::W413,
-            // SMYSL-3's two have no code of their own yet: nothing derives them until TL-P6
-            // and TL-P7, and §15 allocates none. Until then they are what W053 says, two
-            // things that disagree.
+            // SMYSL-3's two, derived since TL-P6 (6) and TL-P7 (7) by `schemas::tel`'s
+            // `rival_explanations` and `witness_conflicts`. §15 allocates them no code, so they
+            // are what W053 says: two things that disagree, for a reviewer to resolve.
             DetectionKind::RivalExplanation | DetectionKind::WitnessConflict => {
                 crate::diag::Code::W053
             }

@@ -1221,9 +1221,357 @@ impl Witnesses {
     }
 }
 
+/// A natural number in base 10⁹ limbs, least significant first: just enough arithmetic to decide
+/// §11.5's quantile tolerance exactly, with no float anywhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Nat(Vec<u32>);
+
+const LIMB: u64 = 1_000_000_000;
+
+impl Nat {
+    fn of(mut n: u128) -> Nat {
+        let mut v = Vec::new();
+        while n > 0 {
+            v.push((n % u128::from(LIMB)) as u32);
+            n /= u128::from(LIMB);
+        }
+        Nat(v)
+    }
+
+    fn trim(mut self) -> Nat {
+        while self.0.last() == Some(&0) {
+            self.0.pop();
+        }
+        self
+    }
+
+    fn mul_small(&self, k: u32) -> Nat {
+        let mut out = Vec::with_capacity(self.0.len() + 1);
+        let mut carry = 0u64;
+        for &d in &self.0 {
+            let x = u64::from(d) * u64::from(k) + carry;
+            out.push((x % LIMB) as u32);
+            carry = x / LIMB;
+        }
+        if carry > 0 {
+            out.push(carry as u32);
+        }
+        Nat(out).trim()
+    }
+
+    fn mul(&self, o: &Nat) -> Nat {
+        let mut out = vec![0u64; self.0.len() + o.0.len() + 1];
+        for (i, &a) in self.0.iter().enumerate() {
+            let mut carry = 0u64;
+            for (j, &b) in o.0.iter().enumerate() {
+                let x = out[i + j] + u64::from(a) * u64::from(b) + carry;
+                out[i + j] = x % LIMB;
+                carry = x / LIMB;
+            }
+            let mut k = i + o.0.len();
+            while carry > 0 {
+                let x = out[k] + carry;
+                out[k] = x % LIMB;
+                carry = x / LIMB;
+                k += 1;
+            }
+        }
+        Nat(out.into_iter().map(|d| d as u32).collect()).trim()
+    }
+
+    /// `self × 10ⁿ`.
+    fn shift10(&self, n: u32) -> Nat {
+        let mut out = vec![0u32; (n / 9) as usize];
+        out.extend_from_slice(&self.0);
+        Nat(out).trim().mul_small(10u32.pow(n % 9))
+    }
+
+    fn add(&self, o: &Nat) -> Nat {
+        let n = self.0.len().max(o.0.len());
+        let mut out = Vec::with_capacity(n + 1);
+        let mut carry = 0u64;
+        for i in 0..n {
+            let x = u64::from(*self.0.get(i).unwrap_or(&0))
+                + u64::from(*o.0.get(i).unwrap_or(&0))
+                + carry;
+            out.push((x % LIMB) as u32);
+            carry = x / LIMB;
+        }
+        if carry > 0 {
+            out.push(carry as u32);
+        }
+        Nat(out).trim()
+    }
+
+    /// `self − o`, for `self ≥ o`.
+    fn sub(&self, o: &Nat) -> Nat {
+        let mut out = Vec::with_capacity(self.0.len());
+        let mut borrow = 0i64;
+        for (i, &d) in self.0.iter().enumerate() {
+            let mut x = i64::from(d) - i64::from(*o.0.get(i).unwrap_or(&0)) - borrow;
+            borrow = 0;
+            if x < 0 {
+                x += LIMB as i64;
+                borrow = 1;
+            }
+            out.push(x as u32);
+        }
+        Nat(out).trim()
+    }
+
+    fn cmp(&self, o: &Nat) -> core::cmp::Ordering {
+        self.0
+            .len()
+            .cmp(&o.0.len())
+            .then_with(|| self.0.iter().rev().cmp(o.0.iter().rev()))
+    }
+}
+
+/// `|d|` as a natural number scaled to the exponent `e ≤ d.exponent()`: `|m| × 10^(exp − e)`.
+fn scaled(d: &crate::Decimal, e: i64) -> Nat {
+    let shift = i64::from(d.exponent()) - e;
+    Nat::of(d.mantissa().unsigned_abs()).shift10(shift as u32)
+}
+
+/// `|a|` against `|b|`, exactly.
+fn cmp_abs(a: &crate::Decimal, b: &crate::Decimal) -> core::cmp::Ordering {
+    let e = i64::from(a.exponent().min(b.exponent()));
+    scaled(a, e).cmp(&scaled(b, e))
+}
+
+/// Whether two quantile estimates differ by more than `2 × alpha` relative to the larger of
+/// them (§11.5): `|a − b| > 2 · alpha · max(|a|, |b|)`, decided exactly.
+///
+/// Each estimate of a DDSketch with relative accuracy `alpha` lies within `alpha × x` of the
+/// true quantile `x`, so two honest sketches of one quantity can be `2 alpha x` apart and no
+/// further. The bound is taken against the larger estimate, which is the lenient side: a
+/// conflict is reported only when no reading of the guarantee covers the gap.
+pub fn quantiles_conflict(a: &crate::Decimal, b: &crate::Decimal, alpha: &crate::Decimal) -> bool {
+    let e = i64::from(a.exponent().min(b.exponent()));
+    let (na, nb) = (scaled(a, e), scaled(b, e));
+    let (sa, sb) = (a.mantissa() < 0, b.mantissa() < 0);
+    let diff = if sa != sb {
+        na.add(&nb)
+    } else if na.cmp(&nb) == core::cmp::Ordering::Less {
+        nb.sub(&na)
+    } else {
+        na.sub(&nb)
+    };
+    let max = if na.cmp(&nb) == core::cmp::Ordering::Less {
+        nb
+    } else {
+        na
+    };
+    let m = Nat::of(alpha.mantissa().unsigned_abs()).mul_small(2);
+    let mut rhs = max.mul(&m);
+    let mut lhs = diff;
+    let k = i64::from(alpha.exponent());
+    if k >= 0 {
+        rhs = rhs.shift10(k as u32);
+    } else {
+        lhs = lhs.shift10((-k) as u32);
+    }
+    lhs.cmp(&rhs) == core::cmp::Ordering::Greater
+}
+
+/// The exact fields §11.5 compares: if any of them differs between two windows, they disagree.
+pub const EXACT_FIELDS: &[&str] = &["count", "min", "max", "first", "last", "sum", "mean"];
+
+/// Why two window payloads of one key disagree (§11.5), or `None` when they do not.
+///
+/// - An exact field present in both with different values: `"<field>"`.
+/// - A quantile present in both at one index, apart by more than 2 × the larger `alpha`:
+///   `"q[<i>]"`.
+///
+/// Fields only one of them carries are not compared: an absence is not a value.
+pub fn windows_disagree(a: &[u8], b: &[u8]) -> Option<String> {
+    for f in EXACT_FIELDS {
+        if let (Some(x), Some(y)) = (quoted_value(a, f, None), quoted_value(b, f, None)) {
+            if x != y {
+                return Some((*f).to_string());
+            }
+        }
+    }
+    let dec = |p: &[u8], f: &str, i: Option<usize>| {
+        quoted_value(p, f, i).and_then(|s| s.parse::<crate::Decimal>().ok())
+    };
+    let alpha = match (dec(a, "alpha", None), dec(b, "alpha", None)) {
+        (Some(x), Some(y)) => {
+            if cmp_abs(&x, &y) == core::cmp::Ordering::Less {
+                y
+            } else {
+                x
+            }
+        }
+        _ => return None,
+    };
+    let mut i = 0;
+    while let (Some(x), Some(y)) = (dec(a, "q", Some(i)), dec(b, "q", Some(i))) {
+        if quantiles_conflict(&x, &y, &alpha) {
+            return Some(format!("q[{i}]"));
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Detection kind 7, `WitnessConflict` (§11.5): two series joined by `x.tel/same-quantity`,
+/// independent by §7, whose preferred windows over one `(from_ms, to_ms, recipe)` disagree
+/// ([`windows_disagree`]). One contention per such pair of windows, `over` the smaller of the
+/// two series uids, `positions` the two windows.
+///
+/// A series' **preferred window** of a span and recipe is §9.2's, taken over every instrument the
+/// series has windows from: the largest `count`, then the smallest `digest` (none before any),
+/// then the smallest uid. Evidence about one series is one witness however many scrapers carried
+/// it (§7), so one window speaks for it.
+///
+/// Derived-only, like kind 6: a function of the record set, never written. `now` stamps the
+/// detection; it is not part of the id.
+pub fn witness_conflicts<'a>(
+    units: impl IntoIterator<Item = (&'a crate::Uid, &'a UnitCore)>,
+    relations: impl IntoIterator<Item = &'a crate::Relation>,
+    now: crate::Hlc,
+) -> Vec<crate::Contention> {
+    use std::collections::BTreeMap;
+    let units: Vec<(&crate::Uid, &UnitCore)> = units.into_iter().collect();
+    let relations: Vec<&crate::Relation> = relations.into_iter().collect();
+    let g = LineageGraph::of(units.iter().copied(), relations.iter().copied());
+    type Pref = (core::cmp::Reverse<u64>, Option<[u8; 32]>, crate::Uid);
+    // series → (from, to, recipe) → the preferred window's rank, and its payload.
+    type Span = (u64, u64, String);
+    type BySpan<'p> = BTreeMap<Span, (Pref, &'p [u8])>;
+    let mut pref: BTreeMap<crate::Uid, BySpan<'_>> = BTreeMap::new();
+    for (uid, u) in &units {
+        if u.schema.as_str() != WINDOW {
+            continue;
+        }
+        let Some(p) = u.payload.as_deref() else {
+            continue;
+        };
+        let Ok(w) = window_fields(p) else { continue };
+        let (Some(s), Some(f), Some(t), Some(r), Some(c)) =
+            (w.series, w.from_ms, w.to_ms, w.recipe, w.count)
+        else {
+            continue;
+        };
+        let Ok(s) = s.parse::<crate::Uid>() else {
+            continue;
+        };
+        let rank: Pref = (core::cmp::Reverse(c), w.digest, **uid);
+        let slot = pref.entry(s).or_default().entry((f, t, r));
+        match slot {
+            std::collections::btree_map::Entry::Vacant(v) => {
+                v.insert((rank, p));
+            }
+            std::collections::btree_map::Entry::Occupied(mut o) => {
+                if rank < o.get().0 {
+                    o.insert((rank, p));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for (a, others) in &g.same {
+        for b in others {
+            if b <= a || !g.independent(a, b) {
+                continue;
+            }
+            let (Some(wa), Some(wb)) = (pref.get(a), pref.get(b)) else {
+                continue;
+            };
+            for (key, (ra, pa)) in wa {
+                let Some((rb, pb)) = wb.get(key) else {
+                    continue;
+                };
+                if windows_disagree(pa, pb).is_none() {
+                    continue;
+                }
+                let mut positions = vec![ra.2, rb.2];
+                positions.sort_unstable();
+                let kind = crate::DetectionKind::WitnessConflict;
+                out.push(crate::Contention::new(
+                    crate::ContentionId::derive(kind, a, &positions),
+                    *a,
+                    positions,
+                    crate::Detected::new(kind, now.clone()),
+                ));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn d(s: &str) -> crate::Decimal {
+        s.parse().unwrap()
+    }
+
+    /// §11.5's tolerance, decided exactly at its edge: `|a − b| > 2 alpha max(|a|, |b|)`.
+    #[test]
+    fn quantiles_conflict_only_past_twice_alpha() {
+        let a = d("0.01");
+        // 100 and 102: the gap is 2, and 2 × 0.01 × 102 is 2.04.
+        assert!(!quantiles_conflict(&d("100"), &d("102"), &a));
+        // At the edge: 2 × 0.01 × 100 = 2 = |100 − 98|, which is not past it.
+        assert!(!quantiles_conflict(&d("98"), &d("100"), &a));
+        assert!(quantiles_conflict(&d("97.9"), &d("100"), &a));
+        // Order, sign and scale do not matter to the decision.
+        assert_eq!(
+            quantiles_conflict(&d("100"), &d("97.9"), &a),
+            quantiles_conflict(&d("97.9"), &d("100"), &a)
+        );
+        assert!(quantiles_conflict(&d("-1"), &d("1"), &a));
+        assert!(!quantiles_conflict(&d("1e-30"), &d("1.01e-30"), &a));
+        assert!(quantiles_conflict(&d("1e30"), &d("1.03e30"), &a));
+        assert!(!quantiles_conflict(&d("0"), &d("0"), &a));
+        // Wide exponent gaps are exact, not rounded.
+        assert!(quantiles_conflict(&d("1e-300"), &d("1e300"), &a));
+        // With 2 alpha ≥ 1 no two estimates of one sign can conflict.
+        assert!(!quantiles_conflict(&d("1e-300"), &d("1e300"), &d("0.5")));
+        // 18 digits apart by one: 2 × 1e-17 × 1.2e17 ≈ 2.5 covers the gap, 2 × 1e-18 × 1.2e17 does not.
+        assert!(!quantiles_conflict(
+            &d("123456789012345678"),
+            &d("123456789012345679"),
+            &d("1e-17")
+        ));
+        assert!(quantiles_conflict(
+            &d("123456789012345678"),
+            &d("123456789012345679"),
+            &d("1e-18")
+        ));
+    }
+
+    #[test]
+    fn nat_arithmetic_agrees_with_u128() {
+        let xs = [
+            0u128,
+            1,
+            999_999_999,
+            1_000_000_000,
+            123_456_789_012_345_678_901,
+            u64::MAX as u128,
+        ];
+        for &a in &xs {
+            for &b in &xs {
+                let (na, nb) = (Nat::of(a), Nat::of(b));
+                assert_eq!(na.add(&nb), Nat::of(a + b));
+                assert_eq!(na.cmp(&nb), a.cmp(&b));
+                if a >= b {
+                    assert_eq!(na.sub(&nb), Nat::of(a - b));
+                }
+                if a <= u64::MAX as u128 && b <= u64::MAX as u128 {
+                    assert_eq!(na.mul(&nb), Nat::of(a * b));
+                }
+            }
+            assert_eq!(
+                Nat::of(a).shift10(11),
+                Nat::of(a).mul(&Nat::of(100_000_000_000))
+            );
+        }
+    }
 
     /// §7's lineage fixtures: instruments by role and key, series by key.
     struct Lab {

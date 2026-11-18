@@ -1392,6 +1392,48 @@ as independent". §7 says the opposite: as its own origin it counts as independe
 other series, which can overcount. The warning exists because of that. The rustdoc, the check
 pass and Appendix A now say so.
 
+### Witness conflicts: detection kind 7 (TL-P7 step 4)
+
+`smysl_core::schemas::tel::witness_conflicts` derives kind 7 (§11.5) from the record set. It
+is never written, like kind 6. It applies to two series joined by `same-quantity` and
+independent by §7, whose preferred windows over one `(from_ms, to_ms, recipe)` disagree.
+There is one contention per pair of windows, `over` the smaller series uid, with the two
+windows as positions.
+
+- **Disagree** (`windows_disagree`):
+  - an exact field both carry differs: `count`, `min`, `max`, `first`, `last`, `sum` or
+    `mean`. A field only one carries is not compared;
+  - or a quantile at one index differs by more than 2 × the larger `alpha`, relative to the
+    larger estimate.
+- **The tolerance is decided exactly** (`quantiles_conflict`): `|a − b| > 2 alpha max(|a|, |b|)`
+  in integer arithmetic over the decimals, with no float. Against the larger estimate is the
+  lenient reading of "relative". Each of two honest DDSketch estimates is within `alpha` of
+  the true value, so they cannot be further apart than that. The edge is pinned: 98 and 100 at
+  alpha 0.01 do not conflict, and 97.9 and 100 do.
+- **The preferred window of a series** is §9.2's, taken over every instrument that carried the
+  series: the largest `count`, then the smallest digest (none first), then the smallest uid.
+  Evidence about one series is one witness (§7), so one window speaks for it. §9.2 defines the
+  preferred window per window key, which includes the instrument. Taking it across instruments
+  is the reading this implementation makes, and §11.5 needs it to compare series rather than
+  carriers.
+
+`tel check` lists each conflict, with which field disagrees and whether a resolution has
+reviewed it, and counts conflicts beside the rival explanations. `tel investigate show` adds,
+for each series the evidence is about, the quantity's witness count and its common transport,
+followed by the conflicts on that evidence.
+
+`tests/cmd_tel_conflict.rs` has two processes reporting one gauge over OTLP, declared one
+quantity:
+- equal values: no conflict;
+- 1% apart: the exact windows conflict on `min`, the sketched windows at alpha 0.01 do not,
+  and a second `tel check` gives the same contention id;
+- a recording rule declared on both lineages: one witness, and no conflict;
+- an investigation that consulted one window: `show` reports 2 witnesses, 1 common transport
+  (the shared collector) and the conflict.
+
+C-Tel-Check (§16) wants kinds 6 and 7 pinned on `fixtures/tel/check/`. That fixture does not
+exist yet, for kind 6 either, and is owed.
+
 ---
 
 ## 1.16.0 — 2026-11-16

@@ -522,10 +522,37 @@ unmeasured    0
 scraped by two Prometheus servers: one witness, carried twice. The count is a report. It
 changes no status unless GE-M6 shows that it changes a conclusion (D-T10).
 
+*When witnesses disagree.* Take two independent witnesses of one quantity, each with a window
+over one span by one recipe. When those windows disagree, `tel check` reports a *witness
+conflict* (detection kind 7). Like a rival explanation, it is derived from the records, named
+by its content, and resolved by a person. The two windows disagree when:
+
+- an exact field that both carry differs (`count`, `min`, `max`, `first`, `last`, `sum`,
+  `mean`); or
+- a quantile differs by more than twice the larger accuracy, relative to the larger estimate.
+  Two honest sketches of one value, each within `alpha` of it, can be no further apart.
+
+Each series is represented by its *preferred* window for the span: the largest count, then the
+smallest digest, over every instrument that carried it. A series is one witness however many
+scrapers carried it, so one window speaks for it. Two processes reporting one gauge 1% apart
+conflict on their exact windows. Their sketches at `alpha` 0.01 do not:
+
+#screen(caption: "$ smysl tel check -s lib")[
+```
+contention k/c…  witness conflict over b3:dhhz3f…: b3:…, b3:… disagree on min  (Open)
+checked   4 window(s): 0 error(s), 0 warning(s); 0 rival explanation(s), 1 witness conflict(s)
+```
+]
+
+Declare a recording rule both pass through (`tel declare via … rule:disk`) and they become one
+witness, which cannot conflict with itself. `tel investigate show` lists, for each series its
+evidence is about, the quantity's witness count and common transport, and then the conflicts
+on that evidence.
+
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
-  investigations, instrument lineage and witness counting. Witness conflicts, eviction,
-  exchange, traces and logs are the RFC's later phases, TL-P7 to TL-P9. So are:
+  investigations, instrument lineage, witness counting and witness conflicts. Eviction,
+  exchange, traces and logs are the RFC's later phases, TL-P8 and TL-P9. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
   - what a deleted object becomes as a unit;
