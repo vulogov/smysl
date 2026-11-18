@@ -2527,6 +2527,7 @@ fn cli() -> Command {
                             "check",
                             "detect",
                             "investigate",
+                            "declare",
                             "profile",
                         ])
                         .help(
@@ -2544,7 +2545,8 @@ fn cli() -> Command {
                             "`read READER FILE...` (k8s/1, zabbix/1, prom/1, otlp/1, \
                              otlp-json/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
                              `detect RECIPE`; `investigate open|consult|hypothesis|probe|action|\
-                             close|show …`; `profile check FILE|NAME`",
+                             close|show …`; `declare instrument|measured-by|via|same-quantity …`; \
+                             `profile check FILE|NAME`",
                         ),
                 )
                 .arg(
@@ -13626,6 +13628,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "check" => tel_check(m, global),
         "detect" => tel_detect(m, global, &args),
         "investigate" => tel_investigate(m, global, &args),
+        "declare" => tel_declare(m, global, &args),
         "read" => tel_read(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
@@ -15532,6 +15535,179 @@ fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> Exi
     }
     if let Err(e) = library.append_records(&staged.records()) {
         eprintln!("smysl tel investigate: {e}");
+        return ExitCode::Failure;
+    }
+    println!("committed {n_units} unit(s), {n_edges} edge(s)");
+    ExitCode::Success
+}
+
+/// `smysl tel declare WHAT … -s LIB --as AGENT --at MS`: lineage a person states (RFC SMYSL-3
+/// §4.1, §4.2, §7, TL-P7 step 2). What no export says is declared, authored by `--as` at `--at`.
+///
+/// | what | writes |
+/// |---|---|
+/// | `instrument ROLE KEY [VERSION]` | an `x.tel/instrument`, and with `VERSION` its `x.tel/instrument-meta` at `--at` |
+/// | `measured-by SERIES INSTRUMENT` | `x.tel/measured-by`: the instrument that measured the series at its origin |
+/// | `via FROM TO` | `x.tel/via`: what `FROM` measured or carried passed through `TO` |
+/// | `same-quantity SERIES SERIES` | `x.tel/same-quantity`: the two measure one quantity in one unit |
+///
+/// A series is a uid or `<scheme>:<key>`, an instrument a uid or its key, and both must already
+/// be in the library: an edge to a unit nobody has is a claim about nothing.
+#[cfg(feature = "tel")]
+fn tel_declare(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::schemas::tel;
+    use smysl::tel::instruments;
+    use smysl::text::library::Library;
+
+    let usage = "smysl tel declare: instrument ROLE KEY [VERSION] | measured-by SERIES INSTRUMENT \
+                 | via FROM TO | same-quantity SERIES SERIES";
+    let Some((what, rest)) = args.split_first() else {
+        eprintln!("{usage}");
+        return ExitCode::Usage;
+    };
+    let arity = match what.as_str() {
+        "instrument" => 2..=3,
+        "measured-by" | "via" | "same-quantity" => 2..=2,
+        other => {
+            eprintln!("smysl tel declare: `{other}` is not declarable");
+            eprintln!("{usage}");
+            return ExitCode::Usage;
+        }
+    };
+    if !arity.contains(&rest.len()) {
+        eprintln!("{usage}");
+        return ExitCode::Usage;
+    }
+    let (Some(agent), Some(&at)) = (m.get_one::<String>("as"), m.get_one::<u64>("at")) else {
+        eprintln!("smysl tel declare {what}: --as AGENT and --at MS are required: who says so,");
+        eprintln!("  and when");
+        return ExitCode::Usage;
+    };
+    let agent = match AgentId::new(agent) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl tel declare: --as: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let mut library = match Library::create(&root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel declare: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let store = library.store();
+    let known: std::collections::BTreeMap<Uid, smysl::UnitCore> = StoreRead::units(store)
+        .filter(|(_, u)| [tel::SERIES, tel::INSTRUMENT].contains(&u.core.schema.as_str()))
+        .map(|(uid, u)| (*uid, u.core.clone()))
+        .collect();
+    let series = |s: &str| -> Result<Uid, ExitCode> {
+        let uid = tel_series_arg(s).map_err(|e| {
+            eprintln!("smysl tel declare {what}: {e}");
+            ExitCode::Usage
+        })?;
+        match known.get(&uid) {
+            Some(u) if u.schema.as_str() == tel::SERIES => Ok(uid),
+            _ => {
+                eprintln!("smysl tel declare {what}: no series {s} here");
+                Err(ExitCode::Failure)
+            }
+        }
+    };
+    let instrument = |s: &str| -> Result<Uid, ExitCode> {
+        instruments::resolve(s, known.iter()).map_err(|e| {
+            eprintln!("smysl tel declare {what}: {e}");
+            ExitCode::Failure
+        })
+    };
+    let (units, relations) = match what.as_str() {
+        "instrument" => {
+            let i = match tel::instrument(rest[0], rest[1]) {
+                Ok(i) => i,
+                Err(e) => {
+                    eprintln!("smysl tel declare instrument: {e}");
+                    return ExitCode::Usage;
+                }
+            };
+            let mut units = vec![i.clone()];
+            if let Some(v) = rest.get(2) {
+                units.extend(instruments::instrument_meta(&i, v, at));
+            }
+            (units, Vec::new())
+        }
+        "measured-by" => match (series(rest[0]), instrument(rest[1])) {
+            (Ok(s), Ok(i)) => (Vec::new(), vec![tel::measured_by(s, i)]),
+            (Err(c), _) | (_, Err(c)) => return c,
+        },
+        "via" => match (instrument(rest[0]), instrument(rest[1])) {
+            (Ok(a), Ok(b)) if a == b => {
+                eprintln!("smysl tel declare via: an instrument does not pass data to itself");
+                return ExitCode::Usage;
+            }
+            (Ok(a), Ok(b)) => (Vec::new(), vec![tel::via(a, b)]),
+            (Err(c), _) | (_, Err(c)) => return c,
+        },
+        _ => match (series(rest[0]), series(rest[1])) {
+            (Ok(a), Ok(b)) if a == b => {
+                eprintln!("smysl tel declare same-quantity: a series is its own quantity already");
+                return ExitCode::Usage;
+            }
+            (Ok(a), Ok(b)) => (Vec::new(), vec![tel::same_quantity(a, b)]),
+            (Err(c), _) | (_, Err(c)) => return c,
+        },
+    };
+    let _locks = match smysl::text::lock::acquire_all(&root, &library.shards(), "tel declare") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel declare: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    for u in &units {
+        println!(
+            "{:<20} {}  {}",
+            u.schema.as_str(),
+            smysl::canonical_uid(u).canonical(),
+            u.gist
+        );
+    }
+    for r in &relations {
+        println!(
+            "{:<20} {} -> {}",
+            r.kind.as_str(),
+            r.from.canonical(),
+            r.to.canonical()
+        );
+    }
+    let (n_units, n_edges) = (units.len(), relations.len());
+    let attest = LedgerAttest {
+        agent: agent.clone(),
+        op: smysl::Op::Authored,
+        rung: smysl::Rung::Document,
+        now: smysl::Hlc::new(at, 0, agent),
+    };
+    let staged = smysl::stage::prepare_attested(
+        library.store(),
+        units,
+        relations,
+        std::collections::BTreeMap::new(),
+        vec![tel::decl()],
+        &attest,
+    );
+    if staged.has_errors() {
+        eprintln!("smysl tel declare: the record did not check clean");
+        for d in &staged.report.diagnostics {
+            eprintln!("  {d}");
+        }
+        return ExitCode::Failure;
+    }
+    if let Err(e) = library.append_records(&staged.records()) {
+        eprintln!("smysl tel declare: {e}");
         return ExitCode::Failure;
     }
     println!("committed {n_units} unit(s), {n_edges} edge(s)");

@@ -1190,12 +1190,24 @@ attested by `--as` at `--at`.
 Probes and actions are attested as imported at the computed rung, because a tool ran them. The
 rest are authored at the document rung.
 
+`tel declare WHAT` records lineage no export states, authored by `--as` at `--at`:
+
+- `instrument ROLE KEY [VERSION]` writes an `x.tel/instrument`, and with a version its
+  `x.tel/instrument-meta` at `--at`.
+- `measured-by SERIES INSTRUMENT` says what measured a series at its origin.
+- `via FROM TO` says that what `FROM` measured or carried passed through `TO`.
+- `same-quantity SERIES SERIES` says the two measure one quantity in one unit. Either order
+  writes the same relation.
+
+A series is a uid or `<scheme>:<key>`, and an instrument is a uid or its key. Both must already
+be in the library. A key that two roles share is refused, and you name the instrument by its uid.
+
 #dtable(
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect` or `profile`.]),
-    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `profile`: `check` and a profile file or shipped name.]),
+    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare` or `profile`.]),
+    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `declare`: what is declared, then its arguments. `profile`: `check` and a profile file or shipped name.]),
     ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for the object readers; it must be for the reader's scheme.]),
     ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds, and for `prom/1` the scrape instant. Required for `read`: nothing here reads a clock.]),
     ([`--licence`], [`SPDX`], [The manifests' licence. Required for the object readers, as `text add` requires it.]),
@@ -1209,7 +1221,7 @@ rest are authored at the document rung.
     ([`--series`], [`SERIES` (repeatable)], [`detect`: a series to run over, as a uid or `<scheme>:<key>`. Required, except for `episode/1`.]),
     ([`--during`], [`FROM-TO`], [`detect`: the window, epoch ms. Required, except for `baro/1`, which takes its window from its `at`.]),
     ([`--trigger`], [`UID`], [`detect` with `baro/1`: the unit the ranking answers, such as an episode or an alert. Each hypothesis is grounded on it.]),
-    ([`--as`], [`AGENT`], [`investigate`: who did it, `human:<handle>` or a model agent such as `model:<name>`. Required, except for `show`.]),
+    ([`--as`], [`AGENT`], [`investigate` and `declare`: who did it or says so, `human:<handle>` or a model agent such as `model:<name>`. Required, except for `show`.]),
     ([`--rotation`], [`NAME`], [`investigate open`: the on-call rotation the investigation belongs to.]),
     ([`--explains`, `--ground`], [`UID` (repeatable)], [`investigate hypothesis`: what it explains, and the evidence it rests on.]),
     ([`--quote`], [`UID#FIELD=VALUE` (repeatable)], [`investigate hypothesis`: a number it quotes, as rule TQ checks it.]),

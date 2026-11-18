@@ -1332,6 +1332,31 @@ what carried it from there:
 `tests/tel_lineage.rs` reads each reader's fixtures and checks one `measured-by` per series,
 the `via` hop, no `SMY-W609`, and `SMY-W609` on exactly the series that has no origin.
 
+### `smysl tel declare`: lineage a person states (TL-P7 step 2)
+
+No export says that two series measure one quantity. Nor does one name a recording rule or a
+remote-write store downstream of the scraper, or the origin of an OTLP resource with no
+`service.name`. `tel declare` records these, authored by `--as` at `--at` at the document rung,
+as the ledger is:
+
+| Declaration | Writes |
+|---|---|
+| `instrument ROLE KEY [VERSION]` | an `x.tel/instrument`, and with a version its `x.tel/instrument-meta` read at `--at` |
+| `measured-by SERIES INSTRUMENT` | `x.tel/measured-by` |
+| `via FROM TO` | `x.tel/via` |
+| `same-quantity SERIES SERIES` | `x.tel/same-quantity`, one relation in either order |
+
+- **Both ends must be in the library.** A series is a uid or `<scheme>:<key>`, and an
+  instrument is a uid or its key. An edge to a unit nobody has is refused, with exit 1.
+- **A key two roles share is refused by name.** The role is part of an instrument's uid, so the
+  refusal lists both uids, and you pick one.
+- **The degenerate cases are refused,** with exit 2: an instrument passing data to itself, and
+  a series declared the same quantity as itself.
+
+`smysl_tel::instruments` holds the builders: `instrument_meta`, `key_of`, `role_of` and
+`resolve`. `tests/cmd_tel_declare.rs` covers each declaration. It also clears an
+OTLP series' `SMY-W609` with `measured-by`, and checks each refusal and its exit code.
+
 ---
 
 ## 1.16.0 — 2026-11-16

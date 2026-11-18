@@ -478,6 +478,22 @@ reader does not guess: two unrelated processes would become one origin. Such a s
 `measured-by`, and `check` says so with `SMY-W609`. Counting witnesses takes it as its own
 origin.
 
+What no export says, a person declares with `tel declare`, authored by `--as` at `--at`.
+That covers a further hop, an origin the reader could not see, an instrument's version, and
+above all that two series measure one quantity:
+
+#screen(caption: "$ smysl tel declare same-quantity 'prom:http_requests_total{…}' 'zabbix:host:DB 01/item:mysql.qps' -s lib --as human:alice --at 1768557700002")[
+```
+x.tel/same-quantity  b3:lutau6eld2ljjo4jsgthf3uaqu4qn4t7sx6atevzxck3uyybzxpq -> b3:y43mgnsmlhmxzker7l2bpvp5kb7k342dh5wi3xi7i5ydzohfmgbq
+committed 0 unit(s), 1 edge(s)
+```
+]
+
+`same-quantity` has no direction, so either order writes the same relation. `instrument ROLE
+KEY VERSION` adds an instrument, and its version as an `x.tel/instrument-meta` read at `--at`.
+`via` and `measured-by` name instruments by key. A key that two roles share is refused, and
+you name the instrument by its uid instead.
+
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
   investigations and instrument lineage. Witness counting, eviction, exchange, traces and logs
