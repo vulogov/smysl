@@ -14173,7 +14173,11 @@ fn tel_read_series(
                     ("instance", arg("instance").unwrap_or("")),
                 ];
                 let s = prom::read(t, &target).map_err(|e| e.to_string())?;
-                scrape::record(&s, at, &key, &history).map_err(|e| e.to_string())
+                let mut r = scrape::record(&s, at, &key, &history).map_err(|e| e.to_string())?;
+                // The target measured the series; the scraper carried them (§7).
+                r.measured_at("exporter", &scrape::origin_key(target[0].1, target[1].1))
+                    .map_err(|e| e.to_string())?;
+                Ok(r)
             }),
             "otlp/1" | "otlp-json/1" => {
                 let e = if reader == "otlp/1" {
@@ -14235,6 +14239,8 @@ fn tel_read_series(
         facts += r.units.len();
         units.insert(r.inst, r.instrument.clone());
         relations.extend(scrape::of_series(&r.units));
+        units.extend(r.lineage.origins.clone());
+        relations.extend(r.lineage.relations.iter().cloned());
         for u in &r.units {
             units.insert(smysl::canonical_uid(u), u.clone());
         }
@@ -14508,6 +14514,7 @@ fn tel_commit_evidence(
     who: &str,
     root: &std::path::Path,
     units: Vec<smysl::UnitCore>,
+    lineage: Vec<smysl::Relation>,
     windows: &[smysl::UnitCore],
     at: u64,
     recipe_text: &str,
@@ -14542,7 +14549,7 @@ fn tel_commit_evidence(
     )
     .with_recipe(recipe, recipe);
     let mut tw = std::collections::BTreeMap::new();
-    let mut relations = Vec::new();
+    let mut relations = lineage;
     for w in windows {
         let Some(f) = w
             .payload
@@ -14793,6 +14800,7 @@ fn tel_window(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode
         "window",
         &root,
         series_unit.into_iter().collect(),
+        Vec::new(),
         &windows,
         at.unwrap_or(0),
         &recipe,
@@ -14830,6 +14838,7 @@ fn tel_read_trends(m: &ArgMatches, global: &ArgMatches, files: &[&String]) -> Ex
     let mut units: std::collections::BTreeMap<Uid, smysl::UnitCore> =
         std::collections::BTreeMap::new();
     let mut windows = Vec::new();
+    let mut lineage = Vec::new();
     for file in files {
         let text = match std::fs::read_to_string(file.as_str()) {
             Ok(t) => t,
@@ -14867,6 +14876,8 @@ fn tel_read_trends(m: &ArgMatches, global: &ArgMatches, files: &[&String]) -> Ex
         };
         println!("read      {file}: {} trend window(s)", r.windows.len());
         units.insert(r.inst, r.instrument.clone());
+        units.extend(r.lineage.origins.clone());
+        lineage.extend(r.lineage.relations.iter().cloned());
         for u in r.series.iter().chain(&r.metas) {
             units.insert(smysl::canonical_uid(u), u.clone());
         }
@@ -14886,6 +14897,7 @@ fn tel_read_trends(m: &ArgMatches, global: &ArgMatches, files: &[&String]) -> Ex
         "read",
         &root,
         units.into_values().collect(),
+        lineage,
         &windows,
         at.unwrap_or(0),
         &format!("zabbix/1 trends {key}"),

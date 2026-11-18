@@ -181,6 +181,24 @@ impl Raw {
         }
     }
 
+    /// The origin key of this point's resource (§7): `otel-sdk:<service.namespace>/<service.name>/<service.instance.id>`,
+    /// the process whose SDK measured it. `None` without a string `service.name`: the resource
+    /// does not say what measured it, and a guess would make two unrelated processes one origin.
+    pub fn origin(&self) -> Option<String> {
+        let get = |k: &str| {
+            self.resource.iter().find_map(|(key, v)| match v {
+                AnyValue::Str(s) if key == k => Some(s.as_str()),
+                _ => None,
+            })
+        };
+        let name = get("service.name").filter(|s| !s.is_empty())?;
+        Some(format!(
+            "otel-sdk:{}/{name}/{}",
+            get("service.namespace").unwrap_or(""),
+            get("service.instance.id").unwrap_or("")
+        ))
+    }
+
     /// The series key of `part` (§6).
     pub fn key(&self, part: Option<&str>) -> String {
         let s = |v: &str| Json::String(v.to_string());
@@ -263,6 +281,8 @@ pub struct Point {
     pub stale: bool,
     /// A count that resets (see [`Raw::resets`]); only meaningful on the headline.
     pub resets: bool,
+    /// Its resource's origin key ([`Raw::origin`]).
+    pub origin: Option<String>,
 }
 
 /// What a read produced.
@@ -310,6 +330,7 @@ pub fn points(raw: &[Raw]) -> Vec<Point> {
                 value: if stale { None } else { n.dec() },
                 stale,
                 resets: r.resets(),
+                origin: r.origin(),
             });
         }
     }

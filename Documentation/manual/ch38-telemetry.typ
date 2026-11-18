@@ -457,10 +457,31 @@ also counts the two failure modes an investigation can be measured by:
 it. `close` closes the investigation. `thread --derive timeline` lays the ledger out as a
 timeline (Chapter 18).
 
+#section("Instruments: what measured a series")
+
+A series is what is measured. An *instrument* is a thing on the way from where it was measured
+to where smysl read it. Each reader says what it knows of that path, as relations:
+
+- `x.tel/measured-by`, from a series to the instrument that measured it at its *origin*;
+- `x.tel/via`, from an instrument to the next one the data passed through.
+
+#table(
+  columns: 3,
+  [*Reader*], [*Origin* (`measured-by`)], [*Carried by* (`via`)],
+  [`prom/1`], [the target, `prom-target:<job>/<instance>`, an exporter], [the scraper, `prom-scrape:<job>/<instance>`],
+  [`otlp/1`], [the resource's process, `otel-sdk:<namespace>/<name>/<instance>`, an agent], [the collector named by `--instrument`],
+  [`zabbix/1`], [the item's host, `zabbix-agent:<host>`, an agent], [the server named by `--instrument`],
+)
+
+An OpenTelemetry resource without a `service.name` does not say what measured it, and the
+reader does not guess: two unrelated processes would become one origin. Such a series has no
+`measured-by`, and `check` says so with `SMY-W609`. Counting witnesses takes it as its own
+origin.
+
 #callout(label: "Not yet")[
-  This part covers object snapshots, the series substrate, window evidence, detectors and
-  investigations. Instruments and witnesses, eviction, exchange, traces and logs are the RFC's
-  later phases, TL-P7 to TL-P9. So are:
+  This part covers object snapshots, the series substrate, window evidence, detectors,
+  investigations and instrument lineage. Witness counting, eviction, exchange, traces and logs
+  are the RFC's later phases, TL-P7 to TL-P9. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
   - what a deleted object becomes as a unit;

@@ -161,6 +161,68 @@ pub struct Scraped {
     pub units: Vec<UnitCore>,
     /// Samples whose value was `NaN` or `±Inf`, kept with flag 4.
     pub not_values: usize,
+    /// Where the series were measured, and how they came to the reader (§7).
+    pub lineage: Lineage,
+}
+
+/// The lineage a read establishes (§7): the instrument each series is measured by at its origin,
+/// and the hop from that origin to the reader's instrument.
+///
+/// A series whose source does not name its origin gets none, and `check` says so (`SMY-W609`).
+#[derive(Debug, Clone, Default)]
+pub struct Lineage {
+    /// The origin instruments, by uid.
+    pub origins: BTreeMap<Uid, UnitCore>,
+    /// `x.tel/measured-by` from each series to its origin, and `x.tel/via` from each origin to
+    /// the reader's instrument; in (kind, from, to) order, each once.
+    pub relations: Vec<Relation>,
+}
+
+impl Lineage {
+    /// `series` is measured at its origin by `(role, key)`, which passed it to `reader`.
+    pub fn add(
+        &mut self,
+        series: Uid,
+        role: &str,
+        key: &str,
+        reader: Uid,
+    ) -> Result<(), ScrapeError> {
+        let origin = tel::instrument(role, key).map_err(|e| ScrapeError::Unit(e.to_string()))?;
+        let o = canonical_uid(&origin);
+        self.origins.insert(o, origin);
+        self.relations.push(tel::measured_by(series, o));
+        if o != reader {
+            self.relations.push(tel::via(o, reader));
+        }
+        Ok(())
+    }
+
+    /// Sort and deduplicate the relations.
+    pub fn settle(&mut self) {
+        let key = |r: &Relation| (r.kind.as_str().to_string(), r.from, r.to);
+        self.relations.sort_by_key(key);
+        self.relations.dedup_by(|a, b| key(a) == key(b));
+    }
+}
+
+impl Scraped {
+    /// Every series of this read is measured at its origin by `(role, key)`: a Prometheus
+    /// target's exporter, which the scrape itself does not name.
+    pub fn measured_at(&mut self, role: &str, key: &str) -> Result<(), ScrapeError> {
+        for s in &self.series {
+            self.lineage.add(s.uid, role, key, self.inst)?;
+        }
+        self.lineage.settle();
+        Ok(())
+    }
+}
+
+/// The origin key of a Prometheus target (§7): `prom-target:<job>/<instance>`, role `exporter`.
+///
+/// The target is what measured the series; the scraper (`prom-scrape:…`, [`instrument_key`]) is
+/// how they reached us. One target scraped by two Prometheus servers is one origin.
+pub fn origin_key(job: &str, instance: &str) -> String {
+    format!("prom-target:{job}/{instance}")
 }
 
 /// Why a scrape could not be recorded.
@@ -319,6 +381,7 @@ pub fn record(
         series: series.into_values().collect(),
         units,
         not_values: scrape.not_values,
+        lineage: Lineage::default(),
     })
 }
 

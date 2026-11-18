@@ -521,6 +521,7 @@ registry! {
         W606 = "SMY-W606", Warn,  "A hypothesis's numeric quote does not verify (rule TQ); its effective status is at most speculative";
         E607 = "SMY-E607", Error, "A series or instrument unit carries what its identity forbids: time, grounds, or another source";
         W608 = "SMY-W608", Warn,  "A declared keyed array could not be keyed (missing, non-scalar or repeated key); diffed as one json leaf";
+        W609 = "SMY-W609", Warn,  "A series has no x.tel/measured-by: witness counting takes it as its own origin";
         W610 = "SMY-W610", Warn,  "The profile changed between two snapshots of one manifest chain; the boundary is reported, not diffed";
         E611 = "SMY-E611", Error, "A record 6 of a detection kind that is derived and never written (6 or 7)";
         E612 = "SMY-E612", Error, "A writer emitted a reserved number: source key 7 or record 16";
@@ -1060,9 +1061,10 @@ mod tests {
     /// 169 with `SMY-E603`, `SMY-E604` and `SMY-W605` in TL-P4 step 3: rule TW, and window
     /// evidence recomputed from the substrate or found without it.
     /// 170 with `SMY-W606` in TL-P6 step 2: a numeric quote that does not verify (rule TQ).
+    /// 171 with `SMY-W609` in TL-P7 step 1: a series with no origin instrument.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 170);
+        assert_eq!(Code::ALL.len(), 171);
     }
 
     #[test]

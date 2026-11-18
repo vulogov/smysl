@@ -146,6 +146,7 @@ pub fn run(
     entity_like(store, report);
     windows(store, report);
     quotes(store, report);
+    unmeasured(store, report);
 
     // `SMY-W409` - an enumeration *code* this build does not know, which is W014's argument
     // one level down. 1.9 opened four enumerations so that an unrecognised code no longer
@@ -408,6 +409,36 @@ fn quotes(store: &(impl StoreRead + ?Sized), report: &mut Report) {
                     ),
             );
         }
+    }
+}
+
+/// `SMY-W609` (SMYSL-3 §7, TL-P7): a series with no `x.tel/measured-by`. Witness counting takes
+/// it as its own origin, which is the safe reading and also the uninformative one; the warning
+/// says which series are counted that way. The rule is `smysl_core::schemas::tel::unmeasured`.
+fn unmeasured(store: &(impl StoreRead + ?Sized), report: &mut Report) {
+    use smysl_core::schemas::tel;
+    let units: Vec<(smysl_core::Uid, smysl_core::UnitCore)> = store
+        .units()
+        .filter(|(_, u)| u.core.schema.as_str() == tel::SERIES)
+        .map(|(uid, u)| (*uid, u.core.clone()))
+        .collect();
+    if units.is_empty() {
+        return;
+    }
+    for uid in tel::unmeasured(units.iter().map(|(u, c)| (u, c)), store.relations()) {
+        report.push(
+            Diagnostic::on(Code::W609, uid)
+                .with_message(
+                    "a series with no `x.tel/measured-by`: witness counting takes it as its own \
+                     origin"
+                        .to_string(),
+                )
+                .with_suggestion(
+                    "relate the series to the instrument that measures it at its origin \
+                     (`smysl tel declare measured-by SERIES INSTRUMENT`)"
+                        .to_string(),
+                ),
+        );
     }
 }
 

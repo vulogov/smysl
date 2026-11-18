@@ -31,7 +31,9 @@ use smysl_core::{canonical_uid, Decimal, Uid};
 use smysl_series::{flags, Sample, SeriesInfo};
 
 use crate::readers::otlp::{Export, Point};
-use crate::scrape::{numeric_cmp, reset, stale, History, ScrapeError, Scraped, SeriesSamples};
+use crate::scrape::{
+    numeric_cmp, reset, stale, History, Lineage, ScrapeError, Scraped, SeriesSamples,
+};
 
 /// The scheme every OTLP series has.
 pub const SCHEME: &str = "otel";
@@ -61,9 +63,13 @@ pub fn record(
     let points = export.points();
     let mut series: BTreeMap<Uid, SeriesSamples> = BTreeMap::new();
     let mut uids = Vec::with_capacity(points.len());
+    let mut lineage = Lineage::default();
     for p in &points {
         let unit = tel::series(SCHEME, &p.key).map_err(unit_err)?;
         let uid = canonical_uid(&unit);
+        if let Some(origin) = &p.origin {
+            lineage.add(uid, "agent", origin, inst)?;
+        }
         series.entry(uid).or_insert_with(|| SeriesSamples {
             uid,
             unit,
@@ -147,6 +153,10 @@ pub fn record(
         series: series.into_values().collect(),
         units,
         not_values: export.not_values(),
+        lineage: {
+            lineage.settle();
+            lineage
+        },
     })
 }
 

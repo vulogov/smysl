@@ -22,7 +22,7 @@ use smysl_series::{flags, Sample, SeriesInfo};
 
 use crate::evidence::{Basis, Summary, Window};
 use crate::readers::zabbix_history::{HistoryRead, Item, TrendsRead, TREND_MS};
-use crate::scrape::{payload, ScrapeError, Scraped, SeriesSamples};
+use crate::scrape::{payload, Lineage, ScrapeError, Scraped, SeriesSamples};
 
 /// The scheme every Zabbix series has.
 pub const SCHEME: &str = "zabbix";
@@ -32,6 +32,12 @@ pub fn instrument_key(server: &str) -> String {
     format!("zabbix-server:{server}")
 }
 
+/// The origin key of a Zabbix host (§7): `zabbix-agent:<host>`, role `agent`. The host's agent
+/// measured the item; the server is how it reached us.
+pub fn origin_key(host: &str) -> String {
+    format!("zabbix-agent:{host}")
+}
+
 /// Record a history read, taken from the Zabbix server keyed `instrument_key`.
 pub fn record(read: &HistoryRead, instrument_key: &str) -> Result<Scraped, ScrapeError> {
     let unit_err = |e: tel::TelError| ScrapeError::Unit(e.to_string());
@@ -39,10 +45,12 @@ pub fn record(read: &HistoryRead, instrument_key: &str) -> Result<Scraped, Scrap
     let inst = canonical_uid(&instrument);
     let mut series = Vec::with_capacity(read.items.len());
     let mut units = Vec::with_capacity(read.items.len());
+    let mut lineage = Lineage::default();
     for ih in &read.items {
         let key = ih.item.key();
         let unit = tel::series(SCHEME, &key).map_err(unit_err)?;
         let uid = canonical_uid(&unit);
+        lineage.add(uid, "agent", &origin_key(&ih.item.host), inst)?;
         units.push(meta(&key, &uid.canonical(), &ih.item));
         let samples = ih
             .rows
@@ -73,6 +81,10 @@ pub fn record(read: &HistoryRead, instrument_key: &str) -> Result<Scraped, Scrap
         series,
         units,
         not_values: read.not_values,
+        lineage: {
+            lineage.settle();
+            lineage
+        },
     })
 }
 
@@ -90,6 +102,8 @@ pub struct Trended {
     /// One `cited` platform window per trend row (§9.4, §20.1).
     pub windows: Vec<Window>,
     pub not_values: usize,
+    /// Each item's series measured by its host's agent, via the server (§7).
+    pub lineage: Lineage,
 }
 
 /// Record a trends read from the Zabbix server keyed `instrument_key` as platform windows.
@@ -109,11 +123,14 @@ pub fn record_trends(read: &TrendsRead, instrument_key: &str) -> Result<Trended,
         metas: Vec::new(),
         windows: Vec::new(),
         not_values: read.not_values,
+        lineage: Lineage::default(),
     };
     for it in &read.items {
         let key = it.item.key();
         let unit = tel::series(SCHEME, &key).map_err(unit_err)?;
         let uid = canonical_uid(&unit);
+        out.lineage
+            .add(uid, "agent", &origin_key(&it.item.host), inst)?;
         out.metas.push(meta(&key, &uid.canonical(), &it.item));
         out.series.push(unit);
         for r in &it.rows {
@@ -138,6 +155,7 @@ pub fn record_trends(read: &TrendsRead, instrument_key: &str) -> Result<Trended,
             });
         }
     }
+    out.lineage.settle();
     Ok(out)
 }
 

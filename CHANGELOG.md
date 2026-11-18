@@ -1300,6 +1300,38 @@ flags.
 
 The incident dossier is reported by `tel investigate show`, not yet as a `dossier` template.
 
+### Instruments: what measured a series (TL-P7 step 1)
+
+TL-P7 is about instruments: what measured a series, and when two series are independent
+witnesses of one quantity (§7). GE-M7 was meant to test §11 before this phase, and it has not
+run, so TL-P7 builds on an investigation design that no experiment has checked yet.
+
+Step 1 records lineage. Every reader now says what measured each series at its origin, and
+what carried it from there:
+
+| Reader | Origin (`x.tel/measured-by`) | Carried by (`x.tel/via`) |
+|---|---|---|
+| `prom/1` | the target, `prom-target:<job>/<instance>`, role `exporter` | the scraper |
+| `otlp/1`, `otlp-json/1` | the resource's process, `otel-sdk:<namespace>/<name>/<instance>`, role `agent` | the `--instrument` collector |
+| `zabbix/1`, history and trends | the item's host, `zabbix-agent:<host>`, role `agent` | the `--instrument` server |
+
+- **A Prometheus scrape names the scraper, not the target.** The target measured the series,
+  and two Prometheus servers scraping one target are one origin. So `measured-by` points at the
+  target and `via` runs from it to the scraper.
+- **An OTLP resource without a string `service.name` gets no origin.** A guess would make two
+  unrelated processes one witness.
+- **`SMY-W609`** (171 codes): a series with no `measured-by`. `check` raises it.
+  `smysl_core::schemas::tel::unmeasured` is the rule. Witness counting will take such a
+  series as its own origin.
+- **`same-quantity` is written one way,** from the smaller uid to the larger, so two
+  declarations of one pair are one relation.
+
+`smysl_core::schemas::tel` gains `measured_by`, `via`, `same_quantity` and `unmeasured`.
+`smysl_tel::scrape` gains `Lineage`, `origin_key` and `Scraped::measured_at`;
+`zabbix_history::origin_key` and `otlp::Raw::origin` give the other readers' origins.
+`tests/tel_lineage.rs` reads each reader's fixtures and checks one `measured-by` per series,
+the `via` hop, no `SMY-W609`, and `SMY-W609` on exactly the series that has no origin.
+
 ---
 
 ## 1.16.0 — 2026-11-16

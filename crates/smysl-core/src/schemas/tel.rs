@@ -504,6 +504,54 @@ pub fn instrument(role: &str, key: &str) -> Result<UnitCore, TelError> {
     .map_err(TelError::Shape)
 }
 
+fn tel_edge(kind: &str, from: crate::Uid, to: crate::Uid) -> crate::Relation {
+    crate::Relation::new(RelKind::Extension(kind.to_string()), from, to)
+}
+
+/// `x.tel/measured-by` (§4.2, §7): `series` is measured at its origin by `instrument`.
+pub fn measured_by(series: crate::Uid, instrument: crate::Uid) -> crate::Relation {
+    tel_edge(MEASURED_BY, series, instrument)
+}
+
+/// `x.tel/via` (§4.2, §7): what `from` measured or carried passed through `to` on its way to
+/// smysl. Lineage runs from the origin towards the reader.
+pub fn via(from: crate::Uid, to: crate::Uid) -> crate::Relation {
+    tel_edge(VIA, from, to)
+}
+
+/// `x.tel/same-quantity` (§4.2, §7): `a` and `b` measure one physical quantity in one unit.
+///
+/// The relation is symmetric, so it is written one way only, from the smaller uid to the
+/// larger: two people declaring one pair in opposite orders declare one relation, not two.
+pub fn same_quantity(a: crate::Uid, b: crate::Uid) -> crate::Relation {
+    let (from, to) = if a <= b { (a, b) } else { (b, a) };
+    tel_edge(SAME_QUANTITY, from, to)
+}
+
+/// The series units with no `x.tel/measured-by` (`SMY-W609`), in uid order.
+///
+/// Witness counting (§7) takes such a series as its own origin: it is independent of every
+/// other series' evidence only as far as nothing says otherwise, which is to say not at all.
+pub fn unmeasured<'a>(
+    units: impl IntoIterator<Item = (&'a crate::Uid, &'a UnitCore)>,
+    relations: impl IntoIterator<Item = &'a crate::Relation>,
+) -> Vec<crate::Uid> {
+    use std::collections::BTreeSet;
+    let kind = RelKind::Extension(MEASURED_BY.to_string());
+    let measured: BTreeSet<crate::Uid> = relations
+        .into_iter()
+        .filter(|r| r.kind == kind)
+        .map(|r| r.from)
+        .collect();
+    let mut out: Vec<crate::Uid> = units
+        .into_iter()
+        .filter(|(uid, u)| u.schema.as_str() == SERIES && !measured.contains(uid))
+        .map(|(uid, _)| *uid)
+        .collect();
+    out.sort_unstable();
+    out
+}
+
 /// What a series or instrument unit carries that §4.1 forbids it, by field name.
 ///
 /// Empty for any other unit. The fields are those §4.1 names — `span`, `manifest`, `published`,
