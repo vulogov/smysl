@@ -1494,6 +1494,68 @@ dossiers and in kind 7. The RFC's D-T10 row, §7 and the §14 reservations table
 GE-M6 built its whole lineage from instrument units, so no `SourceKind` is allocated for an
 instrument either.
 
+### C-Tel-Check: `fixtures/tel/check/`
+
+The fixture step 4 owed. Six stores, as CBOR record sequences, and `expected.tsv`: every
+diagnostic each one raises, with the unit it names; each hypothesis's effective status after
+rule TQ's cap; and each derived contention of kind 6 or 7, by id, `over` and `positions`. Exact
+in both directions. `crates/smysl-check/tests/tel_check_fixture.rs` writes the stores
+(`SMYSL_BLESS=1`) and derives the rows from the bytes on disk.
+
+- `clean`: nothing.
+- `tw`: rule TW's three rows, and one window against each (`SMY-E603`). The exact one also
+  breaks rule T (`SMY-E033`, `SMY-W035`). Two digests under one key (`SMY-W614`).
+- `tq`: a quote that verifies, and the wrong value, a non-canonical spelling, a unit outside
+  the grounds, a missing field and an index past the list (`SMY-W606` each, capped at
+  `speculative`).
+- `rivals`: two rivals of one target, three of another as one contention, and none where one
+  rebuts or supersedes the other, one is speculative, or rule TQ caps one.
+- `witnesses`: kind 7 for independent exact windows that differ, for sketches 3 % apart at alpha
+  0.01, and for a pair whose preferred window, by count across instruments, differs where the
+  other window would agree. None for one origin under two series, a transform on both lineages,
+  sketches 1 % apart, or agreement. `SMY-W609` for a series with no origin.
+- `reserved`: `SMY-E607`, `SMY-E611` for kinds 6 and 7, and `SMY-E612` for record 16 and
+  `source` key 7.
+
+The substrate's codes (`SMY-E604`, `SMY-W605`) need samples no record set holds, and stay with
+`fixtures/tel/window/`.
+
+### TL-P6's leftovers: an OKO ledger stand-in, and GE-M7 still owed
+
+**OKO's rotation ledger.** OKO is a separate project, and its code is not in this repository, so
+TL-P6's criterion that *OKO* writes a rotation ledger stays owed.
+`examples/oko_ledger` (`make oko-ledger`) runs smysl's side of it through the library API, with
+every mechanism §24 maps an OKO decision to:
+
+- one library for the rotation, with `rotation` on every investigation, and a View rooted at
+  each one;
+- attestations by `human:<handle>` and by `model:ollama/<hash>`;
+- probe and action output redacted, then kept as parts;
+- `confirmed_by` on a model's action;
+- Zabbix trends through `zabbix/1` as cited windows;
+- hypotheses quoting them, one in five on purpose with a number the window does not hold.
+
+Each operation is committed alone and read back at once, as OKO appends. The default run:
+
+- **Size:** 1,500 investigations, 10,310 operations and 59,687 records: 8,827 units and 14,695
+  relations, 6.4 MB on disk. The library reopens in 98 ms.
+- **Check:** 605 fabricated quotes written, and 605 `SMY-W606`. Nothing else was raised, and
+  every investigation carries its rotation.
+- **Commit latency grows with the ledger.** p50 is 6.0 ms over the first tenth of the run and
+  66.5 ms over the last (max 97 ms); the run took 355 s. A read after a commit stays under
+  1 µs.
+- **Where the time goes**, from a 300-investigation run:
+  - Staging grows from 0.9 ms to 6.7 ms at p50. That step checks the batch against the
+    whole store.
+  - Appending grows from 4.0 ms to 5.4 ms.
+  - Both are O(store) per append. This is AC-8 (incremental derived state), measured on OKO's
+    path at 10⁴ units. At §24's upper bound of 10⁵ the trend is several hundred ms per
+    operation.
+
+**GE-M7, arms (a) and (b), stays owed.** It needs the Train-Ticket testbed (D-T12) and agent
+runs, which this machine does not have. No simulated run stands in for it. Because of that,
+§11 is still untested against an agent, which the RFC wanted before TL-P7.
+
 ---
 
 ## 1.16.0 — 2026-11-16

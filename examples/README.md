@@ -1,12 +1,13 @@
 # Examples
 
-Two runnable programs over the `smysl` facade crate. Both run offline and print the same
+Three runnable programs over the `smysl` facade crate. All run offline and print the same
 identities on every run and every machine.
 
 | example | run | shows | needs |
 |---|---|---|---|
 | [`simple_demo`](simple_demo/) | `cargo run --example simple_demo` | the format and its core operations: parse, identity, CBOR, store and `check`, sq/1, salience, pack, render, withdraw, `fmt` | nothing beyond the facade; builds under `--no-default-features` |
 | [`information_theory`](information_theory/) | `cargo run --example information_theory` | every layer of SMYSL-2 over one library of texts: readers and identities, pseudonyms, drawn units, consensus text ingest, same-as, time, queries, saved queries, dossiers, measures, export and import, redaction, `check` | the default features (`cli`, `ingest`); add `--features store-redb` for the unit store |
+| [`oko_ledger`](oko_ledger/) | `make oko-ledger` | RFC SMYSL-3 §24's OKO ledger profile: one rotation's investigations, views, probes and actions with redacted output, hypotheses under rule TQ, Zabbix trends through `zabbix/1`, timed per append | `--features tel` |
 
 Start with `simple_demo`. It is one file and one short document, and every later idea rests on
 it: a unit's identity is its content, a claim carries its grounds and its status, and

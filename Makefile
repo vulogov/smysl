@@ -53,7 +53,7 @@ MATRIX := \
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix crate-features gates purity update seed-fuzz fuzz-build \
         determinism check-native conformance eval live-ollama live-hosted doc fuzz clean sweep \
         commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions msrv seed-fuzz fuzz-long \
-        proposition-classes ge-m4 ge-m6
+        proposition-classes ge-m4 ge-m6 oko-ledger
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -430,6 +430,12 @@ ge-m6: ## GE-M6 (RFC SMYSL-3 §7, D-T10): do witness counts change a BARO rankin
 	@# Simulated incidents through duplicated scrapers and independent sources; no files, about
 	@# 5 s. It decides, it does not fail: exit 0 with the verdict printed.
 	$(CARGO) run --release --quiet -p smysl-tel --example ge_m6
+
+oko-ledger: ## A stand-in for OKO's POC (RFC SMYSL-3 §24): a rotation's ledger via the library API
+	@# OKO is not in this repository: this is smysl's side of TL-P6's exit criterion, timed per
+	@# append (AC-8). About 6 minutes and 7 MB under target/oko-ledger, removed afterwards.
+	$(CARGO) run --release --quiet --features tel --example oko_ledger -- --dir target/oko-ledger; \
+		status=$$?; rm -rf target/oko-ledger; exit $$status
 
 dep-versions: ## Fail if an internal crate requirement is behind the workspace version
 	python3 scripts/verify-dep-versions.py

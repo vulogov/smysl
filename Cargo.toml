@@ -176,6 +176,12 @@ path = "src/lib.rs"
 name              = "information_theory"
 required-features = ["cli", "ingest"]
 
+# A stand-in for OKO's proof of concept (RFC SMYSL-3 §24): a rotation's ledger through the
+# library API, timed per append. `make oko-ledger`.
+[[example]]
+name              = "oko_ledger"
+required-features = ["tel"]
+
 [[bin]]
 name              = "smysl"
 path              = "src/main.rs"
