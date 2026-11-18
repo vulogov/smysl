@@ -1148,6 +1148,39 @@ The builders make units and edges, and the caller attests them. Who acted, a hum
 model agent by provider and model hash, is the attestation's to say (§24).
 `tests/tel_investigate.rs` stages an investigation through the facade, and it checks clean.
 
+### Rule TQ: numeric quotes (TL-P6 step 2)
+
+**A hypothesis that quotes a number lists the quote** (§11.4): `<uid>#<field>=<value>`, or
+`<uid>#<field>[<i>]=<value>` into a list field such as a sketch's `q`.
+
+**Rule TQ, in the core** (`smysl_core::schemas::tel`):
+
+- **`parse_quote`** reads a quote.
+- **`quoted_value`** reads the canonical text of a payload's number from its CBOR, so it works
+  on a window, whose payload has no surface form. A `dec` is given by its §5.3 spelling and an
+  integer as itself.
+- **`rule_tq_violations`** gives each quote that does not verify, and why. A quote verifies
+  when the cited unit:
+  - is among the hypothesis's grounds;
+  - resolves;
+  - has the field, and the index;
+  - holds exactly that canonical text. `0.90` does not verify a `0.9`, because a quote is the
+    evidence's own spelling.
+- **`tq_capped`** applies the cap: at most `speculative`.
+
+**`check` raises `SMY-W606`** for each quote that does not verify. It names the quote and says
+why. Like rule M, TQ is a cap and a function of the record set: it reads payloads, never the
+substrate, so it is monotone and safe under merge.
+
+`SMY-W606` is registered, bringing the registry to 170 codes. `tests/tel_investigate.rs` holds
+hypotheses against a materialised window and sketch. Quotes of a max, a count and a sketch
+quantile verify. A wrong value, a non-canonical spelling, an uncited unit, a missing field and a
+missing index each give one `SMY-W606`. The `tel_otlp` fuzz target reads its bytes as a quoted
+payload and as a quote.
+
+The BARO-style ranking's claims (TL-P5) state their score in words and quote nothing. A score
+is not a field of any unit a hypothesis could cite, and TQ checks only what is listed.
+
 ---
 
 ## 1.16.0 — 2026-11-16

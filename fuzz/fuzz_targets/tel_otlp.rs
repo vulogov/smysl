@@ -64,6 +64,15 @@ fuzz_target!(|data: &[u8]| {
     if let Ok(w) = smysl_core::schemas::tel::window_fields(data) {
         let _ = smysl_core::schemas::tel::rule_tw(&w);
     }
+    // And as a payload a rule TQ quote reads a number from, and as a quote (TL-P6 step 2).
+    for (field, index) in [("max", None), ("q", Some(1)), ("count", None)] {
+        if let Some(v) = smysl_core::schemas::tel::quoted_value(data, field, index) {
+            assert!(!v.is_empty(), "a number has a spelling");
+        }
+    }
+    if let Ok(text) = core::str::from_utf8(data) {
+        let _ = smysl_core::schemas::tel::parse_quote(text);
+    }
     if let Ok(e) = otlp::read_proto(data) {
         twice(&e);
     }

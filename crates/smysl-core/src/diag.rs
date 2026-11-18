@@ -518,6 +518,7 @@ registry! {
         E603 = "SMY-E603", Error, "A window unit's status or attestation is not the one rule TW gives its basis and fields";
         E604 = "SMY-E604", Error, "Window evidence recomputed from the substrate does not match the unit";
         W605 = "SMY-W605", Warn,  "Window evidence refers to samples the substrate does not hold (evicted or never received): not re-derivable";
+        W606 = "SMY-W606", Warn,  "A hypothesis's numeric quote does not verify (rule TQ); its effective status is at most speculative";
         E607 = "SMY-E607", Error, "A series or instrument unit carries what its identity forbids: time, grounds, or another source";
         W608 = "SMY-W608", Warn,  "A declared keyed array could not be keyed (missing, non-scalar or repeated key); diffed as one json leaf";
         W610 = "SMY-W610", Warn,  "The profile changed between two snapshots of one manifest chain; the boundary is reported, not diffed";
@@ -1058,9 +1059,10 @@ mod tests {
     /// disagree, two samples at one instant, and an integer sum outside `dec`'s range.
     /// 169 with `SMY-E603`, `SMY-E604` and `SMY-W605` in TL-P4 step 3: rule TW, and window
     /// evidence recomputed from the substrate or found without it.
+    /// 170 with `SMY-W606` in TL-P6 step 2: a numeric quote that does not verify (rule TQ).
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 169);
+        assert_eq!(Code::ALL.len(), 170);
     }
 
     #[test]

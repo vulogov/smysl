@@ -707,6 +707,176 @@ pub fn rule_tw_violations(unit: &UnitCore, attestations: &[crate::Attestation]) 
     out
 }
 
+/// One numeric quote of a hypothesis (§11.4): `<uid>#<field>=<value>`, or
+/// `<uid>#<field>[<index>]=<value>` into a list field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Quote {
+    pub unit: crate::Uid,
+    /// The field without its `tel:` prefix: `max`, `q`.
+    pub field: String,
+    pub index: Option<usize>,
+    /// As written: it must be the canonical spelling to verify.
+    pub value: String,
+}
+
+/// Parse a quote. `Err` says why it is not one.
+pub fn parse_quote(s: &str) -> Result<Quote, String> {
+    let (uid, rest) = s
+        .split_once('#')
+        .ok_or_else(|| format!("`{s}` has no `#`: a quote is <uid>#<field>=<value>"))?;
+    let unit: crate::Uid = uid
+        .parse()
+        .map_err(|_| format!("`{uid}` is not a unit uid"))?;
+    let (lhs, value) = rest
+        .split_once('=')
+        .ok_or_else(|| format!("`{s}` has no `=`"))?;
+    let (field, index) = match lhs.strip_suffix(']').and_then(|l| l.split_once('[')) {
+        Some((f, i)) => (
+            f,
+            Some(
+                i.parse::<usize>()
+                    .map_err(|_| format!("`{i}` is not a 0-based index"))?,
+            ),
+        ),
+        None => (lhs, None),
+    };
+    let name_ok = field.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
+        && field
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    if !name_ok {
+        return Err(format!("`{field}` is not a field name"));
+    }
+    if value.is_empty() {
+        return Err(format!("`{s}` quotes no value"));
+    }
+    Ok(Quote {
+        unit,
+        field: field.to_string(),
+        index,
+        value: value.to_string(),
+    })
+}
+
+/// The canonical text of a payload's number at `tel:<field>` (`[index]` into a list): a `dec`
+/// by its §5.3 spelling, an integer as itself. `None` when the payload, the field or the index
+/// is not there, or holds no number. Read from the CBOR, so it works on a window's payload,
+/// which has no surface form.
+pub fn quoted_value(payload: &[u8], field: &str, index: Option<usize>) -> Option<String> {
+    use crate::cbor::major;
+    use crate::cbor::reader::Dec;
+    fn number(d: &mut Dec<'_>) -> Option<String> {
+        match d.peek_major().ok()? {
+            major::UINT | major::NEGINT => Some(d.int().ok()?.to_string()),
+            major::ARRAY => {
+                let start = d.position();
+                match crate::Decimal::decode(d) {
+                    Ok(v) => Some(v.to_string()),
+                    Err(_) => {
+                        d.set_position(start);
+                        None
+                    }
+                }
+            }
+            _ => None,
+        }
+    }
+    let mut d = Dec::new(payload);
+    let n = d.map_head().ok()?;
+    let want = format!("tel:{field}");
+    for _ in 0..n {
+        let key = d.text().ok()?;
+        if key != want {
+            d.skip_item().ok()?;
+            continue;
+        }
+        return match index {
+            None => number(&mut d),
+            Some(i) => {
+                let len = d.array_head().ok()?;
+                if i >= len {
+                    return None;
+                }
+                for _ in 0..i {
+                    d.skip_item().ok()?;
+                }
+                number(&mut d)
+            }
+        };
+    }
+    None
+}
+
+/// A hypothesis's quotes, as written in `tel:quotes`.
+pub fn quotes_of(unit: &UnitCore) -> Vec<String> {
+    let Some(o) = unit
+        .payload
+        .as_deref()
+        .and_then(|p| crate::surface::payload::payload_to_object(p).ok())
+    else {
+        return Vec::new();
+    };
+    match o.get("tel:quotes").map(|v| &v.value) {
+        Some(HValue::Array(items)) => items
+            .iter()
+            .filter_map(|i| match &i.value {
+                HValue::Str(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Rule TQ (§11.4): each quote of `hypothesis` that does not verify, and why. `payload_of`
+/// resolves a uid to the cited unit's payload in the record set.
+///
+/// A quote verifies when the cited unit is among the hypothesis's grounds, resolves, has the
+/// field (and the index), and holds a value whose canonical text **equals** the quoted value:
+/// `0.90` does not verify a `0.9`, because a quote is the evidence's own spelling.
+pub fn rule_tq_violations(
+    hypothesis: &UnitCore,
+    payload_of: impl Fn(&crate::Uid) -> Option<Vec<u8>>,
+) -> Vec<(String, String)> {
+    if hypothesis.schema.as_str() != HYPOTHESIS {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for q in quotes_of(hypothesis) {
+        let why = match parse_quote(&q) {
+            Err(e) => Some(e),
+            Ok(p) if !hypothesis.grounds.contains(&p.unit) => {
+                Some("the cited unit is not among the hypothesis's grounds".to_string())
+            }
+            Ok(p) => match payload_of(&p.unit) {
+                None => Some("the cited unit does not resolve".to_string()),
+                Some(bytes) => match quoted_value(&bytes, &p.field, p.index) {
+                    None => Some(format!(
+                        "the cited unit has no number at `{}{}`",
+                        p.field,
+                        p.index.map_or(String::new(), |i| format!("[{i}]"))
+                    )),
+                    Some(v) if v == p.value => None,
+                    Some(v) => Some(format!("the cited unit holds {v}, not {}", p.value)),
+                },
+            },
+        };
+        if let Some(w) = why {
+            out.push((q, w));
+        }
+    }
+    out
+}
+
+/// Rule TQ's cap: a hypothesis with a quote that does not verify is at most `speculative`.
+pub fn tq_capped(status: Status, failures: usize) -> Status {
+    if failures > 0 && status > Status::Speculative {
+        Status::Speculative
+    } else {
+        status
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

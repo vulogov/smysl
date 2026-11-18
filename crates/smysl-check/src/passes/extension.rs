@@ -145,6 +145,7 @@ pub fn run(
     reserved(store, report);
     entity_like(store, report);
     windows(store, report);
+    quotes(store, report);
 
     // `SMY-W409` - an enumeration *code* this build does not know, which is W014's argument
     // one level down. 1.9 opened four enumerations so that an unrecognised code no longer
@@ -374,6 +375,38 @@ fn windows(store: &(impl StoreRead + ?Sized), report: &mut Report) {
                  each describes a different sample set",
                 digests.len()
             )));
+        }
+    }
+}
+
+/// Rule TQ (SMYSL-3 §11.4, TL-P6): `SMY-W606` for each numeric quote of a hypothesis that does
+/// not verify against the unit it cites. The rule is `smysl_core::schemas::tel::rule_tq_violations`,
+/// a function of the record set: it reads payloads, never the substrate, so it is monotone and
+/// safe under merge. The cap it implies, at most `speculative`, is `tq_capped`'s.
+fn quotes(store: &(impl StoreRead + ?Sized), report: &mut Report) {
+    use smysl_core::schemas::tel;
+    for (uid, unit) in store.units() {
+        if unit.core.schema.as_str() != tel::HYPOTHESIS {
+            continue;
+        }
+        let failed = tel::rule_tq_violations(&unit.core, |u| {
+            store
+                .get(u)
+                .map(|c| c.core.payload.clone().unwrap_or_default())
+        });
+        for (quote, why) in failed {
+            report.push(
+                Diagnostic::on(Code::W606, *uid)
+                    .with_message(format!(
+                        "quote `{quote}` does not verify: {why}; the hypothesis is at most \
+                         speculative"
+                    ))
+                    .with_suggestion(
+                        "cite a unit among the hypothesis's grounds, by a field it has, with \
+                         the value's canonical spelling"
+                            .to_string(),
+                    ),
+            );
         }
     }
 }
