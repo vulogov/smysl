@@ -519,8 +519,10 @@ unmeasured    0
 ]
 
 `duplicated` lists an origin that reached smysl by more than one path, such as one target
-scraped by two Prometheus servers: one witness, carried twice. The count is a report. It
-changes no status unless GE-M6 shows that it changes a conclusion (D-T10).
+scraped by two Prometheus servers: one witness, carried twice. The count is a report, and it
+changes no status (D-T10). GE-M6 tested making it a rule and kept it a report: lineage tells
+which series are one witness, but not which of two disagreeing instruments is wrong. When they
+disagree, that is a witness conflict, below.
 
 *When witnesses disagree.* Take two independent witnesses of one quantity, each with a window
 over one span by one recipe. When those windows disagree, `tel check` reports a *witness

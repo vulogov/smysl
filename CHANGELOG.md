@@ -1434,6 +1434,66 @@ quantity:
 C-Tel-Check (§16) wants kinds 6 and 7 pinned on `fixtures/tel/check/`. That fixture does not
 exist yet, for kind 6 either, and is owed.
 
+### GE-M6: do independent instruments change conclusions? (TL-P7 step 5)
+
+D-T10 keeps witness counts out of every status rule unless GE-M6 shows they change a
+conclusion. `make ge-m6` runs `crates/smysl-tel/examples/ge_m6.rs`.
+
+- **The incidents:** 12 gauges, an hour of baseline and ten minutes after the anomaly.
+  - One quantity, the root cause, shifts by 3 to 10 noise widths.
+  - Two symptoms shift 1 to 5 minutes later by 0.4 to 1.1 of that, so plain BARO is right
+    about two times in three.
+  - Each quantity reaches smysl as real instrument units and `measured-by`/`via` edges, and
+    `LineageGraph` counts its witnesses (the harness asserts the count it meant to build).
+    - single: one exporter, one series;
+    - duplicated: one exporter, two scrapers, two series;
+    - independent: two exporters, two series on different scales.
+- **The arms**, 2,000 incidents each:
+  - control;
+  - duplicated;
+  - independent;
+  - artifact: one origin of a non-root quantity reports a shift its twin does not see;
+  - blind: one of the root cause's two origins misses the fault;
+  - mixed.
+- **The rankings**, all from one set of BARO scores:
+  - plain: per series, as shipped;
+  - collapse: one entry per witness, at the class's best score;
+  - corroborate: one entry per quantity, at its weakest witness's score.
+- **Results**, seed 6. Hit@1 is how often the root cause ranks first:
+
+  | arm | plain | collapse | corroborate |
+  |---|---|---|---|
+  | control | 65.6 % | 65.6 % | 65.6 % |
+  | duplicated | 64.5 % | 64.5 % | 64.5 % |
+  | independent | 67.1 % | 67.1 % | 69.2 % |
+  | artifact | 34.9 % | 34.9 % | 67.0 % |
+  | blind | 49.2 % | 49.2 % | 0.5 % |
+  | mixed | 57.2 % | 57.2 % | 56.9 % |
+
+  - Collapse never changed a conclusion, meaning the first three distinct quantities in
+    order. It only freed the slots duplicates took: in the duplicated arm, hit@3 by slot went
+    from 95.0 % to 99.9 %.
+  - Corroborate changed 5,218 of 12,000 conclusions.
+    - It gained where an instrument lied: artifact, 34.9 % → 67.0 %.
+    - It lost as much where an instrument was blind: blind, 49.2 % → 0.5 %.
+    - Mixed came out even.
+  - Seeds 7 and 8, and 24 quantities, give the same picture.
+- **Reading:**
+  - Lineage alone tells which series are one witness. It cannot tell a lying instrument from
+    a blind one: in both, independent witnesses disagree.
+  - Whether a corroboration rule helps depends on how often each happens, which no record
+    holds.
+  - The disagreement itself is what carries information, and kind 7 (step 4) already reports
+    it as a contention.
+- **Not run:** a real cluster with duplicated scrapers and independent sources. The run is
+  simulated, and its report says so.
+
+**D-T10 is kept.** Corroborate meets its literal condition, "changes a conclusion", but it does
+not improve the conclusion. Collapse does not change one. Witness counts stay a report, in
+dossiers and in kind 7. The RFC's D-T10 row, §7 and the §14 reservations table record this.
+GE-M6 built its whole lineage from instrument units, so no `SourceKind` is allocated for an
+instrument either.
+
 ---
 
 ## 1.16.0 — 2026-11-16

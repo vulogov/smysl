@@ -88,7 +88,7 @@ recorded change and not a silent one.
 | D-T7 | Retention (H-10) | **Local eviction of substrate, not rule Z.** Rule TL. | Rule Z redactions | Rule Z propagates through merges and is meant for removal. Retention is a per-store policy: one store keeps 6 months, its peer 30 days. Writing a redaction would delete a peer's data at the next merge. |
 | D-T8 | Investigations and OKO's "investigations as views" | **Both.** An `x.tel/investigation` unit is the anchor that `consulted` relations hang from; a View record with that unit as its root is what a TUI opens. | View only | A view cannot be the subject of a relation, and "what was consulted" needs one |
 | D-T9 | Rival explanations and witness conflicts | **Detection kinds 6 and 7, derived-only** (like 4 and 5). | Recorded contentions | Derived from the record set, so rule U holds and nothing has to be written for them to appear |
-| D-T10 | Instrument independence (H-9) | **Reported in dossiers; not a status rule** unless GE-M6 shows it changes a conclusion | A rule from the start | The draft's own stop condition |
+| D-T10 | Instrument independence (H-9) | **Reported in dossiers; not a status rule.** Kept after GE-M6 (simulated, TL-P7). | A rule from the start | The draft's own stop condition. In GE-M6, collapsing duplicates never changed a conclusion. Ranking by the weakest witness changed many conclusions, but did not improve them: it doubled hit@1 where an instrument reported a fault that did not happen, and took it to near zero where an instrument missed a real fault. Lineage cannot tell the two cases apart. The disagreement is the signal, and kind 7 reports it. |
 | D-T11 | Signing (`sig`, attestation key 7) | **Out of scope.** It gets its own RFC. SMYSL-3 locks timestamps with canonical commitments (2.3 A-12.2). | Signing in SMYSL-3 | `sig` is encoded but no code verifies it. Signing is a key-management problem as much as a format one, and it serves text as much as telemetry. |
 | D-T12 | Testbed for GE-M7 | **Train-Ticket** (RCAEval-comparable, Apache-2.0) with scripted deploys and config edits | DeathStarBench, ITBench | Comparable to published numbers; 64 services |
 | D-T13 | Model spend | **Local models by default**, as in the SMYSL-2 spike. One hosted arm in GE-M7, labelled and reported separately. | Hosted only | Reproducibility first |
@@ -359,7 +359,7 @@ Some cases:
 - Two series both produced by one recording rule: one witness.
 
 Witness counts are reported in dossiers (§22.2) and in detection kind 7 (§11.5). They change no
-status unless GE-M6 decides otherwise.
+status: GE-M6 kept D-T10.
 
 ## 8. Change units: the canonical diff
 
@@ -707,9 +707,9 @@ with an override, as for every thread schema.
 |---|---|---|
 | Record 16 (`hold`) | reserved; MUST NOT be written | GE-M4. If the substrate answers "value in force at t" correctly and under 50 ms p95 over 6 months, release the number to the general pool. |
 | `source` key 7 (sub-ms remainder) | reserved | GE-M2 |
-| `SourceKind` value for an instrument | not allocated; instruments are units (§7) | GE-M6. A kind is added only if the unit model is shown to be insufficient. |
+| `SourceKind` value for an instrument | not allocated; instruments are units (§7) | GE-M6: the unit model was sufficient, so no kind is added. |
 | Causal free constraint | not in rule E | GE-M5 |
-| Witness count in status | not a rule | GE-M6 |
+| Witness count in status | not a rule | GE-M6: kept as a report (D-T10) |
 
 ## 15. Diagnostics
 

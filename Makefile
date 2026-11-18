@@ -53,7 +53,7 @@ MATRIX := \
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix crate-features gates purity update seed-fuzz fuzz-build \
         determinism check-native conformance eval live-ollama live-hosted doc fuzz clean sweep \
         commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions msrv seed-fuzz fuzz-long \
-        proposition-classes ge-m4
+        proposition-classes ge-m4 ge-m6
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -425,6 +425,11 @@ ge-m4: ## GE-M4 (RFC SMYSL-3 §14): the value in force at t against simulated ho
 	@# 70 MB under target/ge-m4, removed afterwards.
 	$(CARGO) run --release --quiet -p smysl-series --features store-redb --example ge_m4 -- --dir target/ge-m4; \
 		status=$$?; rm -rf target/ge-m4; exit $$status
+
+ge-m6: ## GE-M6 (RFC SMYSL-3 §7, D-T10): do witness counts change a BARO ranking? Simulated
+	@# Simulated incidents through duplicated scrapers and independent sources; no files, about
+	@# 5 s. It decides, it does not fail: exit 0 with the verdict printed.
+	$(CARGO) run --release --quiet -p smysl-tel --example ge_m6
 
 dep-versions: ## Fail if an internal crate requirement is behind the workspace version
 	python3 scripts/verify-dep-versions.py
