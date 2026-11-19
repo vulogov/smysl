@@ -1065,10 +1065,21 @@ measures already do.
     counts summed.
   - **The message** is journald's `MESSAGE`, and for a CloudEvent its `type` followed by its
     `subject`.
-- **MinHash** is over an episode's typed features: `series:<uid>` per member's series,
-  `change:<pointer>`, `anomaly:<series uid>:<direction>`, `alert:<system>:<key>`, and
-  `template:<text>` for each template whose window overlaps the episode. 128 functions, keyed
-  from a ChaCha20 stream with the recipe's seed. It writes nothing.
+- **MinHash** (`tel/minhash/1?k=128&seed=S`) is over an episode's typed features. Its members
+  are the units joined to it by `x.tel/during`:
+  - `series:<uid>` per member's series (a change's or recreate's `object`);
+  - `change:<pointer>`;
+  - `anomaly:<series uid>:<direction>` (`-` without one);
+  - `alert:<system>:<key>`;
+  - `template:<text>` for each template whose window overlaps the episode.
+
+  It uses 128 functions `hᵢ(x) = (aᵢ·x + bᵢ) mod (2⁶¹ − 1)`. `x` is a feature's BLAKE3, its
+  first eight bytes little-endian, reduced mod 2⁶¹ − 1. `(aᵢ, bᵢ)` are drawn by rejection from
+  ChaCha20, keyed by `BLAKE3("smysl/tel-minhash/1\0" ‖ recipe ‖ seed)` with the seed as eight
+  little-endian bytes. Similarity is the number of equal minima out of 128. `tel similar` prints
+  it beside the exact Jaccard index and the neighbours' labels, and writes nothing. GE-M8 found
+  it model-independent on simulated episodes, so a label shown from similar episodes is a
+  reading of the store, never a unit.
 - A detector that fails GE-M3 stays off the pure path until fixed.
 
 ## 22. Query and dossiers
@@ -1165,7 +1176,7 @@ OKO's first persistent ledger.
 | **TL-P6** investigations | investigation, hypothesis, probe, action, consulted; rule TQ; kind 6; timeline thread; incident dossier; OKO helpers | OKO POC writes a rotation ledger; **GE-M7** arms (a) and (b) run. Arms (c) and (d) run once TL-P5 has shipped the BARO-style ranking. |
 | **TL-P7** instruments | instrument units, `via`, `measured-by`; witness counts; kind 7 | **GE-M6** run; D-T10 confirmed or reversed |
 | **TL-P8** retention and exchange | rule TL eviction; `--with-substrate` export and import | **GE-M9** passes (simulated, `make ge-m9`: held) |
-| **TL-P9** traces and logs | OTLP traces, `x.tel/precedes`; Drain; MinHash; journald and CloudEvents readers | **GE-M2**, **GE-M5**, **GE-M8** decide key 7, the causal constraint and similarity labelling (simulated, `make ge-m2`, `make ge-m5`: key 7 not released; the constraint fails, rule E unchanged) |
+| **TL-P9** traces and logs | OTLP traces, `x.tel/precedes`; Drain; MinHash; journald and CloudEvents readers | **GE-M2**, **GE-M5**, **GE-M8** decide key 7, the causal constraint and similarity labelling (simulated, `make ge-m2`, `make ge-m5`, `make ge-m8`: key 7 not released; the constraint fails, rule E unchanged; similarity model-independent) |
 
 TL-P2 and TL-P3 can run in parallel after TL-P1. TL-P6 needs TL-P4 but not TL-P5 to be built,
 because an agent can hypothesise over evidence before any detector exists. GE-M7 is complete only
@@ -1184,7 +1195,7 @@ Each experiment has a stop condition, stated before it runs.
 | **GE-M5** | Does causal order catch skew? | Inject 1–500 ms skew on chosen hosts; derive constraints from spans | §10.4 | Detection below 90 % at ≥ 5 ms skew means the constraint is not worth a rule E change. **Run on simulated traces (TL-P9, `make ge-m5`): fails; rule E unchanged.** Detection as fixed (the skewed host named): 20.1 % at ≥ 5 ms, and 26.0 % with the response constraint, because two clocks that disagree do not say which is wrong. Seen at all (post hoc: an edge of the host violated by ≥ 2 ms): 63.6 % for §10.4's start-only constraint, which cannot see a leaf service running ahead or the root running behind; 100 % with the response constraint at ≥ 2 ms. With no skew, ±0.25 ms offsets violate 1.3 % of edges at ms resolution (18 of 20 runs). |
 | **GE-M6** | Do independent instruments change conclusions? | The same faults seen through duplicated scrapers and through independent sources | D-T10 | If witness counting never changes a ranking, it stays a report |
 | **GE-M7** | **Does smysl make agent RCA better?** | Train-Ticket (D-T12) with scripted deploys and config edits, faults injected after some of them. Arms: (a) agent alone; (b) agent writing into smysl with TQ, consulted and kind 6; (c) BARO-style derived ranking; (d) (b)+(c). Local models; one hosted arm, labelled (D-T13). | the design of §11 | Measured on top-k accuracy, **fabrications caught** (TQ failures that were real errors), and **unused-evidence rate**. If (b) does not reduce fabricated evidence relative to (a), §11 is wrong and is redesigned before TL-P7. |
-| **GE-M8** | Do episodes recur detectably? | MinHash over typed feature sets against embeddings, on GE-M7's corpus and RCAEval | similarity labelling | If MinHash recall@5 < 0.6 where embeddings exceed 0.8, similarity is model-dependent by default |
+| **GE-M8** | Do episodes recur detectably? | MinHash over typed feature sets against embeddings, on GE-M7's corpus and RCAEval | similarity labelling | If MinHash recall@5 < 0.6 where embeddings exceed 0.8, similarity is model-dependent by default. **Run on simulated episodes (TL-P9, `make ge-m8`): does not fire; similarity is model-independent.** 120 episodes of twelve fault types, two per service sharing half their core. recall@5: MinHash **0.970**, exact Jaccard 0.982, Model2Vec `potion-base-8M` 0.898. Over five other seeds: 0.968–0.987, 0.972–0.985 and 0.880–0.945. The corpus is made of shared identifiers, which favours sets by construction: renamed series and paraphrased alerts are what GE-M7's corpus and RCAEval would test. |
 | **GE-M9** | Does retention keep the round trip? | 6 months of GE-M1-scale data, compressed into a test; evict per rule TL; export, import, merge with an unevicted peer | rule TL | Any P1 failure over records, or any substrate resurrection that changes a unit, blocks TL-P8. **Run on simulated data (TL-P8): held.** 20 gauges, 182 days, 5.2 M samples, 152 days evicted. No record changed at any step, and every window recomputed to the unit it is after the merge. A control peer with one sample more was caught as `SMY-E604`. |
 
 **GE-M2 and GE-M5 on simulated traces (TL-P9 step 4).** The measures, fixed before the runs:
@@ -1209,6 +1220,25 @@ Each experiment has a stop condition, stated before it runs.
   adds the response constraint, a child's `end_ms` at most its parent's, which a span unit can
   state but rule E's single instant cannot. The stop condition is the table's: detection below
   90 % at ≥ 5 ms keeps the constraint out of rule E.
+
+**GE-M8 on simulated episodes (TL-P9 step 5).** The measures, fixed before the run:
+- **The corpus.** Twelve fault types over one shop's services, ten episodes each, 120 in all.
+  A fault type has a core of eight to ten features (anomalies on named series, changes at
+  pointers, alerts, log templates). Half of each core is shared with one other fault type, so
+  that two faults of one service look alike. An occurrence keeps each core feature with
+  probability 0.7, and adds zero to four features from a background pool of thirty that any
+  incident shows.
+- **Each episode is a store's units:** its members joined by `x.tel/during`, and its templates
+  overlapping it. Features are read from them by `smysl_tel::similar`, as `tel similar` reads
+  them.
+- **Three arms rank the other 119 episodes for each one:**
+  - MinHash, 128 functions;
+  - exact Jaccard, the quantity MinHash estimates;
+  - embeddings: Model2Vec `potion-base-8M` over a text rendering of the same units, by cosine.
+- **recall@5** is the share of the top five that are of the episode's fault type, averaged over
+  the 120. Ties go to the smaller uid.
+- **The stop condition** is the table's: MinHash below 0.6 where embeddings exceed 0.8 makes
+  similarity model-dependent by default.
 
 **Order:**
 1. GE-M1, and GE-M3's harness. The harness exists from TL-P0, runs first on TL-P4's summaries, and

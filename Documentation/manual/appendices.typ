@@ -1156,6 +1156,12 @@ FROM TO` runs Drain over the stream's messages in `[FROM, TO)` and prints one li
 template, with its count. With `--yes --at MS` each is committed as an `x.tel/log-template`,
 `derived`. `tel check` recomputes templates as it does windows.
 
+`tel similar EPISODE` ranks the library's other episodes by how alike their features are: the
+series, changes, anomalies and alerts that are members of each, and the log templates over its
+window. Each line gives the MinHash similarity out of 128, the exact Jaccard index it
+estimates, and the episode's label. When the nearest carry labels, the most common is printed.
+It writes nothing.
+
 `tel at SERIES MS` prints the value in force at `MS`, the last sample at or before it, for each
 instrument the series has samples from. `SERIES` is a series uid or `<scheme>:<key>`. A stale
 or no-value sample is printed as `stale` or `no-value`, and one its source marked as a reset is
@@ -1245,8 +1251,8 @@ it prints what it would evict and removes nothing.
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare`, `witnesses`, `evict`, `trace`, `templates` or `profile`.]),
-    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`, `otlp-traces/1`, `otlp-traces-json/1`, `journald/1`, `cloudevents/1`), then the files. `trace`: a trace id, 32 hex digits. `templates`: a stream, then `FROM` and `TO` in epoch ms. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `declare`: what is declared, then its arguments. `witnesses`: a series. `profile`: `check` and a profile file or shipped name.]),
+    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare`, `witnesses`, `evict`, `trace`, `templates`, `similar` or `profile`.]),
+    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`, `otlp-traces/1`, `otlp-traces-json/1`, `journald/1`, `cloudevents/1`), then the files. `trace`: a trace id, 32 hex digits. `templates`: a stream, then `FROM` and `TO` in epoch ms. `similar`: an episode uid. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `declare`: what is declared, then its arguments. `witnesses`: a series. `profile`: `check` and a profile file or shipped name.]),
     ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for the object readers; it must be for the reader's scheme.]),
     ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds, and for `prom/1` the scrape instant. Required for `read`: nothing here reads a clock.]),
     ([`--licence`], [`SPDX`], [The manifests' licence. Required for the object readers, as `text add` requires it.]),
@@ -1268,6 +1274,8 @@ it prints what it would evict and removes nothing.
     ([`--output`], [`TID`], [`investigate probe` and `action`: the part holding the redacted output.]),
     ([`--confirmed-by`], [`HANDLE`], [`investigate action`: who confirmed an unsafe command.]),
     ([`--lookback`], [`MS`], [`investigate show`: how far before the opening to look for unexplored evidence. Default one hour.]),
+    ([`--top`], [`N`], [`similar`: how many episodes to print. Default 5.]),
+    ([`--seed`], [`S`], [`similar`: the MinHash seed, which is part of its recipe. Default 0.]),
     ([`--older-than`], [`DUR`], [`evict`: the retention bound before `--at`, a whole number and `s`, `m`, `h`, `d` or `w`. Required.]),
     ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing. `evict`: evict, rather than report what would go. `trace` and `templates`: commit the units, with `--at`.]),
     ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),

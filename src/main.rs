@@ -2541,13 +2541,15 @@ fn cli() -> Command {
                             "evict",
                             "trace",
                             "templates",
+                            "similar",
                             "profile",
                         ])
                         .help(
                             "read exports with a reader into a library, the value in force at \
                              an instant, materialise window evidence, recompute it, run a \
                              detector, evict old substrate, materialise a trace's spans or a \
-                             log window's templates, or check a profile and print its hash",
+                             log window's templates, rank episodes like one, or check a profile \
+                             and print its hash",
                         ),
                 )
                 .arg(
@@ -2561,7 +2563,7 @@ fn cli() -> Command {
                              cloudevents/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
                              `detect RECIPE`; `investigate open|consult|hypothesis|probe|action|\
                              close|show …`; `declare instrument|measured-by|via|same-quantity …`; `witnesses SERIES`; \
-                             `evict --older-than DUR`; `trace TRACE-ID`; `templates STREAM FROM TO`; `profile check FILE|NAME`",
+                             `evict --older-than DUR`; `trace TRACE-ID`; `templates STREAM FROM TO`; `similar EPISODE`; `profile check FILE|NAME`",
                         ),
                 )
                 .arg(
@@ -2717,6 +2719,20 @@ fn cli() -> Command {
                         .long("zabbix-api")
                         .value_name("VERSION")
                         .help("The Zabbix API version the export came from (`apiinfo.version`)"),
+                )
+                .arg(
+                    Arg::new("top")
+                        .long("top")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("similar: how many episodes to print (default 5)"),
+                )
+                .arg(
+                    Arg::new("seed")
+                        .long("seed")
+                        .value_name("S")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("similar: the MinHash seed, part of its recipe (default 0)"),
                 )
                 .arg(
                     Arg::new("older-than")
@@ -13898,6 +13914,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "evict" => tel_evict(m, global, &args),
         "trace" => tel_trace(m, global, &args),
         "templates" => tel_templates(m, global, &args),
+        "similar" => tel_similar(m, global, &args),
         "read" => tel_read(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
@@ -15476,6 +15493,88 @@ fn tel_templates(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitC
         at.unwrap_or(0),
         &format!("tel templates {}", smysl::tel::drain::RECIPE),
     )
+}
+
+/// `smysl tel similar EPISODE [--top N] [--seed S]`: the episodes most like one, by MinHash
+/// over their typed features (RFC SMYSL-3 §21, TL-P9). It writes nothing.
+///
+/// One line per episode: its uid, its MinHash similarity out of 128, the exact Jaccard index it
+/// estimates, its window and its label. When the nearest carry labels, the most common one is
+/// printed as what the episode is labelled like; it is a reading, not a unit.
+#[cfg(feature = "tel")]
+fn tel_similar(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::tel::similar;
+    use smysl::text::library::Library;
+
+    let (Some(ep), None) = (args.first(), args.get(1)) else {
+        eprintln!("smysl tel similar: `EPISODE`, an x.tel/episode uid");
+        return ExitCode::Usage;
+    };
+    let Ok(ep) = ep.parse::<Uid>() else {
+        eprintln!("smysl tel similar: `{ep}` is not a uid");
+        return ExitCode::Usage;
+    };
+    let top = m.get_one::<usize>("top").copied().unwrap_or(5);
+    let seed = m.get_one::<u64>("seed").copied().unwrap_or(0);
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let library = match Library::open(&root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel similar: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let store = library.store();
+    let eps = similar::episodes(
+        StoreRead::units(store).map(|(u, c)| (u, &c.core)),
+        store.relations(),
+    );
+    let Some(mine) = eps.get(&ep) else {
+        eprintln!(
+            "smysl tel similar: {} is not an x.tel/episode of this library",
+            ep.canonical()
+        );
+        return ExitCode::Failure;
+    };
+    println!(
+        "episode   {}  {} feature(s); {}",
+        ep.canonical(),
+        mine.len(),
+        similar::recipe(seed)
+    );
+    let label_of = |u: &Uid| {
+        let core = &StoreRead::get(store, u)?.core;
+        let o = smysl::surface::payload_to_object(core.payload.as_deref()?).ok()?;
+        match &o.get("tel:label")?.value {
+            smysl::surface::hjson::HValue::Str(s) => Some(s.clone()),
+            _ => None,
+        }
+    };
+    let mut labels: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for n in similar::nearest(&eps, &ep, top, seed) {
+        let label = label_of(&n.uid);
+        if let Some(l) = &label {
+            *labels.entry(l.clone()).or_default() += 1;
+        }
+        let gist = StoreRead::get(store, &n.uid).map_or(String::new(), |c| c.core.gist.clone());
+        println!(
+            "similar   {}  {:>3}/{}  jaccard {}/{}  {}{}",
+            n.uid.canonical(),
+            n.matches,
+            similar::K,
+            n.exact.0,
+            n.exact.1,
+            gist,
+            label.map_or(String::new(), |l| format!("  [{l}]"))
+        );
+    }
+    if let Some((l, k)) = labels.iter().max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0))) {
+        println!("labelled  like `{l}`: {k} of the {top} nearest");
+    }
+    ExitCode::Success
 }
 
 /// One line per window: its uid, instrument, and what it says.

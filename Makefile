@@ -53,7 +53,7 @@ MATRIX := \
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix crate-features gates purity update seed-fuzz fuzz-build \
         determinism check-native conformance eval live-ollama live-hosted doc fuzz clean sweep \
         commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions msrv seed-fuzz fuzz-long \
-        proposition-classes ge-m4 ge-m6 ge-m2 ge-m5 ge-m9 oko-ledger
+        proposition-classes ge-m4 ge-m6 ge-m2 ge-m5 ge-m8 ge-m9 oko-ledger
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -440,6 +440,12 @@ ge-m5: ## GE-M5 (RFC SMYSL-3 §10.4): does causal order catch clock skew? Simula
 	@# 218 simulated runs of 300 traces, one host's clock skewed in each; about 35 s. It decides,
 	@# it does not fail: exit 0 with the verdict printed.
 	$(CARGO) run --release --quiet -p smysl-tel --example ge_m5
+
+ge-m8: ## GE-M8 (RFC SMYSL-3 §26): do episodes recur detectably? MinHash against embeddings
+	@# 120 simulated episodes; under a second. The embeddings arm needs a Model2Vec model:
+	@# SMYSL_EMBED_MODEL=/path/to/potion-base-8M. Without it that arm is not run, and the report
+	@# says so. It decides, it does not fail: exit 0 with the verdict printed.
+	$(CARGO) run --release --quiet --features tel,semantic --example ge_m8
 
 ge-m9: ## GE-M9 (RFC SMYSL-3 §14, rule TL): six months evicted, exported, imported, merged
 	@# Simulated data: GE-M1's cluster is not here, and the report says so. Exit 1 blocks TL-P8.

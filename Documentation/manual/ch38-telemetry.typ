@@ -723,11 +723,35 @@ the templates have changed since, and `SMY-W605` once they are evicted.
 Spans and log records travel with `lib export --with-substrate` as samples do, one file per
 stream and day, and an import finds each trace again by its id.
 
+#section("Episodes that look alike")
+
+An on-call engineer's first question about an incident is often "have we seen this before?"
+`tel similar EPISODE` answers it from the library. An episode's *features* are the series its
+members are about, the pointers its changes touched, its anomalies with their direction, its
+alerts, and the log templates over its window. Two episodes are alike as far as those sets
+overlap:
+
+```
+smysl tel similar b3:… -s lib
+```
+
+Each line is another episode, with its MinHash similarity out of 128, the exact share of
+features the two have in common, and its label if it has one. When the nearest carry labels,
+the most common is printed as what this episode is labelled like. That is a reading, and
+nothing is written.
+
+*Does that find recurrences?* That is GE-M8, and `make ge-m8` asks it of 120 simulated
+episodes of twelve faults. Each service has two faults that share half their signs. Of each
+episode's five nearest, 97 % were the same fault by MinHash and 90 % by a small embedding
+model reading a description of the same units. So similarity does not depend on a model.
+The simulated incidents name things by the same identifiers each time, which favours sets.
+Renamed series and alerts in other words are what real incident data would test.
+
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
   investigations, instrument lineage, witness counting, witness conflicts, eviction, exchanging
-  the substrate, traces and logs. Similarity between episodes is the rest of the RFC's TL-P9.
-  So are:
+  the substrate, traces, logs and similar episodes. The RFC's experiments on real data are
+  still to run. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
   - what a deleted object becomes as a unit;

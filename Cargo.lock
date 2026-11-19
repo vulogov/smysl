@@ -2314,6 +2314,8 @@ name = "smysl-tel"
 version = "1.17.0"
 dependencies = [
  "prost",
+ "rand_chacha",
+ "rand_core",
  "smysl-core",
  "smysl-series",
  "unicode-normalization",

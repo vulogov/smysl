@@ -188,6 +188,12 @@ required-features = ["tel"]
 name              = "ge_m9"
 required-features = ["tel"]
 
+# GE-M8 (RFC SMYSL-3 §26): MinHash, exact Jaccard and Model2Vec embeddings over simulated
+# episodes. `make ge-m8`.
+[[example]]
+name              = "ge_m8"
+required-features = ["tel", "semantic"]
+
 [[bin]]
 name              = "smysl"
 path              = "src/main.rs"

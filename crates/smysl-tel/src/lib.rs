@@ -35,6 +35,7 @@ pub mod pointer;
 pub mod profile;
 pub mod readers;
 pub mod scrape;
+pub mod similar;
 pub mod sketch;
 pub mod snapshot;
 pub mod trace;

@@ -30,7 +30,7 @@ smysl-pack       580
 smysl-thread     293
 smysl-render     997
 smysl-retrieve   403
-smysl-embed      72
+smysl-embed      73
 smysl-provider   806
 smysl-ingest     1999
 smysl-tui        232
@@ -39,5 +39,5 @@ smysl-query      4029
 smysl-measure    3608
 smysl-lib        1651
 smysl-embed-candle 140
-smysl-tel        2420
+smysl-tel        2467
 smysl-series     1089

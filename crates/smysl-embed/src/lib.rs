@@ -116,7 +116,10 @@ impl Model {
         self.hash
     }
 
-    fn embed(&self, text: &str) -> Vec<f32> {
+    /// The embedding of one text: a pooled lookup, as an index embeds a unit's gist. Public
+    /// for comparisons that embed something other than a store's units, such as GE-M8's episode
+    /// renderings (RFC SMYSL-3 §26).
+    pub fn embed(&self, text: &str) -> Vec<f32> {
         self.inner.encode_single(text)
     }
 

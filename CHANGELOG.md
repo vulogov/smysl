@@ -1831,6 +1831,47 @@ The constraint fails its bar, so rule E is unchanged and `x.tel/precedes` stays 
 
 DeathStarBench at load is still owed for both experiments.
 
+### Similar episodes: MinHash, `smysl tel similar`, and GE-M8 (TL-P9 step 5)
+
+**`smysl_tel::similar`** reads an episode's typed features:
+- its members by `x.tel/during`: the series of each, change pointers, anomalies with their
+  direction, and alerts;
+- the log templates whose window overlaps it.
+
+It estimates their Jaccard index with MinHash (`tel/minhash/1?k=128&seed=S`):
+- 128 functions mod 2⁶¹ − 1, drawn from ChaCha20 keyed by the recipe and seed;
+- a seeded generator, which `smysl-tel`'s purity scan allows and its unseeded-generator ban
+  still forbids otherwise;
+- `rand_chacha` and `rand_core` join the crate's dependencies, without default features, as
+  `smysl-measure` has them.
+
+**`smysl tel similar EPISODE [--top N] [--seed S]`** prints the nearest episodes:
+- the MinHash similarity out of 128;
+- the exact Jaccard index;
+- the episode's gist and label, and the label most common among the nearest.
+
+It writes nothing. `smysl_embed::Model::embed` is now public, for GE-M8.
+
+**GE-M8 (`make ge-m8`), do episodes recur detectably? Yes, and without a model.** The
+measures were fixed in §26 first:
+- 120 simulated episodes of twelve fault types, two per service sharing half their core.
+- Each episode is units, grouped by the episode detector.
+- Each is ranked against the other 119 by three arms.
+
+| recall@5 | seed 8 | five other seeds |
+|---|---|---|
+| MinHash, 128 functions | 0.970 | 0.968–0.987 |
+| exact Jaccard | 0.982 | 0.972–0.985 |
+| Model2Vec `potion-base-8M`, over a text rendering of the same units | 0.898 | 0.880–0.945 |
+
+The stop condition (MinHash below 0.6 where embeddings exceed 0.8) does not fire, so
+similarity is model-independent by default. The corpus names things by shared identifiers,
+which favours sets by construction. Renamed series and paraphrased alerts are what GE-M7's
+corpus and RCAEval would test, and both are still owed.
+
+**TL-P9 is complete:** traces, logs, Drain, MinHash, and its three experiments run on simulated
+data, with the real runs owed.
+
 ---
 
 ## 1.16.0 — 2026-11-16

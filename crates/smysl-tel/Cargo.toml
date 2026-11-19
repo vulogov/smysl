@@ -30,6 +30,11 @@ unicode-normalization = { workspace = true }
 # Protobuf decoding for `otlp/1`, with the metrics messages declared in `readers/otlp_pb.rs`:
 # `opentelemetry-proto` would bring `opentelemetry_sdk` with its types.
 prost = { workspace = true, optional = true }
+# MinHash's functions (RFC SMYSL-3 §21, TL-P9): ChaCha20 keyed by the recipe and its seed, as
+# `smysl-measure`'s bootstrap draws. Seeded only: `rand_core` without `os_rng` brings no
+# `getrandom`, and the crate's purity scan still bans every unseeded generator by name.
+rand_chacha = { version = "0.9", default-features = false }
+rand_core   = { version = "0.9", default-features = false }
 
 [dev-dependencies]
 # `tests/prom_fixture.rs` records the fixture into the redb backend as well as memory: the
