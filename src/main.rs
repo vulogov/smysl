@@ -2529,12 +2529,14 @@ fn cli() -> Command {
                             "investigate",
                             "declare",
                             "witnesses",
+                            "evict",
                             "profile",
                         ])
                         .help(
                             "read exports with a reader into a library, the value in force at \
                              an instant, materialise window evidence, recompute it, run a \
-                             detector, or check a profile and print its hash",
+                             detector, evict old substrate, or check a profile and print its \
+                             hash",
                         ),
                 )
                 .arg(
@@ -2547,7 +2549,7 @@ fn cli() -> Command {
                              otlp-json/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
                              `detect RECIPE`; `investigate open|consult|hypothesis|probe|action|\
                              close|show …`; `declare instrument|measured-by|via|same-quantity …`; `witnesses SERIES`; \
-                             `profile check FILE|NAME`",
+                             `evict --older-than DUR`; `profile check FILE|NAME`",
                         ),
                 )
                 .arg(
@@ -2705,9 +2707,15 @@ fn cli() -> Command {
                         .help("The Zabbix API version the export came from (`apiinfo.version`)"),
                 )
                 .arg(
+                    Arg::new("older-than")
+                        .long("older-than")
+                        .value_name("DUR")
+                        .help("evict: the policy bound, a whole number and s, m, h, d or w, before --at"),
+                )
+                .arg(
                     Arg::new("yes")
                         .long("yes")
-                        .help("Commit the units rather than staging them")
+                        .help("Commit the units rather than staging them; evict: evict rather than report")
                         .action(ArgAction::SetTrue),
                 ),
             _ => sub.arg(
@@ -13631,6 +13639,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "investigate" => tel_investigate(m, global, &args),
         "declare" => tel_declare(m, global, &args),
         "witnesses" => tel_witnesses(m, global, &args),
+        "evict" => tel_evict(m, global, &args),
         "read" => tel_read(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
@@ -14598,6 +14607,81 @@ fn tel_commit_evidence(
         return ExitCode::Failure;
     }
     println!("{n} record(s) committed");
+    ExitCode::Success
+}
+
+/// `smysl tel evict --older-than DUR -s LIB --at MS [--yes]`: rule TL (RFC SMYSL-3 §13, TL-P8).
+///
+/// Retention is the local eviction of telemetry substrate. The bound is `--at` less `--older-than`,
+/// and every chunk of samples whose span ends at or before it is deleted and recorded as evicted.
+/// A chunk holding anything younger is kept whole. No record is written, nothing propagates
+/// through merge, and no unit is touched: evidence over evicted samples stays what it was, and
+/// `tel check` reports it as `SMY-W605`, not re-derivable.
+///
+/// Without `--yes` it reports what it would evict and removes nothing; nothing reads a clock, so
+/// `--at` is required.
+#[cfg(feature = "tel")]
+fn tel_evict(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::Substrate;
+
+    if !args.is_empty() {
+        eprintln!("smysl tel evict: takes no arguments, only --older-than DUR and --at MS");
+        return ExitCode::Usage;
+    }
+    let Some(raw) = m.get_one::<String>("older-than") else {
+        eprintln!("smysl tel evict: --older-than DUR is required (for example 30d)");
+        return ExitCode::Usage;
+    };
+    let Some(older) = window_ms(raw) else {
+        eprintln!(
+            "smysl tel evict: `{raw}` is not a duration: a whole number and one of s, m, h, d, w"
+        );
+        return ExitCode::Usage;
+    };
+    let Some(&at) = m.get_one::<u64>("at") else {
+        eprintln!("smysl tel evict: --at MS is required: nothing reads a clock");
+        return ExitCode::Usage;
+    };
+    let bound = at.saturating_sub(older);
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let yes = m.get_flag("yes");
+    let path = tel_series_path(&root);
+    let report = if path.exists() {
+        let mut sub = match RedbBackend::open(&path) {
+            Ok(b) => Substrate::new(b),
+            Err(e) => {
+                eprintln!("smysl tel evict: {}: {e}", path.display());
+                return ExitCode::Failure;
+            }
+        };
+        let r = if yes {
+            sub.evict(bound, at)
+        } else {
+            sub.evictable(bound)
+        };
+        match r {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("smysl tel evict: {e}");
+                return ExitCode::Failure;
+            }
+        }
+    } else {
+        smysl::series::EvictReport::default()
+    };
+    println!(
+        "substrate {} chunk(s), {} sample(s) of {} series, wholly before {bound}",
+        report.chunks, report.samples, report.series
+    );
+    if yes {
+        println!("evicted; no record written");
+    } else {
+        println!("nothing removed: run again with --yes to evict");
+    }
     ExitCode::Success
 }
 

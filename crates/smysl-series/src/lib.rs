@@ -32,7 +32,8 @@ pub mod store;
 pub use chunk::Span;
 pub use sample::{conflicts, digest, flags, Sample, SampleError};
 pub use store::{
-    AddReport, Backend, Coverage, MemBackend, SeriesInfo, SeriesRow, Substrate, WindowRead,
+    AddReport, Backend, Coverage, EvictReport, MemBackend, SeriesInfo, SeriesRow, Substrate,
+    WindowRead,
 };
 
 /// Why a substrate operation failed.

@@ -1216,11 +1216,17 @@ series joined to it by `same-quantity`), and the quantity's independent witnesse
 what measured it. It also prints common transport, origins carried by more than one path, and
 series with no origin (`SMY-W609`). It exits 1 when the series is not in the library.
 
+`tel evict --older-than DUR --at MS` is retention, rule TL. Every chunk of samples whose span
+ends at or before `--at` less `DUR` is deleted from the substrate and recorded as evicted. A
+chunk holding anything younger is kept whole. It writes no record and touches no unit: evidence
+over evicted samples keeps its status, and `tel check` reports it as `SMY-W605`. Without `--yes`
+it prints what it would evict and removes nothing.
+
 #dtable(
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare`, `witnesses` or `profile`.]),
+    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare`, `witnesses`, `evict` or `profile`.]),
     ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `declare`: what is declared, then its arguments. `witnesses`: a series. `profile`: `check` and a profile file or shipped name.]),
     ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for the object readers; it must be for the reader's scheme.]),
     ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds, and for `prom/1` the scrape instant. Required for `read`: nothing here reads a clock.]),
@@ -1243,7 +1249,8 @@ series with no origin (`SMY-W609`). It exits 1 when the series is not in the lib
     ([`--output`], [`TID`], [`investigate probe` and `action`: the part holding the redacted output.]),
     ([`--confirmed-by`], [`HANDLE`], [`investigate action`: who confirmed an unsafe command.]),
     ([`--lookback`], [`MS`], [`investigate show`: how far before the opening to look for unexplored evidence. Default one hour.]),
-    ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing.]),
+    ([`--older-than`], [`DUR`], [`evict`: the retention bound before `--at`, a whole number and `s`, `m`, `h`, `d` or `w`. Required.]),
+    ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing. `evict`: evict, rather than report what would go.]),
     ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),
   ),
 )

@@ -81,17 +81,30 @@ pub trait Backend {
     ) -> Result<Option<(u64, Vec<u8>)>, Error>;
     /// The instruments the substrate holds chunks of `series` from, in uid order.
     fn instruments(&self, series: &Uid) -> Result<Vec<Uid>, Error>;
-    /// The span starts of `(series, inst)` in `[lo, hi]` recorded as evicted (§13; written from
-    /// TL-P8).
+    /// The span starts of `(series, inst)` in `[lo, hi]` recorded as evicted (§13).
     fn evicted(&self, series: &Uid, inst: &Uid, lo: u64, hi: u64) -> Result<Vec<u64>, Error>;
+    /// Every chunk key, in key order.
+    fn chunk_keys(&self) -> Result<Vec<ChunkKey>, Error>;
+    /// Every eviction record, `(key, instant)`, in key order.
+    fn evictions(&self) -> Result<Vec<(ChunkKey, u64)>, Error>;
     /// The series row.
     fn row(&self, series: &Uid) -> Result<Option<Vec<u8>>, Error>;
     /// Every series row, in uid order.
     fn rows(&self) -> Result<Vec<(Uid, Vec<u8>)>, Error>;
-    /// Write chunks and rows together: all of them or none.
+    /// Write chunks and rows together: all of them or none. A chunk written where one was
+    /// evicted clears the eviction record: the substrate holds that span again (§13, a merge
+    /// can bring substrate back).
     fn write(
         &mut self,
         chunks: Vec<(ChunkKey, Vec<u8>)>,
+        rows: Vec<(Uid, Vec<u8>)>,
+    ) -> Result<(), Error>;
+    /// Delete `chunks`, record each as evicted at `at_ms`, and write `rows`: all of it or none
+    /// (§13, rule TL).
+    fn evict(
+        &mut self,
+        chunks: Vec<ChunkKey>,
+        at_ms: u64,
         rows: Vec<(Uid, Vec<u8>)>,
     ) -> Result<(), Error>;
 }
@@ -158,6 +171,14 @@ impl Backend for MemBackend {
             .collect())
     }
 
+    fn chunk_keys(&self) -> Result<Vec<ChunkKey>, Error> {
+        Ok(self.chunks.keys().copied().collect())
+    }
+
+    fn evictions(&self) -> Result<Vec<(ChunkKey, u64)>, Error> {
+        Ok(self.evicted.iter().map(|(k, v)| (*k, *v)).collect())
+    }
+
     fn row(&self, series: &Uid) -> Result<Option<Vec<u8>>, Error> {
         Ok(self.rows.get(series).cloned())
     }
@@ -171,10 +192,39 @@ impl Backend for MemBackend {
         chunks: Vec<(ChunkKey, Vec<u8>)>,
         rows: Vec<(Uid, Vec<u8>)>,
     ) -> Result<(), Error> {
+        for (k, _) in &chunks {
+            self.evicted.remove(k);
+        }
         self.chunks.extend(chunks);
         self.rows.extend(rows);
         Ok(())
     }
+
+    fn evict(
+        &mut self,
+        chunks: Vec<ChunkKey>,
+        at_ms: u64,
+        rows: Vec<(Uid, Vec<u8>)>,
+    ) -> Result<(), Error> {
+        for k in chunks {
+            if self.chunks.remove(&k).is_some() {
+                self.evicted.insert(k, at_ms);
+            }
+        }
+        self.rows.extend(rows);
+        Ok(())
+    }
+}
+
+/// What one [`Substrate::evict`] removed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EvictReport {
+    /// Chunks deleted, each now recorded as evicted.
+    pub chunks: u64,
+    /// The samples they held.
+    pub samples: u64,
+    /// The series that lost any.
+    pub series: u64,
 }
 
 /// What one [`Substrate::add`] did.
@@ -383,6 +433,107 @@ impl<B: Backend> Substrate<B> {
     /// The instruments `series` has samples from, in uid order.
     pub fn instruments(&self, series: &Uid) -> Result<Vec<Uid>, Error> {
         self.backend.instruments(series)
+    }
+
+    /// Rule TL (§13): delete every chunk whose span ends at or before `bound_ms`, so that every
+    /// sample it held is older than the bound, and record each as evicted at `at_ms`.
+    ///
+    /// Eviction is by whole chunk: a chunk that holds any sample at or after the bound is kept
+    /// whole, so nothing younger than the bound is ever removed. It writes no record, and a
+    /// series' row stays, with its span, so that the series keeps its chunking if its samples
+    /// come back and [`Substrate::present`] can say which spans were evicted. The row's count
+    /// and first instant follow what remains.
+    pub fn evict(&mut self, bound_ms: u64, at_ms: u64) -> Result<EvictReport, Error> {
+        let (report, keys, rows) = self.plan_eviction(bound_ms)?;
+        if !keys.is_empty() {
+            self.backend.evict(keys, at_ms, rows)?;
+        }
+        Ok(report)
+    }
+
+    /// What [`Substrate::evict`] at `bound_ms` would remove, removing nothing.
+    pub fn evictable(&self, bound_ms: u64) -> Result<EvictReport, Error> {
+        Ok(self.plan_eviction(bound_ms)?.0)
+    }
+
+    /// The chunks rule TL removes at `bound_ms`, and the rows as they will be after.
+    #[allow(clippy::type_complexity)]
+    fn plan_eviction(
+        &self,
+        bound_ms: u64,
+    ) -> Result<(EvictReport, Vec<ChunkKey>, Vec<(Uid, Vec<u8>)>), Error> {
+        let mut report = EvictReport::default();
+        let mut gone: BTreeMap<Uid, Vec<ChunkKey>> = BTreeMap::new();
+        let mut rows: BTreeMap<Uid, SeriesRow> = BTreeMap::new();
+        for key in self.backend.chunk_keys()? {
+            let series = Uid::from_bytes(key[..32].try_into().expect("thirty-two bytes"));
+            let row = match rows.get(&series) {
+                Some(r) => r.clone(),
+                None => match self.row(&series)? {
+                    Some(r) => {
+                        rows.insert(series, r.clone());
+                        r
+                    }
+                    None => continue,
+                },
+            };
+            if key_start(&key).saturating_add(row.span.ms()) <= bound_ms {
+                gone.entry(series).or_default().push(key);
+            }
+        }
+        let mut writes = Vec::new();
+        let mut keys = Vec::new();
+        for (series, chunks) in gone {
+            let mut row = rows.remove(&series).expect("read above");
+            let mut removed = 0u64;
+            for k in &chunks {
+                if let Some(bytes) = self.backend.chunk(k)? {
+                    removed += chunk::decode(&bytes)?.len() as u64;
+                }
+            }
+            row.count = row.count.saturating_sub(removed);
+            report.chunks += chunks.len() as u64;
+            report.samples += removed;
+            report.series += 1;
+            keys.extend(chunks.iter().copied());
+            // The first instant held now: the earliest remaining chunk of any instrument.
+            let evicted: BTreeSet<ChunkKey> = chunks.into_iter().collect();
+            row.first_ms = u64::MAX;
+            for inst in self.backend.instruments(&series)? {
+                let left = self
+                    .backend
+                    .chunks(&series, &inst, 0, u64::MAX)?
+                    .into_iter()
+                    .find(|(start, _)| !evicted.contains(&chunk_key(&series, &inst, *start)));
+                if let Some((_, bytes)) = left {
+                    if let Some(first) = chunk::decode(&bytes)?.first() {
+                        row.first_ms = row.first_ms.min(first.ts_ms());
+                    }
+                }
+            }
+            if row.count == 0 {
+                row.last_ms = 0;
+            }
+            writes.push((series, encode_row(&row)));
+        }
+        Ok((report, keys, writes))
+    }
+
+    /// Every eviction record: `(series, instrument, span start, evicted at)`, in that order.
+    pub fn evictions(&self) -> Result<Vec<(Uid, Uid, u64, u64)>, Error> {
+        Ok(self
+            .backend
+            .evictions()?
+            .into_iter()
+            .map(|(k, at)| {
+                (
+                    Uid::from_bytes(k[..32].try_into().expect("thirty-two bytes")),
+                    key_inst(&k),
+                    key_start(&k),
+                    at,
+                )
+            })
+            .collect())
     }
 
     /// Which spans of `[from, to)` the substrate holds for `(series, inst)`.

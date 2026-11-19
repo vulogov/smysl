@@ -1556,6 +1556,34 @@ Each operation is committed alone and read back at once, as OKO appends. The def
 runs, which this machine does not have. No simulated run stands in for it. Because of that,
 §11 is still untested against an agent, which the RFC wanted before TL-P7.
 
+### Retention: `smysl tel evict` (TL-P8 step 1)
+
+Rule TL (§13) for samples. `Substrate::evict(bound, at)` deletes every chunk whose span ends at
+or before the bound, and records each as evicted at `at`. Eviction is by whole chunk, so a
+chunk with any sample at or after the bound is kept whole and nothing younger than the bound is
+removed. A series' row stays, with its span, so the series keeps its chunking if its samples
+come back, and `present` can say which spans were evicted. The row's count and first instant
+follow what remains. `Substrate::evictable` plans the same eviction without making it, and
+`Substrate::evictions` lists the records.
+
+`Backend` gains `chunk_keys`, `evictions` and `evict`, for memory and redb. A chunk written where
+one was evicted clears the record: a merge can bring substrate back. Both backends run one
+eviction contract:
+- whole chunks only;
+- planned equals done;
+- idempotent;
+- the samples added back give the same digest;
+- the redb records survive a reopen.
+
+`smysl tel evict --older-than DUR --at MS -s LIB [--yes]` evicts at `--at` less `DUR`. Without
+`--yes` it reports and removes nothing. It writes no record. Against the binary, evicting three
+OTLP exports' samples:
+- changes no unit, relation or attestation;
+- turns both windows over them into `SMY-W605`, with no error;
+- after the same exports are read again, checks clean.
+
+Snapshot part texts (§13's other half) are step 2.
+
 ---
 
 ## 1.16.0 — 2026-11-16

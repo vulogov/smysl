@@ -161,6 +161,27 @@ impl Backend for RedbBackend {
         Ok(out)
     }
 
+    fn chunk_keys(&self) -> Result<Vec<ChunkKey>, Error> {
+        let txn = self.db.begin_read().map_err(backend)?;
+        let t = txn.open_table(CHUNKS).map_err(backend)?;
+        let mut out = Vec::new();
+        for row in t.iter().map_err(backend)? {
+            out.push(*row.map_err(backend)?.0.value());
+        }
+        Ok(out)
+    }
+
+    fn evictions(&self) -> Result<Vec<(ChunkKey, u64)>, Error> {
+        let txn = self.db.begin_read().map_err(backend)?;
+        let t = txn.open_table(EVICTED).map_err(backend)?;
+        let mut out = Vec::new();
+        for row in t.iter().map_err(backend)? {
+            let (k, v) = row.map_err(backend)?;
+            out.push((*k.value(), v.value()));
+        }
+        Ok(out)
+    }
+
     fn row(&self, series: &Uid) -> Result<Option<Vec<u8>>, Error> {
         let txn = self.db.begin_read().map_err(backend)?;
         let t = txn.open_table(SERIES).map_err(backend)?;
@@ -188,8 +209,33 @@ impl Backend for RedbBackend {
         let txn = self.db.begin_write().map_err(backend)?;
         {
             let mut c = txn.open_table(CHUNKS).map_err(backend)?;
+            let mut e = txn.open_table(EVICTED).map_err(backend)?;
             for (k, v) in &chunks {
                 c.insert(k, v.as_slice()).map_err(backend)?;
+                e.remove(k).map_err(backend)?;
+            }
+            let mut s = txn.open_table(SERIES).map_err(backend)?;
+            for (u, v) in &rows {
+                s.insert(u.as_bytes(), v.as_slice()).map_err(backend)?;
+            }
+        }
+        txn.commit().map_err(backend)
+    }
+
+    fn evict(
+        &mut self,
+        chunks: Vec<ChunkKey>,
+        at_ms: u64,
+        rows: Vec<(Uid, Vec<u8>)>,
+    ) -> Result<(), Error> {
+        let txn = self.db.begin_write().map_err(backend)?;
+        {
+            let mut c = txn.open_table(CHUNKS).map_err(backend)?;
+            let mut e = txn.open_table(EVICTED).map_err(backend)?;
+            for k in &chunks {
+                if c.remove(k).map_err(backend)?.is_some() {
+                    e.insert(k, at_ms).map_err(backend)?;
+                }
             }
             let mut s = txn.open_table(SERIES).map_err(backend)?;
             for (u, v) in &rows {

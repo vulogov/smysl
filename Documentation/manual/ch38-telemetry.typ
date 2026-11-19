@@ -551,10 +551,38 @@ witness, which cannot conflict with itself. `tel investigate show` lists, for ea
 evidence is about, the quantity's witness count and common transport, and then the conflicts
 on that evidence.
 
+== Retention: evicting old samples
+
+Samples pile up. Retention is a local decision: this library keeps six months, a peer keeps
+thirty days. `tel evict` drops samples older than a bound, and nothing else.
+
+```
+smysl tel evict --older-than 30d --at 1771149600000 -s lib          # what would go
+smysl tel evict --older-than 30d --at 1771149600000 -s lib --yes    # evict it
+```
+
+The substrate is cut into chunks by span (a minute, fifteen minutes or two hours, chosen per
+series). A chunk goes when its whole span ends before the bound, so no sample younger than the
+bound is ever removed. Each evicted chunk is recorded as evicted, locally.
+
+What eviction does not do matters more:
+
+- It writes no record. A unit, a relation and an attestation are never evicted, and a merge
+  carries nothing about it to a peer.
+- It is not a redaction. Rule Z removes text that must not be held. Eviction is a cache
+  decision.
+- Window evidence keeps its status. It was attested when it was computed, and it says what it
+  says. `tel check` can no longer recompute it, and reports `SMY-W605`, "not re-derivable": a
+  warning, never an error.
+
+Reading the same exports again, or merging the samples back from a peer that kept them, adds
+them as a set. The windows recompute exactly as before.
+
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
-  investigations, instrument lineage, witness counting and witness conflicts. Eviction,
-  exchange, traces and logs are the RFC's later phases, TL-P8 and TL-P9. So are:
+  investigations, instrument lineage, witness counting, witness conflicts and the eviction of
+  samples. Evicting snapshot texts, exchanging substrate, traces and logs are the RFC's later
+  steps, TL-P8 and TL-P9. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
   - what a deleted object becomes as a unit;

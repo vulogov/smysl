@@ -1009,7 +1009,7 @@ migrate    --shard
 migrate    --seed-check
 migrate    --help
 tel        <ACTION>
-tel        [possible values: read, at, window, check, detect, investigate, declare, witnesses, profile]
+tel        [possible values: read, at, window, check, detect, investigate, declare, witnesses, evict, profile]
 tel        [ARG]
 tel        --config
 tel        --profile
@@ -1049,5 +1049,6 @@ tel        --lookback
 tel        --trends
 tel        --items
 tel        --zabbix-api
+tel        --older-than
 tel        --yes
 tel        --help

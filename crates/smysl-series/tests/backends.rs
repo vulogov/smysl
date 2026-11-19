@@ -90,9 +90,80 @@ fn contract<B: Backend>(mut sub: Substrate<B>) {
     assert!(sub.instruments(&other).unwrap().is_empty());
 }
 
+/// Rule TL (§13), against each backend: eviction by whole chunk, recorded, and undone by the
+/// samples coming back.
+fn eviction<B: Backend>(mut sub: Substrate<B>) {
+    let (s, i, j) = (uid(1), uid(2), uid(3));
+    // One sample a minute for six hours, from two instruments: a 2 h span, three chunks each.
+    let all: Vec<Sample> = (0..360).map(|k| v(k * 60_000, k as i64)).collect();
+    sub.add(&s, &i, &info(), &all).unwrap();
+    sub.add(&s, &j, &info(), &all[..10]).unwrap();
+    let whole = sub.window(&s, &i, 0, 6 * 3_600_000).unwrap();
+    assert_eq!(sub.row(&s).unwrap().unwrap().span, Span::H2);
+
+    // A bound inside the second chunk evicts only the first: its span ends at 2 h ≤ 3 h; the
+    // second's ends at 4 h, and it holds samples younger than the bound.
+    let planned = sub.evictable(3 * 3_600_000).unwrap();
+    assert_eq!(
+        sub.window(&s, &i, 0, 6 * 3_600_000).unwrap(),
+        whole,
+        "a plan removes nothing"
+    );
+    let r = sub.evict(3 * 3_600_000, 99).unwrap();
+    assert_eq!(r, planned);
+    assert_eq!((r.chunks, r.samples, r.series), (2, 130, 1));
+    let row = sub.row(&s).unwrap().unwrap();
+    assert_eq!(
+        (row.count, row.first_ms, row.span),
+        (240, 7_200_000, Span::H2)
+    );
+    assert!(sub.window(&s, &i, 0, 7_200_000).unwrap().samples.is_empty());
+    assert_eq!(
+        sub.window(&s, &i, 7_200_000, 6 * 3_600_000)
+            .unwrap()
+            .samples,
+        all[120..].to_vec(),
+        "nothing younger than its chunk's end is touched"
+    );
+    let c = sub.present(&s, &i, 0, 6 * 3_600_000).unwrap();
+    assert_eq!(
+        (c.present, c.evicted),
+        (vec![7_200_000, 14_400_000], vec![0])
+    );
+    assert!(sub.present(&s, &j, 0, 7_200_000).unwrap().is_absent());
+    assert_eq!(sub.evictions().unwrap(), vec![(s, i, 0, 99), (s, j, 0, 99)]);
+    assert!(
+        sub.instruments(&s).unwrap() == vec![i],
+        "j held one chunk, now evicted"
+    );
+
+    // Again, at the same bound: nothing left to do.
+    assert_eq!(sub.evict(3 * 3_600_000, 100).unwrap().chunks, 0);
+
+    // A merge with a peer that kept them brings the samples back as a set: the same digest,
+    // and the span is held again.
+    sub.add(&s, &i, &info(), &all).unwrap();
+    assert_eq!(sub.window(&s, &i, 0, 6 * 3_600_000).unwrap(), whole);
+    assert_eq!(sub.row(&s).unwrap().unwrap().count, 360);
+    let c = sub.present(&s, &i, 0, 6 * 3_600_000).unwrap();
+    assert!(c.evicted.is_empty() && c.present.len() == 3);
+    assert_eq!(sub.evictions().unwrap(), vec![(s, j, 0, 99)]);
+
+    // Everything evicted: the row stays, empty, with its span.
+    let r = sub.evict(u64::MAX, 200).unwrap();
+    assert_eq!(r.samples, 360);
+    let row = sub.row(&s).unwrap().unwrap();
+    assert_eq!((row.count, row.first_ms, row.last_ms), (0, u64::MAX, 0));
+}
+
 #[test]
 fn the_memory_backend_keeps_the_contract() {
     contract(Substrate::new(MemBackend::default()));
+}
+
+#[test]
+fn the_memory_backend_evicts_by_rule_tl() {
+    eviction(Substrate::new(MemBackend::default()));
 }
 
 #[cfg(feature = "store-redb")]
@@ -112,6 +183,19 @@ mod redb {
     fn the_redb_backend_keeps_the_contract() {
         let p = path("contract");
         contract(Substrate::new(RedbBackend::open(&p).unwrap()));
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn the_redb_backend_evicts_by_rule_tl_and_keeps_it_when_reopened() {
+        let p = path("evict");
+        eviction(Substrate::new(RedbBackend::open(&p).unwrap()));
+        let sub = Substrate::new(RedbBackend::open(&p).unwrap());
+        assert_eq!(
+            sub.evictions().unwrap().len(),
+            4,
+            "every chunk, and j's from before"
+        );
         let _ = std::fs::remove_dir_all(p.parent().unwrap());
     }
 
