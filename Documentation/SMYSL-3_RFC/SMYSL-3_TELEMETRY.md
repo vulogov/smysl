@@ -719,7 +719,7 @@ with an override, as for every thread schema.
 | `SMY-E602` | a non-canonical `dec`: trailing-zero mantissa, `-0`, out of range, non-integer parts, or −2⁶⁴ |
 | `SMY-E603` | a window attested contrary to rule TW |
 | `SMY-E604` | recomputed window evidence does not match the unit |
-| `SMY-W605` | evidence or a probe output refers to substrate that is absent (evicted or never received) |
+| `SMY-W605` | window evidence refers to substrate that is absent (evicted or never received). A probe output is a SMYSL-2 part that names no samples and rule TL never evicts, so it is not reported. |
 | `SMY-W606` | a numeric quote does not verify (rule TQ); the hypothesis is capped at `speculative` |
 | `SMY-E607` | a `series` or `instrument` unit breaks §4.1's entity-like rule |
 | `SMY-W608` | a declared keyed array could not be keyed (missing, non-scalar or duplicated key); diffed as one `json` leaf |

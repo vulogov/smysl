@@ -1636,6 +1636,22 @@ Against the binary, with one library that evicted everything and an unevicted pe
 - a second import adds nothing;
 - the peer's export into the evicted library itself restores it.
 
+### Gaps: `SMY-W605` in an investigation (TL-P8 step 4)
+
+`smysl tel investigate show` gains a last section, `gaps`, which is the dossier's open
+questions. It lists every window the investigation consulted or cited (its hypotheses' grounds)
+whose samples the substrate does not hold, evicted or never received, each as `SMY-W605`. It
+reads the substrate through the same `tel-evidence` recomputation `tel check` uses, and reports
+only the warning: a hypothesis grounded in an evicted window keeps its status.
+
+Against the binary: an investigation that consulted one window and cited another reports
+0 gaps, then 2 after `tel evict`, and its hypothesis is unchanged. Reading the scrapes again
+brings it back to 0.
+
+A probe's output is a SMYSL-2 text part. It names no samples, and rule TL never evicts it, so
+§15's "or a probe output" had nothing structured to point at. The RFC's row now names window
+evidence only.
+
 ---
 
 ## 1.16.0 — 2026-11-16

@@ -345,3 +345,95 @@ fn who_and_when_are_required() {
         assert_eq!(run(&dir, &args).status.code(), Some(2), "{args:?}");
     }
 }
+
+/// Open questions (§22.2): a window the investigation used whose samples were evicted is a gap,
+/// `SMY-W605`, and its hypothesis keeps its status. Reading the scrapes again closes the gap.
+#[test]
+fn an_evicted_window_it_used_is_a_gap() {
+    let (dir, w1, w2, series) = library("gaps");
+    let i = uid_of(
+        &inv(&dir, &["open", "q"], "human:alice", 70_000),
+        "x.tel/investigation",
+    );
+    inv(&dir, &["consult", &i, &w1], "human:alice", 71_000);
+    inv(
+        &dir,
+        &[
+            "hypothesis",
+            &i,
+            "it dropped",
+            "--explains",
+            &w2,
+            "--ground",
+            &w2,
+            "--target",
+            &series,
+        ],
+        "human:alice",
+        72_000,
+    );
+    let show = |dir: &Path| ok(dir, &["tel", "investigate", "show", &i, "-s", "lib"]);
+    let before = show(&dir);
+    assert!(before.contains("gaps          0"), "{before}");
+    let status = |s: &str| {
+        s.lines()
+            .find(|l| l.contains("it dropped"))
+            .map(str::to_string)
+    };
+
+    let day_later = t(86_400_000);
+    ok(
+        &dir,
+        &[
+            "tel",
+            "evict",
+            "--older-than",
+            "1h",
+            "--at",
+            &day_later,
+            "-s",
+            "lib",
+            "--yes",
+        ],
+    );
+    let after = show(&dir);
+    assert!(
+        after.contains("gaps          2"),
+        "consulted and cited: {after}"
+    );
+    assert_eq!(
+        after.lines().filter(|l| l.contains("SMY-W605")).count(),
+        2,
+        "{after}"
+    );
+    assert_eq!(
+        status(&after),
+        status(&before),
+        "the hypothesis keeps its status"
+    );
+
+    // The scrapes again: the samples come back as a set.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/tel/prom");
+    for n in 0..4u64 {
+        let f = root.join(format!("s{n}.prom")).display().to_string();
+        ok(
+            &dir,
+            &[
+                "tel",
+                "read",
+                "prom/1",
+                &f,
+                "--job",
+                "node",
+                "--instance",
+                "h:9100",
+                "--at",
+                &t(15_000 * n),
+                "-s",
+                "lib",
+                "--yes",
+            ],
+        );
+    }
+    assert!(show(&dir).contains("gaps          0"));
+}

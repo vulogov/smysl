@@ -15735,6 +15735,36 @@ fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> Exi
                 StoreRead::contention_status(store, c)
             );
         }
+        // Open questions (§22.2): the windows it used whose samples are not here (`SMY-W605`,
+        // rule TL or never received). Their status stands; only re-deriving them is gone.
+        let used: Vec<&smysl::UnitCore> = evidence
+            .iter()
+            .filter_map(|u| units.get(u).copied())
+            .filter(|c| c.schema.as_str() == smysl::schemas::tel::WINDOW)
+            .collect();
+        let path = tel_series_path(&root);
+        let checked = if path.exists() {
+            match smysl::series::redb::RedbBackend::open(&path) {
+                Ok(b) => smysl::tel::evidence::verify(used, &smysl::series::Substrate::new(b)),
+                Err(e) => {
+                    eprintln!("smysl tel investigate: {}: {e}", path.display());
+                    return ExitCode::Failure;
+                }
+            }
+        } else {
+            smysl::tel::evidence::verify(
+                used,
+                &smysl::series::Substrate::new(smysl::series::MemBackend::default()),
+            )
+        };
+        let gaps: Vec<_> = checked
+            .iter()
+            .filter(|d| d.code == smysl::Code::W605)
+            .collect();
+        println!("gaps          {}", gaps.len());
+        for d in gaps {
+            println!("  {d}");
+        }
         return ExitCode::Success;
     }
 

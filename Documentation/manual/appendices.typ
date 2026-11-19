@@ -1195,7 +1195,8 @@ attested by `--as` at `--at`.
   effective status and any `SMY-W606`, probes, actions, consulted, unused and unexplored
   evidence, and rival explanations. For each series the evidence is about, it prints how many
   independent witnesses its quantity has and the common transport, followed by the witness
-  conflicts on that evidence.
+  conflicts on that evidence. Last come the gaps: each window it consulted or cited whose
+  samples the substrate does not hold, as `SMY-W605`.
 
 Probes and actions are attested as imported at the computed rung, because a tool ran them. The
 rest are authored at the document rung.

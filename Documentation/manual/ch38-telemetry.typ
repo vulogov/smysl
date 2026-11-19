@@ -583,6 +583,9 @@ What eviction does not do matters more:
 - Window evidence keeps its status. It was attested when it was computed, and it says what it
   says. `tel check` can no longer recompute it, and reports `SMY-W605`, "not re-derivable": a
   warning, never an error.
+- An investigation that used such a window keeps its hypotheses as they were. `tel investigate
+  show` ends with its *gaps*: each window it consulted or cited that can no longer be
+  recomputed, as `SMY-W605`. These are the dossier's open questions.
 
 Reading the same exports again, or merging the samples back from a peer that kept them, adds
 them as a set. The windows recompute exactly as before.
