@@ -24,6 +24,7 @@
 use core::fmt;
 
 pub mod chunk;
+pub mod exchange;
 #[cfg(feature = "store-redb")]
 pub mod redb;
 pub mod sample;

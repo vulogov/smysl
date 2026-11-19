@@ -56,7 +56,7 @@ pub fn key_inst(k: &ChunkKey) -> Uid {
     Uid::from_bytes(k[32..64].try_into().expect("thirty-two bytes"))
 }
 
-fn key_start(k: &ChunkKey) -> u64 {
+pub(crate) fn key_start(k: &ChunkKey) -> u64 {
     u64::from_be_bytes(k[64..].try_into().expect("eight bytes"))
 }
 

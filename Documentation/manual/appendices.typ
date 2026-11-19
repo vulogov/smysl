@@ -973,6 +973,7 @@ part the library has redacted is dropped at the door (`SMY-W414`).
     ([`--with-provenance`], [—], [Export the import manifests the records arrived under (`export`, a library). Outside P3.]),
     ([`--with-staged`], [—], [Export staged imports too (`export`, a library).]),
     ([`--with-quarantine`], [—], [Export quarantined records too (`export`, a library).]),
+    ([`--with-substrate`], [—], [Export the series substrate's samples under `substrate/`: one file per series, instrument and UTC day, named by its BLAKE3, and a listing of the days held and evicted (`export`, a library). `import` of an export that carries one adds its samples as a set, and imports nothing if a day file is not its name.]),
     ([`--as-of`], [`EDTF`], [Export only what was known before the end of this date: a record's own clock, a unit's earliest attestation (`SMY-W415` for one with none), and nothing resting on what was not yet known (`SMY-W498`) (`export`).]),
     ([`--target-revision`], [`ID@N`], [Export the selection as revision `N` of schema `ID` writes it, through the schema's lenses (`export`).]),
     ([`--agent`], [`ID`], [The agent of the attestations `--target-revision` adds (`export`); `tool:smysl-lib` by default.]),

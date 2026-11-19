@@ -953,6 +953,7 @@ lib        --with-text
 lib        --with-provenance
 lib        --with-staged
 lib        --with-quarantine
+lib        --with-substrate
 lib        --primary
 lib        --index
 lib        --primary-shards

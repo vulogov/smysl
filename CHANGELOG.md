@@ -1607,6 +1607,35 @@ reports how many. Against the binary, three snapshots of one Deployment, evicted
 After eviction, `smysl check` is unchanged, and `lib export --scope all` writes and verifies with
 P1 and P3 holding.
 
+### Exchanging samples: `lib export --with-substrate` (TL-P8 step 3)
+
+§19.5. `smysl_series::exchange` writes samples, not chunks. There is one file per
+(series, instrument, UTC day): a CBOR sequence of §9.1 sample arrays in sample order, named
+`<BLAKE3>.cbor`. `listing.cbor` names the series (scheme, key, class), each day held with its
+file and count, and the days known evicted. A day file is a function of its samples alone, so
+two peers holding the same samples write the same file.
+
+`decode_day` refuses anything `encode_day` would not write:
+- a sample outside the day;
+- samples out of order or repeated;
+- a file that is not canonical.
+
+`verify` checks every file against its name, day and count before anything is written.
+`import` then adds the samples day by day, as a set.
+
+`smysl lib export --with-substrate` writes the library's whole substrate under `substrate/`.
+That is beside the collection and outside its index, so P1 and P3 are checked as before.
+`--with-substrate` over a plain store is refused (exit 2). `smysl lib import` of an export that
+carries one verifies it first, so a bad day file imports nothing (exit 1). After the records it
+adds the samples, and reports how many were new, how many already held, and the exporter's
+evicted days.
+
+Against the binary, with one library that evicted everything and an unevicted peer:
+- the evicted export carries no samples, and a fresh library importing it has `SMY-W605`;
+- the peer's export on top brings the samples back, changes no unit, and checks clean;
+- a second import adds nothing;
+- the peer's export into the evicted library itself restores it.
+
 ---
 
 ## 1.16.0 — 2026-11-16

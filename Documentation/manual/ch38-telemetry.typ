@@ -587,10 +587,38 @@ What eviction does not do matters more:
 Reading the same exports again, or merging the samples back from a peer that kept them, adds
 them as a set. The windows recompute exactly as before.
 
+== Exchanging samples
+
+A collection carries records, and a window carries its own summary, so a peer can read the
+evidence without the samples. To give the peer the samples too, export with the substrate:
+
+```
+smysl lib export --scope all --with-substrate -o exp -s lib
+smysl lib import exp --accept -s peer
+```
+
+The samples go under `exp/substrate/`. That is one file per series, instrument and UTC day,
+holding that day's samples in order, and named by the BLAKE3 of its bytes. Chunks are not
+exchanged: their layout is local. The same samples therefore always write the same file,
+whoever writes it. `substrate/listing.cbor` lists the days held, and the days this library
+knows it has evicted. A day partly evicted is listed in both.
+
+`lib import` of such an export adds the samples as a set, after its records. It checks every
+day file against its name, its day and the listing first. If any file fails, nothing is
+imported, records included, and the import exits 1. Importing the same export twice adds
+nothing. An export from a peer that kept what this library evicted brings those samples back,
+and the windows over them check clean again. No unit changes. The listing's evicted days evict
+nothing here.
+
+The substrate exported is the library's whole substrate, whatever `--scope` selects. It sits
+beside the collection, outside its index, so `lib verify` checks the records as before.
+`bundle` carries no substrate: evidence units are self-contained, which is why windows are
+materialised.
+
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
-  investigations, instrument lineage, witness counting, witness conflicts and eviction.
-  Exchanging substrate, traces and logs are the RFC's later steps, TL-P8 and TL-P9. So are:
+  investigations, instrument lineage, witness counting, witness conflicts, eviction and
+  exchanging samples. Traces and logs are the RFC's later step, TL-P9. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
   - what a deleted object becomes as a unit;

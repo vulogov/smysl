@@ -2445,6 +2445,15 @@ fn cli() -> Command {
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
+                    Arg::new("with-substrate")
+                        .long("with-substrate")
+                        .help(
+                            "Export the series substrate's samples under substrate/ \
+                             (`export`, a library; RFC SMYSL-3 §19.5)",
+                        )
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
                     Arg::new("primary")
                         .long("primary")
                         .value_name("SHARD")
@@ -8975,6 +8984,15 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             Input::File(p.to_path_buf())
         });
     }
+    // An export's substrate is checked before anything is imported: one that does not verify
+    // refuses the whole input, records and all.
+    for input in &inputs {
+        if let Input::Index(index) = input {
+            if let Err(code) = verify_substrate(index) {
+                return code;
+            }
+        }
+    }
     let mut opts = ImportOptions::new()
         .accept(m.get_flag("accept"))
         .keep_original(m.get_flag("keep-original"))
@@ -9001,6 +9019,23 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return lib_error_code(&e);
         }
     };
+    // An export's substrate (RFC SMYSL-3 §19.5), added as a set once its records are in.
+    let mut substrate: Option<(u64, u64, u64, u64)> = None;
+    for input in &inputs {
+        let Input::Index(index) = input else { continue };
+        let Some(dir) = index.parent() else { continue };
+        if !dir.join("substrate").join("listing.cbor").is_file() {
+            continue;
+        }
+        match import_substrate_into(m, global, dir) {
+            Ok(Some((files, added, already, evicted))) => {
+                let t = substrate.get_or_insert((0, 0, 0, 0));
+                *t = (t.0 + files, t.1 + added, t.2 + already, t.3 + evicted);
+            }
+            Ok(None) => {}
+            Err(code) => return code,
+        }
+    }
     for d in r.report.iter() {
         eprintln!("import:{}: {d}", r.name);
     }
@@ -9045,8 +9080,15 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 )
             })
             .collect();
+        let sub = match substrate {
+            Some((files, added, already, evicted)) => format!(
+                ",\"substrate\":{{\"days\":{files},\"added\":{added},\"already\":{already},\
+                 \"evicted\":{evicted}}}"
+            ),
+            None => String::new(),
+        };
         println!(
-            "{{\"name\":{},\"files\":[{}],\"contentions\":{},\"joins\":{}}}",
+            "{{\"name\":{},\"files\":[{}],\"contentions\":{},\"joins\":{}{sub}}}",
             smysl::json_escape(&r.name),
             files.join(","),
             r.contentions.len(),
@@ -9081,6 +9123,12 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             println!(
                 "join    {} same-as edge(s) staged as join:{}; `lib accept join:{}` merges them",
                 r.joins, r.name, r.name
+            );
+        }
+        if let Some((files, added, already, evicted)) = substrate {
+            println!(
+                "substrate {files} day file(s): {added} new sample(s), {already} already held; \
+                 {evicted} day(s) the exporter had evicted"
             );
         }
     }
@@ -9341,6 +9389,18 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         );
         return ExitCode::Usage;
     }
+    let with_substrate = m.get_flag("with-substrate");
+    if with_substrate && library.is_none() {
+        eprintln!(
+            "smysl lib export: --with-substrate reads a library's series substrate, and {path} \
+             is not a library"
+        );
+        return ExitCode::Usage;
+    }
+    if with_substrate && !cfg!(feature = "tel") {
+        eprintln!("smysl lib export: --with-substrate needs a build with the `tel` feature");
+        return ExitCode::Usage;
+    }
     let store = match &library {
         Some(l) => match snapshot(l, &with) {
             Ok(s) => s,
@@ -9490,6 +9550,16 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         eprintln!("smysl lib export: {e}");
         return lib_error_code(&e);
     }
+    // The substrate (RFC SMYSL-3 §19.5): samples, beside the collection and outside its index,
+    // which names records only.
+    let substrate = if with_substrate {
+        match export_substrate(std::path::Path::new(&path), dir) {
+            Ok(s) => s,
+            Err(code) => return code,
+        }
+    } else {
+        None
+    };
     let records: usize = c.files.iter().map(|f| f.records).sum();
     if global.get_flag("json") {
         let files: Vec<String> = c
@@ -9504,9 +9574,15 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 )
             })
             .collect();
+        let sub = match &substrate {
+            Some((held, samples, evicted)) => format!(
+                ",\"substrate\":{{\"days\":{held},\"samples\":{samples},\"evicted\":{evicted}}}"
+            ),
+            None => String::new(),
+        };
         println!(
             "{{\"files\":[{}],\"records\":{records},\"rsd\":\"{}\",\"duplication\":[{},{}],\
-             \"verified\":{verified}}}",
+             \"verified\":{verified}{sub}}}",
             files.join(","),
             hex32(&c.rsd()),
             c.duplication().0,
@@ -9526,6 +9602,12 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         for f in &c.files {
             println!("  {}  {}", f.path, f.records);
         }
+        if let Some((held, samples, evicted)) = substrate {
+            println!(
+                "substrate {held} day file(s), {samples} sample(s); {evicted} day(s) listed as \
+                 evicted"
+            );
+        }
     }
     // A surface file that does not read back as its selection (`SMY-E424`): written, with the
     // index saying it is incomplete, and exit 3 (§4.4).
@@ -9536,6 +9618,130 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         Some(code) => code,
         None => ExitCode::Success,
     }
+}
+
+/// `lib export --with-substrate`: the library's samples under `<out>/substrate/` (RFC SMYSL-3
+/// §19.5), as (day files, samples, evicted days). A library with no substrate yet writes an
+/// empty listing, so the export still says what it holds.
+#[cfg(feature = "tel")]
+fn export_substrate(
+    root: &std::path::Path,
+    out: &std::path::Path,
+) -> Result<Option<(usize, u64, usize)>, ExitCode> {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::{exchange, MemBackend, Substrate};
+    let path = tel_series_path(root);
+    let dir = out.join(exchange::DIR);
+    let listing = if path.exists() {
+        let sub = match RedbBackend::open(&path) {
+            Ok(b) => Substrate::new(b),
+            Err(e) => {
+                eprintln!("smysl lib export: {}: {e}", path.display());
+                return Err(ExitCode::Failure);
+            }
+        };
+        exchange::export(&sub, &dir)
+    } else {
+        exchange::export(&Substrate::new(MemBackend::default()), &dir)
+    };
+    match listing {
+        Ok(l) => Ok(Some((
+            l.held.len(),
+            l.held.iter().map(|h| h.count).sum(),
+            l.evicted.len(),
+        ))),
+        Err(e) => {
+            eprintln!("smysl lib export: {e}");
+            Err(ExitCode::Failure)
+        }
+    }
+}
+
+#[cfg(not(feature = "tel"))]
+fn export_substrate(
+    _root: &std::path::Path,
+    _out: &std::path::Path,
+) -> Result<Option<(usize, u64, usize)>, ExitCode> {
+    Ok(None)
+}
+
+/// Check the substrate beside an export's index, if it carries one (RFC SMYSL-3 §19.5).
+#[cfg(feature = "text")]
+fn verify_substrate(index: &std::path::Path) -> Result<(), ExitCode> {
+    let Some(dir) = index.parent() else {
+        return Ok(());
+    };
+    if !dir.join("substrate").join("listing.cbor").is_file() {
+        return Ok(());
+    }
+    #[cfg(feature = "tel")]
+    if let Err(e) = smysl::series::exchange::verify(&dir.join(smysl::series::exchange::DIR)) {
+        eprintln!(
+            "smysl lib import: {}: substrate: {e}; nothing was imported",
+            dir.display()
+        );
+        return Err(ExitCode::Failure);
+    }
+    Ok(())
+}
+
+/// The substrate of the export at `dir` into the library `lib import` writes, as (files,
+/// added, already held, evicted days); `None` in a build without `tel`, which says so.
+#[cfg(feature = "text")]
+fn import_substrate_into(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    dir: &std::path::Path,
+) -> Result<Option<(u64, u64, u64, u64)>, ExitCode> {
+    #[cfg(feature = "tel")]
+    {
+        let root = library_root(m, global, "lib import")?;
+        match import_substrate(&root, dir) {
+            Ok(r) => {
+                if r.conflicts > 0 {
+                    eprintln!(
+                        "import: SMY-W615: {} instant(s) of the substrate now hold more than \
+                         one sample",
+                        r.conflicts
+                    );
+                }
+                Ok(Some((r.files, r.added, r.already, r.evicted)))
+            }
+            Err(e) => {
+                eprintln!("smysl lib import: {}: substrate: {e}", dir.display());
+                Err(ExitCode::Failure)
+            }
+        }
+    }
+    #[cfg(not(feature = "tel"))]
+    {
+        let _ = (m, global);
+        eprintln!(
+            "smysl lib import: {} carries a series substrate, and this build has no `tel` \
+             feature to read it; its records are imported, its samples are not",
+            dir.display()
+        );
+        Ok(None)
+    }
+}
+
+/// `lib import` of an export that carries `substrate/` (RFC SMYSL-3 §19.5): its samples are
+/// added to `<library>/index/series.redb` as a set. Nothing is added unless every day file is
+/// the file its name says.
+#[cfg(feature = "tel")]
+fn import_substrate(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+) -> Result<smysl::series::exchange::ImportReport, String> {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::{exchange, Substrate};
+    let path = tel_series_path(root);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    let mut sub =
+        Substrate::new(RedbBackend::open(&path).map_err(|e| format!("{}: {e}", path.display()))?);
+    exchange::import(&mut sub, &dir.join(exchange::DIR)).map_err(|e| e.to_string())
 }
 
 /// An `sq/1` scope over what `lib export` reads (TX-P11 step 8).
