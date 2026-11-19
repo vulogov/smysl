@@ -671,8 +671,24 @@ nothing, and `tel check` recomputes each span from the substrate as it does a wi
 twice with different contents, because two exports disagree about it, is `SMY-W617`. Both are
 kept.
 
-The sub-millisecond part of a span's times stays in the substrate. Whether units need it is
-GE-M2's question, and until it is answered `source` key 7 stays reserved.
+The sub-millisecond part of a span's times stays in the substrate, and units hold milliseconds.
+*Is a millisecond enough?* That is GE-M2, and `make ge-m2` asks it of 5,000 simulated traces of
+a social-network service. Two thirds of the spans are under a millisecond. In 39.5 % of them, a
+span and a sibling that ran before or after it share a `start_ms`, mostly cache calls made one
+after another by one handler. The substrate's nanoseconds put every such pair in the order it
+ran. So `source` key 7 is not released. It is not assigned on simulated data either, because
+nothing yet reads sub-millisecond order from units.
+
+*Could the order of calls catch a clock that is wrong?* That is GE-M5, and `make ge-m5` skews
+one host at a time by 1 to 500 ms. A child span that starts before its parent says some clock
+is off, but not which one, and some clocks it never catches:
+- a service that calls nobody, running ahead;
+- the entry point, running behind.
+
+Adding "a child ends before its parent ends" catches every skew of 2 ms or more. Ordinary
+quarter-millisecond clock error already breaks about 1 % of cross-host edges at millisecond
+resolution. The experiment failed its bar, so `x.tel/precedes` stays an ordinary relation and
+rule E does not read it.
 
 #section("Logs: templates as evidence")
 
@@ -710,8 +726,8 @@ stream and day, and an import finds each trace again by its id.
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
   investigations, instrument lineage, witness counting, witness conflicts, eviction, exchanging
-  the substrate, traces and logs. The experiments on causal order and on similarity are the rest
-  of the RFC's TL-P9. So are:
+  the substrate, traces and logs. Similarity between episodes is the rest of the RFC's TL-P9.
+  So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
   - what a deleted object becomes as a unit;

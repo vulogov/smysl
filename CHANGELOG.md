@@ -1781,6 +1781,56 @@ and carrying the window's event digest. `tel check` recomputes templates:
   trace` finds it in the importing library.
 - Both commands print an `events` line, and their JSON an `events` member, when there are any.
 
+### GE-M2 and GE-M5: milliseconds, and causal order (TL-P9 step 4)
+
+Both experiments ran on simulated traces. The measures and stop conditions went into the RFC
+(§26) before either ran.
+
+**The simulator.** `crates/smysl-tel/examples/common/traces.rs` models a social-network service
+graph after DeathStarBench's:
+- Eleven instrumented services, one per host, with client and server spans per call.
+- Cache and database calls are client spans only.
+- Handlers call in stages: parallel within one, sequential across them.
+- Latencies are log-normal with published-order medians.
+- Each host's clock has a residual offset within ±0.25 ms.
+
+Both runs go through `otlp-traces/1`'s path, the event substrate and `trace::materialise`.
+
+**GE-M2 (`make ge-m2`), is a millisecond enough? No.**
+- 5,000 traces, 72,177 spans, 66.7 % of them under 1 ms.
+- 39.5 % are *affected*: a sibling ran strictly before or after them, and the two units share a
+  `start_ms`.
+- Nearly all of them are memcached and redis calls made in sequence by one handler.
+- The substrate's nanoseconds put all 25,311 collapsed pairs in the order they ran.
+- By the stop condition key 7 is not released. It is not assigned on simulated data either,
+  since no rule reads sub-millisecond order from units (GE-M5). The run at production load
+  decides.
+
+**GE-M5 (`make ge-m5`), does causal order catch skew? Not as §10.4 states it.**
+
+Each host in turn was skewed by ±1 to 500 ms, giving 198 runs of 300 traces each, plus 20 runs
+with no skew. As fixed, *detected* means the skewed host is the one touching the most violated
+`x.tel/precedes` edges.
+
+| at ≥ 5 ms | start-only (§10.4) | with "child ends before parent" |
+|---|---|---|
+| detected, as fixed | 20.1 % | 26.0 % |
+| noticed, post hoc (an edge of the host off by ≥ 2 ms) | 63.6 % | 100 % |
+
+- **No host was named reliably.** A violated edge says that two clocks disagree, not which one
+  is wrong. A host with one caller ties with it.
+- **The start-only constraint cannot notice some skews.** A leaf service running ahead, or the
+  entry point running behind, never violates it: 8 of 22 host-and-direction cases.
+- **The noise trips it.** With no skew, the residual offsets violate 1.3 % of edges at
+  millisecond resolution, in 18 of 20 runs. No edge was off by 2 ms or more.
+
+The constraint fails its bar, so rule E is unchanged and `x.tel/precedes` stays ordinary.
+§10.4 records what a later design would need:
+- a second instant per span, for the response constraint;
+- a tolerance, or the sub-millisecond part.
+
+DeathStarBench at load is still owed for both experiments.
+
 ---
 
 ## 1.16.0 — 2026-11-16

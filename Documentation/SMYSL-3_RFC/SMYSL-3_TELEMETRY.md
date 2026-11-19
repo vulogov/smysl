@@ -606,8 +606,23 @@ If GE-M5 passes, rule E gains one free constraint, at the status of the trace da
 | span order | if A `x.tel/precedes` B (parent before child, request before response), said(A) ≤ said(B) | cited (exporter-recorded) |
 
 Only materialised spans take part: the constraint reads units and relations, never substrate, so
-rule U holds. Skew then shows up as a detection-kind-5 contention (an empty interval), and is corrected by a
-window dating with a measured offset, which SMYSL-2 already specifies. Until GE-M5 passes,
+rule U holds.
+
+**GE-M5 on simulated traces failed it (TL-P9), so rule E is unchanged** and `x.tel/precedes`
+stays an ordinary relation. What the run found, for whoever takes this up with real data:
+- **A start-only constraint is blind to some hosts.** A callee whose clock runs ahead never
+  starts too early, and a root whose clock runs behind has no caller to start before. That was 8
+  of the 22 host-and-direction cases here.
+- **The response constraint sees every skew of 2 ms or more.** That is a child's end at most its
+  parent's. It needs a second instant per span, which said(·) does not have.
+- **A violated edge names a pair of clocks, not the wrong one.**
+- **Ordinary NTP residuals trip it.** At millisecond resolution, offsets of a quarter of a
+  millisecond violate about 1 % of cross-host edges, so a rule would need a tolerance or the
+  sub-millisecond part.
+
+What follows describes the constraint as it would work if adopted. Skew would show up as a
+detection-kind-5 contention (an empty interval), and would be corrected by a window dating
+with a measured offset, which SMYSL-2 already specifies. Until GE-M5 passes,
 `x.tel/precedes` is an ordinary relation and rule E ignores it.
 
 ## 11. Investigations
@@ -759,9 +774,9 @@ with an override, as for every thread schema.
 | Item | State | Decided by |
 |---|---|---|
 | Record 16 (`hold`) | reserved; MUST NOT be written | GE-M4. If the substrate answers "value in force at t" correctly and under 50 ms p95 over 6 months, release the number to the general pool. |
-| `source` key 7 (sub-ms remainder) | reserved | GE-M2 |
+| `source` key 7 (sub-ms remainder) | reserved | GE-M2. Simulated: 39.5 % affected, so not released; not assigned until the run at load |
 | `SourceKind` value for an instrument | not allocated; instruments are units (§7) | GE-M6: the unit model was sufficient, so no kind is added. |
-| Causal free constraint | not in rule E | GE-M5 |
+| Causal free constraint | not in rule E | GE-M5. Simulated: fails (§10.4) |
 | Witness count in status | not a rule | GE-M6: kept as a report (D-T10) |
 
 ## 15. Diagnostics
@@ -1150,7 +1165,7 @@ OKO's first persistent ledger.
 | **TL-P6** investigations | investigation, hypothesis, probe, action, consulted; rule TQ; kind 6; timeline thread; incident dossier; OKO helpers | OKO POC writes a rotation ledger; **GE-M7** arms (a) and (b) run. Arms (c) and (d) run once TL-P5 has shipped the BARO-style ranking. |
 | **TL-P7** instruments | instrument units, `via`, `measured-by`; witness counts; kind 7 | **GE-M6** run; D-T10 confirmed or reversed |
 | **TL-P8** retention and exchange | rule TL eviction; `--with-substrate` export and import | **GE-M9** passes (simulated, `make ge-m9`: held) |
-| **TL-P9** traces and logs | OTLP traces, `x.tel/precedes`; Drain; MinHash; journald and CloudEvents readers | **GE-M2**, **GE-M5**, **GE-M8** decide key 7, the causal constraint and similarity labelling |
+| **TL-P9** traces and logs | OTLP traces, `x.tel/precedes`; Drain; MinHash; journald and CloudEvents readers | **GE-M2**, **GE-M5**, **GE-M8** decide key 7, the causal constraint and similarity labelling (simulated, `make ge-m2`, `make ge-m5`: key 7 not released; the constraint fails, rule E unchanged) |
 
 TL-P2 and TL-P3 can run in parallel after TL-P1. TL-P6 needs TL-P4 but not TL-P5 to be built,
 because an agent can hypothesise over evidence before any detector exists. GE-M7 is complete only
@@ -1163,14 +1178,37 @@ Each experiment has a stop condition, stated before it runs.
 | Id | Question | Design | Decides | Stop / pivot |
 |---|---|---|---|---|
 | **GE-M1** | Does D-T1 hold on real data? | I-1's cluster (kube-state-metrics, node_exporter, Kubernetes snapshots, Zabbix where available), 7 days. Count units per active series per day under change-only and class-based encodings. Check `dec` canonicalisation across exporters. | D-T1, H-3 defaults, D-T4 | **Normalised per series:** if class-based encoding exceeds a median of 1 unit per active series per day, or a p99 of 50, the class defaults or the noise filters are wrong. Revisit before TL-P3. |
-| **GE-M2** | Is ms enough? | OTLP traces from DeathStarBench at production-like load; count sub-ms spans and same-ms siblings whose order matters | D-T5 (key 7) | If < 1 % are affected, key 7 is released to the general pool |
+| **GE-M2** | Is ms enough? | OTLP traces from DeathStarBench at production-like load; count sub-ms spans and same-ms siblings whose order matters | D-T5 (key 7) | If < 1 % are affected, key 7 is released to the general pool. **Run on simulated traces (TL-P9, `make ge-m2`): not released.** 5,000 traces, 72,177 spans: 66.7 % under 1 ms, **39.5 % affected**, nearly all store calls (memcached, redis) made in sequence by one handler. The substrate's nanoseconds ordered all 25,311 collapsed pairs as they ran. Key 7 is not assigned on simulated data either: the run at load decides that, and no rule reads sub-ms order (GE-M5). |
 | **GE-M3** | Can the analysis layer be replayed? | Every shipped detector over `fixtures/tel/`, on x86_64 and aarch64, twice each | H-7 | Any byte difference in a `derived` unit keeps that detector off the pure path until fixed |
 | **GE-M4** | Is a hold record needed? | "Value in force at t" from the substrate against simulated holds, on GE-M1 data extended to 6 months | D-T6 | If the substrate is correct and ≤ 50 ms p95 at 6 months, release record 16 |
-| **GE-M5** | Does causal order catch skew? | Inject 1–500 ms skew on chosen hosts; derive constraints from spans | §10.4 | Detection below 90 % at ≥ 5 ms skew means the constraint is not worth a rule E change |
+| **GE-M5** | Does causal order catch skew? | Inject 1–500 ms skew on chosen hosts; derive constraints from spans | §10.4 | Detection below 90 % at ≥ 5 ms skew means the constraint is not worth a rule E change. **Run on simulated traces (TL-P9, `make ge-m5`): fails; rule E unchanged.** Detection as fixed (the skewed host named): 20.1 % at ≥ 5 ms, and 26.0 % with the response constraint, because two clocks that disagree do not say which is wrong. Seen at all (post hoc: an edge of the host violated by ≥ 2 ms): 63.6 % for §10.4's start-only constraint, which cannot see a leaf service running ahead or the root running behind; 100 % with the response constraint at ≥ 2 ms. With no skew, ±0.25 ms offsets violate 1.3 % of edges at ms resolution (18 of 20 runs). |
 | **GE-M6** | Do independent instruments change conclusions? | The same faults seen through duplicated scrapers and through independent sources | D-T10 | If witness counting never changes a ranking, it stays a report |
 | **GE-M7** | **Does smysl make agent RCA better?** | Train-Ticket (D-T12) with scripted deploys and config edits, faults injected after some of them. Arms: (a) agent alone; (b) agent writing into smysl with TQ, consulted and kind 6; (c) BARO-style derived ranking; (d) (b)+(c). Local models; one hosted arm, labelled (D-T13). | the design of §11 | Measured on top-k accuracy, **fabrications caught** (TQ failures that were real errors), and **unused-evidence rate**. If (b) does not reduce fabricated evidence relative to (a), §11 is wrong and is redesigned before TL-P7. |
 | **GE-M8** | Do episodes recur detectably? | MinHash over typed feature sets against embeddings, on GE-M7's corpus and RCAEval | similarity labelling | If MinHash recall@5 < 0.6 where embeddings exceed 0.8, similarity is model-dependent by default |
 | **GE-M9** | Does retention keep the round trip? | 6 months of GE-M1-scale data, compressed into a test; evict per rule TL; export, import, merge with an unevicted peer | rule TL | Any P1 failure over records, or any substrate resurrection that changes a unit, blocks TL-P8. **Run on simulated data (TL-P8): held.** 20 gauges, 182 days, 5.2 M samples, 152 days evicted. No record changed at any step, and every window recomputed to the unit it is after the merge. A control peer with one sample more was caught as `SMY-E604`. |
+
+**GE-M2 and GE-M5 on simulated traces (TL-P9 step 4).** The measures, fixed before the runs:
+- **The traces.** A social-network service graph after DeathStarBench's: eleven instrumented
+  services, one per host, with a client span on the caller and a server span on the callee for
+  every call between them. Calls to memcached, redis and MongoDB are client spans only, as their
+  drivers record them. Calls are made in stages: parallel within a stage, sequential across
+  stages. Latencies are log-normal with published-order medians (a cache call ≈ 0.12 ms, MongoDB
+  ≈ 1.2 ms, one network hop ≈ 0.08 ms). Each host's clock has a residual offset uniform in
+  ±0.25 ms, as NTP within a data centre gives.
+- **GE-M2.** The trace data goes through `otlp-traces/1`'s path into the substrate, and its spans
+  are materialised. *A span is affected* when it has a sibling (same parent) that ran strictly
+  before or after it (one ended before the other started) and the two units' `start_ms` are
+  equal: their order is in the substrate's nanoseconds and not in any unit. Reported: the share
+  of spans under 1 ms, and the share affected, over all spans and over server spans alone. The
+  stop condition is the table's: under 1 % affected releases key 7.
+- **GE-M5.** One host's clock is skewed by ±1, 2, 5, 10, 20, 50, 100, 200 or 500 ms, in turn
+  for every host, over 300 traces each; and twenty runs with no skew. A run is checked at the
+  unit level, as rule E would: an `x.tel/precedes` edge is violated when the child's `start_ms`
+  is below the parent's. *The skew is detected* when the skewed host is the one host touching
+  the most violated edges. *A false alarm* is a no-skew run with any violated edge. A second arm
+  adds the response constraint, a child's `end_ms` at most its parent's, which a span unit can
+  state but rule E's single instant cannot. The stop condition is the table's: detection below
+  90 % at ≥ 5 ms keeps the constraint out of rule E.
 
 **Order:**
 1. GE-M1, and GE-M3's harness. The harness exists from TL-P0, runs first on TL-P4's summaries, and

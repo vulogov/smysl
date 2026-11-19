@@ -53,7 +53,7 @@ MATRIX := \
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix crate-features gates purity update seed-fuzz fuzz-build \
         determinism check-native conformance eval live-ollama live-hosted doc fuzz clean sweep \
         commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions msrv seed-fuzz fuzz-long \
-        proposition-classes ge-m4 ge-m6 ge-m9 oko-ledger
+        proposition-classes ge-m4 ge-m6 ge-m2 ge-m5 ge-m9 oko-ledger
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -430,6 +430,16 @@ ge-m6: ## GE-M6 (RFC SMYSL-3 §7, D-T10): do witness counts change a BARO rankin
 	@# Simulated incidents through duplicated scrapers and independent sources; no files, about
 	@# 5 s. It decides, it does not fail: exit 0 with the verdict printed.
 	$(CARGO) run --release --quiet -p smysl-tel --example ge_m6
+
+ge-m2: ## GE-M2 (RFC SMYSL-3 §26, D-T5): is a millisecond enough? Simulated traces
+	@# 5,000 simulated traces through otlp-traces/1's path, materialised; no files, about 35 s.
+	@# It decides, it does not fail: exit 0 with the verdict printed.
+	$(CARGO) run --release --quiet -p smysl-tel --example ge_m2
+
+ge-m5: ## GE-M5 (RFC SMYSL-3 §10.4): does causal order catch clock skew? Simulated traces
+	@# 218 simulated runs of 300 traces, one host's clock skewed in each; about 35 s. It decides,
+	@# it does not fail: exit 0 with the verdict printed.
+	$(CARGO) run --release --quiet -p smysl-tel --example ge_m5
 
 ge-m9: ## GE-M9 (RFC SMYSL-3 §14, rule TL): six months evicted, exported, imported, merged
 	@# Simulated data: GE-M1's cluster is not here, and the report says so. Exit 1 blocks TL-P8.
