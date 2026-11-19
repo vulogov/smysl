@@ -1872,6 +1872,12 @@ corpus and RCAEval would test, and both are still owed.
 **TL-P9 is complete:** traces, logs, Drain, MinHash, and its three experiments run on simulated
 data, with the real runs owed.
 
+**`source` key 7 stays reserved, with a trigger (D-T5).** GE-M2 keeps it from release. It is
+assigned only when something needs sub-millisecond order between units, not events: a `check`
+rule that orders spans across hosts, or a unit that must keep its order after its events are
+evicted. The RFC's §10.2 no longer ties assignment to GE-M2's 1 % threshold, which governs
+release only.
+
 ---
 
 ## 1.16.0 — 2026-11-16

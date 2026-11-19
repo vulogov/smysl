@@ -676,8 +676,9 @@ The sub-millisecond part of a span's times stays in the substrate, and units hol
 a social-network service. Two thirds of the spans are under a millisecond. In 39.5 % of them, a
 span and a sibling that ran before or after it share a `start_ms`, mostly cache calls made one
 after another by one handler. The substrate's nanoseconds put every such pair in the order it
-ran. So `source` key 7 is not released. It is not assigned on simulated data either, because
-nothing yet reads sub-millisecond order from units.
+ran. So `source` key 7 is not released. It is not assigned either. It will be only when something
+needs sub-millisecond order between units rather than events: a `check` rule that orders spans
+across hosts, or a unit that must keep its order after its events are evicted. Nothing does yet.
 
 *Could the order of calls catch a clock that is wrong?* That is GE-M5, and `make ge-m5` skews
 one host at a time by 1 to 500 ms. A child span that starts before its parent says some clock
