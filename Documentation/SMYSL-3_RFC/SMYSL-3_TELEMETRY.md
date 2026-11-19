@@ -64,7 +64,7 @@ status ladder. That is the reason SMYSL-3 exists rather than being a telemetry t
 | Area | Addition |
 |---|---|
 | Format | No new record type and no kernel change. Two payload encodings defined by `x.tel/v1` (`dec`, a canonical decimal, and `bytes32`), proposed for A-7. Role assignments for the `timeline` thread schema. Two derived-only detection kinds. One `source` key number and record 16 kept reserved behind experiments. |
-| Schema | `x.tel/v1`: 17 unit types, 8 relation kinds, a canonical diff, canonical values, series identity as an ordinary uid |
+| Schema | `x.tel/v1`: 19 unit types (17, and 2 in TL-P9), 8 relation kinds, a canonical diff, canonical values, series identity as an ordinary uid |
 | Rules | Schema-level rules, enforced by implementations that register `x.tel/v1`: TQ (numeric quotes), TW (window evidence), TL (retention is local) |
 | Code | Two crates, `smysl-series` (substrate) and `smysl-tel` (readers, profiles, diff, detectors, materialiser). Both sit on the layering the architecture proposal fixes. |
 | Delivery | Ten phases, TL-P0 to TL-P9. Nine gated experiments, GE-M1 to GE-M9. |
@@ -146,12 +146,15 @@ them:
 | `gauge` | **never per reading.** Only through detectors and evidence. | `segment`, `anomaly`, `window` | `derived` (`window` per §9.4) |
 | `histogram` | as `gauge`, per bucket layout | same | same |
 | `event` | it happens and is in scope of a profile | `alert`, `change` | `cited` for a platform's own event (a Zabbix problem, a Kubernetes Event); `measured` for an instrument's own record |
+| spans (TL-P9) | **never on read.** A trace's spans are materialised as evidence when something asks for them (§9.6) | `span` | `measured` |
+| `log` (TL-P9) | **never per record.** Only through templates over a window (§9.7) | `log-template` | `derived` |
 | staleness, series end | the source marks it (Prometheus stale NaN; OTLP `FLAG_NO_RECORDED_VALUE`) | `stale` | `measured` |
 | episode | a grouping recipe fires (§21) | `episode` | `derived` |
 | hypothesis | an agent or person proposes it | `hypothesis` | `inferred` with resolving grounds; `speculative` otherwise; capped by TQ |
 
 An implementation that registers `x.tel/v1` **MUST NOT** write a unit per sample of a `gauge` or
-`histogram` leaf. A reader that is asked to fails with `SMY-E601`.
+`histogram` leaf, nor a unit per span or log record on read. A reader that is asked to fails with
+`SMY-E601`.
 
 ## 4. The `x.tel/v1` schema
 
@@ -191,14 +194,18 @@ The A-7 proposal gains both types for the day A-7 is taken up (§5.4).
 | `x.tel/investigation` | The anchor of one investigation | `question` (text), `opened_ms` (int) | `rotation` (text), `closed_ms` (int) |
 | `x.tel/probe` | A read-only observation an investigator made: a command, a query, a dashboard read | `what` (text), `at_ms` (int) | `output` (text, a tid) |
 | `x.tel/action` | Something done to the system: a restart, a rollback, a scale | `what` (text), `at_ms` (int) | `confirmed_by` (text), `output` (text, a tid) |
+| `x.tel/span` | Span evidence (TL-P9, §9.6): one span, materialised from the event substrate | `series` (uid of the span stream), `instrument` (uid), `trace` (text, 32 lowercase hex), `span_id` (text, 16 lowercase hex), `name` (text), `start_ms`, `end_ms` (int), `digest` (bytes32) | `parent` (text, 16 lowercase hex), `span_kind` (enum), `status` (enum), `service` (text) |
+| `x.tel/log-template` | Template evidence (TL-P9, §9.7): one Drain template over a window of a log stream | `series` (uid of the log stream), `instrument` (uid), `from_ms`, `to_ms` (int), `recipe` (text), `template` (text), `count` (int), `digest` (bytes32) | — |
 
-Seventeen types. Four describe what is measured and by what (`series`, `series-meta`,
-`instrument`, `instrument-meta`); thirteen carry assertions about it. TL-P9 adds `x.tel/span` and
-`x.tel/log-template`, additively.
+Nineteen types. Four describe what is measured and by what (`series`, `series-meta`,
+`instrument`, `instrument-meta`); fifteen carry assertions about it. TL-P9 added the last two,
+`x.tel/span` and `x.tel/log-template`, additively: a reader that knows seventeen preserves them
+under rule X.
 
 **Times.** Times inside payloads (`*_ms`) are epoch milliseconds, the unit `observed` uses. The
 unit's own `source.observed` is:
-- for `window`, `segment`, `anomaly`, `episode`: the end of the window
+- for `window`, `segment`, `anomaly`, `episode`, `log-template`: the end of the window
+- for `span`: its start (`start_ms`), so that span order (§10.4) compares the instants it orders
 - for `change`, `recreate`, `reset`, `stale`: the instant of the reading that showed it
 - for `probe` and `action`: when it ran
 - for `series-meta` and `instrument-meta`: the instant the metadata was read
@@ -233,9 +240,14 @@ hypothesis cites its evidence through the unit's `grounds`, as any claim does.
 
 All of them are open (Unknown preserved), as every enumeration has been since 1.9.
 
-- **`scheme`:** `otel`, `prom`, `k8s`, `zabbix`, `json` (a generic profile)
+- **`scheme`:** `otel`, `prom`, `k8s`, `zabbix`, `json` (a generic profile), and in TL-P9
+  `journald`, `cloudevents`
 - **`class`:** `config`, `identity`, `membership`, `counter`, `gauge`, `histogram`, `event`, `log`
-- **`kind`:** `counter`, `gauge`, `histogram`, `summary`, `state`, `text`
+- **`kind`:** `counter`, `gauge`, `histogram`, `summary`, `state`, `text`, and in TL-P9 `span`,
+  `log`, `event` (the three event-stream kinds, §19.6)
+- **`span_kind`** (TL-P9): `internal`, `server`, `client`, `producer`, `consumer`, OTLP's
+  `SPAN_KIND_*` lowercased; `SPAN_KIND_UNSPECIFIED` is the field's absence
+- **`status`** (span, TL-P9): `unset`, `ok`, `error`, OTLP's `STATUS_CODE_*` lowercased
 - **`role`** (instrument): `exporter`, `agent`, `scraper`, `collector`, `pipeline`, `store`,
   `transform`
 - **`vtype`:** `null`, `bool`, `int`, `dec`, `text`, `json`
@@ -323,6 +335,9 @@ identity tuple, as text so that it is inspectable:
 | `k8s` | `apiVersion/kind/namespace/name#uid` + the JSON Pointer of the leaf (§8.1 pointer form). The object's own series has an empty pointer. |
 | `zabbix` | `host:<host>/item:<key_>` with the item key verbatim. The `itemid` goes to `series-meta.native_id`, because it changes when templates are re-imported. |
 | `json` | the profile's declared key fields, then the pointer |
+| `otel` span stream (TL-P9) | the §5.5-number JCS text of `{signal:"spans", resource, scope:{name,version}}`. One stream per (resource, scope), as OTLP groups them. |
+| `journald` (TL-P9) | the JCS text of `{host, unit}`: `_HOSTNAME`, and `_SYSTEMD_UNIT`, else `SYSLOG_IDENTIFIER`, else `""` |
+| `cloudevents` (TL-P9) | the JCS text of `{source, type}`, the two attributes CloudEvents 1.0 says identify a kind of event from one producer |
 
 **Renames and recreation:**
 - A Kubernetes object recreated with a new `uid` is a new series, linked to the old one by an
@@ -498,6 +513,8 @@ merging the two is idempotent.
 > - A window with `basis: platform` (a platform's own aggregate, such as a Zabbix trend) carries
 >   no `digest`, and is attested with `Op::Imported` at `Rung::Document`, which makes it `cited`:
 >   we transcribed it, but we did not compute it.
+> - An `x.tel/span` (§9.6) is attested as an exact window, and an `x.tel/log-template` (§9.7) as
+>   a sketched one.
 > - An implementation MUST NOT attest otherwise (`SMY-E603`).
 
 The usual way to have both kinds is two units, one exact and one sketched. DDSketch merges are
@@ -511,6 +528,41 @@ mismatch as `SMY-E604`. When the samples are absent (evicted, or never received)
 `SMY-W605`, "evidence not re-derivable", and nothing else: the unit's status does not depend on
 the substrate being present. That is the honest cost of retention, and it keeps rule TL (§13) from
 touching rule U.
+
+### 9.6 Span evidence (TL-P9)
+
+A span is a reading, as a sample is (D-T1). OTLP traces are read into the **event substrate**
+(§19.6), not into units. An `x.tel/span` unit is materialised from it when something asks for a
+trace: an investigation consulting it, a hypothesis grounding on it, `tel trace` (§23).
+
+- **Fields.** Copied from the span's event body (§19.6): ids as lowercase hex, `start_ms` and
+  `end_ms` as `floor(unix_nano / 10⁶)`, `service` from the resource's `service.name`. The
+  sub-millisecond remainders stay in the body (§10.2), and `digest` commits to them.
+- **`digest`** is the event digest (§19.6) of the one event, so the unit is a function of the
+  substrate and materialising twice gives one uid.
+- **Order.** Materialising a trace also writes `x.tel/precedes` from each parent span unit to each
+  child span unit whose `parent` names it. A parent that is not in the substrate gets no edge.
+- **Status.** As an exact window: `Op::Imported` at `Rung::Computed`, `measured` (rule TW, §9.4).
+
+### 9.7 Template evidence (TL-P9)
+
+A log record is a reading too. An `x.tel/log-template` unit states that, over the events of one
+log stream and instrument in `[from, to)`, Drain (§21) with the recipe `recipe` produced this
+template `count` times.
+
+- **`digest`** is the event digest of the window, every template of one run sharing it. Drain's
+  templates depend on every record it read and on their order, so a template is evidence about
+  the window, not about the records it matched.
+- **Order** is event order (§19.6), so the run is a function of the event set.
+- **Status.** `Op::Transformed` at `Rung::Computed`, `derived`: a template is a summary that
+  depends on parameters, as a sketch is (rule TW). Its grounds are its stream, as a sketched
+  window's are its series.
+
+### 9.8 Recomputation of span and template evidence
+
+As §9.5. While the events are present, `tel-evidence` recomputes a span (one event's digest and
+fields) or a template (the window's digest, then Drain) and reports a mismatch as `SMY-E604`.
+When they are absent it reports `SMY-W605` and nothing else.
 
 ## 10. Time
 
@@ -553,7 +605,8 @@ If GE-M5 passes, rule E gains one free constraint, at the status of the trace da
 |---|---|---|
 | span order | if A `x.tel/precedes` B (parent before child, request before response), said(A) ≤ said(B) | cited (exporter-recorded) |
 
-Skew then shows up as a detection-kind-5 contention (an empty interval), and is corrected by a
+Only materialised spans take part: the constraint reads units and relations, never substrate, so
+rule U holds. Skew then shows up as a detection-kind-5 contention (an empty interval), and is corrected by a
 window dating with a measured offset, which SMYSL-2 already specifies. Until GE-M5 passes,
 `x.tel/precedes` is an ordinary relation and rule E ignores it.
 
@@ -679,8 +732,8 @@ with an override, as for every thread schema.
 ## 13. Retention (rule TL)
 
 > **Rule TL.** Retention is the local eviction of telemetry substrate.
-> - An implementation MAY delete samples (§9.1), and the part texts of manifests whose reader is
->   an `x.tel` reader (§20.1), when they are older than a local policy bound.
+> - An implementation MAY delete samples (§9.1), events (§19.6), and the part texts of manifests
+>   whose reader is an `x.tel` reader (§20.1), when they are older than a local policy bound.
 > - It MUST NOT evict the parts of any other manifest. Postmortems, chats and tickets are SMYSL-2
 >   texts, governed by SMYSL-2 alone.
 > - Eviction writes no record, does not propagate through merge, and MUST NOT be expressed as a
@@ -717,9 +770,9 @@ with an override, as for every thread schema.
 |---|---|
 | `SMY-E601` | a reader was asked to emit units per sample of a `gauge`/`histogram` leaf |
 | `SMY-E602` | a non-canonical `dec`: trailing-zero mantissa, `-0`, out of range, non-integer parts, or −2⁶⁴ |
-| `SMY-E603` | a window attested contrary to rule TW |
-| `SMY-E604` | recomputed window evidence does not match the unit |
-| `SMY-W605` | window evidence refers to substrate that is absent (evicted or never received). A probe output is a SMYSL-2 part that names no samples and rule TL never evicts, so it is not reported. |
+| `SMY-E603` | a window, span or template attested contrary to rule TW |
+| `SMY-E604` | recomputed window, span or template evidence does not match the unit |
+| `SMY-W605` | window, span or template evidence refers to substrate that is absent (evicted or never received). A probe output is a SMYSL-2 part that names no samples and rule TL never evicts, so it is not reported. |
 | `SMY-W606` | a numeric quote does not verify (rule TQ); the hypothesis is capped at `speculative` |
 | `SMY-E607` | a `series` or `instrument` unit breaks §4.1's entity-like rule |
 | `SMY-W608` | a declared keyed array could not be keyed (missing, non-scalar or duplicated key); diffed as one `json` leaf |
@@ -731,6 +784,7 @@ with an override, as for every thread schema.
 | `SMY-W614` | the windows of one window key disagree (§9.2) |
 | `SMY-W615` | two samples at one (series, instrument, instant) with different values or flags |
 | `SMY-W616` | an integer `sum` outside `dec`'s range; the field is omitted |
+| `SMY-W617` | two spans with one (trace, span id) in one stream whose events differ; both are kept and both materialise (TL-P9) |
 
 ## 16. Conformance
 
@@ -857,6 +911,39 @@ port.
   knows are evicted.
 - `bundle` carries no substrate. Evidence units are self-contained, which is why they are
   materialised.
+- Events (§19.6) travel the same way (TL-P9): one file per (stream, instrument, UTC day), a CBOR
+  sequence of event arrays in event order, named by its BLAKE3. The listing names the event days
+  held and those evicted, beside the sample days.
+
+### 19.6 The event substrate (TL-P9)
+
+Spans and log records are readings, but not numbers. They live beside the samples, in the same
+redb file, and follow the same rules.
+
+An **event** is the tuple (stream uid, instrument uid, `ts_ms`, `ns`, body), where:
+- the **stream** is an `x.tel/series` unit of kind `span`, `log` or `event`, keyed by §6
+- `ts_ms` and `ns` are the record's instant (a span's start), `ns` the remainder 0–999,999
+- the **body** is the reader's canonical record (§20.1), encoded by the kernel's deterministic
+  CBOR. It holds everything the reader keeps, the full-resolution times among it.
+
+**Event order:** `ts_ms`, then `ns`, then the body bytes. **The substrate is a set of events**:
+two equal tuples are one event, so reading an export twice, or the same trace from two
+collectors' files, adds nothing.
+
+**Digest of events** (one event, for a span; a window `[from, to)`, for templates):
+
+```
+digest = BLAKE3-256( "smysl/tel-events/1" ‖ 0x00 ‖ cbor_array( e₁, e₂, … ) )
+eᵢ     = cbor_array( ts_ms, ns, body )        body as a CBOR byte string
+```
+
+| Table | Key → value |
+|---|---|
+| `events` | (stream uid, instrument uid, hour start ms) → the hour's events, a CBOR sequence in event order |
+| `evicted_events` | (stream uid, instrument uid, hour start ms) → eviction instant |
+
+The stream's row in `series` records its kind as its class. Hours are a local layout, as chunks
+are (§19.2): what is compared is events, through the digest.
 
 ## 20. Readers and profiles
 
@@ -869,6 +956,16 @@ port.
 | `otlp/1` | OTLP metrics protobuf (`ExportMetricsServiceRequest`) | series substrate; `reset` from `start_time_unix_nano` changes (`measured`); `stale` from `FLAG_NO_RECORDED_VALUE` |
 | `otlp-json/1` | OTLP/JSON | as `otlp/1`. **Our own JSON reader**: `opentelemetry-proto`'s `with-serde` drops spec-compliant string `asInt` values [A §5, probe]. |
 | `zabbix/1` | Zabbix API JSON exports: `host.get`, `item.get`, `history.get`, `trend.get`, `problem.get`, `event.get`. The caller records the API version it saw (`apiinfo.version`: 6.x, 7.x, 8.x) beside the export, and the reader refuses an export without it. | hosts and items → parts (config changes per §8); history → series substrate; **trends → `x.tel/window` with `basis: platform`, `cited` by rule TW** (Zabbix computed them, not us); problems and events → `x.tel/alert` at `cited` |
+
+**Trace and log readers (TL-P9).** They write the event substrate (§19.6) and an `x.tel/series`
+unit per stream, and no other unit.
+
+| Reader | Input | Goes to |
+|---|---|---|
+| `otlp-traces/1` | OTLP traces protobuf (`ExportTraceServiceRequest`) | span streams (§6), one event per span. Body: `[trace_id, span_id, parent_span_id, name, kind, start_unix_nano, end_unix_nano, status_code, status_message, attributes]`, the ids as byte strings (`parent` empty for a root), the attributes as §5.5 JCS text. Span events and links are not kept in the first cut. |
+| `otlp-traces-json/1` | OTLP/JSON traces | as `otlp-traces/1`, the ids decoded from OTLP/JSON's hex |
+| `journald/1` | `journalctl -o json`, one entry per line | log streams (§6). Instant: `__REALTIME_TIMESTAMP` (µs). Body: `[MESSAGE, PRIORITY, fields]`, `fields` the JCS text of every field not starting `__`, so the cursor and monotonic clock, which differ between reads of one entry, are not identity. |
+| `cloudevents/1` | CloudEvents 1.0 JSON in structured mode: one event, a batch (a JSON array), or JSON lines | event streams (§6). Instant: `time`, refused when absent. Body: `[JCS text of the event]`. |
 
 - Readers read files and never the network. Collecting is the caller's job: OKO for Zabbix, a
   script or `kubectl` otherwise.
@@ -927,12 +1024,22 @@ measures already do.
 | robust z (MAD) | `x.tel/anomaly` | derived | TL-P5 | median and MAD over a declared baseline window |
 | BARO-style scorer | `x.tel/hypothesis` ranking units, `Rung::Computed` | derived | TL-P5 | own implementation (under 300 lines) [B §5] |
 | episode grouping | `x.tel/episode` | derived | TL-P5 | changes and anomalies within a gap bound, ordered by (time, uid) |
-| Drain over canonical order | log templates | derived | TL-P9 | GE-M3 for replay |
-| MinHash (ChaCha-seeded) | episode similarity | derived | TL-P9 | GE-M8 decides whether it beats embeddings |
+| Drain over canonical order | `x.tel/log-template` | derived | TL-P9 | GE-M3 for replay. Parameters below. |
+| MinHash (ChaCha-seeded) | episode similarity, a ranking `tel similar` prints | derived | TL-P9 | GE-M8 decides whether it beats embeddings, and whether a label is ever proposed from it |
 | causal discovery (PC, PCMCI, Granger) | hypotheses | **inferred** even though deterministic | not planned | edges rest on assumptions that do not reliably hold [B §5] |
 | LLM agent | hypotheses | inferred / speculative, capped by TQ | TL-P6 | model hash recorded, as the provider layer does |
 
 - BOCPD stays out until a crate without `SmallRng` exists, or until we write one.
+- **Drain** (He et al. 2017, as Drain3 runs it) is our own implementation. Its recipe records the
+  tree depth (4), the similarity threshold (0.4, a `dec`), the children per node (100), and the
+  masks applied before parsing, in order: UUIDs, IPv4 addresses, hex runs of 8 or more digits, and
+  numbers, as `<UUID>`, `<IP>`, `<HEX>`, `<NUM>`. Tokens split on ASCII whitespace. The message is
+  journald's `MESSAGE`, and for a CloudEvent its `type` followed by its `subject`. Ties on
+  similarity go to the cluster made first, which event order fixes.
+- **MinHash** is over an episode's typed features: `series:<uid>` per member's series,
+  `change:<pointer>`, `anomaly:<series uid>:<direction>`, `alert:<system>:<key>`, and
+  `template:<text>` for each template whose window overlaps the episode. 128 functions, keyed
+  from a ChaCha20 stream with the recipe's seed. It writes nothing.
 - A detector that fails GE-M3 stays off the pure path until fixed.
 
 ## 22. Query and dossiers
@@ -983,6 +1090,9 @@ The facade gains feature `tel` and one command group:
 | `smysl tel at <series> <t>` | value in force at t, from the substrate |
 | `smysl tel investigate open\|consult\|hypothesis\|probe\|action\|close` | the ledger operations, for scripts and OKO |
 | `smysl tel evict --older-than <dur>` | rule TL eviction |
+| `smysl tel trace <trace-id>` | materialise a trace's spans and their `x.tel/precedes` (TL-P9) |
+| `smysl tel templates <stream> <from> <to>` | materialise a window's log templates (TL-P9) |
+| `smysl tel similar <episode>` | rank episodes by MinHash similarity (TL-P9) |
 | `smysl tel profile check <file>` | validate a profile and print its hash |
 
 Every command takes `--at` for its attestation clock, as `ingest` does since 1.14. Nothing reads a

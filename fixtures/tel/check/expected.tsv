@@ -141,6 +141,21 @@ witnesses	code	SMY-W609	b3:6fi7sqo6ukdjbx4yadyj36axmiq7by5srov7tjixt5uhkuwqur6q
 witnesses	contention	k/csldtcvqct3oxiu3mryileiizb2	kind=7 over=b3:hzwujad7aatetpkjzxyyiknuzi3vi4jcmtyoh6basfu5k7yhyzla positions=b3:skuis7ibvr4t5vk3wjt32hprschbpsunusszszsg2drw5zu66ktq,b3:xgkqy2rmkuvipprcml4myv4cx3ppp2alygp34dl22ywogfecbfca
 witnesses	contention	k/crohikqf7zq3awkkvpczcb3pji4	kind=7 over=b3:jjxidfvac6wb3fd3zsuskm7fxkzl7y3wfjdu5qn2udnetrkqmpmq positions=b3:ylfebhhynnnycau5njkmirjlhtbti4fdmfwjrfji4j6n4pu6hsnq,b3:2oqeq34szymlcolf6imxnl4gxidhxvkcgjlj7d2jtv3ilgotc3ra
 witnesses	contention	k/cqg7mdfmkvzrxhlfa7mnbbiwf24	kind=7 over=b3:rw53belsdekjborcc52f3lhs6vdlxnrfwyjk6qx3gzffhm2xj36a positions=b3:ncro3zknvppjjeem75j5tfsdvsrwfi66sdbvndr53i5vc2zu3ryq,b3:3l6daeoajv7sftfouvgujs7qt4lynhkst7y466xkzv7oaswu4jwq
+events	unit	b3:camnyrozt7g3gl3yuwyycsv22fdqukit3hh3rf55wp6j3fd6yy7q	span: child
+events	unit	b3:fy3jdobgyaomi62ejntyqcp7nk3odozmjyrprvh2ijhbnjkgh5qq	otel-collector:c1
+events	unit	b3:gaqcz4zqiakinatywoqszmheehg633qqbtmdu6zqdrer64bgzera	{"resource":{"service.name":"cart"},"scope":{"name":"io.opentelemetry.http","version":"1.2.0"},"signal":"spans"}
+events	unit	b3:nkuvwxlu47y6eqphe6snoeh7ymsrqms4da4fbtocdyxsx7pakgwq	e603: span, attested transformed
+events	unit	b3:styox3dkrp7psxal57itbbvcanojzp7qmwe3rbp37fywfdzbatrq	{"host":"h1","unit":"cart.service"}
+events	unit	b3:s2z6trixgkinefq32ci22tyzodvz6ddsbawfmzq2twxhyn2kpaeq	e603: span, no digest
+events	unit	b3:whm6tmseh4azhj2g2aiotbuqhqoygyqcab5ukngf65ry3sr6ezhq	template
+events	unit	b3:xxomdilkiqjmy4rycisfauuctlr62xfmfspop5m5bpjy3w7dp5ka	journald:h1
+events	unit	b3:3jtgcvdtumfgvt5l2r2i3drsmjhhvdunbliijtfl76r5rgu2jstq	span: parent
+events	unit	b3:3k7tfdd5moy2nuposc275j4jjuehlnrn465wjkyknjlymmtntuaa	e603: template, measured
+events	code	SMY-E033	b3:nkuvwxlu47y6eqphe6snoeh7ymsrqms4da4fbtocdyxsx7pakgwq
+events	code	SMY-E603	b3:3k7tfdd5moy2nuposc275j4jjuehlnrn465wjkyknjlymmtntuaa
+events	code	SMY-E603	b3:nkuvwxlu47y6eqphe6snoeh7ymsrqms4da4fbtocdyxsx7pakgwq
+events	code	SMY-E603	b3:s2z6trixgkinefq32ci22tyzodvz6ddsbawfmzq2twxhyn2kpaeq
+events	code	SMY-W035	b3:nkuvwxlu47y6eqphe6snoeh7ymsrqms4da4fbtocdyxsx7pakgwq
 reserved	unit	b3:iffdtxqyfjsjagiuh3343w3gsvanc3flbghswo46lhuttsnzn5ja	w
 reserved	unit	b3:l63ds3ri7lgkbyl3lauxqdv2qssm2w67meqfjxggyxpsjkcjl7jq	e612: source key 7
 reserved	unit	b3:pxgezcpaukjqoejaqxj6nribtztgcpxy3uhexuzepoqgqtdjykxa	prom-scrape:reserved/h1:9100

@@ -71,8 +71,12 @@ pub const INVESTIGATION: &str = "x.tel/investigation";
 pub const PROBE: &str = "x.tel/probe";
 /// Something done to the system.
 pub const ACTION: &str = "x.tel/action";
+/// Span evidence: one span, materialised from the event substrate (§9.6, TL-P9).
+pub const SPAN: &str = "x.tel/span";
+/// Template evidence: one Drain template over a window of a log stream (§9.7, TL-P9).
+pub const LOG_TEMPLATE: &str = "x.tel/log-template";
 
-/// The seventeen types, in §4.1's order.
+/// The nineteen types, in §4.1's order: seventeen, and the two TL-P9 added.
 pub const TYPES: &[&str] = &[
     SERIES,
     SERIES_META,
@@ -91,6 +95,8 @@ pub const TYPES: &[&str] = &[
     INVESTIGATION,
     PROBE,
     ACTION,
+    SPAN,
+    LOG_TEMPLATE,
 ];
 
 // ---------------------------------------------------------------------------
@@ -130,7 +136,15 @@ pub const RELATIONS: &[&str] = &[
 // Enumerations (§4.3). All open: a value this build does not know is preserved.
 // ---------------------------------------------------------------------------
 
-pub const SCHEMES: &[&str] = &["otel", "prom", "k8s", "zabbix", "json"];
+pub const SCHEMES: &[&str] = &[
+    "otel",
+    "prom",
+    "k8s",
+    "zabbix",
+    "json",
+    "journald",
+    "cloudevents",
+];
 pub const CLASSES: &[&str] = &[
     "config",
     "identity",
@@ -141,7 +155,22 @@ pub const CLASSES: &[&str] = &[
     "event",
     "log",
 ];
-pub const KINDS: &[&str] = &["counter", "gauge", "histogram", "summary", "state", "text"];
+/// `span`, `log` and `event` are the event-stream kinds of TL-P9 (§19.6).
+pub const KINDS: &[&str] = &[
+    "counter",
+    "gauge",
+    "histogram",
+    "summary",
+    "state",
+    "text",
+    "span",
+    "log",
+    "event",
+];
+/// OTLP's `SPAN_KIND_*`, lowercased; `SPAN_KIND_UNSPECIFIED` is the field's absence (TL-P9).
+pub const SPAN_KINDS: &[&str] = &["internal", "server", "client", "producer", "consumer"];
+/// OTLP's `STATUS_CODE_*`, lowercased (TL-P9).
+pub const SPAN_STATUSES: &[&str] = &["unset", "ok", "error"];
 pub const ROLES: &[&str] = &[
     "exporter",
     "agent",
@@ -217,6 +246,7 @@ const RECIPE: Field = f("tel:recipe", TEXT);
 const OF_SERIES_UID: Field = f("tel:series", UID);
 const AT_MS: Field = f("tel:at_ms", INT);
 const OF: Field = f("tel:of", UID);
+const DIGEST: Field = f("tel:digest", FieldType::Bytes32);
 
 /// §4.1's table, in its order.
 pub const TYPE_DEFS: &[TypeDef] = &[
@@ -346,6 +376,39 @@ pub const TYPE_DEFS: &[TypeDef] = &[
         required: &[f("tel:what", TEXT), AT_MS],
         optional: &[f("tel:confirmed_by", TEXT), f("tel:output", TEXT)],
     },
+    TypeDef {
+        ty: SPAN,
+        required: &[
+            OF_SERIES_UID,
+            f("tel:instrument", UID),
+            f("tel:trace", TEXT),
+            f("tel:span_id", TEXT),
+            f("tel:name", TEXT),
+            f("tel:start_ms", INT),
+            f("tel:end_ms", INT),
+            DIGEST,
+        ],
+        optional: &[
+            f("tel:parent", TEXT),
+            e("tel:span_kind", SPAN_KINDS),
+            e("tel:status", SPAN_STATUSES),
+            f("tel:service", TEXT),
+        ],
+    },
+    TypeDef {
+        ty: LOG_TEMPLATE,
+        required: &[
+            OF_SERIES_UID,
+            f("tel:instrument", UID),
+            FROM_MS,
+            TO_MS,
+            RECIPE,
+            f("tel:template", TEXT),
+            f("tel:count", INT),
+            DIGEST,
+        ],
+        optional: &[],
+    },
 ];
 
 /// The table entry for a unit type, if `x.tel/v1` declares it.
@@ -353,7 +416,7 @@ pub fn type_def(ty: &str) -> Option<&'static TypeDef> {
     TYPE_DEFS.iter().find(|d| d.ty == ty)
 }
 
-/// Whether this schema id is one of the seventeen types.
+/// Whether this schema id is one of the nineteen types.
 pub fn declares(id: &SchemaId) -> bool {
     TYPES.contains(&id.as_str())
 }
@@ -715,11 +778,68 @@ pub fn rule_tw(w: &WindowFields) -> Option<(Status, crate::Op, crate::Rung)> {
     }
 }
 
-/// How a window unit, with these attestations, breaks rule TW (`SMY-E603`); empty when it does
-/// not. Not a window, nothing.
+/// Rule TW for the two evidence types TL-P9 added (§9.6, §9.7): a span is attested as an exact
+/// window, a log template as a sketched one, and both carry a digest.
+fn rule_tw_event_violations(
+    unit: &UnitCore,
+    attestations: &[crate::Attestation],
+    (status, op, rung, what): (Status, crate::Op, crate::Rung, &str),
+) -> Vec<String> {
+    let Some(payload) = unit.payload.as_deref() else {
+        return vec!["it has no payload".into()];
+    };
+    let w = match window_fields(payload) {
+        Ok(w) => w,
+        Err(e) => return vec![format!("its payload is not a {what}'s: {e}")],
+    };
+    let mut out = Vec::new();
+    if unit.status != status {
+        out.push(format!(
+            "a {what} is {}, not {}",
+            status.as_str(),
+            unit.status.as_str()
+        ));
+    }
+    if w.digest.is_none() {
+        out.push(format!("a {what} has no digest"));
+    }
+    for a in attestations {
+        if a.op != op || a.rung != rung {
+            out.push(format!(
+                "attested {:?} at {:?} by {}; rule TW asks {op:?} at {rung:?}",
+                a.op, a.rung, a.agent
+            ));
+        }
+    }
+    out
+}
+
+/// How a window, span or log-template unit, with these attestations, breaks rule TW
+/// (`SMY-E603`); empty when it does not. Any other type, nothing.
 pub fn rule_tw_violations(unit: &UnitCore, attestations: &[crate::Attestation]) -> Vec<String> {
-    if unit.schema.as_str() != WINDOW {
-        return Vec::new();
+    use crate::{Op, Rung};
+    match unit.schema.as_str() {
+        WINDOW => {}
+        SPAN => {
+            return rule_tw_event_violations(
+                unit,
+                attestations,
+                (Status::Measured, Op::Imported, Rung::Computed, "span"),
+            )
+        }
+        LOG_TEMPLATE => {
+            return rule_tw_event_violations(
+                unit,
+                attestations,
+                (
+                    Status::Derived,
+                    Op::Transformed,
+                    Rung::Computed,
+                    "log template",
+                ),
+            )
+        }
+        _ => return Vec::new(),
     }
     let Some(payload) = unit.payload.as_deref() else {
         return vec!["it has no payload".into()];
@@ -1725,9 +1845,58 @@ mod tests {
         assert!(!g.independent(&a, &a));
     }
 
+    /// A span is attested as an exact window and a log template as a sketched one (§9.4, TL-P9),
+    /// and neither is evidence without its digest.
     #[test]
-    fn seventeen_types_and_eight_relations_all_well_formed() {
-        assert_eq!(TYPES.len(), 17);
+    fn rule_tw_reads_spans_and_log_templates() {
+        use crate::cbor::{major, writer::Enc};
+        use crate::{AgentId, Attestation, Hlc, Op, Rung};
+        fn unit(ty: &str, status: Status, digest: bool) -> UnitCore {
+            let mut e = Enc::new();
+            e.head(major::MAP, if digest { 2 } else { 1 });
+            e.text("tel:name");
+            e.text("GET /cart");
+            if digest {
+                e.text("tel:digest");
+                e.bytes(&[7; 32]);
+            }
+            UnitCoreBuilder::new(SchemaId::Extension(ty.to_string()), "g", status)
+                .source(SourceRef::new(SourceKind::Tool, "smysl-tel"))
+                .grounds(vec![crate::Uid::from_bytes([1; 32])])
+                .payload(e.into_bytes())
+                .build()
+                .unwrap()
+        }
+        let att = |u: &UnitCore, op, rung| {
+            let a = AgentId::new("tool:smysl-tel").unwrap();
+            Attestation::new(
+                crate::canonical_uid(u),
+                a.clone(),
+                op,
+                rung,
+                Hlc::new(1, 0, a),
+            )
+        };
+        let span = unit(SPAN, Status::Measured, true);
+        let ok = att(&span, Op::Imported, Rung::Computed);
+        assert!(rule_tw_violations(&span, &[ok]).is_empty());
+        let wrong = att(&span, Op::Transformed, Rung::Computed);
+        assert_eq!(rule_tw_violations(&span, &[wrong]).len(), 1);
+        let bare = unit(SPAN, Status::Measured, false);
+        let v = rule_tw_violations(&bare, &[]);
+        assert!(v.iter().any(|m| m.contains("no digest")), "{v:?}");
+
+        let t = unit(LOG_TEMPLATE, Status::Derived, true);
+        let ok = att(&t, Op::Transformed, Rung::Computed);
+        assert!(rule_tw_violations(&t, &[ok]).is_empty());
+        let measured = unit(LOG_TEMPLATE, Status::Measured, true);
+        let v = rule_tw_violations(&measured, &[]);
+        assert!(v.iter().any(|m| m.contains("is derived")), "{v:?}");
+    }
+
+    #[test]
+    fn nineteen_types_and_eight_relations_all_well_formed() {
+        assert_eq!(TYPES.len(), 19);
         assert_eq!(RELATIONS.len(), 8);
         assert!(SchemaId::parse(ID).is_ok());
         for t in TYPES {
@@ -1800,7 +1969,18 @@ mod tests {
                 .map(|f| f.ty),
             Some(FieldType::List(&FieldType::Dec))
         );
-        assert!(type_def("x.tel/span").is_none(), "TL-P9's, not TL-P1's");
+        assert_eq!(
+            type_def(SPAN)
+                .and_then(|d| d.field("tel:span_kind"))
+                .map(|f| f.values),
+            Some(SPAN_KINDS)
+        );
+        assert_eq!(
+            type_def(LOG_TEMPLATE)
+                .and_then(|d| d.field("tel:digest"))
+                .map(|f| f.ty),
+            Some(FieldType::Bytes32)
+        );
     }
 
     #[test]

@@ -1673,6 +1673,37 @@ There was no P1 failure, and no resurrection changed a unit, so TL-P8's gate hol
 90 s and 630 MB, removed afterwards. The data is simulated, as GE-M4's is: the RFC's run is on
 GE-M1's data, which 1.17 does not have.
 
+### Spans and log templates: TL-P9's design, and two types (TL-P9 step 1)
+
+The RFC named TL-P9's work and defined none of it. It now does, on D-T1's terms: a span and a
+log record are readings, so they live in an **event substrate** beside the samples (§19.6), and
+units are made only for what is asserted about them.
+
+- **Events** are (stream, instrument, instant, body) tuples, the body the reader's canonical
+  record in deterministic CBOR. The substrate is a set, ordered by instant then body, and has a
+  digest of its own (`smysl/tel-events/1`). Rule TL may evict events, and `--with-substrate`
+  carries them by day, as it carries samples.
+- **`x.tel/span`** (§9.6) is span evidence, materialised from the substrate when a trace is
+  asked for. It is `measured`, its digest is its one event's, and materialising a trace writes
+  `x.tel/precedes` from parent to child. The sub-millisecond remainders stay in the body, so
+  `source` key 7 stays reserved for GE-M2 to decide.
+- **`x.tel/log-template`** (§9.7) is one Drain template over a window of a log stream. It is
+  `derived`, grounded on its stream, and its digest is the whole window's, because Drain's
+  templates depend on every record it read and on their order.
+- **Readers** (§20.1): `otlp-traces/1`, `otlp-traces-json/1`, `journald/1` (`journalctl -o
+  json`) and `cloudevents/1` (structured mode). New streams are keyed in §6, with two new
+  schemes, `journald` and `cloudevents`, and three new kinds, `span`, `log` and `event`.
+- **Drain's and MinHash's recipes** are fixed in §21. `tel trace`, `tel templates` and `tel
+  similar` are the commands still to come (§23).
+
+`x.tel/v1` now has nineteen types, with nine new payload keys and the enumerations `span_kind`
+and `status`. Rule TW covers the two new types: a span is attested as an exact window is, a
+template as a sketched one, and both need a digest, or `SMY-E603`. C-Tel-Check has a seventh
+case, `events`, that pins this. The other six cases derive what they did. Their bytes changed
+only in the schema declaration each one carries, which now names nineteen types. For the same
+reason the wire fixture `F15-telemetry.cbor` was re-blessed. The three ports still round-trip
+it byte for byte.
+
 ---
 
 ## 1.16.0 — 2026-11-16

@@ -973,7 +973,7 @@ declaration key 4 remains opaque CBOR that no implementation reads (§3.1).
 - **Types**: `x.tel/series`, `x.tel/series-meta`, `x.tel/instrument`, `x.tel/instrument-meta`,
   `x.tel/change`, `x.tel/recreate`, `x.tel/reset`, `x.tel/stale`, `x.tel/window`,
   `x.tel/segment`, `x.tel/anomaly`, `x.tel/alert`, `x.tel/episode`, `x.tel/hypothesis`,
-  `x.tel/investigation`, `x.tel/probe`, `x.tel/action`.
+  `x.tel/investigation`, `x.tel/probe`, `x.tel/action`, `x.tel/span`, `x.tel/log-template`.
 - **Relation kinds**: `x.tel/of-series`, `x.tel/via`, `x.tel/measured-by`,
   `x.tel/same-quantity`, `x.tel/during`, `x.tel/explains`, `x.tel/consulted`, `x.tel/precedes`.
 - **Payload keys**: `tel:scheme`, `tel:key`, `tel:name`, `tel:unit`, `tel:kind`, `tel:of`,
@@ -984,7 +984,9 @@ declaration key 4 remains opaque CBOR that no implementation reads (§3.1).
   `tel:sum`, `tel:mean`, `tel:first`, `tel:last`, `tel:qs`, `tel:q`, `tel:alpha`, `tel:level`,
   `tel:slope`, `tel:score`, `tel:direction`, `tel:system`, `tel:state`, `tel:severity`,
   `tel:label`, `tel:claim`, `tel:quotes`, `tel:target`, `tel:question`, `tel:opened_ms`,
-  `tel:rotation`, `tel:closed_ms`, `tel:what`, `tel:output`, `tel:confirmed_by`.
+  `tel:rotation`, `tel:closed_ms`, `tel:what`, `tel:output`, `tel:confirmed_by`, `tel:trace`,
+  `tel:span_id`, `tel:start_ms`, `tel:end_ms`, `tel:parent`, `tel:span_kind`, `tel:status`,
+  `tel:service`, `tel:template`.
 
 The RFC names its fields without the `tel:` prefix. The prefix is this document's, as `text:` is
 `x.text/v1`'s, because a payload key that is a unit header word has no surface spelling.

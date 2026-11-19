@@ -52,13 +52,14 @@ Every `dec` has exactly one text spelling: `[412, -1]` is `41.2`, `[15, -10]` is
 `0.0000000015`. Rust, Python, JavaScript and Go agree on 2,030 doubles and on every token,
 spelling and refusal in `fixtures/tel/dec/cases.json`.
 
-#section("x.tel/v1: seventeen types, eight relation kinds")
+#section("x.tel/v1: nineteen types, eight relation kinds")
 
 `x.tel/v1` is registered as `x.text/v1` is: a store that does not know it keeps every unit and
 relation and enforces none of its rules. The format spec's §5.2 lists the names. Four types
 describe what is measured and by what: `x.tel/series`, `x.tel/instrument`, and their `-meta`
-units. Thirteen carry assertions about it, from `x.tel/change` and `x.tel/window` to
-`x.tel/hypothesis` and `x.tel/action`. Payload keys are prefixed `tel:`.
+units. Fifteen carry assertions about it, from `x.tel/change` and `x.tel/window` to
+`x.tel/hypothesis` and `x.tel/action`, and the two TL-P9 adds for traces and logs, `x.tel/span`
+and `x.tel/log-template`. Payload keys are prefixed `tel:`.
 
 *A series is what is measured, not when.* Its identity is its scheme and its key and nothing
 else, so the same series seen by fifty scrapes is one unit. A series with a time in it is not:

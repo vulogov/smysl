@@ -320,7 +320,8 @@ fn entity_like(store: &(impl StoreRead + ?Sized), report: &mut Report) {
 /// SMYSL-3's window evidence (TL-P4): rule TW per window, and the windows of one key.
 ///
 /// - `SMY-E603`: a window whose status or attestation is not the one rule TW gives its basis
-///   and fields (§9.4). The rule is `smysl_core::schemas::tel::rule_tw_violations`, which the
+///   and fields (§9.4), or a span or log template (TL-P9) not attested as an exact or a sketched
+///   window is. The rule is `smysl_core::schemas::tel::rule_tw_violations`, which the
 ///   producer attests by, so the two cannot drift.
 /// - `SMY-W614`: several windows of one window key with different digests (§9.2). Each is true
 ///   of its own sample set, so this is a report, not a contention.
@@ -333,7 +334,29 @@ fn windows(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     let mut by_key: std::collections::BTreeMap<Key, BTreeSet<[u8; 32]>> =
         std::collections::BTreeMap::new();
     for (uid, unit) in store.units() {
-        if unit.core.schema.as_str() != tel::WINDOW {
+        let ty = unit.core.schema.as_str();
+        if ty == tel::SPAN || ty == tel::LOG_TEMPLATE {
+            let atts: Vec<smysl_core::Attestation> = unit.attestations.iter().cloned().collect();
+            let broken = tel::rule_tw_violations(&unit.core, &atts);
+            if !broken.is_empty() {
+                let what = if ty == tel::SPAN {
+                    "a span"
+                } else {
+                    "a log template"
+                };
+                report.push(
+                    Diagnostic::on(Code::E603, *uid)
+                        .with_message(format!("{what} breaks rule TW: {}", broken.join("; ")))
+                        .with_suggestion(
+                            "a span is measured (imported, computed); a log template is derived \
+                             (transformed, computed); both carry the digest of their events"
+                                .to_string(),
+                        ),
+                );
+            }
+            continue;
+        }
+        if ty != tel::WINDOW {
             continue;
         }
         let atts: Vec<smysl_core::Attestation> = unit.attestations.iter().cloned().collect();

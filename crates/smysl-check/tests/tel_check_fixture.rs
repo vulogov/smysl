@@ -32,6 +32,11 @@
 //!   preferred window chosen by `count` across instruments; one origin under two series; a
 //!   transform on both lineages; sketches within and beyond 2·alpha; witnesses that agree; and
 //!   a series with no origin (`SMY-W609`).
+//! - `events`: rule TW over TL-P9's evidence (§9.6, §9.7). A parent and a child span, `measured`
+//!   and ordered by `x.tel/precedes`, and a log template, `derived` and grounded on its stream,
+//!   all attested as the rule asks; then a span attested `Transformed`, a span with no digest,
+//!   and a template stated `measured` (`SMY-E603` each). The first also breaks rule T, as the
+//!   `tw` case's exact window does (`SMY-E033`, `SMY-W035`).
 //! - `reserved`: what no writer may emit, carried and reported: records 6 of kinds 6 and 7
 //!   (`SMY-E611`), record 16 and `source` key 7 (`SMY-E612`), and a series that breaks §4.1's
 //!   entity-like rule (`SMY-E607`).
@@ -61,7 +66,15 @@ use smysl_graph::{effective_status, RetractionPolicy, Store, StoreRead};
 const FROM: u64 = 1_768_557_600_000;
 const TO: u64 = FROM + 60_000;
 
-const CASES: &[&str] = &["clean", "tw", "tq", "rivals", "witnesses", "reserved"];
+const CASES: &[&str] = &[
+    "clean",
+    "tw",
+    "tq",
+    "rivals",
+    "witnesses",
+    "events",
+    "reserved",
+];
 
 fn dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/tel/check")
@@ -707,8 +720,141 @@ fn reserved() -> Case {
     c
 }
 
+/// A span stream, as `otlp-traces/1` keys one (§6).
+const SPANS: &str = r#"{"resource":{"service.name":"cart"},"scope":{"name":"io.opentelemetry.http","version":"1.2.0"},"signal":"spans"}"#;
+/// A journald stream (§6).
+const JOURNAL: &str = r#"{"host":"h1","unit":"cart.service"}"#;
+
+impl Case {
+    /// An event-stream series and its collector, measured there.
+    fn stream(&mut self, scheme: &str, key: &str, collector: &str) -> (Uid, Uid, String) {
+        let s = self.unit(key, tel::series(scheme, key).unwrap());
+        let i = self.instrument("collector", collector);
+        self.rel(tel::MEASURED_BY, s, i);
+        (s, i, format!("series:{scheme}:{key}"))
+    }
+
+    /// A span of `stream`, measured unless `status` says otherwise, attested as rule TW asks
+    /// unless `att` does.
+    #[allow(clippy::too_many_arguments)]
+    fn span(
+        &mut self,
+        label: &str,
+        (stream, inst, reference): (Uid, Uid, &str),
+        id: &str,
+        parent: Option<&str>,
+        digest: Option<u8>,
+        att: Option<(Op, Rung)>,
+    ) -> Uid {
+        let mut source = SourceRef::new(SourceKind::Metric, reference);
+        source.observed = Some(FROM);
+        let mut p = vec![
+            ("tel:series", V::Uid(stream)),
+            ("tel:instrument", V::Uid(inst)),
+            (
+                "tel:trace",
+                V::Text("4bf92f3577b34da6a3ce929d0e0e4736".into()),
+            ),
+            ("tel:span_id", V::Text(id.into())),
+            ("tel:name", V::Text("GET /cart".into())),
+            ("tel:start_ms", V::Int(FROM)),
+            ("tel:end_ms", V::Int(FROM + 12)),
+            ("tel:status", V::Text("ok".into())),
+        ];
+        if let Some(pa) = parent {
+            p.push(("tel:parent", V::Text(pa.into())));
+        }
+        if let Some(d) = digest {
+            p.push(("tel:digest", V::Bytes([d; 32])));
+        }
+        let u = UnitCoreBuilder::new(ty(tel::SPAN), label, Status::Measured)
+            .source(source)
+            .payload(payload(p))
+            .build()
+            .unwrap();
+        let id = self.unit(label, u);
+        let (op, rung) = att.unwrap_or((Op::Imported, Rung::Computed));
+        self.attest(id, op, rung);
+        id
+    }
+}
+
+fn events() -> Case {
+    let mut c = Case::new();
+    let (s, i, r) = c.stream("otel", SPANS, "otel-collector:c1");
+    let parent = c.span(
+        "span: parent",
+        (s, i, &r),
+        "00f067aa0ba902b7",
+        None,
+        Some(0xd1),
+        None,
+    );
+    let child = c.span(
+        "span: child",
+        (s, i, &r),
+        "53995c3f42cd8ad8",
+        Some("00f067aa0ba902b7"),
+        Some(0xd2),
+        None,
+    );
+    c.rel(tel::PRECEDES, parent, child);
+    c.span(
+        "e603: span, attested transformed",
+        (s, i, &r),
+        "b7ad6b7169203331",
+        None,
+        Some(0xd3),
+        Some((Op::Transformed, Rung::Computed)),
+    );
+    c.span(
+        "e603: span, no digest",
+        (s, i, &r),
+        "c0ffee0000000001",
+        None,
+        None,
+        None,
+    );
+    let (log, li, lr) = c.stream("journald", JOURNAL, "journald:h1");
+    for (label, status, op, d) in [
+        ("template", Status::Derived, Op::Transformed, 0xe1),
+        (
+            "e603: template, measured",
+            Status::Measured,
+            Op::Imported,
+            0xe2,
+        ),
+    ] {
+        let mut source = SourceRef::new(SourceKind::Metric, lr.as_str());
+        source.observed = Some(TO);
+        let p = vec![
+            ("tel:series", V::Uid(log)),
+            ("tel:instrument", V::Uid(li)),
+            ("tel:from_ms", V::Int(FROM)),
+            ("tel:to_ms", V::Int(TO)),
+            ("tel:recipe", V::Text("tel/drain/1".into())),
+            (
+                "tel:template",
+                V::Text("connection from <IP> closed after <NUM> ms".into()),
+            ),
+            ("tel:count", V::Int(17)),
+            ("tel:digest", V::Bytes([d; 32])),
+        ];
+        let u = UnitCoreBuilder::new(ty(tel::LOG_TEMPLATE), label, status)
+            .source(source)
+            .grounds([log])
+            .payload(payload(p))
+            .build()
+            .unwrap();
+        let t = c.unit(label, u);
+        c.attest(t, op, Rung::Computed);
+    }
+    c
+}
+
 fn build(name: &str) -> Case {
     match name {
+        "events" => events(),
         "clean" => clean(),
         "tw" => tw(),
         "tq" => tq(),
