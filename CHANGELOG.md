@@ -1652,6 +1652,27 @@ A probe's output is a SMYSL-2 text part. It names no samples, and rule TL never 
 §15's "or a probe output" had nothing structured to point at. The RFC's row now names window
 evidence only.
 
+### GE-M9: retention keeps the round trip (TL-P8 step 5)
+
+TL-P8's gate. `examples/ge_m9` (`make ge-m9`) builds library A from simulated data: 20 gauges,
+one scrape a minute, 182 days, which is 5.24 M samples and 3,640 daily windows committed by rule
+TW. Peer B is a copy of A. A then evicts all but its last 30 days, exports with its substrate,
+and the libraries import and merge:
+
+| step | result |
+|---|---|
+| A evicts 152 days | 36,480 chunks, 4.38 M samples; records unchanged; 3,040 of 3,040 old windows `SMY-W605`; no `SMY-E604` |
+| A's export | 600 day files, 3,040 days listed evicted, 14.7 MB; P1 and P3 hold |
+| C imports it | C's records are A's (rsd, units, relations, attestations); same 3,040 gaps |
+| C merges B | 4.38 M samples back, 0.86 M already held; records unchanged; no `SMY-E604`, no `SMY-W605`; C's samples are B's |
+| A merges B | the same, and no eviction record left |
+| set | a second import adds nothing; D (B then A) equals C |
+| control | a peer with one sample more on an evicted day: exactly one `SMY-E604`, and no record changed |
+
+There was no P1 failure, and no resurrection changed a unit, so TL-P8's gate holds. The run took
+90 s and 630 MB, removed afterwards. The data is simulated, as GE-M4's is: the RFC's run is on
+GE-M1's data, which 1.17 does not have.
+
 ---
 
 ## 1.16.0 — 2026-11-16

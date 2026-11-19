@@ -182,6 +182,12 @@ required-features = ["cli", "ingest"]
 name              = "oko_ledger"
 required-features = ["tel"]
 
+# GE-M9 (RFC SMYSL-3 §14, rule TL): six months, evicted, exported, imported and merged with a
+# peer that kept them. `make ge-m9`.
+[[example]]
+name              = "ge_m9"
+required-features = ["tel"]
+
 [[bin]]
 name              = "smysl"
 path              = "src/main.rs"

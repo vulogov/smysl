@@ -618,6 +618,20 @@ beside the collection, outside its index, so `lib verify` checks the records as 
 `bundle` carries no substrate: evidence units are self-contained, which is why windows are
 materialised.
 
+*Does retention keep the round trip?* That is GE-M9, and `make ge-m9` asks it:
+
+- It writes six months of 20 gauges scraped every minute, 5.2 million samples, and one
+  window per series per day, 3,640 window units.
+- Library A keeps 30 days and evicts the other 152, and peer B is a copy that keeps everything.
+- A exports with its substrate, and a fresh library C imports it. C then merges B's export,
+  A merges it too, and a fourth library imports both in the other order.
+- At every step the records were A's, byte for byte, and P1 and P3 held. After the merges every
+  window recomputed to the unit it already was, and neither `SMY-W605` nor `SMY-E604` remained.
+- As a control, a peer holding one sample more was caught as exactly one `SMY-E604`, and still
+  changed no record.
+
+It took 90 seconds. The data is simulated, as GE-M4's is.
+
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
   investigations, instrument lineage, witness counting, witness conflicts, eviction and

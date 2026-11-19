@@ -1025,7 +1025,7 @@ OKO's first persistent ledger.
 | **TL-P5** detectors | CUSUM, PELT, MAD, BARO-style, episodes | **GE-M3** passes for each shipped detector |
 | **TL-P6** investigations | investigation, hypothesis, probe, action, consulted; rule TQ; kind 6; timeline thread; incident dossier; OKO helpers | OKO POC writes a rotation ledger; **GE-M7** arms (a) and (b) run. Arms (c) and (d) run once TL-P5 has shipped the BARO-style ranking. |
 | **TL-P7** instruments | instrument units, `via`, `measured-by`; witness counts; kind 7 | **GE-M6** run; D-T10 confirmed or reversed |
-| **TL-P8** retention and exchange | rule TL eviction; `--with-substrate` export and import | **GE-M9** passes |
+| **TL-P8** retention and exchange | rule TL eviction; `--with-substrate` export and import | **GE-M9** passes (simulated, `make ge-m9`: held) |
 | **TL-P9** traces and logs | OTLP traces, `x.tel/precedes`; Drain; MinHash; journald and CloudEvents readers | **GE-M2**, **GE-M5**, **GE-M8** decide key 7, the causal constraint and similarity labelling |
 
 TL-P2 and TL-P3 can run in parallel after TL-P1. TL-P6 needs TL-P4 but not TL-P5 to be built,
@@ -1046,7 +1046,7 @@ Each experiment has a stop condition, stated before it runs.
 | **GE-M6** | Do independent instruments change conclusions? | The same faults seen through duplicated scrapers and through independent sources | D-T10 | If witness counting never changes a ranking, it stays a report |
 | **GE-M7** | **Does smysl make agent RCA better?** | Train-Ticket (D-T12) with scripted deploys and config edits, faults injected after some of them. Arms: (a) agent alone; (b) agent writing into smysl with TQ, consulted and kind 6; (c) BARO-style derived ranking; (d) (b)+(c). Local models; one hosted arm, labelled (D-T13). | the design of §11 | Measured on top-k accuracy, **fabrications caught** (TQ failures that were real errors), and **unused-evidence rate**. If (b) does not reduce fabricated evidence relative to (a), §11 is wrong and is redesigned before TL-P7. |
 | **GE-M8** | Do episodes recur detectably? | MinHash over typed feature sets against embeddings, on GE-M7's corpus and RCAEval | similarity labelling | If MinHash recall@5 < 0.6 where embeddings exceed 0.8, similarity is model-dependent by default |
-| **GE-M9** | Does retention keep the round trip? | 6 months of GE-M1-scale data, compressed into a test; evict per rule TL; export, import, merge with an unevicted peer | rule TL | Any P1 failure over records, or any substrate resurrection that changes a unit, blocks TL-P8 |
+| **GE-M9** | Does retention keep the round trip? | 6 months of GE-M1-scale data, compressed into a test; evict per rule TL; export, import, merge with an unevicted peer | rule TL | Any P1 failure over records, or any substrate resurrection that changes a unit, blocks TL-P8. **Run on simulated data (TL-P8): held.** 20 gauges, 182 days, 5.2 M samples, 152 days evicted. No record changed at any step, and every window recomputed to the unit it is after the merge. A control peer with one sample more was caught as `SMY-E604`. |
 
 **Order:**
 1. GE-M1, and GE-M3's harness. The harness exists from TL-P0, runs first on TL-P4's summaries, and

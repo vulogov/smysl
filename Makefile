@@ -53,7 +53,7 @@ MATRIX := \
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix crate-features gates purity update seed-fuzz fuzz-build \
         determinism check-native conformance eval live-ollama live-hosted doc fuzz clean sweep \
         commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions msrv seed-fuzz fuzz-long \
-        proposition-classes ge-m4 ge-m6 oko-ledger
+        proposition-classes ge-m4 ge-m6 ge-m9 oko-ledger
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -430,6 +430,12 @@ ge-m6: ## GE-M6 (RFC SMYSL-3 §7, D-T10): do witness counts change a BARO rankin
 	@# Simulated incidents through duplicated scrapers and independent sources; no files, about
 	@# 5 s. It decides, it does not fail: exit 0 with the verdict printed.
 	$(CARGO) run --release --quiet -p smysl-tel --example ge_m6
+
+ge-m9: ## GE-M9 (RFC SMYSL-3 §14, rule TL): six months evicted, exported, imported, merged
+	@# Simulated data: GE-M1's cluster is not here, and the report says so. Exit 1 blocks TL-P8.
+	@# About 90 s and 630 MB under target/ge-m9, removed afterwards.
+	$(CARGO) run --release --quiet --features tel --example ge_m9 -- --dir target/ge-m9; \
+		status=$$?; rm -rf target/ge-m9; exit $$status
 
 oko-ledger: ## A stand-in for OKO's POC (RFC SMYSL-3 §24): a rotation's ledger via the library API
 	@# OKO is not in this repository: this is smysl's side of TL-P6's exit criterion, timed per
