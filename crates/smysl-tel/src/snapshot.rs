@@ -25,7 +25,7 @@
 
 use smysl_core::ids::LangTag;
 use smysl_core::{
-    Manifest, Mid, PartEntry, PartReading, PartText, SourceKind, SourceRef, Tid, UnitCore,
+    Manifest, Mid, PartEntry, PartReading, PartText, Rdid, SourceKind, SourceRef, Tid, UnitCore,
 };
 
 use crate::diff::{diff, part_text, Diff, Note, Snapshot};
@@ -194,6 +194,75 @@ fn tid_of(doc: &Json, profile: &Profile) -> Tid {
     PartText::new(part_text(doc, profile).0.into_bytes()).tid
 }
 
+/// The `x.tel` readers (§20.1): a manifest whose reader field names one of these holds a
+/// telemetry snapshot, and its part text is substrate under rule TL (§13).
+pub const TEL_READERS: &[&str] = &[
+    crate::readers::k8s::ID,
+    crate::readers::zabbix::ID,
+    crate::readers::prom::ID,
+    crate::readers::otlp::ID,
+    "otlp-json/1",
+];
+
+/// Whether a manifest's reader field (`<id>[ <key>=<value>…]`) names an `x.tel` reader.
+pub fn is_tel_reader(reader: &str) -> bool {
+    TEL_READERS.contains(&reader.split(' ').next().unwrap_or(""))
+}
+
+/// Rule TL for snapshot texts (§13): the parts, and their readings, that eviction at `bound_ms`
+/// removes from among `manifests`, in tid order.
+///
+/// A part goes when every manifest that names it is an `x.tel` snapshot taken before the bound
+/// (its `origin.observed`), and none of them is the head of its chain. The head is kept because
+/// it is the previous snapshot the next read of that object diffs against (§8.3), however old
+/// it is: an object that has not changed for a year still has a present. A part any other
+/// manifest names is never evicted: postmortems, chats and tickets are SMYSL-2 texts, governed
+/// by SMYSL-2 alone. A snapshot with no observed instant has no age, and is kept.
+///
+/// A reading goes with its part, unless a kept entry names it too.
+pub fn evictable_parts<'a>(
+    manifests: impl IntoIterator<Item = (&'a Mid, &'a Manifest)>,
+    bound_ms: u64,
+) -> Vec<(Tid, Rdid)> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let manifests: Vec<(&Mid, &Manifest)> = manifests.into_iter().collect();
+    let superseded: BTreeSet<Mid> = manifests
+        .iter()
+        .filter(|(_, m)| is_tel_reader(&m.reader))
+        .filter_map(|(_, m)| m.supersedes)
+        .collect();
+    let mut keep_tid: BTreeSet<Tid> = BTreeSet::new();
+    let mut keep_rdid: BTreeSet<Rdid> = BTreeSet::new();
+    let mut candidates: BTreeMap<Tid, BTreeSet<Rdid>> = BTreeMap::new();
+    for (mid, m) in &manifests {
+        let old = m
+            .origin
+            .as_ref()
+            .and_then(|o| o.observed)
+            .is_some_and(|t| t < bound_ms);
+        let evictable = is_tel_reader(&m.reader) && old && superseded.contains(mid);
+        for e in &m.parts {
+            if evictable {
+                candidates.entry(e.tid).or_default().insert(e.rdid);
+            } else {
+                keep_tid.insert(e.tid);
+                keep_rdid.insert(e.rdid);
+            }
+        }
+    }
+    candidates
+        .into_iter()
+        .filter(|(tid, _)| !keep_tid.contains(tid))
+        .flat_map(|(tid, rdids)| {
+            rdids
+                .into_iter()
+                .filter(|r| !keep_rdid.contains(r))
+                .map(move |r| (tid, r))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +307,82 @@ mod tests {
             1_000,
         )
         .unwrap()
+    }
+
+    /// Rule TL for snapshot texts: old, superseded `x.tel` parts go; the head, the young, a part
+    /// another manifest names, and a snapshot with no instant stay.
+    #[test]
+    fn eviction_takes_old_superseded_snapshots_and_nothing_else() {
+        let field = field();
+        let snap = |rv: u32, image: &str, at: u64, prev: Option<(&Json, Mid)>| {
+            let o = read_one(&deploy(rv, "3", image, "u-1"));
+            let r = record(
+                &o,
+                prev.map(|(doc, mid)| Prev {
+                    doc,
+                    mid,
+                    reader: &field,
+                }),
+                &Profile::parse(PROFILE).unwrap(),
+                &field,
+                "unknown",
+                None,
+                at,
+            )
+            .unwrap();
+            (o, r.manifest.unwrap())
+        };
+        let (o1, m1) = snap(1, "web:1", 1_000, None);
+        let (o2, m2) = snap(2, "web:2", 2_000, Some((&o1.doc, m1.mid())));
+        let (_, m3) = snap(3, "web:3", 3_000, Some((&o2.doc, m2.mid())));
+        let tid = |m: &Manifest| m.parts[0].tid;
+        let all = [(m1.mid(), &m1), (m2.mid(), &m2), (m3.mid(), &m3)];
+        let at = |bound| -> Vec<Tid> {
+            evictable_parts(all.iter().map(|(k, m)| (k, *m)), bound)
+                .into_iter()
+                .map(|(t, _)| t)
+                .collect()
+        };
+        assert!(at(1_000).is_empty(), "nothing is older than the bound");
+        assert_eq!(at(1_001), vec![tid(&m1)]);
+        let mut both = vec![tid(&m1), tid(&m2)];
+        both.sort();
+        assert_eq!(at(u64::MAX), both, "the head is kept, however old");
+
+        // A text manifest naming the first snapshot's part keeps it.
+        let mut text = m3.clone();
+        text.reader = "plain/1".into();
+        text.supersedes = None;
+        text.parts = m1.parts.clone();
+        let mut with_text: Vec<(Mid, &Manifest)> = all.to_vec();
+        with_text.push((text.mid(), &text));
+        let got: Vec<Tid> = evictable_parts(with_text.iter().map(|(k, m)| (k, *m)), u64::MAX)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect();
+        assert_eq!(got, vec![tid(&m2)]);
+
+        // A snapshot with no observed instant has no age.
+        // (Superseded, so that only its missing instant keeps it.)
+        let mut timeless = m1.clone();
+        timeless.origin = None;
+        let mut next = m2.clone();
+        next.supersedes = Some(timeless.mid());
+        let mut last = m3.clone();
+        last.supersedes = Some(next.mid());
+        let got: Vec<Tid> = evictable_parts(
+            [
+                (&timeless.mid(), &timeless),
+                (&next.mid(), &next),
+                (&last.mid(), &last),
+            ],
+            u64::MAX,
+        )
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect();
+        assert_eq!(got, vec![tid(&m2)], "only the timed, superseded one");
+        assert!(is_tel_reader(&field) && !is_tel_reader("plain/1"));
     }
 
     #[test]

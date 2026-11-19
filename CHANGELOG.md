@@ -1584,6 +1584,29 @@ OTLP exports' samples:
 
 Snapshot part texts (§13's other half) are step 2.
 
+### Retention for snapshot texts (TL-P8 step 2)
+
+Rule TL's other half (§13): the part texts of manifests whose reader is an `x.tel` reader.
+`smysl_tel::snapshot::evictable_parts(manifests, bound)` chooses them, and
+`TEL_READERS`/`is_tel_reader` say which manifests are telemetry. A part goes when every
+manifest naming it is a telemetry snapshot taken before the bound (its `origin.observed`) that
+another snapshot of its chain supersedes. Three things are kept:
+- **Each chain's head, however old.** It is the previous snapshot the next read of that object
+  diffs against (§8.3).
+- **A part any other manifest names.** SMYSL-2 texts are governed by SMYSL-2 alone.
+- **A snapshot with no observed instant.** It has no age.
+
+A reading goes with its part, unless a kept entry names it.
+
+`smysl tel evict` now removes those parts and readings too, under the library's locks, and
+reports how many. Against the binary, three snapshots of one Deployment, evicted a day later:
+- the two superseded parts go, and the head stays;
+- no record changes;
+- the next read of the object still diffs against the head and writes its change.
+
+After eviction, `smysl check` is unchanged, and `lib export --scope all` writes and verifies with
+P1 and P3 holding.
+
 ---
 
 ## 1.16.0 — 2026-11-16

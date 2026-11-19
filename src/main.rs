@@ -14614,7 +14614,9 @@ fn tel_commit_evidence(
 ///
 /// Retention is the local eviction of telemetry substrate. The bound is `--at` less `--older-than`,
 /// and every chunk of samples whose span ends at or before it is deleted and recorded as evicted.
-/// A chunk holding anything younger is kept whole. No record is written, nothing propagates
+/// A chunk holding anything younger is kept whole. So are the part texts of telemetry snapshots
+/// taken before it, except each object's latest and any part another manifest names
+/// (`smysl::tel::snapshot::evictable_parts`). No record is written, nothing propagates
 /// through merge, and no unit is touched: evidence over evicted samples stays what it was, and
 /// `tel check` reports it as `SMY-W605`, not re-derivable.
 ///
@@ -14677,6 +14679,46 @@ fn tel_evict(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode 
         "substrate {} chunk(s), {} sample(s) of {} series, wholly before {bound}",
         report.chunks, report.samples, report.series
     );
+    // Snapshot texts (§13): the parts of superseded `x.tel` snapshots taken before the bound.
+    if smysl::text::library::Library::is_library(&root) {
+        let library = match smysl::text::library::Library::open(&root) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("smysl tel evict: {}: {e}", root.display());
+                return ExitCode::Failure;
+            }
+        };
+        let objects = library.objects();
+        let parts: Vec<(smysl::Tid, smysl::Rdid)> =
+            smysl::tel::snapshot::evictable_parts(library.store().manifests(), bound)
+                .into_iter()
+                .filter(|(t, _)| objects.has_part(t))
+                .collect();
+        let tids: std::collections::BTreeSet<smysl::Tid> = parts.iter().map(|p| p.0).collect();
+        if yes && !parts.is_empty() {
+            let _locks = match smysl::text::lock::acquire_all(&root, &library.shards(), "tel evict")
+            {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("smysl tel evict: {e}");
+                    return ExitCode::Failure;
+                }
+            };
+            for (tid, rdid) in &parts {
+                let gone = objects
+                    .remove_part(tid)
+                    .and_then(|_| objects.remove_reading(rdid));
+                if let Err(e) = gone {
+                    eprintln!("smysl tel evict: {e}");
+                    return ExitCode::Failure;
+                }
+            }
+        }
+        println!(
+            "snapshots {} part text(s) of superseded telemetry snapshots taken before {bound}",
+            tids.len()
+        );
+    }
     if yes {
         println!("evicted; no record written");
     } else {

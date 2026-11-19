@@ -1218,7 +1218,9 @@ series with no origin (`SMY-W609`). It exits 1 when the series is not in the lib
 
 `tel evict --older-than DUR --at MS` is retention, rule TL. Every chunk of samples whose span
 ends at or before `--at` less `DUR` is deleted from the substrate and recorded as evicted. A
-chunk holding anything younger is kept whole. It writes no record and touches no unit: evidence
+chunk holding anything younger is kept whole. So are the part texts of telemetry snapshots taken
+before the bound, except each object's latest and any part another manifest names. It writes no
+record and touches no unit: evidence
 over evicted samples keeps its status, and `tel check` reports it as `SMY-W605`. Without `--yes`
 it prints what it would evict and removes nothing.
 

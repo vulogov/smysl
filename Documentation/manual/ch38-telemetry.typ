@@ -565,6 +565,15 @@ The substrate is cut into chunks by span (a minute, fifteen minutes or two hours
 series). A chunk goes when its whole span ends before the bound, so no sample younger than the
 bound is ever removed. Each evicted chunk is recorded as evicted, locally.
 
+Object snapshots go the same way. The part text of a Kubernetes or Zabbix snapshot taken before
+the bound is deleted, with two exceptions:
+
+- each object's latest snapshot, however old, because the next `tel read` of that object diffs
+  against it;
+- any part another manifest names. A postmortem, a chat or a ticket is never evicted.
+
+The snapshot's manifest and its change units stay, and they carry the values that changed.
+
 What eviction does not do matters more:
 
 - It writes no record. A unit, a relation and an attestation are never evicted, and a merge
@@ -580,9 +589,8 @@ them as a set. The windows recompute exactly as before.
 
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
-  investigations, instrument lineage, witness counting, witness conflicts and the eviction of
-  samples. Evicting snapshot texts, exchanging substrate, traces and logs are the RFC's later
-  steps, TL-P8 and TL-P9. So are:
+  investigations, instrument lineage, witness counting, witness conflicts and eviction.
+  Exchanging substrate, traces and logs are the RFC's later steps, TL-P8 and TL-P9. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
   - what a deleted object becomes as a unit;

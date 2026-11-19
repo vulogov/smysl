@@ -197,3 +197,71 @@ fn a_bound_before_the_data_evicts_nothing_and_usage_is_checked() {
         Some(2)
     );
 }
+
+/// Snapshot texts (§13): three snapshots of one Deployment. Eviction takes the two superseded
+/// parts and keeps the head, which the next read diffs against, and no record changes.
+#[test]
+fn eviction_takes_superseded_snapshot_texts_and_keeps_the_head() {
+    let dir = scratch("parts");
+    let diff = |rel: &str| {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/tel/diff")
+            .join(rel)
+            .display()
+            .to_string()
+    };
+    let read_k8s = |file: &str, at: u64| {
+        let at = at.to_string();
+        ok(
+            &dir,
+            &[
+                "tel",
+                "read",
+                "k8s/1",
+                file,
+                "--profile",
+                "k8s-deployments/1",
+                "--at",
+                &at,
+                "--licence",
+                "unknown",
+                "-s",
+                "lib",
+                "--yes",
+            ],
+        )
+    };
+    read_k8s(&diff("base.json"), T0);
+    read_k8s(&diff("image-bump/s1.json"), T0 + 1_000);
+    read_k8s(&diff("scale/s1.json"), T0 + 2_000);
+    let parts = |dir: &Path| -> usize {
+        let lib = Library::open(&dir.join("lib")).unwrap();
+        lib.store()
+            .manifests()
+            .filter(|(_, m)| lib.objects().has_part(&m.parts[0].tid))
+            .count()
+    };
+    assert_eq!(parts(&dir), 3);
+    let before = records(&dir);
+
+    // Before the second snapshot: only the first is older, and it is superseded.
+    let o = evict(&dir, "1s", T0 + 2_000, false);
+    assert!(o.contains("snapshots 1 part text(s)"), "{o}");
+    assert_eq!(parts(&dir), 3, "a dry run removes nothing");
+    let o = evict(&dir, "1d", T0 + 2 * DAY, true);
+    assert!(o.contains("snapshots 2 part text(s)"), "{o}");
+    assert_eq!(parts(&dir), 1, "the head is kept, however old");
+    assert_eq!(records(&dir), before, "no record is evicted");
+    assert!(evict(&dir, "1d", T0 + 2 * DAY, true).contains("snapshots 0 part text(s)"));
+
+    // The next read still has its previous snapshot: the base again is a change from `scale`.
+    let o = read_k8s(&diff("base.json"), T0 + 3_000);
+    assert!(
+        o.contains("1 new snapshot(s)") && o.contains("1 change(s)"),
+        "{o}"
+    );
+    assert!(
+        records(&dir).0 > before.0,
+        "the diff against the head wrote units: {o}"
+    );
+}
