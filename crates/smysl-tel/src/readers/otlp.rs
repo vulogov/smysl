@@ -226,7 +226,7 @@ impl Raw {
 }
 
 /// An attribute set as a JSON object. A later duplicate key wins, as in the OTel data model.
-fn attrs(kvs: &[(String, AnyValue)]) -> Json {
+pub(crate) fn attrs(kvs: &[(String, AnyValue)]) -> Json {
     let mut out: Vec<(String, Json)> = Vec::with_capacity(kvs.len());
     for (k, v) in kvs {
         let v = any(v);
@@ -540,7 +540,7 @@ const TEMPORALITIES: &[&str] = &[
 ];
 
 /// `lowerCamelCase` as OTLP/JSON writes it, or the proto's `snake_case`.
-fn field<'a>(v: &'a Json, camel: &str) -> Option<&'a Json> {
+pub(crate) fn field<'a>(v: &'a Json, camel: &str) -> Option<&'a Json> {
     v.get(camel).or_else(|| {
         let snake: String = camel
             .chars()
@@ -557,7 +557,7 @@ fn field<'a>(v: &'a Json, camel: &str) -> Option<&'a Json> {
 }
 
 /// A repeated field: absent is empty; anything but an array is refused.
-fn array<'a>(v: &'a Json, name: &str) -> Result<&'a [Json], ReadError> {
+pub(crate) fn array<'a>(v: &'a Json, name: &str) -> Result<&'a [Json], ReadError> {
     match field(v, name) {
         None | Some(Json::Null) => Ok(&[]),
         Some(Json::Array(items)) => Ok(items),
@@ -565,7 +565,7 @@ fn array<'a>(v: &'a Json, name: &str) -> Result<&'a [Json], ReadError> {
     }
 }
 
-fn string(v: &Json, name: &str) -> Result<String, ReadError> {
+pub(crate) fn string(v: &Json, name: &str) -> Result<String, ReadError> {
     match field(v, name) {
         None | Some(Json::Null) => Ok(String::new()),
         Some(Json::String(s)) => Ok(s.clone()),
@@ -582,7 +582,7 @@ fn boolean(v: &Json, name: &str) -> Result<bool, ReadError> {
 }
 
 /// An enum, as its number or its name.
-fn enum_value(v: &Json, name: &str, names: &[&str]) -> Result<i64, ReadError> {
+pub(crate) fn enum_value(v: &Json, name: &str, names: &[&str]) -> Result<i64, ReadError> {
     match field(v, name) {
         None | Some(Json::Null) => Ok(0),
         Some(Json::String(s)) => names
@@ -613,13 +613,13 @@ fn i64_json(v: &Json, name: &str) -> Result<i64, ReadError> {
         .map_err(|_| shape(format!("{name} is outside int64")))
 }
 
-fn u64_json(v: &Json, name: &str) -> Result<u64, ReadError> {
+pub(crate) fn u64_json(v: &Json, name: &str) -> Result<u64, ReadError> {
     integer_token(v, name)?
         .parse()
         .map_err(|_| shape(format!("{name} is outside uint64")))
 }
 
-fn u64_of(v: &Json, name: &str) -> Result<Option<u64>, ReadError> {
+pub(crate) fn u64_of(v: &Json, name: &str) -> Result<Option<u64>, ReadError> {
     match field(v, name) {
         None | Some(Json::Null) => Ok(None),
         Some(j) => u64_json(j, name).map(Some),
@@ -654,7 +654,7 @@ fn f64_of(v: &Json, name: &str) -> Result<Option<f64>, ReadError> {
     }
 }
 
-fn kvs(v: &Json, name: &str) -> Result<Vec<(String, AnyValue)>, ReadError> {
+pub(crate) fn kvs(v: &Json, name: &str) -> Result<Vec<(String, AnyValue)>, ReadError> {
     array(v, name)?
         .iter()
         .map(|kv| Ok((string(kv, "key")?, any_json(field(kv, "value"), 0)?)))

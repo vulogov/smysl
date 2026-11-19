@@ -1112,7 +1112,7 @@ migrate or under `--dry-run`, and 1 when the store does not declare the target r
 #section("tel")
 
 *Read telemetry into a library; the value in force at an instant; window evidence; detectors;
-investigations; check a profile.* Pure · TL-P2 to TL-P6.
+investigations; traces; check a profile.* Pure · TL-P2 to TL-P9.
 
 `tel read READER FILE...` reads platform exports with one of SMYSL-3's object readers. `k8s/1`
 reads `kubectl get -o json` lists, objects and watch events; `zabbix/1` reads `host.get` and
@@ -1140,6 +1140,14 @@ their `item.get`. With `--yes` the samples go to `<library>/index/series.redb`, 
 they establish are committed with their `x.tel/of-series` relations: `x.tel/reset`,
 `x.tel/stale` and Zabbix's `x.tel/series-meta`. Without `--yes` nothing is written, and each
 file is still judged after the ones before it. Reading an export twice adds nothing.
+
+The trace readers write spans, not units (TL-P9). `otlp-traces/1` reads OTLP traces protobuf
+and `otlp-traces-json/1` OTLP/JSON. With `--yes` each span goes to the substrate as an event,
+and each span stream (a resource and scope) is committed as an `x.tel/series` with its
+lineage. `tel trace TRACE-ID` prints a trace's spans from the substrate as a tree, each under
+its parent. With `--yes --at MS` it commits them as `x.tel/span` units, with `x.tel/precedes`
+from each parent to each child. `SMY-W617` names a span held twice with different contents, and
+`SMY-W605` an hour of the trace that was evicted.
 
 `tel at SERIES MS` prints the value in force at `MS`, the last sample at or before it, for each
 instrument the series has samples from. `SERIES` is a series uid or `<scheme>:<key>`. A stale
@@ -1230,14 +1238,14 @@ it prints what it would evict and removes nothing.
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare`, `witnesses`, `evict` or `profile`.]),
-    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`), then the files. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `declare`: what is declared, then its arguments. `witnesses`: a series. `profile`: `check` and a profile file or shipped name.]),
+    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare`, `witnesses`, `evict`, `trace` or `profile`.]),
+    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`, `otlp-traces/1`, `otlp-traces-json/1`), then the files. `trace`: a trace id, 32 hex digits. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `declare`: what is declared, then its arguments. `witnesses`: a series. `profile`: `check` and a profile file or shipped name.]),
     ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for the object readers; it must be for the reader's scheme.]),
     ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds, and for `prom/1` the scrape instant. Required for `read`: nothing here reads a clock.]),
     ([`--licence`], [`SPDX`], [The manifests' licence. Required for the object readers, as `text add` requires it.]),
     ([`--zabbix-api`], [`VERSION`], [The Zabbix API version the export came from (`apiinfo.version`). Required for `zabbix/1`: 6.x, 7.x or 8.x.]),
     ([`--job`, `--instance`], [`JOB`, `INSTANCE`], [`prom/1`: the target's labels, which the exposition does not carry and every series key includes. Required.]),
-    ([`--instrument`], [`I`], [`read`: the key of what an OTLP or Zabbix export was read from, such as `otel-collector:c1` or `zabbix-server:main`. Required for those readers. `at` and `window`: an instrument uid, to ask one instrument only.]),
+    ([`--instrument`], [`I`], [`read`: the key of what an OTLP (metrics or traces) or Zabbix export was read from, such as `otel-collector:c1` or `zabbix-server:main`. Required for those readers. `at` and `window`: an instrument uid, to ask one instrument only.]),
     ([`--items`], [`FILE`], [`zabbix/1`: the `item.get` export (with `selectHosts`) the files' history belongs to. With it, the files are `history.get` exports.]),
     ([`--trends`], [—], [`zabbix/1` with `--items`: the files are `trend.get` exports, each hour a `cited` window.]),
     ([`--sketch`], [`ALPHA`], [`window`: a DDSketch of this relative accuracy, 0.001 to 0.5, rather than the exact summary.]),
@@ -1254,7 +1262,7 @@ it prints what it would evict and removes nothing.
     ([`--confirmed-by`], [`HANDLE`], [`investigate action`: who confirmed an unsafe command.]),
     ([`--lookback`], [`MS`], [`investigate show`: how far before the opening to look for unexplored evidence. Default one hour.]),
     ([`--older-than`], [`DUR`], [`evict`: the retention bound before `--at`, a whole number and `s`, `m`, `h`, `d` or `w`. Required.]),
-    ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing. `evict`: evict, rather than report what would go.]),
+    ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing. `evict`: evict, rather than report what would go. `trace`: commit the spans, with `--at`.]),
     ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),
   ),
 )
@@ -1448,6 +1456,7 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W614`], [warning], [Several `x.tel/window` units share one window key (series, instrument, from, to, recipe) and disagree: they were materialised over different sample sets, typically before and after late data arrived. Each is true of its own samples, and its digest says which. Neither supersedes the other, and a consumer that needs one takes the largest count, then the smallest digest. From 1.17.]),
     ([`SMY-W615`], [warning], [Two samples at one series, instrument and instant, with different values or flags. The substrate is a set of samples, so both are kept and both enter every window digest over that instant. A data error at the source, reported by `tel read`. From 1.17.]),
     ([`SMY-W616`], [warning], [The exact sum of an integer window is outside `dec`'s range. The window's `sum` is omitted rather than rounded, and every other field stands. From 1.17.]),
+    ([`SMY-W617`], [warning], [One stream holds two spans with the same trace and span id whose contents differ: two exports disagree about one span. Both are kept, both materialise as `x.tel/span` units, and each is a parent of the other's children. `tel trace` reports it. From 1.17.]),
   ),
 )
 

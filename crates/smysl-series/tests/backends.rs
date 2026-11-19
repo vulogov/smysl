@@ -4,7 +4,9 @@
 //! environment, `std::env::temp_dir` included, out of the crate's own source.
 
 use smysl_core::{Decimal, Uid};
-use smysl_series::{digest, Backend, MemBackend, Sample, SeriesInfo, Span, Substrate};
+use smysl_series::{
+    digest, Backend, Event, MemBackend, Sample, SeriesInfo, Span, StreamInfo, Substrate,
+};
 
 fn uid(n: u8) -> Uid {
     Uid::from_bytes([n; 32])
@@ -156,6 +158,48 @@ fn eviction<B: Backend>(mut sub: Substrate<B>) {
     assert_eq!((row.count, row.first_ms, row.last_ms), (0, u64::MAX, 0));
 }
 
+/// Events (§19.6): a set, read by range, found by tag, evicted by the hour beside the samples.
+fn events<B: Backend>(mut sub: Substrate<B>) -> Substrate<B> {
+    let (s, i) = (uid(7), uid(8));
+    let si = StreamInfo {
+        scheme: "otel".into(),
+        key: r#"{"signal":"spans"}"#.into(),
+        kind: "span".into(),
+    };
+    let tag = |e: &Event| Some([e.body[0]; 16]);
+    let evs: Vec<Event> = (0..6u64)
+        .map(|k| Event::at_nanos(k * 1_800_000_000_000 + 7, vec![(k % 3) as u8, k as u8]))
+        .collect();
+    let r = sub.add_events(&s, &i, &si, &evs, &tag).unwrap();
+    assert_eq!((r.added, r.already), (6, 0));
+    let r = sub.add_events(&s, &i, &si, &evs[2..], &tag).unwrap();
+    assert_eq!((r.added, r.already), (0, 4));
+    let all = sub.events(&s, &i, 0, u64::MAX).unwrap();
+    assert_eq!(all.events, evs);
+    assert_eq!(all.events[0].ns, 7, "the remainder is kept");
+    let firsts = sub.events(&s, &i, 0, 3_600_000).unwrap();
+    assert_eq!(firsts.events.len(), 2);
+    assert_eq!(
+        sub.tagged(&[0; 16]).unwrap().len(),
+        2,
+        "events 0 and 3: hours 0 and 1"
+    );
+    assert_eq!(sub.event_instruments(&s).unwrap(), vec![i]);
+    assert_eq!(sub.streams().unwrap().len(), 1);
+    // Samples and events in one eviction: everything before 2 h.
+    sub.add(&uid(1), &uid(2), &info(), &[v(1_000, 1)]).unwrap();
+    let r = sub.evict(7_200_000, 42).unwrap();
+    assert_eq!((r.chunks, r.event_hours, r.events), (1, 2, 4));
+    assert_eq!(sub.events(&s, &i, 0, u64::MAX).unwrap().events, evs[4..]);
+    assert_eq!(sub.event_evictions().unwrap().len(), 2);
+    sub
+}
+
+#[test]
+fn the_memory_backend_keeps_the_event_contract() {
+    events(Substrate::new(MemBackend::default()));
+}
+
 #[test]
 fn the_memory_backend_keeps_the_contract() {
     contract(Substrate::new(MemBackend::default()));
@@ -196,6 +240,16 @@ mod redb {
             4,
             "every chunk, and j's from before"
         );
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn the_redb_backend_keeps_the_event_contract_when_reopened() {
+        let p = path("events");
+        drop(events(Substrate::new(RedbBackend::open(&p).unwrap())));
+        let sub = Substrate::new(RedbBackend::open(&p).unwrap());
+        assert_eq!(sub.event_evictions().unwrap().len(), 2);
+        assert_eq!(sub.streams().unwrap()[0].1.count, 2);
         let _ = std::fs::remove_dir_all(p.parent().unwrap());
     }
 

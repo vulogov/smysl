@@ -564,7 +564,8 @@ smysl tel evict --older-than 30d --at 1771149600000 -s lib --yes    # evict it
 
 The substrate is cut into chunks by span (a minute, fifteen minutes or two hours, chosen per
 series). A chunk goes when its whole span ends before the bound, so no sample younger than the
-bound is ever removed. Each evicted chunk is recorded as evicted, locally.
+bound is ever removed. Each evicted chunk is recorded as evicted, locally. Spans, which a later
+section reads, go the same way by the hour.
 
 Object snapshots go the same way. The part text of a Kubernetes or Zabbix snapshot taken before
 the bound is deleted, with two exceptions:
@@ -633,10 +634,51 @@ materialised.
 
 It took 90 seconds. The data is simulated, as GE-M4's is.
 
+#section("Traces: spans as readings")
+
+A span is a reading, as a sample is, so reading a trace export makes no span unit. Each span is
+kept as an *event* in the substrate, beside the samples: its trace and span ids, its parent,
+name, kind, status, attributes, and its start and end to the nanosecond. One stream holds the
+spans of one OTLP resource and scope, and is an `x.tel/series` like any other.
+
+```
+smysl tel read otlp-traces/1 t0.pb t1.pb --instrument otel-collector:c1 \
+    --at 1768557700000 -s lib --yes
+```
+
+`otlp-traces-json/1` reads the same exports as OTLP/JSON, and gives the same events. Span events,
+links and `trace_state` are not kept yet. The substrate is a set, so reading an export twice,
+or one trace from two collectors' files, adds nothing.
+
+A span becomes evidence when something asks for its trace:
+
+#screen(caption: "$ smysl tel trace 4bf92f3577b34da6a3ce929d0e0e4736 -s lib")[
+```
+span      b3:h4an2g46dgfzbayrs7zcbcbdoeihfxomu2sra4l45czdsh52ammq  at 1768557600000  cart GET /cart
+span      b3:w7eb4g7j2ld7363u7zeld73zm3dio3q7rmvp4nuvhfg46ievy7oa  at 1768557600001    cart POST /pay
+span      b3:gtmeeujhyhoiuj6fcdvmvneceqilu3wojudmu7y5kzxjp2d4e32q  at 1768557600001      payment POST /pay
+span      b3:tzdj25qhvuovs5sqrlrrbpyme46dghltezcsv2myigy727glmm6a  at 1768557600001        payment SELECT cards
+4 span(s), 3 precedes edge(s); nothing was written - run again with --yes --at MS to commit them
+```
+]
+
+Each line is an `x.tel/span` unit, `measured`, under its parent. Three spans start in the same
+millisecond, and the tree still orders them, because the order comes from who called whom and
+not from the clocks. With `--yes --at MS` the units are committed with an `x.tel/precedes` edge
+from each parent to each child. A unit's digest is its one event's, so committing twice changes
+nothing, and `tel check` recomputes each span from the substrate as it does a window:
+`SMY-E604` if the span there is another one, and `SMY-W605` if it was evicted. A span id held
+twice with different contents, because two exports disagree about it, is `SMY-W617`. Both are
+kept.
+
+The sub-millisecond part of a span's times stays in the substrate. Whether units need it is
+GE-M2's question, and until it is answered `source` key 7 stays reserved.
+
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
-  investigations, instrument lineage, witness counting, witness conflicts, eviction and
-  exchanging samples. Traces and logs are the RFC's later step, TL-P9. So are:
+  investigations, instrument lineage, witness counting, witness conflicts, eviction, exchanging
+  samples and traces. Exchanging spans, logs, and the experiments on causal order are the rest
+  of the RFC's TL-P9. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;
   - what a deleted object becomes as a unit;

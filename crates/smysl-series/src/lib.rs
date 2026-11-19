@@ -12,6 +12,9 @@
 //! - [`chunk`]s are a local layout: their bytes depend on the span chosen and on the encoder,
 //!   so they enter no identity (§19.2).
 //!
+//! **Events** (§19.6, TL-P9): spans and log records, the readings that are not numbers, kept
+//! beside the samples in the same tables' shapes ([`event`], [`Substrate::add_events`]).
+//!
 //! **Where it lives.** [`Substrate`] over a [`Backend`]: [`MemBackend`] in memory, or, behind
 //! feature `store-redb`, [`redb::RedbBackend`] in `<library>/index/series.redb` (§19.3).
 //!
@@ -24,6 +27,8 @@
 use core::fmt;
 
 pub mod chunk;
+pub mod event;
+mod event_store;
 pub mod exchange;
 #[cfg(feature = "store-redb")]
 pub mod redb;
@@ -31,6 +36,8 @@ pub mod sample;
 pub mod store;
 
 pub use chunk::Span;
+pub use event::Event;
+pub use event_store::{EventAddReport, EventsRead, StreamInfo, StreamRow, Tagger};
 pub use sample::{conflicts, digest, flags, Sample, SampleError};
 pub use store::{
     AddReport, Backend, Coverage, EvictReport, MemBackend, SeriesInfo, SeriesRow, Substrate,

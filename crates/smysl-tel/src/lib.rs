@@ -35,6 +35,7 @@ pub mod readers;
 pub mod scrape;
 pub mod sketch;
 pub mod snapshot;
+pub mod trace;
 pub mod zabbix_history;
 
 pub use diff::{diff, leaves, part_text, Diff, Note, Snapshot};

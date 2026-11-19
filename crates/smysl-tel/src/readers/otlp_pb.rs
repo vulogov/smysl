@@ -424,7 +424,7 @@ fn metric(data: &Data, base: &Raw, out: &mut Vec<Raw>) -> Result<(), ReadError> 
     Ok(())
 }
 
-fn kvs(kvs: &[KeyValue]) -> Vec<(String, AnyValue)> {
+pub(crate) fn kvs(kvs: &[KeyValue]) -> Vec<(String, AnyValue)> {
     kvs.iter()
         .map(|kv| (kv.key.clone(), any(kv.value.as_ref())))
         .collect()

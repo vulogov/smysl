@@ -529,6 +529,7 @@ registry! {
         W614 = "SMY-W614", Warn,  "The windows of one window key disagree: several sample sets, each window true of its own";
         W615 = "SMY-W615", Warn,  "Two samples at one series, instrument and instant, with different values or flags; both are kept";
         W616 = "SMY-W616", Warn,  "An integer window sum outside dec's range; the sum is omitted";
+        W617 = "SMY-W617", Warn,  "Two spans with one trace and span id in one stream, with different contents; both are kept";
     }
 }
 
@@ -1062,9 +1063,10 @@ mod tests {
     /// evidence recomputed from the substrate or found without it.
     /// 170 with `SMY-W606` in TL-P6 step 2: a numeric quote that does not verify (rule TQ).
     /// 171 with `SMY-W609` in TL-P7 step 1: a series with no origin instrument.
+    /// 172 with `SMY-W617` in TL-P9 step 2: one span id held twice with different contents.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 171);
+        assert_eq!(Code::ALL.len(), 172);
     }
 
     #[test]

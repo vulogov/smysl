@@ -28,6 +28,7 @@ pub mod k8s;
 pub mod otlp;
 #[cfg(feature = "reader-otlp")]
 mod otlp_pb;
+pub mod otlp_traces;
 pub mod prom;
 pub mod zabbix;
 pub mod zabbix_history;

@@ -99,14 +99,65 @@ pub trait Backend {
         chunks: Vec<(ChunkKey, Vec<u8>)>,
         rows: Vec<(Uid, Vec<u8>)>,
     ) -> Result<(), Error>;
-    /// Delete `chunks`, record each as evicted at `at_ms`, and write `rows`: all of it or none
-    /// (§13, rule TL).
+    /// Delete `chunks` and the event hours `hours`, record each as evicted at `at_ms`, and
+    /// write the series `rows` and stream rows `streams`: all of it or none (§13, rule TL).
     fn evict(
         &mut self,
         chunks: Vec<ChunkKey>,
+        hours: Vec<ChunkKey>,
         at_ms: u64,
         rows: Vec<(Uid, Vec<u8>)>,
+        streams: Vec<(Uid, Vec<u8>)>,
     ) -> Result<(), Error>;
+
+    // -- Events (§19.6, TL-P9): the same shapes, keyed (stream, instrument, hour start) -------
+
+    /// The event hour at `key`.
+    fn event_hour(&self, key: &ChunkKey) -> Result<Option<Vec<u8>>, Error>;
+    /// The event hours of `(stream, inst)` whose start is in `[lo, hi]`, in start order.
+    fn event_hours(
+        &self,
+        stream: &Uid,
+        inst: &Uid,
+        lo: u64,
+        hi: u64,
+    ) -> Result<Vec<(u64, Vec<u8>)>, Error>;
+    /// Every event hour key, in key order.
+    fn event_keys(&self) -> Result<Vec<ChunkKey>, Error>;
+    /// The hour starts of `(stream, inst)` in `[lo, hi]` recorded as evicted.
+    fn events_evicted(&self, stream: &Uid, inst: &Uid, lo: u64, hi: u64)
+        -> Result<Vec<u64>, Error>;
+    /// Every event eviction record, `(key, instant)`, in key order.
+    fn event_evictions(&self) -> Result<Vec<(ChunkKey, u64)>, Error>;
+    /// The stream row.
+    fn stream_row(&self, stream: &Uid) -> Result<Option<Vec<u8>>, Error>;
+    /// Every stream row, in uid order.
+    fn stream_rows(&self) -> Result<Vec<(Uid, Vec<u8>)>, Error>;
+    /// The hours holding an event tagged `tag` (a trace id), in key order.
+    fn tagged(&self, tag: &[u8; 16]) -> Result<Vec<ChunkKey>, Error>;
+    /// Write event hours, stream rows and tag entries together: all or none. An hour written
+    /// where one was evicted clears the eviction record.
+    fn write_events(
+        &mut self,
+        hours: Vec<(ChunkKey, Vec<u8>)>,
+        streams: Vec<(Uid, Vec<u8>)>,
+        tags: Vec<TagKey>,
+    ) -> Result<(), Error>;
+}
+
+/// A tag entry's key: (tag, stream uid, instrument uid, hour start ms), 88 bytes.
+pub type TagKey = [u8; 88];
+
+pub fn tag_key(tag: &[u8; 16], hour: &ChunkKey) -> TagKey {
+    let mut k = [0u8; 88];
+    k[..16].copy_from_slice(tag);
+    k[16..].copy_from_slice(hour);
+    k
+}
+
+/// The hour key a tag entry points at.
+pub fn tag_hour(k: &TagKey) -> ChunkKey {
+    k[16..].try_into().expect("seventy-two bytes")
 }
 
 /// The tables in memory.
@@ -115,6 +166,10 @@ pub struct MemBackend {
     chunks: BTreeMap<ChunkKey, Vec<u8>>,
     rows: BTreeMap<Uid, Vec<u8>>,
     evicted: BTreeMap<ChunkKey, u64>,
+    hours: BTreeMap<ChunkKey, Vec<u8>>,
+    streams: BTreeMap<Uid, Vec<u8>>,
+    hours_evicted: BTreeMap<ChunkKey, u64>,
+    tags: BTreeSet<TagKey>,
 }
 
 impl Backend for MemBackend {
@@ -203,15 +258,92 @@ impl Backend for MemBackend {
     fn evict(
         &mut self,
         chunks: Vec<ChunkKey>,
+        hours: Vec<ChunkKey>,
         at_ms: u64,
         rows: Vec<(Uid, Vec<u8>)>,
+        streams: Vec<(Uid, Vec<u8>)>,
     ) -> Result<(), Error> {
         for k in chunks {
             if self.chunks.remove(&k).is_some() {
                 self.evicted.insert(k, at_ms);
             }
         }
+        for k in hours {
+            if self.hours.remove(&k).is_some() {
+                self.hours_evicted.insert(k, at_ms);
+            }
+        }
         self.rows.extend(rows);
+        self.streams.extend(streams);
+        Ok(())
+    }
+
+    fn event_hour(&self, key: &ChunkKey) -> Result<Option<Vec<u8>>, Error> {
+        Ok(self.hours.get(key).cloned())
+    }
+
+    fn event_hours(
+        &self,
+        stream: &Uid,
+        inst: &Uid,
+        lo: u64,
+        hi: u64,
+    ) -> Result<Vec<(u64, Vec<u8>)>, Error> {
+        Ok(self
+            .hours
+            .range(chunk_key(stream, inst, lo)..=chunk_key(stream, inst, hi))
+            .map(|(k, v)| (key_start(k), v.clone()))
+            .collect())
+    }
+
+    fn event_keys(&self) -> Result<Vec<ChunkKey>, Error> {
+        Ok(self.hours.keys().copied().collect())
+    }
+
+    fn events_evicted(
+        &self,
+        stream: &Uid,
+        inst: &Uid,
+        lo: u64,
+        hi: u64,
+    ) -> Result<Vec<u64>, Error> {
+        Ok(self
+            .hours_evicted
+            .range(chunk_key(stream, inst, lo)..=chunk_key(stream, inst, hi))
+            .map(|(k, _)| key_start(k))
+            .collect())
+    }
+
+    fn event_evictions(&self) -> Result<Vec<(ChunkKey, u64)>, Error> {
+        Ok(self.hours_evicted.iter().map(|(k, v)| (*k, *v)).collect())
+    }
+
+    fn stream_row(&self, stream: &Uid) -> Result<Option<Vec<u8>>, Error> {
+        Ok(self.streams.get(stream).cloned())
+    }
+
+    fn stream_rows(&self) -> Result<Vec<(Uid, Vec<u8>)>, Error> {
+        Ok(self.streams.iter().map(|(u, r)| (*u, r.clone())).collect())
+    }
+
+    fn tagged(&self, tag: &[u8; 16]) -> Result<Vec<ChunkKey>, Error> {
+        let lo = tag_key(tag, &[0; 72]);
+        let hi = tag_key(tag, &[0xff; 72]);
+        Ok(self.tags.range(lo..=hi).map(tag_hour).collect())
+    }
+
+    fn write_events(
+        &mut self,
+        hours: Vec<(ChunkKey, Vec<u8>)>,
+        streams: Vec<(Uid, Vec<u8>)>,
+        tags: Vec<TagKey>,
+    ) -> Result<(), Error> {
+        for (k, _) in &hours {
+            self.hours_evicted.remove(k);
+        }
+        self.hours.extend(hours);
+        self.streams.extend(streams);
+        self.tags.extend(tags);
         Ok(())
     }
 }
@@ -225,6 +357,12 @@ pub struct EvictReport {
     pub samples: u64,
     /// The series that lost any.
     pub series: u64,
+    /// Event hours deleted (§19.6), each now recorded as evicted.
+    pub event_hours: u64,
+    /// The events they held.
+    pub events: u64,
+    /// The event streams that lost any.
+    pub streams: u64,
 }
 
 /// What one [`Substrate::add`] did.
@@ -281,6 +419,10 @@ impl<B: Backend> Substrate<B> {
 
     pub fn into_backend(self) -> B {
         self.backend
+    }
+
+    pub(crate) fn backend_mut(&mut self) -> &mut B {
+        &mut self.backend
     }
 
     /// Add `samples` of `(series, inst)` as a set (§19.3): each target chunk is read, merged
@@ -443,17 +585,22 @@ impl<B: Backend> Substrate<B> {
     /// series' row stays, with its span, so that the series keeps its chunking if its samples
     /// come back and [`Substrate::present`] can say which spans were evicted. The row's count
     /// and first instant follow what remains.
+    ///
+    /// Events (§19.6) are evicted the same way, by whole hour.
     pub fn evict(&mut self, bound_ms: u64, at_ms: u64) -> Result<EvictReport, Error> {
-        let (report, keys, rows) = self.plan_eviction(bound_ms)?;
-        if !keys.is_empty() {
-            self.backend.evict(keys, at_ms, rows)?;
+        let (mut report, keys, rows) = self.plan_eviction(bound_ms)?;
+        let (hours, streams) = self.plan_event_eviction(bound_ms, &mut report)?;
+        if !keys.is_empty() || !hours.is_empty() {
+            self.backend.evict(keys, hours, at_ms, rows, streams)?;
         }
         Ok(report)
     }
 
     /// What [`Substrate::evict`] at `bound_ms` would remove, removing nothing.
     pub fn evictable(&self, bound_ms: u64) -> Result<EvictReport, Error> {
-        Ok(self.plan_eviction(bound_ms)?.0)
+        let mut report = self.plan_eviction(bound_ms)?.0;
+        self.plan_event_eviction(bound_ms, &mut report)?;
+        Ok(report)
     }
 
     /// The chunks rule TL removes at `bound_ms`, and the rows as they will be after.

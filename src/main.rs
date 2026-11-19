@@ -2539,13 +2539,14 @@ fn cli() -> Command {
                             "declare",
                             "witnesses",
                             "evict",
+                            "trace",
                             "profile",
                         ])
                         .help(
                             "read exports with a reader into a library, the value in force at \
                              an instant, materialise window evidence, recompute it, run a \
-                             detector, evict old substrate, or check a profile and print its \
-                             hash",
+                             detector, evict old substrate, materialise a trace's spans, or \
+                             check a profile and print its hash",
                         ),
                 )
                 .arg(
@@ -2555,10 +2556,10 @@ fn cli() -> Command {
                         .action(ArgAction::Append)
                         .help(
                             "`read READER FILE...` (k8s/1, zabbix/1, prom/1, otlp/1, \
-                             otlp-json/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
+                             otlp-json/1, otlp-traces/1, otlp-traces-json/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
                              `detect RECIPE`; `investigate open|consult|hypothesis|probe|action|\
                              close|show …`; `declare instrument|measured-by|via|same-quantity …`; `witnesses SERIES`; \
-                             `evict --older-than DUR`; `profile check FILE|NAME`",
+                             `evict --older-than DUR`; `trace TRACE-ID`; `profile check FILE|NAME`",
                         ),
                 )
                 .arg(
@@ -2597,7 +2598,7 @@ fn cli() -> Command {
                         .long("instrument")
                         .value_name("I")
                         .help(
-                            "otlp/1, otlp-json/1 and zabbix/1 history: the instrument's key \
+                            "otlp/1, otlp-json/1, the trace readers and zabbix/1 history: the instrument's key \
                              (`otel-collector:<id>`, `zabbix-server:<name>`); `at`: an \
                              instrument uid",
                         ),
@@ -13846,6 +13847,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "declare" => tel_declare(m, global, &args),
         "witnesses" => tel_witnesses(m, global, &args),
         "evict" => tel_evict(m, global, &args),
+        "trace" => tel_trace(m, global, &args),
         "read" => tel_read(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
@@ -13918,7 +13920,11 @@ fn tel_read(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
         eprintln!("smysl tel read: no file given");
         return ExitCode::Usage;
     }
-    // The series readers write the substrate rather than snapshots.
+    // The trace readers write events (TL-P9), and the series readers samples, rather than
+    // snapshots.
+    if matches!(reader.as_str(), "otlp-traces/1" | "otlp-traces-json/1") {
+        return tel_read_traces(m, global, reader, files);
+    }
     let series_reader = matches!(reader.as_str(), "prom/1" | "otlp/1" | "otlp-json/1")
         || (reader.as_str() == zabbix::ID && m.contains_id("items"));
     if series_reader {
@@ -14885,6 +14891,12 @@ fn tel_evict(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode 
         "substrate {} chunk(s), {} sample(s) of {} series, wholly before {bound}",
         report.chunks, report.samples, report.series
     );
+    if report.event_hours > 0 {
+        println!(
+            "events    {} hour(s), {} span(s) and record(s) of {} stream(s), wholly before {bound}",
+            report.event_hours, report.events, report.streams
+        );
+    }
     // Snapshot texts (§13): the parts of superseded `x.tel` snapshots taken before the bound.
     if smysl::text::library::Library::is_library(&root) {
         let library = match smysl::text::library::Library::open(&root) {
@@ -14931,6 +14943,331 @@ fn tel_evict(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode 
         println!("nothing removed: run again with --yes to evict");
     }
     ExitCode::Success
+}
+
+/// `smysl tel read otlp-traces/1|otlp-traces-json/1 FILE... --instrument KEY --at MS`: spans
+/// into the event substrate (RFC SMYSL-3 §19.6, §20.1, TL-P9).
+///
+/// A span is a reading, so no span becomes a unit here. What is written is the events, and the
+/// units a read establishes: each span stream's `x.tel/series`, the collector's instrument, and
+/// each resource's origin with its lineage. `tel trace` makes span units, when asked.
+#[cfg(feature = "tel")]
+fn tel_read_traces(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    reader: &str,
+    files: &[&String],
+) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::Substrate;
+    use smysl::tel::readers::otlp_traces;
+    use smysl::tel::trace;
+    use smysl::text::library::Library;
+
+    let Some(&at) = m.get_one::<u64>("at") else {
+        eprintln!("smysl tel read: --at is required: the attestation clock");
+        return ExitCode::Usage;
+    };
+    let Some(key) = m.get_one::<String>("instrument") else {
+        eprintln!("smysl tel read: {reader} needs --instrument, the key of what the export was");
+        eprintln!("  read from (`otel-collector:<service.instance.id>`)");
+        return ExitCode::Usage;
+    };
+    let yes = m.get_flag("yes");
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let mut units: std::collections::BTreeMap<Uid, smysl::UnitCore> =
+        std::collections::BTreeMap::new();
+    let mut relations = Vec::new();
+    let mut streams: Vec<trace::Stream> = Vec::new();
+    let mut inst = None;
+    for file in files {
+        let bytes = match std::fs::read(file.as_str()) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("smysl tel read: {file}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        let spans = if reader == otlp_traces::ID {
+            otlp_traces::read_proto(&bytes).map_err(|e| e.to_string())
+        } else {
+            std::str::from_utf8(&bytes)
+                .map_err(|e| format!("not UTF-8 text: {e}"))
+                .and_then(|t| otlp_traces::read_json(t).map_err(|e| e.to_string()))
+        };
+        let recorded = spans.and_then(|s| {
+            let n = s.len();
+            trace::record(&s, "collector", key)
+                .map(|r| (n, r))
+                .map_err(|e| e.to_string())
+        });
+        let (n, r) = match recorded {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("smysl tel read: {file}: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        println!(
+            "read      {file}: {n} span(s) in {} stream(s)",
+            r.streams.len()
+        );
+        inst = Some(r.inst);
+        units.insert(r.inst, r.instrument.clone());
+        units.extend(r.lineage.origins.clone());
+        relations.extend(r.lineage.relations.iter().cloned());
+        for st in r.streams {
+            units.insert(st.uid, st.unit.clone());
+            streams.push(st);
+        }
+    }
+    let Some(inst) = inst else {
+        return ExitCode::Usage;
+    };
+    let total: usize = streams.iter().map(|s| s.events.len()).sum();
+    if !yes {
+        println!(
+            "events    {total} span(s) would be added; {} unit(s) would be committed - run \
+             again with --yes to add and commit them",
+            units.len()
+        );
+        return ExitCode::Success;
+    }
+    // The events first: a stream unit with nothing behind it would be a fact with nothing
+    // behind it.
+    let path = tel_series_path(&root);
+    if let Some(dir) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            eprintln!("smysl tel read: {}: {e}", dir.display());
+            return ExitCode::Failure;
+        }
+    }
+    let mut library = match Library::create(&root) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel read: {}: {e}", root.display());
+            return ExitCode::Failure;
+        }
+    };
+    let _locks = match smysl::text::lock::acquire_all(&root, &library.shards(), "tel read") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel read: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let mut sub = match RedbBackend::open(&path) {
+        Ok(b) => Substrate::new(b),
+        Err(e) => {
+            eprintln!("smysl tel read: {}: {e}", path.display());
+            return ExitCode::Failure;
+        }
+    };
+    let mut added = 0u64;
+    for st in &streams {
+        match sub.add_events(&st.uid, &inst, &st.info, &st.events, &trace::tag) {
+            Ok(r) => added += r.added,
+            Err(e) => {
+                eprintln!("smysl tel read: {}: {e}", path.display());
+                return ExitCode::Failure;
+            }
+        }
+    }
+    drop(sub);
+    println!(
+        "events    {added} span(s) added to the substrate, {} already there",
+        total as u64 - added
+    );
+    let agent = match AgentId::new("tool:smysl-tel") {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl tel read: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let recipe = smysl::hash_bytes(format!("{reader} {key}").as_bytes());
+    let attest = smysl::stage::Attest::new(
+        agent.clone(),
+        smysl::Rung::Computed,
+        smysl::Hlc::new(at, 0, agent),
+    )
+    .with_recipe(recipe, recipe);
+    let staged = smysl::stage::prepare_declared(
+        library.store(),
+        units.into_values().collect(),
+        relations,
+        std::collections::BTreeMap::new(),
+        vec![smysl::schemas::tel::decl()],
+        &attest,
+    );
+    if staged.has_errors() {
+        eprintln!("smysl tel read: the batch did not check clean");
+        for d in &staged.report.diagnostics {
+            eprintln!("  {d}");
+        }
+        return ExitCode::Failure;
+    }
+    let n = staged.len();
+    if let Err(e) = library.append_records(&staged.records()) {
+        eprintln!("smysl tel read: {e}");
+        return ExitCode::Failure;
+    }
+    println!("{n} record(s) committed");
+    ExitCode::Success
+}
+
+/// `smysl tel trace TRACE-ID [--yes --at MS]`: a trace's spans as `x.tel/span` evidence, with
+/// `x.tel/precedes` from each parent to each child (RFC SMYSL-3 §9.6, TL-P9).
+///
+/// Prints one line per span, parents before children where the trace says so. `SMY-W617` names
+/// a span id held twice with different contents, and `SMY-W605` an hour of the trace that was
+/// evicted. With `--yes --at MS` the units and edges are committed, attested as rule TW asks.
+#[cfg(feature = "tel")]
+fn tel_trace(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::Substrate;
+    use smysl::tel::readers::otlp_traces;
+    use smysl::tel::trace;
+
+    let (Some(id), None) = (args.first(), args.get(1)) else {
+        eprintln!("smysl tel trace: `TRACE-ID`, 32 hex digits");
+        return ExitCode::Usage;
+    };
+    let Some(trace_id) = otlp_traces::unhex::<16>(id) else {
+        eprintln!("smysl tel trace: `{id}` is not a trace id: 32 hex digits");
+        return ExitCode::Usage;
+    };
+    let yes = m.get_flag("yes");
+    let at = m.get_one::<u64>("at").copied();
+    if yes && at.is_none() {
+        eprintln!("smysl tel trace: --yes needs --at, the attestation clock");
+        return ExitCode::Usage;
+    }
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let path = tel_series_path(&root);
+    if !path.exists() {
+        eprintln!(
+            "smysl tel trace: {} has no substrate; `tel read otlp-traces/1 --yes` writes one",
+            root.display()
+        );
+        return ExitCode::Failure;
+    }
+    let sub = match RedbBackend::open(&path) {
+        Ok(b) => Substrate::new(b),
+        Err(e) => {
+            eprintln!("smysl tel trace: {}: {e}", path.display());
+            return ExitCode::Failure;
+        }
+    };
+    let read = match trace::materialise(&sub, &trace_id) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("smysl tel trace: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let streams: std::collections::BTreeMap<Uid, smysl::UnitCore> = read
+        .units
+        .values()
+        .filter_map(|u| {
+            let f = smysl::schemas::tel::window_fields(u.payload.as_deref()?).ok()?;
+            let s = f.series?.parse::<Uid>().ok()?;
+            let row = sub.stream(&s).ok()??;
+            let unit = smysl::schemas::tel::series(&row.scheme, &row.key).ok()?;
+            Some((s, unit))
+        })
+        .collect();
+    drop(sub);
+    for (stream, hour) in read.evicted.iter().map(|(s, _, h)| (s, h)) {
+        println!(
+            "SMY-W605  stream {} hour {hour}: evicted; its spans of this trace are not here",
+            stream.canonical()
+        );
+    }
+    if read.units.is_empty() {
+        if read.evicted.is_empty() {
+            eprintln!("smysl tel trace: the substrate holds no span of trace {id}");
+            return ExitCode::Failure;
+        }
+        return ExitCode::Success;
+    }
+    for (stream, span) in &read.duplicates {
+        println!(
+            "SMY-W617  span {} is held twice in stream {} with different contents; both are kept",
+            otlp_traces::hex(span),
+            stream.canonical()
+        );
+    }
+    // The trace as a tree: each span under its parent, siblings in start order then uid. Order
+    // is the protocol's (§10.4), not the clocks': two spans in one millisecond are told apart by
+    // who called whom.
+    let start = |u: &Uid| {
+        read.units
+            .get(u)
+            .and_then(|c| c.source.as_ref())
+            .and_then(|s| s.observed)
+            .unwrap_or(0)
+    };
+    let mut children: std::collections::BTreeMap<Uid, Vec<Uid>> = std::collections::BTreeMap::new();
+    let mut has_parent = std::collections::BTreeSet::new();
+    for r in &read.relations {
+        children.entry(r.from).or_default().push(r.to);
+        has_parent.insert(r.to);
+    }
+    for c in children.values_mut() {
+        c.sort_by_key(|u| (start(u), *u));
+    }
+    let mut roots: Vec<Uid> = read
+        .units
+        .keys()
+        .filter(|u| !has_parent.contains(*u))
+        .copied()
+        .collect();
+    roots.sort_by_key(|u| (start(u), *u));
+    let mut shown = std::collections::BTreeSet::new();
+    let mut stack: Vec<(Uid, usize)> = roots.into_iter().rev().map(|u| (u, 0)).collect();
+    while let Some((uid, depth)) = stack.pop() {
+        if !shown.insert(uid) {
+            continue;
+        }
+        let unit = &read.units[&uid];
+        println!(
+            "span      {}  at {}  {}{}",
+            uid.canonical(),
+            start(&uid),
+            "  ".repeat(depth),
+            unit.gist.strip_prefix("span ").unwrap_or(&unit.gist)
+        );
+        for c in children.get(&uid).into_iter().flatten().rev() {
+            stack.push((*c, depth + 1));
+        }
+    }
+    if !yes {
+        println!(
+            "{} span(s), {} precedes edge(s); nothing was written - run again with --yes --at MS \
+             to commit them",
+            read.units.len(),
+            read.relations.len()
+        );
+        return ExitCode::Success;
+    }
+    let mut units: Vec<smysl::UnitCore> = streams.into_values().collect();
+    units.extend(read.units.into_values());
+    tel_commit_evidence(
+        "trace",
+        &root,
+        units,
+        read.relations,
+        &[],
+        at.unwrap_or(0),
+        "tel trace",
+    )
 }
 
 /// One line per window: its uid, instrument, and what it says.
@@ -16278,8 +16615,12 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
     let store = library.store();
+    // Windows and, since TL-P9, spans: the evidence the substrate can recompute.
     let windows: Vec<(Uid, smysl::UnitCore, Vec<smysl::Attestation>)> = StoreRead::units(store)
-        .filter(|(_, u)| u.core.schema.as_str() == smysl::schemas::tel::WINDOW)
+        .filter(|(_, u)| {
+            let t = u.core.schema.as_str();
+            t == smysl::schemas::tel::WINDOW || t == smysl::schemas::tel::SPAN
+        })
         .map(|(uid, u)| {
             (
                 *uid,
@@ -16367,10 +16708,19 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .iter()
         .filter(|d| d.code.severity() == smysl::Severity::Error)
         .count();
+    let spans = windows
+        .iter()
+        .filter(|(_, u, _)| u.schema.as_str() == smysl::schemas::tel::SPAN)
+        .count();
+    let span_note = if spans > 0 {
+        format!(" and {spans} span(s)")
+    } else {
+        String::new()
+    };
     println!(
-        "checked   {} window(s): {errors} error(s), {} warning(s); {} rival explanation(s), {} \
-         witness conflict(s)",
-        windows.len(),
+        "checked   {} window(s){span_note}: {errors} error(s), {} warning(s); {} rival \
+         explanation(s), {} witness conflict(s)",
+        windows.len() - spans,
         diags.len() - errors,
         rivals.len(),
         conflicts.len()

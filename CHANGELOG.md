@@ -1704,6 +1704,43 @@ only in the schema declaration each one carries, which now names nineteen types.
 reason the wire fixture `F15-telemetry.cbor` was re-blessed. The three ports still round-trip
 it byte for byte.
 
+### Traces: spans as events, and `smysl tel trace` (TL-P9 step 2)
+
+**The event substrate** (`smysl-series`, §19.6) holds spans beside the samples, in the same redb
+file:
+- Four new tables: event hours, their eviction records, a row per stream, and an index from a
+  trace id to the hours holding its spans.
+- A file written before them gains them, empty, when it is opened, so the format stays
+  `smysl-series/1`.
+- `Substrate::add_events` adds as a set, and `events` reads a range with its
+  `smysl/tel-events/1` digest.
+- `evict` takes whole hours under the same bound as chunks. Its report counts both, and
+  `tel evict` prints an `events` line when it evicts any.
+
+**Readers.** `otlp-traces/1` (protobuf, with the traces messages declared as the metrics ones
+are) and `otlp-traces-json/1`:
+- Each span is one event, at its start, whose body keeps the times to the nanosecond.
+- A stream is one resource and scope. The stream's `x.tel/series` unit, the collector and each
+  service's origin are committed with their lineage.
+- No span becomes a unit on read.
+- `fixtures/tel/otlp-traces/` holds two exports, one per service, with one trace across both.
+  Their protobuf twins were written by `protoc` and set a `trace_state`, a span event and a
+  link, which are not kept. The two encodings give the same events.
+
+**`smysl tel trace TRACE-ID`** materialises a trace's spans as `x.tel/span` units, `measured`,
+and prints them as a tree. Siblings are in start order, and children under their parents even
+when all start in one millisecond. With `--yes --at MS` it commits the units and an
+`x.tel/precedes` from each parent to each child. Materialising twice gives the same uids.
+
+**Checking spans:**
+- `tel check` recomputes span units against the substrate. A span that is there but is another
+  span is `SMY-E604`. One that is not there, or was evicted, is `SMY-W605`.
+- Reading the exports again brings the spans back, and the same units with them.
+- `SMY-W617` is registered (172 codes): one stream holds a span id twice with different
+  contents. Both are kept and both materialise, and `tel trace` names it.
+
+Exchanging events through `--with-substrate` comes with logs, in step 3.
+
 ---
 
 ## 1.16.0 — 2026-11-16

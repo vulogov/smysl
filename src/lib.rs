@@ -590,8 +590,8 @@ mod tests {
         // `SMY-W615` and `SMY-W616` (TL-P4 step 1), window evidence and samples; 169 with
         // `SMY-E603`, `SMY-E604` and `SMY-W605` (step 3), rule TW and recomputation; 170 with
         // `SMY-W606` (TL-P6 step 2), rule TQ; 171 with `SMY-W609` (TL-P7 step 1), a series with
-        // no origin instrument.
-        assert_eq!(Code::ALL.len(), 171);
+        // no origin instrument; 172 with `SMY-W617` (TL-P9 step 2), one span id held twice.
+        assert_eq!(Code::ALL.len(), 172);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 

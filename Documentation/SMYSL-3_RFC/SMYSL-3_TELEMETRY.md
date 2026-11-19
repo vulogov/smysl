@@ -941,8 +941,10 @@ eᵢ     = cbor_array( ts_ms, ns, body )        body as a CBOR byte string
 |---|---|
 | `events` | (stream uid, instrument uid, hour start ms) → the hour's events, a CBOR sequence in event order |
 | `evicted_events` | (stream uid, instrument uid, hour start ms) → eviction instant |
+| `streams` | stream uid → (kind, scheme, key, first ms, last ms, event count) |
+| `tags` | (trace id, stream uid, instrument uid, hour start ms) → (), so a trace is read without reading every stream. An entry outlives its hour's eviction, which is how a reader tells an evicted trace from one never received. |
 
-The stream's row in `series` records its kind as its class. Hours are a local layout, as chunks
+A stream's row is its own, not a `series` row, because a stream has no chunk span. Hours are a local layout, as chunks
 are (§19.2): what is compared is events, through the digest.
 
 ## 20. Readers and profiles

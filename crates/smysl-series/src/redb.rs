@@ -5,13 +5,19 @@ use std::path::Path;
 use ::redb::{Database, ReadableTable, TableDefinition};
 use smysl_core::Uid;
 
-use crate::store::{chunk_key, key_inst, Backend, ChunkKey};
+use crate::store::{chunk_key, key_inst, tag_hour, tag_key, Backend, ChunkKey, TagKey};
 use crate::Error;
 
 const CHUNKS: TableDefinition<'_, &[u8; 72], &[u8]> = TableDefinition::new("chunks");
 const SERIES: TableDefinition<'_, &[u8; 32], &[u8]> = TableDefinition::new("series");
 const EVICTED: TableDefinition<'_, &[u8; 72], u64> = TableDefinition::new("evicted");
 const META: TableDefinition<'_, &str, &[u8]> = TableDefinition::new("meta");
+// The event substrate (§19.6, TL-P9). Added to format 1 rather than starting format 2: a file
+// written before them gains them, empty, the first time it is opened.
+const EVENTS: TableDefinition<'_, &[u8; 72], &[u8]> = TableDefinition::new("events");
+const EVENTS_EVICTED: TableDefinition<'_, &[u8; 72], u64> = TableDefinition::new("evicted_events");
+const STREAMS: TableDefinition<'_, &[u8; 32], &[u8]> = TableDefinition::new("streams");
+const TAGS: TableDefinition<'_, &[u8; 88], ()> = TableDefinition::new("tags");
 
 /// The `meta` table's format version (§19.3).
 pub const FORMAT: &[u8] = b"smysl-series/1";
@@ -48,7 +54,12 @@ impl RedbBackend {
                                 String::from_utf8_lossy(FORMAT)
                             )));
                         }
-                        return Ok(RedbBackend { db });
+                        // A file from before the event tables falls through to gain them.
+                        match txn.open_table(TAGS) {
+                            Ok(_) => return Ok(RedbBackend { db }),
+                            Err(::redb::TableError::TableDoesNotExist(_)) => {}
+                            Err(e) => return Err(backend(e)),
+                        }
                     }
                 }
                 Err(::redb::TableError::TableDoesNotExist(_)) => {}
@@ -79,6 +90,10 @@ impl RedbBackend {
             txn.open_table(CHUNKS).map_err(backend)?;
             txn.open_table(SERIES).map_err(backend)?;
             txn.open_table(EVICTED).map_err(backend)?;
+            txn.open_table(EVENTS).map_err(backend)?;
+            txn.open_table(EVENTS_EVICTED).map_err(backend)?;
+            txn.open_table(STREAMS).map_err(backend)?;
+            txn.open_table(TAGS).map_err(backend)?;
         }
         txn.commit().map_err(backend)?;
         Ok(RedbBackend { db })
@@ -225,8 +240,10 @@ impl Backend for RedbBackend {
     fn evict(
         &mut self,
         chunks: Vec<ChunkKey>,
+        hours: Vec<ChunkKey>,
         at_ms: u64,
         rows: Vec<(Uid, Vec<u8>)>,
+        streams: Vec<(Uid, Vec<u8>)>,
     ) -> Result<(), Error> {
         let txn = self.db.begin_write().map_err(backend)?;
         {
@@ -237,9 +254,138 @@ impl Backend for RedbBackend {
                     e.insert(k, at_ms).map_err(backend)?;
                 }
             }
+            let mut h = txn.open_table(EVENTS).map_err(backend)?;
+            let mut he = txn.open_table(EVENTS_EVICTED).map_err(backend)?;
+            for k in &hours {
+                if h.remove(k).map_err(backend)?.is_some() {
+                    he.insert(k, at_ms).map_err(backend)?;
+                }
+            }
             let mut s = txn.open_table(SERIES).map_err(backend)?;
             for (u, v) in &rows {
                 s.insert(u.as_bytes(), v.as_slice()).map_err(backend)?;
+            }
+            let mut st = txn.open_table(STREAMS).map_err(backend)?;
+            for (u, v) in &streams {
+                st.insert(u.as_bytes(), v.as_slice()).map_err(backend)?;
+            }
+        }
+        txn.commit().map_err(backend)
+    }
+
+    fn event_hour(&self, key: &ChunkKey) -> Result<Option<Vec<u8>>, Error> {
+        let txn = self.db.begin_read().map_err(backend)?;
+        let t = txn.open_table(EVENTS).map_err(backend)?;
+        Ok(t.get(key).map_err(backend)?.map(|v| v.value().to_vec()))
+    }
+
+    fn event_hours(
+        &self,
+        stream: &Uid,
+        inst: &Uid,
+        lo: u64,
+        hi: u64,
+    ) -> Result<Vec<(u64, Vec<u8>)>, Error> {
+        let txn = self.db.begin_read().map_err(backend)?;
+        let t = txn.open_table(EVENTS).map_err(backend)?;
+        let (lo, hi) = (chunk_key(stream, inst, lo), chunk_key(stream, inst, hi));
+        let mut out = Vec::new();
+        for row in t.range::<&[u8; 72]>(&lo..=&hi).map_err(backend)? {
+            let (k, v) = row.map_err(backend)?;
+            out.push((start(k.value()), v.value().to_vec()));
+        }
+        Ok(out)
+    }
+
+    fn event_keys(&self) -> Result<Vec<ChunkKey>, Error> {
+        let txn = self.db.begin_read().map_err(backend)?;
+        let t = txn.open_table(EVENTS).map_err(backend)?;
+        let mut out = Vec::new();
+        for row in t.iter().map_err(backend)? {
+            out.push(*row.map_err(backend)?.0.value());
+        }
+        Ok(out)
+    }
+
+    fn events_evicted(
+        &self,
+        stream: &Uid,
+        inst: &Uid,
+        lo: u64,
+        hi: u64,
+    ) -> Result<Vec<u64>, Error> {
+        let txn = self.db.begin_read().map_err(backend)?;
+        let t = txn.open_table(EVENTS_EVICTED).map_err(backend)?;
+        let (lo, hi) = (chunk_key(stream, inst, lo), chunk_key(stream, inst, hi));
+        let mut out = Vec::new();
+        for row in t.range::<&[u8; 72]>(&lo..=&hi).map_err(backend)? {
+            out.push(start(row.map_err(backend)?.0.value()));
+        }
+        Ok(out)
+    }
+
+    fn event_evictions(&self) -> Result<Vec<(ChunkKey, u64)>, Error> {
+        let txn = self.db.begin_read().map_err(backend)?;
+        let t = txn.open_table(EVENTS_EVICTED).map_err(backend)?;
+        let mut out = Vec::new();
+        for row in t.iter().map_err(backend)? {
+            let (k, v) = row.map_err(backend)?;
+            out.push((*k.value(), v.value()));
+        }
+        Ok(out)
+    }
+
+    fn stream_row(&self, stream: &Uid) -> Result<Option<Vec<u8>>, Error> {
+        let txn = self.db.begin_read().map_err(backend)?;
+        let t = txn.open_table(STREAMS).map_err(backend)?;
+        Ok(t.get(stream.as_bytes())
+            .map_err(backend)?
+            .map(|v| v.value().to_vec()))
+    }
+
+    fn stream_rows(&self) -> Result<Vec<(Uid, Vec<u8>)>, Error> {
+        let txn = self.db.begin_read().map_err(backend)?;
+        let t = txn.open_table(STREAMS).map_err(backend)?;
+        let mut out = Vec::new();
+        for row in t.iter().map_err(backend)? {
+            let (k, v) = row.map_err(backend)?;
+            out.push((Uid::from_bytes(*k.value()), v.value().to_vec()));
+        }
+        Ok(out)
+    }
+
+    fn tagged(&self, tag: &[u8; 16]) -> Result<Vec<ChunkKey>, Error> {
+        let txn = self.db.begin_read().map_err(backend)?;
+        let t = txn.open_table(TAGS).map_err(backend)?;
+        let (lo, hi) = (tag_key(tag, &[0; 72]), tag_key(tag, &[0xff; 72]));
+        let mut out = Vec::new();
+        for row in t.range::<&[u8; 88]>(&lo..=&hi).map_err(backend)? {
+            out.push(tag_hour(row.map_err(backend)?.0.value()));
+        }
+        Ok(out)
+    }
+
+    fn write_events(
+        &mut self,
+        hours: Vec<(ChunkKey, Vec<u8>)>,
+        streams: Vec<(Uid, Vec<u8>)>,
+        tags: Vec<TagKey>,
+    ) -> Result<(), Error> {
+        let txn = self.db.begin_write().map_err(backend)?;
+        {
+            let mut h = txn.open_table(EVENTS).map_err(backend)?;
+            let mut he = txn.open_table(EVENTS_EVICTED).map_err(backend)?;
+            for (k, v) in &hours {
+                h.insert(k, v.as_slice()).map_err(backend)?;
+                he.remove(k).map_err(backend)?;
+            }
+            let mut st = txn.open_table(STREAMS).map_err(backend)?;
+            for (u, v) in &streams {
+                st.insert(u.as_bytes(), v.as_slice()).map_err(backend)?;
+            }
+            let mut tg = txn.open_table(TAGS).map_err(backend)?;
+            for k in &tags {
+                tg.insert(k, ()).map_err(backend)?;
             }
         }
         txn.commit().map_err(backend)
