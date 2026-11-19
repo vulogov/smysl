@@ -123,6 +123,8 @@ pub use smysl_core::schemas;
 pub use smysl_core::schema;
 
 // ---- check ----------------------------------------------------------------
+/// A store's check kept as derived state, so a batch is checked against it (AC-8).
+pub use smysl_check::incremental;
 pub use smysl_check::{
     check, check_and_fail_on, conformance, fidelity, granularity_distribution, CheckOptions,
     ConformanceClass, ConformanceVerdict, ConsumerProfile, FidelityReport, Pass,

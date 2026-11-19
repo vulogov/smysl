@@ -842,6 +842,70 @@ Also part of TL-P0:
 - **Cross-architecture replay.** `xtask determinism` gains a run of the `fixtures/tel/` pipeline
   on x86_64 and aarch64, compared byte for byte (GE-M3).
 
+### 17.1 AC-8: a store's check kept as derived state
+
+The architecture proposal that names AC-8 is not in the repository, so this section is its
+design, as implemented in 1.17.
+
+**What it measured.** `make oko-ledger` commits one ledger operation at a time, staged and
+checked against the whole store, as §24 says OKO will. At 6 × 10³ units a commit took 43 ms at
+p50 against 5.8 ms at the start, 30 ms of it staging. A profile of the late commits found every
+cost O(store):
+
+| Where | Share | Why it grows |
+|---|---|---|
+| rule E's solve, in `check` and again in the range index's append | ~40 % | the whole network is solved: `findings` per axis, and `axis_on_append` for every batch that bears on time, as `x.tel/*` edges do |
+| the ten passes' loops | ~25 % | each pass iterates `units()` |
+| `Overlay::new` and its drop | ~15 % | the interpretive layer and the library are cloned for every batch |
+| the adjacency | ~5 % | rebuilt over the union |
+
+The log's `fsync` is per commit and constant; AC-8 leaves it.
+
+**The contract is exact.** `Checked` holds the report of the store as it stands. For a batch
+`B`, `checked.with_batch(S, B, opts)` equals `check(&Overlay::new(S, B), opts)`: the same
+diagnostics, messages and counts. `crates/smysl-check/tests/incremental.rs` holds it over every
+fixture store the check is pinned on and over generated stores, each dealt at random into a base
+and up to five batches. `examples/oko_ledger --verify` holds it after every operation. A batch
+the recomputation cannot bound is checked in full: a fallback costs time, never correctness. A
+weaker contract (report only what the batch touches) was rejected: it would change what staging
+reports, and could not be tested against anything.
+
+**What is checked is what is committed.** `stage::prepare_checked` checks `Staged::records()`,
+attestations included, and the caller's `extra` records (OKO's investigation View). The other
+`prepare` functions check the units, relations and declarations only, as they did. The cache
+advances by exactly the records appended.
+
+**The design.** A sub-store "view" of the batch's neighbourhood was ruled out: dangling
+references, `b3:` prefix resolution and transitive grounds all need the whole store, and a
+restricted adjacency would report spurious `SMY-E060`. The passes instead run over the whole
+union, restricted in what they iterate. The cached report is kept by rule family:
+
+| Family | Codes | Recomputed for |
+|---|---|---|
+| per unit | shape, granularity, closure, E030, trust, W010, E603, E607, E612 (key 7), W606, W609, W057, unit E403, E404, W405, W411, E410/W449 on `published` | the dirty units: the batch's; those grounding on a new unit or a new commit's subject; the endpoints of new relations; the subjects of new attestations; units whose body has a `b3:` token that is a prefix of a new uid |
+| dangling | E060 (subject: the missing uid) | uids the batch adds or references |
+| per record | W432, W409, W014, E612, E611, E452, E012, manifest E403, E410/W449 | the batch's new records, added |
+| aggregates | W013, W614, W418, W111 | the keys the batch touches: a relation kind, a window key, an alias |
+| cycles | E061, W062 | the strongly connected components a new edge can close |
+| time | rule E | the constraint components the batch touches (below) |
+
+**Rule E by component.** Variables are tied by `reply` and `quotes` edges, manifest parents and
+supersedes, and relative datings with a unit target. Contested status and bounds are local to a
+component of those edges, so a batch is solved over the components it touches. The range index's
+`axis_on_append` uses the same components. One question is open until it is measured: under a
+negative cycle, Bellman-Ford's cutoff is the network's variable count, so a variable upstream of a
+cycle might be bounded differently when its component is solved alone.
+
+**Fallbacks**, each recorded in the report's `path`: options other than the cache's; a View
+whose granularity profile the store does not have; a schema declaration the store does not hold;
+a withdrawal, retraction, commitment or resolution that can change a dating's liveness, which is
+transitive through rule R.
+
+**Steps.** (1) This design, `Checked` with the full check on every batch, `prepare_checked`, the
+harness and `--verify`. (2) Per-unit, dangling, per-record and aggregate families. (3) Rule E
+by component, in `check` and in the range index. (4) `Overlay` without cloning the store's
+interpretive layer and library; cycles from the new edges. (5) Measured at 10⁴ and 10⁵ units.
+
 ## 18. Crates
 
 ```

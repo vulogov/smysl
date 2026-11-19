@@ -25,14 +25,14 @@
 # Regenerate with `make api`. Check with `make api-check`.
 smysl-core       11308
 smysl-graph      5673
-smysl-check      273
+smysl-check      351
 smysl-pack       580
 smysl-thread     293
 smysl-render     997
 smysl-retrieve   403
 smysl-embed      73
 smysl-provider   806
-smysl-ingest     1999
+smysl-ingest     2004
 smysl-tui        232
 smysl-text       4195
 smysl-query      4029

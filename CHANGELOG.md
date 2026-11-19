@@ -1878,6 +1878,32 @@ rule that orders spans across hosts, or a unit that must keep its order after it
 evicted. The RFC's §10.2 no longer ties assignment to GE-M2's 1 % threshold, which governs
 release only.
 
+
+### AC-8: a store's check kept as derived state (step 1)
+
+OKO stages every ledger operation against the whole store, and that cost grows with the store.
+`make oko-ledger` at 6 × 10³ units: a commit at 43 ms p50, against 5.8 ms at the start, and 30 ms
+of it staging. A profile of the late commits found rule E's solve twice per commit (in `check`
+and in the range index's append, ~40 %), the ten passes' loops, `Overlay::new` cloning the
+interpretive layer and the library, and the adjacency rebuilt. All of it is O(store). RFC SMYSL-3
+§17.1 now holds AC-8's design, since the architecture proposal that names it is not in the
+repository.
+
+- **`smysl_check::incremental::Checked`** keeps a store's report. `with_batch` gives the report of
+  the store with a batch, and `advance` adopts it once the batch is appended. Each batch report
+  says how it was reached: incrementally, or in full and why. In this step every batch is checked
+  in full; the next steps make it incremental, family by family.
+- **The contract is exact:** equal to `check` over the store with the batch. It is held by
+  `crates/smysl-check/tests/incremental.rs` over every fixture store the check is pinned on
+  (one by one and all together) and 60 generated stores. Each store is dealt at random into a
+  base and up to five batches, some records arriving twice. A cache that returns the stale report
+  fails all three tests, which was tried.
+- **`stage::prepare_checked`** checks what will be committed: the staged records with their
+  attestations, and the caller's `extra` records, which `Staged::records` now carries. Every
+  other `prepare` checks what it did. `Staged` gains `extra` and `checked`.
+- **`examples/oko_ledger`** stages through `prepare_checked`, and with `--verify` it asserts the
+  contract after every operation. The time `--verify` spends is not counted in the commit timings.
+
 ---
 
 ## 1.16.0 — 2026-11-16

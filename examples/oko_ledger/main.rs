@@ -33,6 +33,10 @@
 //! follows it, and the report gives the percentiles over the first and the last tenth of the
 //! run, so growth with the ledger's size shows.
 //!
+//! Each operation is staged with `prepare_checked`, against the store's kept check (AC-8, RFC
+//! SMYSL-3 §17.1). `--verify` also checks it in full and asserts the two agree; the oracle's time
+//! is not counted.
+//!
 //! **Checks at the end:** the library is reopened, `smysl check` runs over it, every
 //! fabricated quote is a `SMY-W606` and nothing else is, and one investigation's report (§11.2,
 //! §22.2) is printed.
@@ -44,13 +48,14 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use smysl::incremental::{self, Checked};
 use smysl::schemas::tel;
-use smysl::stage::{prepare_attested, Attesting};
+use smysl::stage::{prepare_checked, Attesting};
 use smysl::tel::investigate as inv;
 use smysl::text::library::Library;
 use smysl::{
-    canonical_uid, AgentId, Attestation, Hlc, Op, PartText, Record, RelKind, Relation, Rung,
-    StoreRead, Uid, UnitCore,
+    canonical_uid, AgentId, Attestation, CheckOptions, Hlc, Op, PartText, Record, RelKind,
+    Relation, Rung, StoreRead, Uid, UnitCore,
 };
 
 /// splitmix64: a fixed, seedable sequence, so a run is reproducible from its arguments.
@@ -81,6 +86,8 @@ struct Args {
     investigations: usize,
     fabricate: usize,
     seed: u64,
+    /// Hold AC-8's contract after every operation: the kept check against the full one.
+    verify: bool,
 }
 
 fn args() -> Args {
@@ -90,9 +97,14 @@ fn args() -> Args {
         investigations: 1_500,
         fabricate: 5,
         seed: 24,
+        verify: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
+        if flag == "--verify" {
+            a.verify = true;
+            continue;
+        }
         let v = it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
         let n = || v.parse::<u64>().unwrap_or_else(|_| panic!("{flag}: `{v}`"));
         match flag.as_str() {
@@ -142,6 +154,11 @@ struct Ledger {
     stage_us: Vec<u128>,
     read_us: Vec<u128>,
     records: usize,
+    /// The store's check, kept (AC-8): each batch is checked against it.
+    checked: Checked,
+    /// Batches checked incrementally, and in full.
+    paths: [usize; 2],
+    verify: bool,
 }
 
 impl Ledger {
@@ -156,13 +173,15 @@ impl Ledger {
     ) -> Vec<Uid> {
         let uids: Vec<Uid> = units.iter().map(canonical_uid).collect();
         let t = Instant::now();
-        let staged = prepare_attested(
+        let mut staged = prepare_checked(
             self.lib.store(),
+            &self.checked,
             units,
             relations,
             BTreeMap::new(),
             vec![tel::decl()],
             by,
+            extra,
         );
         assert!(
             !staged.has_errors(),
@@ -170,11 +189,26 @@ impl Ledger {
             staged.report.diagnostics
         );
         let staged_us = t.elapsed().as_micros();
-        let mut records = staged.records();
-        records.extend(extra);
+        let records = staged.records();
+        let batch = staged.checked.take().expect("prepare_checked checks");
+        // Not timed: the commit is what OKO pays, and the oracle is not part of it.
+        let paused = Instant::now();
+        if self.verify {
+            let full = smysl::check(
+                &smysl::Overlay::new(self.lib.store(), records.clone()),
+                CheckOptions::default(),
+            );
+            assert_eq!(
+                batch.report, full,
+                "AC-8: the kept check is not the full one"
+            );
+        }
+        self.paths[usize::from(batch.path != incremental::Path::Incremental)] += 1;
         self.records += records.len();
+        let unpaid = paused.elapsed();
         self.lib.append_records(&records).expect("the append");
-        self.commit_us.push(t.elapsed().as_micros());
+        self.checked.advance(batch);
+        self.commit_us.push((t.elapsed() - unpaid).as_micros());
         self.stage_us.push(staged_us);
         let t = Instant::now();
         if let Some(u) = uids.first() {
@@ -213,12 +247,17 @@ fn main() {
     let root = a.dir.join(&a.rotation);
     let _ = std::fs::remove_dir_all(&a.dir);
     std::fs::create_dir_all(&a.dir).expect("the directory");
+    let lib = Library::create(&root).expect("a library per rotation");
+    let checked = Checked::new(lib.store(), &CheckOptions::default());
     let mut ledger = Ledger {
-        lib: Library::create(&root).expect("a library per rotation"),
+        lib,
         commit_us: Vec::new(),
         stage_us: Vec::new(),
         read_us: Vec::new(),
         records: 0,
+        checked,
+        paths: [0, 0],
+        verify: a.verify,
     };
     println!(
         "OKO ledger stand-in (RFC SMYSL-3 §24): OKO itself is not here; this is smysl's side."
@@ -406,6 +445,16 @@ fn main() {
         ops,
         ledger.records,
         elapsed.as_secs_f64()
+    );
+    println!(
+        "check   {} batches against the kept check, {} in full{}",
+        ledger.paths[0],
+        ledger.paths[1],
+        if a.verify {
+            "; every one equal to the full check (--verify)"
+        } else {
+            ""
+        }
     );
     for (name, v) in [
         ("commit", &ledger.commit_us),

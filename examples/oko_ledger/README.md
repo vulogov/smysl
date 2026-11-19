@@ -27,4 +27,5 @@ Every quote the run fabricated on purpose (`--fabricate N`: one hypothesis in N)
 `SMY-W606`, and nothing else may be raised. Exit 0 when that holds.
 
 Arguments: `--dir`, `--rotation` (`sre-eu`), `--investigations` (1500), `--fabricate` (5),
-`--seed` (24).
+`--seed` (24), and `--verify`, which checks each operation in full as well and asserts that the
+kept check (AC-8, RFC SMYSL-3 §17.1) reported the same.

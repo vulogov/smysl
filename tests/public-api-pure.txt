@@ -242,6 +242,7 @@ pub use smysl::from_cbor_seq
 pub use smysl::granularity_distribution
 pub use smysl::hash_bytes
 pub use smysl::hop_diff
+pub use smysl::incremental
 pub use smysl::json_escape
 pub use smysl::kernel_major
 pub use smysl::label_bindings

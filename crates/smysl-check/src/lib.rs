@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
+pub mod incremental;
 pub mod passes;
 
 use std::collections::BTreeMap;
