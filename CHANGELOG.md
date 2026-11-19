@@ -1741,6 +1741,46 @@ when all start in one millisecond. With `--yes --at MS` it commits the units and
 
 Exchanging events through `--with-substrate` comes with logs, in step 3.
 
+### Logs: journald, CloudEvents, Drain and `smysl tel templates` (TL-P9 step 3)
+
+**Two readers** write the event substrate, never a unit:
+- **`journald/1`** reads `journalctl -o json`. An entry is one event at
+  `__REALTIME_TIMESTAMP`. Its body is the message, the priority, and every field not starting
+  `__`, so the cursor and monotonic clock are not identity and a journal read twice adds
+  nothing. A message that is not UTF-8 is read lossily and kept exactly. A stream is a host and
+  unit, with origin `journald:<host>`.
+- **`cloudevents/1`** reads CloudEvents 1.0 JSON: one event, a batch or JSON lines. `time` is
+  required, as an RFC 3339 instant to the nanosecond, and the body is the whole event, so a
+  producer's retry is one event. A stream is a source and type, with origin
+  `cloudevents:<source>`.
+- Fixtures: `fixtures/tel/journald/j0.json` and `fixtures/tel/cloudevents/c0.json`, both
+  hand-written in the formats' shapes.
+
+**Drain** (`smysl_tel::drain`) is our own implementation, recipe
+`tel/drain/1?depth=4&sim=0.4&children=100&masks=uuid,ip,hex,num`:
+- UUIDs, IPv4 addresses, hex runs and numbers are masked as whole tokens.
+- Messages are routed by length and first token.
+- Similarity is compared in integer arithmetic, and a tie goes to the oldest cluster.
+- Writing it found one thing to fix in the RFC: "depth 4" is Drain3's count of layers (root,
+  length, one token layer, leaves), so a message is routed by its first token, not its first
+  two. §21 now says so.
+
+**`smysl tel templates STREAM FROM TO`** runs Drain over the stream's messages in event order
+and prints each template with its count. With `--yes --at MS` it commits each as an
+`x.tel/log-template`: `derived`, grounded on the stream, attested `Transformed` at `Computed`,
+and carrying the window's event digest. `tel check` recomputes templates:
+- A record added since, or a changed template or count, is `SMY-E604`.
+- An evicted window is `SMY-W605`.
+
+**Exchange.** `lib export --with-substrate` now carries spans and log records:
+- One file per stream, instrument and UTC day, named by its BLAKE3.
+- The listing gains three lists after the sample days: the streams, the event days held, and
+  those evicted.
+- `lib import` verifies the event day files with the sample day files before importing
+  anything, adds the events as a set, and re-indexes each span under its trace id, so `tel
+  trace` finds it in the importing library.
+- Both commands print an `events` line, and their JSON an `events` member, when there are any.
+
 ---
 
 ## 1.16.0 — 2026-11-16

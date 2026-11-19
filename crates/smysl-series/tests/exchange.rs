@@ -123,3 +123,64 @@ fn a_file_that_is_not_its_name_adds_nothing() {
     assert!(matches!(import(&mut dst, &dir), Err(Error::Corrupt(_))));
     assert!(dst.series(None).unwrap().is_empty(), "nothing was added");
 }
+
+/// Events (§19.6) travel beside the samples: by day, as a set, indexed again under their tag,
+/// and listed as evicted when they were.
+#[test]
+fn events_round_trip_by_day_and_are_found_by_tag_again() {
+    use smysl_series::exchange::import_tagged;
+    use smysl_series::{Event, StreamInfo};
+    let si = StreamInfo {
+        scheme: "otel".into(),
+        key: r#"{"signal":"spans"}"#.into(),
+        kind: "span".into(),
+    };
+    let tag = |e: &Event| Some([e.body[0]; 16]);
+    let mut a = filled(1);
+    // Two days of events, an hour apart.
+    let evs: Vec<Event> = (0..48u64)
+        .map(|h| Event::at_nanos(h * 3_600_000_000_000 + 5, vec![(h % 4) as u8, h as u8]))
+        .collect();
+    a.add_events(&uid(5), &uid(9), &si, &evs, &tag).unwrap();
+    let dir = scratch("events");
+    let l = export(&a, &dir).unwrap();
+    assert_eq!(
+        (l.streams.len(), l.events_held.len()),
+        (1, 2),
+        "one stream, two days"
+    );
+
+    let mut b = Substrate::new(MemBackend::default());
+    let r = import_tagged(&mut b, &dir, &tag).unwrap();
+    assert_eq!(
+        (r.event_files, r.events_added, r.events_already),
+        (2, 48, 0)
+    );
+    assert_eq!(b.events(&uid(5), &uid(9), 0, u64::MAX).unwrap().events, evs);
+    assert_eq!(
+        b.tagged(&[1; 16]).unwrap().len(),
+        12,
+        "every hour holding a tag-1 event"
+    );
+    let r = import_tagged(&mut b, &dir, &tag).unwrap();
+    assert_eq!((r.events_added, r.events_already), (0, 48));
+
+    // Evict day one in A: listed as evicted, and a peer that kept it brings it back.
+    a.evict(DAY_MS, 1).unwrap();
+    let dir2 = scratch("events-evicted");
+    let l = export(&a, &dir2).unwrap();
+    assert_eq!((l.events_held.len(), l.events_evicted.len()), (1, 1));
+    import_tagged(&mut a, &dir, &tag).unwrap();
+    assert_eq!(a.events(&uid(5), &uid(9), 0, u64::MAX).unwrap().events, evs);
+
+    // A day file that is not its name adds nothing at all.
+    let victim = dir.join(file_name(&l.events_held[0].name));
+    let mut bytes = fs::read(&victim).unwrap();
+    bytes[0] ^= 1;
+    fs::write(&victim, bytes).unwrap();
+    let mut c = Substrate::new(MemBackend::default());
+    assert!(matches!(import(&mut c, &dir), Err(Error::Corrupt(_))));
+    assert!(c.streams().unwrap().is_empty() && c.series(None).unwrap().is_empty());
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&dir2);
+}

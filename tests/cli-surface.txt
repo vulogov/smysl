@@ -1010,7 +1010,7 @@ migrate    --shard
 migrate    --seed-check
 migrate    --help
 tel        <ACTION>
-tel        [possible values: read, at, window, check, detect, investigate, declare, witnesses, evict, trace, profile]
+tel        [possible values: read, at, window, check, detect, investigate, declare, witnesses, evict, trace, templates, profile]
 tel        [ARG]
 tel        --config
 tel        --profile

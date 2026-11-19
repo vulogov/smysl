@@ -12,13 +12,21 @@
 //!   associative and idempotent. A sample written where a span was evicted clears its eviction
 //!   record. The listing's evicted triples are information only: they evict nothing here.
 //!
+//! **Events** (§19.6, TL-P9) travel the same way: one file per (stream, instrument, UTC day),
+//! the day's event arrays `[ts_ms, ns, body]` in event order, named by its BLAKE3, and listed
+//! beside the sample days. Import adds them as a set, indexing each span under its trace with
+//! the caller's tagger ([`import_tagged`]).
+//!
 //! The listing is
 //!
 //! ```text
 //! [ "smysl/substrate/1",
 //!   [ [series, scheme, key, class], … ],              series uid order
 //!   [ [series, instrument, day ms, name, count], … ], key order
-//!   [ [series, instrument, day ms], … ] ]             key order
+//!   [ [series, instrument, day ms], … ],              key order
+//!   [ [stream, scheme, key, kind], … ],               stream uid order (TL-P9)
+//!   [ [stream, instrument, day ms, name, count], … ], key order
+//!   [ [stream, instrument, day ms], … ] ]             key order
 //! ```
 //!
 //! with uids and names as 32-byte strings and `day ms` the UTC midnight that starts the day.
@@ -32,6 +40,8 @@ use smysl_core::cbor::writer::Enc;
 use smysl_core::{Decimal, Uid};
 
 use crate::chunk;
+use crate::event::{self, Event, HOUR_MS};
+use crate::event_store::{StreamInfo, Tagger};
 use crate::sample::{flags, Sample};
 use crate::store::{key_inst, key_start, Backend, SeriesInfo, Substrate};
 use crate::Error;
@@ -62,6 +72,10 @@ pub struct Listing {
     pub series: Vec<(Uid, SeriesInfo)>,
     pub held: Vec<Held>,
     pub evicted: Vec<(Uid, Uid, u64)>,
+    /// Event streams (TL-P9); a [`Held`]'s `series` is the stream.
+    pub streams: Vec<(Uid, StreamInfo)>,
+    pub events_held: Vec<Held>,
+    pub events_evicted: Vec<(Uid, Uid, u64)>,
 }
 
 /// What [`import`] did.
@@ -77,6 +91,14 @@ pub struct ImportReport {
     pub conflicts: u64,
     /// Triples the exporter listed as evicted.
     pub evicted: u64,
+    /// Event day files read (TL-P9).
+    pub event_files: u64,
+    /// Events the substrate did not already hold.
+    pub events_added: u64,
+    /// Events it held already.
+    pub events_already: u64,
+    /// Event days the exporter listed as evicted.
+    pub events_evicted: u64,
 }
 
 /// The file name of a day file: `<hex of name>.cbor`.
@@ -136,7 +158,7 @@ pub fn decode_day(bytes: &[u8], day_ms: u64) -> Result<Vec<Sample>, Error> {
 impl Listing {
     pub fn encode(&self) -> Vec<u8> {
         let mut e = Enc::new();
-        e.array_head(4);
+        e.array_head(7);
         e.text(TAG);
         e.array_head(self.series.len());
         for (uid, info) in &self.series {
@@ -155,13 +177,37 @@ impl Listing {
             e.bytes(&h.name);
             e.uint(h.count);
         }
-        e.array_head(self.evicted.len());
-        for (s, i, day) in &self.evicted {
-            e.array_head(3);
-            e.uid(s);
-            e.uid(i);
-            e.uint(*day);
+        let triples = |e: &mut Enc, ts: &[(Uid, Uid, u64)]| {
+            e.array_head(ts.len());
+            for (s, i, day) in ts {
+                e.array_head(3);
+                e.uid(s);
+                e.uid(i);
+                e.uint(*day);
+            }
+        };
+        let held = |e: &mut Enc, hs: &[Held]| {
+            e.array_head(hs.len());
+            for h in hs {
+                e.array_head(5);
+                e.uid(&h.series);
+                e.uid(&h.inst);
+                e.uint(h.day_ms);
+                e.bytes(&h.name);
+                e.uint(h.count);
+            }
+        };
+        triples(&mut e, &self.evicted);
+        e.array_head(self.streams.len());
+        for (uid, info) in &self.streams {
+            e.array_head(4);
+            e.uid(uid);
+            e.text(&info.scheme);
+            e.text(&info.key);
+            e.text(&info.kind);
         }
+        held(&mut e, &self.events_held);
+        triples(&mut e, &self.events_evicted);
         e.into_bytes()
     }
 
@@ -176,7 +222,7 @@ impl Listing {
                 Err(e) => Err(bad(e.to_string())),
             }
         };
-        head(&mut d, 4)?;
+        head(&mut d, 7)?;
         let tag = d.text().map_err(c)?;
         if tag != TAG {
             return Err(bad(format!("tagged `{tag}`, not `{TAG}`")));
@@ -192,32 +238,54 @@ impl Listing {
             );
             l.series.push((uid, SeriesInfo { scheme, key, class }));
         }
-        for _ in 0..d.array_head().map_err(c)? {
-            head(&mut d, 5)?;
-            let (series, inst) = (d.uid().map_err(c)?, d.uid().map_err(c)?);
-            let day_ms = d.uint().map_err(c)?;
-            let name = <[u8; 32]>::try_from(d.bytes().map_err(c)?)
-                .map_err(|_| bad("a file name that is not 32 bytes".to_string()))?;
-            let count = d.uint().map_err(c)?;
-            if day_ms % DAY_MS != 0 {
-                return Err(bad(format!("a day at {day_ms}, not a UTC midnight")));
+        let held = |d: &mut Dec<'_>| -> Result<Vec<Held>, Error> {
+            let mut out = Vec::new();
+            for _ in 0..d.array_head().map_err(c)? {
+                head(d, 5)?;
+                let (series, inst) = (d.uid().map_err(c)?, d.uid().map_err(c)?);
+                let day_ms = d.uint().map_err(c)?;
+                let name = <[u8; 32]>::try_from(d.bytes().map_err(c)?)
+                    .map_err(|_| bad("a file name that is not 32 bytes".to_string()))?;
+                let count = d.uint().map_err(c)?;
+                if day_ms % DAY_MS != 0 {
+                    return Err(bad(format!("a day at {day_ms}, not a UTC midnight")));
+                }
+                out.push(Held {
+                    series,
+                    inst,
+                    day_ms,
+                    name,
+                    count,
+                });
             }
-            l.held.push(Held {
-                series,
-                inst,
-                day_ms,
-                name,
-                count,
-            });
-        }
+            Ok(out)
+        };
+        let triples = |d: &mut Dec<'_>| -> Result<Vec<(Uid, Uid, u64)>, Error> {
+            let mut out = Vec::new();
+            for _ in 0..d.array_head().map_err(c)? {
+                head(d, 3)?;
+                out.push((
+                    d.uid().map_err(c)?,
+                    d.uid().map_err(c)?,
+                    d.uint().map_err(c)?,
+                ));
+            }
+            Ok(out)
+        };
+        l.held = held(&mut d)?;
+        l.evicted = triples(&mut d)?;
         for _ in 0..d.array_head().map_err(c)? {
-            head(&mut d, 3)?;
-            l.evicted.push((
-                d.uid().map_err(c)?,
-                d.uid().map_err(c)?,
-                d.uint().map_err(c)?,
-            ));
+            head(&mut d, 4)?;
+            let uid = d.uid().map_err(c)?;
+            let (scheme, key, kind) = (
+                d.text().map_err(c)?.to_string(),
+                d.text().map_err(c)?.to_string(),
+                d.text().map_err(c)?.to_string(),
+            );
+            l.streams.push((uid, StreamInfo { scheme, key, kind }));
         }
+        l.events_held = held(&mut d)?;
+        l.events_evicted = triples(&mut d)?;
         if !d.is_done() {
             return Err(bad("bytes after the listing".to_string()));
         }
@@ -287,6 +355,67 @@ pub fn export<B: Backend>(sub: &Substrate<B>, dir: &Path) -> Result<Listing, Err
     if let Some(d) = day {
         flush(d, &mut samples)?;
     }
+    // Events, the same way: hour keys sort by (stream, instrument, start), and a day is a run.
+    listing.streams = sub
+        .streams()?
+        .into_iter()
+        .map(|(u, r)| {
+            (
+                u,
+                StreamInfo {
+                    scheme: r.scheme,
+                    key: r.key,
+                    kind: r.kind,
+                },
+            )
+        })
+        .collect();
+    let mut eday: Option<(Uid, Uid, u64)> = None;
+    let mut events: Vec<Event> = Vec::new();
+    let mut flush_events = |day: (Uid, Uid, u64), events: &mut Vec<Event>| -> Result<(), Error> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        let bytes = event::encode_run(events);
+        let name = smysl_core::hash_bytes(&bytes);
+        let path = dir.join(file_name(&name));
+        if !path.is_file() {
+            fs::write(&path, &bytes).map_err(|e| io(&path, e))?;
+        }
+        listing.events_held.push(Held {
+            series: day.0,
+            inst: day.1,
+            day_ms: day.2,
+            name,
+            count: events.len() as u64,
+        });
+        events.clear();
+        Ok(())
+    };
+    for key in sub.backend().event_keys()? {
+        let stream = Uid::from_bytes(key[..32].try_into().expect("thirty-two bytes"));
+        let start = key_start(&key);
+        let this = (stream, key_inst(&key), start / DAY_MS * DAY_MS);
+        if eday.is_some_and(|d| d != this) {
+            flush_events(eday.expect("some"), &mut events)?;
+        }
+        eday = Some(this);
+        let bytes = sub
+            .backend()
+            .event_hour(&key)?
+            .ok_or_else(|| Error::Backend("an event hour listed and not there".to_string()))?;
+        events.extend(event::decode_run(&bytes, start, start + HOUR_MS)?);
+    }
+    if let Some(d) = eday {
+        flush_events(d, &mut events)?;
+    }
+    let mut ev_evicted: Vec<(Uid, Uid, u64)> = sub
+        .event_evictions()?
+        .into_iter()
+        .map(|(s, i, start, _)| (s, i, start / DAY_MS * DAY_MS))
+        .collect();
+    ev_evicted.dedup();
+    listing.events_evicted = ev_evicted;
     let mut evicted: Vec<(Uid, Uid, u64)> = sub
         .evictions()?
         .into_iter()
@@ -322,6 +451,28 @@ fn day(dir: &Path, h: &Held) -> Result<Vec<Sample>, Error> {
     Ok(samples)
 }
 
+/// The events of the event day file `h` names under `dir`, checked as [`day`] checks samples.
+fn event_day(dir: &Path, h: &Held) -> Result<Vec<Event>, Error> {
+    let path = dir.join(file_name(&h.name));
+    let bytes = fs::read(&path).map_err(|e| Error::Backend(format!("{}: {e}", path.display())))?;
+    if smysl_core::hash_bytes(&bytes) != h.name {
+        return Err(Error::Corrupt(format!(
+            "{}: its bytes are not the file its name says",
+            path.display()
+        )));
+    }
+    let events = event::decode_run(&bytes, h.day_ms, h.day_ms.saturating_add(DAY_MS))?;
+    if events.len() as u64 != h.count {
+        return Err(Error::Corrupt(format!(
+            "{}: {} event(s), and the listing says {}",
+            path.display(),
+            events.len(),
+            h.count
+        )));
+    }
+    Ok(events)
+}
+
 /// Check the substrate under `dir`: its listing, and every day file it names against its name,
 /// its day and its count, and that every series it holds samples of is described. Holds no
 /// samples, so it can run before anything is written.
@@ -340,12 +491,33 @@ pub fn verify(dir: &Path) -> Result<Listing, Error> {
         }
         day(dir, h)?;
     }
+    let streams: std::collections::BTreeSet<Uid> =
+        listing.streams.iter().map(|(u, _)| *u).collect();
+    for h in &listing.events_held {
+        if !streams.contains(&h.series) {
+            return Err(Error::Corrupt(format!(
+                "a substrate listing: events of stream {} it does not describe",
+                h.series.canonical()
+            )));
+        }
+        event_day(dir, h)?;
+    }
     Ok(listing)
 }
 
 /// Add the substrate under `dir` to `sub`, as a set (§19.5). Nothing is added unless the whole
-/// substrate verifies ([`verify`]); then one day at a time.
+/// substrate verifies ([`verify`]); then one day at a time. Events are indexed under no tag:
+/// [`import_tagged`] names the tagger.
 pub fn import<B: Backend>(sub: &mut Substrate<B>, dir: &Path) -> Result<ImportReport, Error> {
+    import_tagged(sub, dir, &|_| None)
+}
+
+/// [`import`], each event indexed under `tag`'s tag, as reading it would have.
+pub fn import_tagged<B: Backend>(
+    sub: &mut Substrate<B>,
+    dir: &Path,
+    tag: Tagger<'_>,
+) -> Result<ImportReport, Error> {
     let listing = verify(dir)?;
     let info: BTreeMap<Uid, SeriesInfo> = listing.series.iter().cloned().collect();
     let mut report = ImportReport {
@@ -359,6 +531,15 @@ pub fn import<B: Backend>(sub: &mut Substrate<B>, dir: &Path) -> Result<ImportRe
         report.added += r.added;
         report.already += r.already;
         report.conflicts += r.conflicts.len() as u64;
+    }
+    let streams: BTreeMap<Uid, StreamInfo> = listing.streams.iter().cloned().collect();
+    report.events_evicted = listing.events_evicted.len() as u64;
+    for h in &listing.events_held {
+        let events = event_day(dir, h)?;
+        let r = sub.add_events(&h.series, &h.inst, &streams[&h.series], &events, tag)?;
+        report.event_files += 1;
+        report.events_added += r.added;
+        report.events_already += r.already;
     }
     Ok(report)
 }

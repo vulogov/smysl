@@ -674,10 +674,43 @@ kept.
 The sub-millisecond part of a span's times stays in the substrate. Whether units need it is
 GE-M2's question, and until it is answered `source` key 7 stays reserved.
 
+#section("Logs: templates as evidence")
+
+A log line is a reading too. `journald/1` reads `journalctl -o json`, and `cloudevents/1` reads
+CloudEvents, such as the CDEvents a deploy pipeline sends. Each entry or event is kept in the
+substrate as spans are, in one stream per host and unit, or per source and type:
+
+```
+smysl tel read journald/1 j0.json --instrument journald:h1 --at 1768557700000 -s lib --yes
+```
+
+The cursor and the monotonic clock, which change between two reads of one entry, are not kept,
+so reading a journal twice adds nothing. What a person asks of a log is what it said, and Drain
+answers that: it groups messages of one shape into a template.
+
+#screen(caption: "$ smysl tel templates 'journald:{\"host\":\"h1\",\"unit\":\"cart.service\"}' 1768557600000 1768557660000 -s lib")[
+```
+template  b3:vtlizy6u73…  b3:xxomdilkiq…  count 4  connection from <IP> closed after <NUM> ms
+template  b3:2civxfk47i…  b3:xxomdilkiq…  count 2  payment provider acme returned <NUM>
+template  b3:ph7pk6xzun…  b3:xxomdilkiq…  count 2  retrying payment <UUID> in <NUM> ms
+3 template(s); nothing was written - run again with --yes --at MS to commit them
+```
+]
+
+Addresses, UUIDs, hex runs and numbers are masked before Drain reads a line, so `returned 502`
+and `returned 503` are one template. With `--yes --at MS` each template is committed as an
+`x.tel/log-template`, `derived`, with its count and the digest of every record in the window.
+Drain's result depends on every line it read and their order, so the template is evidence
+about the window, and `tel check` recomputes it from the window: `SMY-E604` if the records or
+the templates have changed since, and `SMY-W605` once they are evicted.
+
+Spans and log records travel with `lib export --with-substrate` as samples do, one file per
+stream and day, and an import finds each trace again by its id.
+
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
   investigations, instrument lineage, witness counting, witness conflicts, eviction, exchanging
-  samples and traces. Exchanging spans, logs, and the experiments on causal order are the rest
+  the substrate, traces and logs. The experiments on causal order and on similarity are the rest
   of the RFC's TL-P9. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;

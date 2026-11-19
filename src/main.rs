@@ -2540,13 +2540,14 @@ fn cli() -> Command {
                             "witnesses",
                             "evict",
                             "trace",
+                            "templates",
                             "profile",
                         ])
                         .help(
                             "read exports with a reader into a library, the value in force at \
                              an instant, materialise window evidence, recompute it, run a \
-                             detector, evict old substrate, materialise a trace's spans, or \
-                             check a profile and print its hash",
+                             detector, evict old substrate, materialise a trace's spans or a \
+                             log window's templates, or check a profile and print its hash",
                         ),
                 )
                 .arg(
@@ -2556,10 +2557,11 @@ fn cli() -> Command {
                         .action(ArgAction::Append)
                         .help(
                             "`read READER FILE...` (k8s/1, zabbix/1, prom/1, otlp/1, \
-                             otlp-json/1, otlp-traces/1, otlp-traces-json/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
+                             otlp-json/1, otlp-traces/1, otlp-traces-json/1, journald/1, \
+                             cloudevents/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
                              `detect RECIPE`; `investigate open|consult|hypothesis|probe|action|\
                              close|show …`; `declare instrument|measured-by|via|same-quantity …`; `witnesses SERIES`; \
-                             `evict --older-than DUR`; `trace TRACE-ID`; `profile check FILE|NAME`",
+                             `evict --older-than DUR`; `trace TRACE-ID`; `templates STREAM FROM TO`; `profile check FILE|NAME`",
                         ),
                 )
                 .arg(
@@ -9021,7 +9023,7 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
     // An export's substrate (RFC SMYSL-3 §19.5), added as a set once its records are in.
-    let mut substrate: Option<(u64, u64, u64, u64)> = None;
+    let mut substrate: Option<[u64; 8]> = None;
     for input in &inputs {
         let Input::Index(index) = input else { continue };
         let Some(dir) = index.parent() else { continue };
@@ -9029,9 +9031,11 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             continue;
         }
         match import_substrate_into(m, global, dir) {
-            Ok(Some((files, added, already, evicted))) => {
-                let t = substrate.get_or_insert((0, 0, 0, 0));
-                *t = (t.0 + files, t.1 + added, t.2 + already, t.3 + evicted);
+            Ok(Some(r)) => {
+                let t = substrate.get_or_insert([0u64; 8]);
+                for (a, b) in t.iter_mut().zip(r) {
+                    *a += b;
+                }
             }
             Ok(None) => {}
             Err(code) => return code,
@@ -9082,10 +9086,20 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             })
             .collect();
         let sub = match substrate {
-            Some((files, added, already, evicted)) => format!(
-                ",\"substrate\":{{\"days\":{files},\"added\":{added},\"already\":{already},\
-                 \"evicted\":{evicted}}}"
-            ),
+            Some([files, added, already, evicted, ef, ea, eh, ee]) => {
+                let events = if ef + ee > 0 {
+                    format!(
+                        ",\"events\":{{\"days\":{ef},\"added\":{ea},\"already\":{eh},\
+                         \"evicted\":{ee}}}"
+                    )
+                } else {
+                    String::new()
+                };
+                format!(
+                    ",\"substrate\":{{\"days\":{files},\"added\":{added},\"already\":\
+                     {already},\"evicted\":{evicted}{events}}}"
+                )
+            }
             None => String::new(),
         };
         println!(
@@ -9126,11 +9140,17 @@ fn lib_import(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 r.joins, r.name, r.name
             );
         }
-        if let Some((files, added, already, evicted)) = substrate {
+        if let Some([files, added, already, evicted, ef, ea, eh, ee]) = substrate {
             println!(
                 "substrate {files} day file(s): {added} new sample(s), {already} already held; \
                  {evicted} day(s) the exporter had evicted"
             );
+            if ef + ee > 0 {
+                println!(
+                    "events    {ef} day file(s): {ea} new event(s), {eh} already held; {ee} \
+                     day(s) the exporter had evicted"
+                );
+            }
         }
     }
     let bad_input = r.files.iter().any(|f| f.rejected)
@@ -9576,9 +9596,17 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             })
             .collect();
         let sub = match &substrate {
-            Some((held, samples, evicted)) => format!(
-                ",\"substrate\":{{\"days\":{held},\"samples\":{samples},\"evicted\":{evicted}}}"
-            ),
+            Some([held, samples, evicted, eh, ec, ee]) => {
+                let events = if eh + ee > 0 {
+                    format!(",\"events\":{{\"days\":{eh},\"events\":{ec},\"evicted\":{ee}}}")
+                } else {
+                    String::new()
+                };
+                format!(
+                    ",\"substrate\":{{\"days\":{held},\"samples\":{samples},\"evicted\":\
+                     {evicted}{events}}}"
+                )
+            }
             None => String::new(),
         };
         println!(
@@ -9603,11 +9631,16 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         for f in &c.files {
             println!("  {}  {}", f.path, f.records);
         }
-        if let Some((held, samples, evicted)) = substrate {
+        if let Some([held, samples, evicted, eh, ec, ee]) = substrate {
             println!(
                 "substrate {held} day file(s), {samples} sample(s); {evicted} day(s) listed as \
                  evicted"
             );
+            if eh + ee > 0 {
+                println!(
+                    "events    {eh} day file(s), {ec} event(s); {ee} day(s) listed as evicted"
+                );
+            }
         }
     }
     // A surface file that does not read back as its selection (`SMY-E424`): written, with the
@@ -9621,14 +9654,15 @@ fn lib_export(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
 }
 
-/// `lib export --with-substrate`: the library's samples under `<out>/substrate/` (RFC SMYSL-3
-/// §19.5), as (day files, samples, evicted days). A library with no substrate yet writes an
-/// empty listing, so the export still says what it holds.
+/// `lib export --with-substrate`: the library's samples and events under `<out>/substrate/`
+/// (RFC SMYSL-3 §19.5), as [day files, samples, evicted days] and the same for events. A
+/// library with no substrate yet writes an empty listing, so the export still says what it
+/// holds.
 #[cfg(feature = "tel")]
 fn export_substrate(
     root: &std::path::Path,
     out: &std::path::Path,
-) -> Result<Option<(usize, u64, usize)>, ExitCode> {
+) -> Result<Option<[u64; 6]>, ExitCode> {
     use smysl::series::redb::RedbBackend;
     use smysl::series::{exchange, MemBackend, Substrate};
     let path = tel_series_path(root);
@@ -9646,11 +9680,14 @@ fn export_substrate(
         exchange::export(&Substrate::new(MemBackend::default()), &dir)
     };
     match listing {
-        Ok(l) => Ok(Some((
-            l.held.len(),
+        Ok(l) => Ok(Some([
+            l.held.len() as u64,
             l.held.iter().map(|h| h.count).sum(),
-            l.evicted.len(),
-        ))),
+            l.evicted.len() as u64,
+            l.events_held.len() as u64,
+            l.events_held.iter().map(|h| h.count).sum(),
+            l.events_evicted.len() as u64,
+        ])),
         Err(e) => {
             eprintln!("smysl lib export: {e}");
             Err(ExitCode::Failure)
@@ -9662,7 +9699,7 @@ fn export_substrate(
 fn export_substrate(
     _root: &std::path::Path,
     _out: &std::path::Path,
-) -> Result<Option<(usize, u64, usize)>, ExitCode> {
+) -> Result<Option<[u64; 6]>, ExitCode> {
     Ok(None)
 }
 
@@ -9686,14 +9723,15 @@ fn verify_substrate(index: &std::path::Path) -> Result<(), ExitCode> {
     Ok(())
 }
 
-/// The substrate of the export at `dir` into the library `lib import` writes, as (files,
-/// added, already held, evicted days); `None` in a build without `tel`, which says so.
+/// The substrate of the export at `dir` into the library `lib import` writes, as [files,
+/// added, already held, evicted days] for samples and then for events; `None` in a build
+/// without `tel`, which says so.
 #[cfg(feature = "text")]
 fn import_substrate_into(
     m: &ArgMatches,
     global: &ArgMatches,
     dir: &std::path::Path,
-) -> Result<Option<(u64, u64, u64, u64)>, ExitCode> {
+) -> Result<Option<[u64; 8]>, ExitCode> {
     #[cfg(feature = "tel")]
     {
         let root = library_root(m, global, "lib import")?;
@@ -9706,7 +9744,16 @@ fn import_substrate_into(
                         r.conflicts
                     );
                 }
-                Ok(Some((r.files, r.added, r.already, r.evicted)))
+                Ok(Some([
+                    r.files,
+                    r.added,
+                    r.already,
+                    r.evicted,
+                    r.event_files,
+                    r.events_added,
+                    r.events_already,
+                    r.events_evicted,
+                ]))
             }
             Err(e) => {
                 eprintln!("smysl lib import: {}: substrate: {e}", dir.display());
@@ -9742,7 +9789,9 @@ fn import_substrate(
     }
     let mut sub =
         Substrate::new(RedbBackend::open(&path).map_err(|e| format!("{}: {e}", path.display()))?);
-    exchange::import(&mut sub, &dir.join(exchange::DIR)).map_err(|e| e.to_string())
+    // Spans are indexed under their trace again, as reading them would have (§19.6).
+    exchange::import_tagged(&mut sub, &dir.join(exchange::DIR), &smysl::tel::trace::tag)
+        .map_err(|e| e.to_string())
 }
 
 /// An `sq/1` scope over what `lib export` reads (TX-P11 step 8).
@@ -13848,6 +13897,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "witnesses" => tel_witnesses(m, global, &args),
         "evict" => tel_evict(m, global, &args),
         "trace" => tel_trace(m, global, &args),
+        "templates" => tel_templates(m, global, &args),
         "read" => tel_read(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
@@ -13922,7 +13972,10 @@ fn tel_read(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
     }
     // The trace readers write events (TL-P9), and the series readers samples, rather than
     // snapshots.
-    if matches!(reader.as_str(), "otlp-traces/1" | "otlp-traces-json/1") {
+    if matches!(
+        reader.as_str(),
+        "otlp-traces/1" | "otlp-traces-json/1" | "journald/1" | "cloudevents/1"
+    ) {
         return tel_read_traces(m, global, reader, files);
     }
     let series_reader = matches!(reader.as_str(), "prom/1" | "otlp/1" | "otlp-json/1")
@@ -14777,6 +14830,15 @@ fn tel_commit_evidence(
     let mut tw = std::collections::BTreeMap::new();
     let mut relations = lineage;
     for w in windows {
+        // A log template (TL-P9) is attested as a sketched window is, and is grounded on its
+        // stream rather than linked to it.
+        if w.schema.as_str() == smysl::schemas::tel::LOG_TEMPLATE {
+            tw.insert(
+                smysl::canonical_uid(w),
+                (smysl::Op::Transformed, smysl::Rung::Computed),
+            );
+            continue;
+        }
         let Some(f) = w
             .payload
             .as_deref()
@@ -14945,12 +15007,14 @@ fn tel_evict(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode 
     ExitCode::Success
 }
 
-/// `smysl tel read otlp-traces/1|otlp-traces-json/1 FILE... --instrument KEY --at MS`: spans
-/// into the event substrate (RFC SMYSL-3 §19.6, §20.1, TL-P9).
+/// `smysl tel read otlp-traces/1|otlp-traces-json/1|journald/1|cloudevents/1 FILE...
+/// --instrument KEY --at MS`: spans, journal entries and CloudEvents into the event substrate
+/// (RFC SMYSL-3 §19.6, §20.1, TL-P9).
 ///
-/// A span is a reading, so no span becomes a unit here. What is written is the events, and the
-/// units a read establishes: each span stream's `x.tel/series`, the collector's instrument, and
-/// each resource's origin with its lineage. `tel trace` makes span units, when asked.
+/// A span or a log record is a reading, so none becomes a unit here. What is written is the
+/// events, and the units a read establishes: each stream's `x.tel/series`, the collector's
+/// instrument, and each origin with its lineage. `tel trace` makes span units and `tel
+/// templates` template units, when asked.
 #[cfg(feature = "tel")]
 fn tel_read_traces(
     m: &ArgMatches,
@@ -14960,10 +15024,15 @@ fn tel_read_traces(
 ) -> ExitCode {
     use smysl::series::redb::RedbBackend;
     use smysl::series::Substrate;
-    use smysl::tel::readers::otlp_traces;
-    use smysl::tel::trace;
+    use smysl::tel::readers::{cloudevents, journald, otlp_traces};
+    use smysl::tel::{logs, trace};
     use smysl::text::library::Library;
 
+    let noun = if reader.starts_with("otlp-traces") {
+        "span(s)"
+    } else {
+        "record(s)"
+    };
     let Some(&at) = m.get_one::<u64>("at") else {
         eprintln!("smysl tel read: --at is required: the attestation clock");
         return ExitCode::Usage;
@@ -14991,19 +15060,35 @@ fn tel_read_traces(
                 return ExitCode::Failure;
             }
         };
-        let spans = if reader == otlp_traces::ID {
-            otlp_traces::read_proto(&bytes).map_err(|e| e.to_string())
-        } else {
-            std::str::from_utf8(&bytes)
-                .map_err(|e| format!("not UTF-8 text: {e}"))
-                .and_then(|t| otlp_traces::read_json(t).map_err(|e| e.to_string()))
+        let text = || std::str::from_utf8(&bytes).map_err(|e| format!("not UTF-8 text: {e}"));
+        let recorded: Result<(usize, trace::Recorded), String> = match reader {
+            otlp_traces::ID | otlp_traces::ID_JSON => {
+                let spans = if reader == otlp_traces::ID {
+                    otlp_traces::read_proto(&bytes).map_err(|e| e.to_string())
+                } else {
+                    text().and_then(|t| otlp_traces::read_json(t).map_err(|e| e.to_string()))
+                };
+                spans.and_then(|s| {
+                    trace::record(&s, "collector", key)
+                        .map(|r| (s.len(), r))
+                        .map_err(|e| e.to_string())
+                })
+            }
+            journald::ID => text()
+                .and_then(|t| journald::read(t).map_err(|e| e.to_string()))
+                .and_then(|es| {
+                    logs::record_journald(&es, "collector", key)
+                        .map(|r| (es.len(), r))
+                        .map_err(|e| e.to_string())
+                }),
+            _ => text()
+                .and_then(|t| cloudevents::read(t).map_err(|e| e.to_string()))
+                .and_then(|es| {
+                    logs::record_cloudevents(&es, "collector", key)
+                        .map(|r| (es.len(), r))
+                        .map_err(|e| e.to_string())
+                }),
         };
-        let recorded = spans.and_then(|s| {
-            let n = s.len();
-            trace::record(&s, "collector", key)
-                .map(|r| (n, r))
-                .map_err(|e| e.to_string())
-        });
         let (n, r) = match recorded {
             Ok(r) => r,
             Err(e) => {
@@ -15012,7 +15097,7 @@ fn tel_read_traces(
             }
         };
         println!(
-            "read      {file}: {n} span(s) in {} stream(s)",
+            "read      {file}: {n} {noun} in {} stream(s)",
             r.streams.len()
         );
         inst = Some(r.inst);
@@ -15030,7 +15115,7 @@ fn tel_read_traces(
     let total: usize = streams.iter().map(|s| s.events.len()).sum();
     if !yes {
         println!(
-            "events    {total} span(s) would be added; {} unit(s) would be committed - run \
+            "events    {total} {noun} would be added; {} unit(s) would be committed - run \
              again with --yes to add and commit them",
             units.len()
         );
@@ -15078,7 +15163,7 @@ fn tel_read_traces(
     }
     drop(sub);
     println!(
-        "events    {added} span(s) added to the substrate, {} already there",
+        "events    {added} {noun} added to the substrate, {} already there",
         total as u64 - added
     );
     let agent = match AgentId::new("tool:smysl-tel") {
@@ -15267,6 +15352,129 @@ fn tel_trace(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode 
         &[],
         at.unwrap_or(0),
         "tel trace",
+    )
+}
+
+/// `smysl tel templates STREAM FROM TO [--instrument UID] [--yes --at MS]`: Drain over a
+/// window of a log or event stream, as `x.tel/log-template` evidence (RFC SMYSL-3 §9.7, §21,
+/// TL-P9).
+///
+/// One line per template, with its count. With `--yes --at MS` the templates are committed,
+/// `derived` and grounded on the stream, attested as rule TW asks of a sketched window.
+#[cfg(feature = "tel")]
+fn tel_templates(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::Substrate;
+    use smysl::tel::logs;
+
+    let (Some(stream), Some(from), Some(to), None) =
+        (args.first(), args.get(1), args.get(2), args.get(3))
+    else {
+        eprintln!("smysl tel templates: `STREAM FROM TO`, epoch milliseconds, [FROM, TO)");
+        return ExitCode::Usage;
+    };
+    let (Ok(from), Ok(to)) = (from.parse::<u64>(), to.parse::<u64>()) else {
+        eprintln!("smysl tel templates: FROM and TO are epoch milliseconds");
+        return ExitCode::Usage;
+    };
+    let uid = match tel_series_arg(stream) {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("smysl tel templates: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let yes = m.get_flag("yes");
+    let at = m.get_one::<u64>("at").copied();
+    if yes && at.is_none() {
+        eprintln!("smysl tel templates: --yes needs --at, the attestation clock");
+        return ExitCode::Usage;
+    }
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let path = tel_series_path(&root);
+    if !path.exists() {
+        eprintln!(
+            "smysl tel templates: {} has no substrate; `tel read journald/1 --yes` writes one",
+            root.display()
+        );
+        return ExitCode::Failure;
+    }
+    let sub = match RedbBackend::open(&path) {
+        Ok(b) => Substrate::new(b),
+        Err(e) => {
+            eprintln!("smysl tel templates: {}: {e}", path.display());
+            return ExitCode::Failure;
+        }
+    };
+    let insts = match m.get_one::<String>("instrument") {
+        Some(i) => match i.parse::<Uid>() {
+            Ok(u) => vec![u],
+            Err(_) => {
+                eprintln!(
+                    "smysl tel templates: --instrument takes an instrument uid; `{i}` is not one"
+                );
+                return ExitCode::Usage;
+            }
+        },
+        None => match sub.event_instruments(&uid) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("smysl tel templates: {e}");
+                return ExitCode::Failure;
+            }
+        },
+    };
+    if insts.is_empty() {
+        eprintln!(
+            "smysl tel templates: the substrate holds no event of {}",
+            uid.canonical()
+        );
+        return ExitCode::Failure;
+    }
+    let mut units = Vec::new();
+    let mut stream_unit = None;
+    for inst in insts {
+        let ts = match logs::materialise(&sub, &uid, &inst, from, to) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("smysl tel templates: {e}");
+                return ExitCode::Failure;
+            }
+        };
+        for t in &ts {
+            if stream_unit.is_none() {
+                stream_unit = smysl::schemas::tel::series(&t.scheme, &t.key).ok();
+            }
+            let u = t.unit();
+            println!(
+                "template  {}  {}  count {}  {}",
+                smysl::canonical_uid(&u).canonical(),
+                inst.canonical(),
+                t.count,
+                t.template
+            );
+            units.push(u);
+        }
+    }
+    drop(sub);
+    if !yes {
+        println!(
+            "{} template(s); nothing was written - run again with --yes --at MS to commit them",
+            units.len()
+        );
+        return ExitCode::Success;
+    }
+    tel_commit_evidence(
+        "templates",
+        &root,
+        stream_unit.into_iter().collect(),
+        Vec::new(),
+        &units,
+        at.unwrap_or(0),
+        &format!("tel templates {}", smysl::tel::drain::RECIPE),
     )
 }
 
@@ -16619,7 +16827,9 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let windows: Vec<(Uid, smysl::UnitCore, Vec<smysl::Attestation>)> = StoreRead::units(store)
         .filter(|(_, u)| {
             let t = u.core.schema.as_str();
-            t == smysl::schemas::tel::WINDOW || t == smysl::schemas::tel::SPAN
+            t == smysl::schemas::tel::WINDOW
+                || t == smysl::schemas::tel::SPAN
+                || t == smysl::schemas::tel::LOG_TEMPLATE
         })
         .map(|(uid, u)| {
             (
@@ -16712,15 +16922,21 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .iter()
         .filter(|(_, u, _)| u.schema.as_str() == smysl::schemas::tel::SPAN)
         .count();
-    let span_note = if spans > 0 {
-        format!(" and {spans} span(s)")
-    } else {
-        String::new()
-    };
+    let templates = windows
+        .iter()
+        .filter(|(_, u, _)| u.schema.as_str() == smysl::schemas::tel::LOG_TEMPLATE)
+        .count();
+    let mut span_note = String::new();
+    if spans > 0 {
+        span_note.push_str(&format!(" and {spans} span(s)"));
+    }
+    if templates > 0 {
+        span_note.push_str(&format!(" and {templates} template(s)"));
+    }
     println!(
         "checked   {} window(s){span_note}: {errors} error(s), {} warning(s); {} rival \
          explanation(s), {} witness conflict(s)",
-        windows.len() - spans,
+        windows.len() - spans - templates,
         diags.len() - errors,
         rivals.len(),
         conflicts.len()

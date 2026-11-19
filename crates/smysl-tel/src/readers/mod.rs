@@ -24,6 +24,8 @@ use smysl_core::ids::is_alias;
 
 use crate::json::{Json, JsonError};
 
+pub mod cloudevents;
+pub mod journald;
 pub mod k8s;
 pub mod otlp;
 #[cfg(feature = "reader-otlp")]

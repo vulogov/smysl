@@ -695,17 +695,22 @@ pub fn materialise_sketched<B: Backend>(
 /// A platform window has nothing here to recompute from, and a recipe this build does not know
 /// is not recomputed; neither is reported.
 ///
-/// Span units (TL-P9, §9.8) are recomputed too, by [`crate::trace::verify`].
+/// Span and template units (TL-P9, §9.8) are recomputed too, by [`crate::trace::verify`] and
+/// [`crate::logs::verify`].
 pub fn verify<'a, B: Backend>(
     windows: impl IntoIterator<Item = &'a UnitCore>,
     substrate: &Substrate<B>,
 ) -> Vec<smysl_core::Diagnostic> {
     use smysl_core::{Code, Diagnostic};
     let mut out = Vec::new();
-    let mut spans = Vec::new();
+    let (mut spans, mut templates) = (Vec::new(), Vec::new());
     for unit in windows {
         if unit.schema.as_str() == tel::SPAN {
             spans.push(unit);
+            continue;
+        }
+        if unit.schema.as_str() == tel::LOG_TEMPLATE {
+            templates.push(unit);
             continue;
         }
         if unit.schema.as_str() != tel::WINDOW {
@@ -795,6 +800,7 @@ pub fn verify<'a, B: Backend>(
         )));
     }
     out.extend(crate::trace::verify(spans, substrate));
+    out.extend(crate::logs::verify(templates, substrate));
     out
 }
 

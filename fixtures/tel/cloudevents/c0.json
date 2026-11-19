@@ -1,0 +1,46 @@
+[
+ {
+  "specversion": "1.0",
+  "id": "deploy-1",
+  "source": "/argocd/prod",
+  "type": "dev.cdevents.service.deployed.0.1.1",
+  "subject": "cart",
+  "time": "2026-01-16T10:00:00.250Z",
+  "datacontenttype": "application/json",
+  "data": {
+   "artifactId": "pkg:oci/cart@v2"
+  }
+ },
+ {
+  "specversion": "1.0",
+  "id": "deploy-2",
+  "source": "/argocd/prod",
+  "type": "dev.cdevents.service.deployed.0.1.1",
+  "subject": "payment",
+  "time": "2026-01-16T10:00:20.250Z",
+  "datacontenttype": "application/json",
+  "data": {
+   "artifactId": "pkg:oci/payment@v7"
+  }
+ },
+ {
+  "specversion": "1.0",
+  "id": "deploy-3",
+  "source": "/argocd/prod",
+  "type": "dev.cdevents.service.deployed.0.1.1",
+  "subject": "cart",
+  "time": "2026-01-16T10:00:40.250Z",
+  "datacontenttype": "application/json",
+  "data": {
+   "artifactId": "pkg:oci/cart@v3"
+  }
+ },
+ {
+  "specversion": "1.0",
+  "id": "pr-9",
+  "source": "/github/shop",
+  "type": "dev.cdevents.change.merged.0.1.2",
+  "subject": "shop#9",
+  "time": "2026-01-16T09:58:00Z"
+ }
+]

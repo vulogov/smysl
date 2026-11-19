@@ -973,7 +973,7 @@ part the library has redacted is dropped at the door (`SMY-W414`).
     ([`--with-provenance`], [—], [Export the import manifests the records arrived under (`export`, a library). Outside P3.]),
     ([`--with-staged`], [—], [Export staged imports too (`export`, a library).]),
     ([`--with-quarantine`], [—], [Export quarantined records too (`export`, a library).]),
-    ([`--with-substrate`], [—], [Export the series substrate's samples under `substrate/`: one file per series, instrument and UTC day, named by its BLAKE3, and a listing of the days held and evicted (`export`, a library). `import` of an export that carries one adds its samples as a set, and imports nothing if a day file is not its name.]),
+    ([`--with-substrate`], [—], [Export the series substrate's samples, spans and log records under `substrate/`: one file per series or stream, instrument and UTC day, named by its BLAKE3, and a listing of the days held and evicted (`export`, a library). `import` of an export that carries one adds them as a set, and imports nothing if a day file is not its name.]),
     ([`--as-of`], [`EDTF`], [Export only what was known before the end of this date: a record's own clock, a unit's earliest attestation (`SMY-W415` for one with none), and nothing resting on what was not yet known (`SMY-W498`) (`export`).]),
     ([`--target-revision`], [`ID@N`], [Export the selection as revision `N` of schema `ID` writes it, through the schema's lenses (`export`).]),
     ([`--agent`], [`ID`], [The agent of the attestations `--target-revision` adds (`export`); `tool:smysl-lib` by default.]),
@@ -1149,6 +1149,13 @@ its parent. With `--yes --at MS` it commits them as `x.tel/span` units, with `x.
 from each parent to each child. `SMY-W617` names a span held twice with different contents, and
 `SMY-W605` an hour of the trace that was evicted.
 
+`journald/1` reads `journalctl -o json` and `cloudevents/1` CloudEvents JSON (one event, a
+batch or JSON lines). Each entry or event is an event of the substrate too, never a unit, and
+each stream (a host and unit, or a source and type) is an `x.tel/series`. `tel templates STREAM
+FROM TO` runs Drain over the stream's messages in `[FROM, TO)` and prints one line per
+template, with its count. With `--yes --at MS` each is committed as an `x.tel/log-template`,
+`derived`. `tel check` recomputes templates as it does windows.
+
 `tel at SERIES MS` prints the value in force at `MS`, the last sample at or before it, for each
 instrument the series has samples from. `SERIES` is a series uid or `<scheme>:<key>`. A stale
 or no-value sample is printed as `stale` or `no-value`, and one its source marked as a reset is
@@ -1238,14 +1245,14 @@ it prints what it would evict and removes nothing.
   (auto, auto, 1fr),
   (
     ([Flag], [Value], [Meaning]),
-    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare`, `witnesses`, `evict`, `trace` or `profile`.]),
-    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`, `otlp-traces/1`, `otlp-traces-json/1`), then the files. `trace`: a trace id, 32 hex digits. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `declare`: what is declared, then its arguments. `witnesses`: a series. `profile`: `check` and a profile file or shipped name.]),
+    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare`, `witnesses`, `evict`, `trace`, `templates` or `profile`.]),
+    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`, `otlp-traces/1`, `otlp-traces-json/1`, `journald/1`, `cloudevents/1`), then the files. `trace`: a trace id, 32 hex digits. `templates`: a stream, then `FROM` and `TO` in epoch ms. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `declare`: what is declared, then its arguments. `witnesses`: a series. `profile`: `check` and a profile file or shipped name.]),
     ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for the object readers; it must be for the reader's scheme.]),
     ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds, and for `prom/1` the scrape instant. Required for `read`: nothing here reads a clock.]),
     ([`--licence`], [`SPDX`], [The manifests' licence. Required for the object readers, as `text add` requires it.]),
     ([`--zabbix-api`], [`VERSION`], [The Zabbix API version the export came from (`apiinfo.version`). Required for `zabbix/1`: 6.x, 7.x or 8.x.]),
     ([`--job`, `--instance`], [`JOB`, `INSTANCE`], [`prom/1`: the target's labels, which the exposition does not carry and every series key includes. Required.]),
-    ([`--instrument`], [`I`], [`read`: the key of what an OTLP (metrics or traces) or Zabbix export was read from, such as `otel-collector:c1` or `zabbix-server:main`. Required for those readers. `at` and `window`: an instrument uid, to ask one instrument only.]),
+    ([`--instrument`], [`I`], [`read`: the key of what an OTLP, journald, CloudEvents or Zabbix export was read from, such as `otel-collector:c1`, `journald:h1` or `zabbix-server:main`. Required for those readers. `at`, `window` and `templates`: an instrument uid, to ask one instrument only.]),
     ([`--items`], [`FILE`], [`zabbix/1`: the `item.get` export (with `selectHosts`) the files' history belongs to. With it, the files are `history.get` exports.]),
     ([`--trends`], [—], [`zabbix/1` with `--items`: the files are `trend.get` exports, each hour a `cited` window.]),
     ([`--sketch`], [`ALPHA`], [`window`: a DDSketch of this relative accuracy, 0.001 to 0.5, rather than the exact summary.]),
@@ -1262,7 +1269,7 @@ it prints what it would evict and removes nothing.
     ([`--confirmed-by`], [`HANDLE`], [`investigate action`: who confirmed an unsafe command.]),
     ([`--lookback`], [`MS`], [`investigate show`: how far before the opening to look for unexplored evidence. Default one hour.]),
     ([`--older-than`], [`DUR`], [`evict`: the retention bound before `--at`, a whole number and `s`, `m`, `h`, `d` or `w`. Required.]),
-    ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing. `evict`: evict, rather than report what would go. `trace`: commit the spans, with `--at`.]),
+    ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing. `evict`: evict, rather than report what would go. `trace` and `templates`: commit the units, with `--at`.]),
     ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),
   ),
 )

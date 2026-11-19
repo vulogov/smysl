@@ -912,8 +912,9 @@ port.
 - `bundle` carries no substrate. Evidence units are self-contained, which is why they are
   materialised.
 - Events (§19.6) travel the same way (TL-P9): one file per (stream, instrument, UTC day), a CBOR
-  sequence of event arrays in event order, named by its BLAKE3. The listing names the event days
-  held and those evicted, beside the sample days.
+  sequence of event arrays in event order, named by its BLAKE3. The listing gains three lists
+  after the sample days: the streams `[stream, scheme, key, kind]`, the event days held, and
+  those evicted. Import re-indexes each span under its trace id.
 
 ### 19.6 The event substrate (TL-P9)
 
@@ -966,8 +967,8 @@ unit per stream, and no other unit.
 |---|---|---|
 | `otlp-traces/1` | OTLP traces protobuf (`ExportTraceServiceRequest`) | span streams (§6), one event per span. Body: `[trace_id, span_id, parent_span_id, name, kind, start_unix_nano, end_unix_nano, status_code, status_message, attributes]`, the ids as byte strings (`parent` empty for a root), the attributes as §5.5 JCS text. Span events and links are not kept in the first cut. |
 | `otlp-traces-json/1` | OTLP/JSON traces | as `otlp-traces/1`, the ids decoded from OTLP/JSON's hex |
-| `journald/1` | `journalctl -o json`, one entry per line | log streams (§6). Instant: `__REALTIME_TIMESTAMP` (µs). Body: `[MESSAGE, PRIORITY, fields]`, `fields` the JCS text of every field not starting `__`, so the cursor and monotonic clock, which differ between reads of one entry, are not identity. |
-| `cloudevents/1` | CloudEvents 1.0 JSON in structured mode: one event, a batch (a JSON array), or JSON lines | event streams (§6). Instant: `time`, refused when absent. Body: `[JCS text of the event]`. |
+| `journald/1` | `journalctl -o json`, one entry per line | log streams (§6), origin `journald:<host>`. Instant: `__REALTIME_TIMESTAMP` (µs), refused when absent. Body: `[MESSAGE, PRIORITY or null, fields]`, `fields` the JCS text of every field not starting `__`, so the cursor and monotonic clock, which differ between reads of one entry, are not identity. A `MESSAGE` that is not UTF-8 (an array of bytes) is read lossily as the message and kept exactly in `fields`. |
+| `cloudevents/1` | CloudEvents 1.0 JSON in structured mode: one event, a batch (a JSON array), or JSON lines | event streams (§6), origin `cloudevents:<source>`. `specversion` 1.0, `id`, `source` and `type` required. Instant: `time` (RFC 3339), refused when absent. Body: `[JCS text of the event]`, so a producer's retry is one event. |
 
 - Readers read files and never the network. Collecting is the caller's job: OKO for Zabbix, a
   script or `kubectl` otherwise.
@@ -1032,12 +1033,23 @@ measures already do.
 | LLM agent | hypotheses | inferred / speculative, capped by TQ | TL-P6 | model hash recorded, as the provider layer does |
 
 - BOCPD stays out until a crate without `SmallRng` exists, or until we write one.
-- **Drain** (He et al. 2017, as Drain3 runs it) is our own implementation. Its recipe records the
-  tree depth (4), the similarity threshold (0.4, a `dec`), the children per node (100), and the
-  masks applied before parsing, in order: UUIDs, IPv4 addresses, hex runs of 8 or more digits, and
-  numbers, as `<UUID>`, `<IP>`, `<HEX>`, `<NUM>`. Tokens split on ASCII whitespace. The message is
-  journald's `MESSAGE`, and for a CloudEvent its `type` followed by its `subject`. Ties on
-  similarity go to the cluster made first, which event order fixes.
+- **Drain** (He et al. 2017, as Drain3 runs it) is our own implementation, recipe
+  `tel/drain/1?depth=4&sim=0.4&children=100&masks=uuid,ip,hex,num`:
+  - **Tokens** split on ASCII whitespace.
+  - **Masks** are applied to whole tokens before parsing, in order: a UUID, an IPv4 address
+    (with an optional port), a run of 8 or more hex digits (with an optional `0x`), and a
+    decimal number become `<UUID>`, `<IP>`, `<HEX>`, `<NUM>`. Whole tokens, not substrings, so
+    `id=42` stays a word.
+  - **Depth 4** counts as Drain3 does: the root, a layer by token count, one layer by the first
+    token, and the leaves. A token with a digit is routed as `<*>`, as is any token past 100
+    children of a node.
+  - **Similarity 0.4.** A message joins the cluster at its leaf with the most positions equal
+    to its template, if that is at least 0.4 of its length, in integer arithmetic. Ties go to
+    the cluster made first, which event order fixes.
+  - **Equal templates** are one: two clusters whose templates end equal are one template, their
+    counts summed.
+  - **The message** is journald's `MESSAGE`, and for a CloudEvent its `type` followed by its
+    `subject`.
 - **MinHash** is over an episode's typed features: `series:<uid>` per member's series,
   `change:<pointer>`, `anomaly:<series uid>:<direction>`, `alert:<system>:<key>`, and
   `template:<text>` for each template whose window overlaps the episode. 128 functions, keyed

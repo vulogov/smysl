@@ -22,12 +22,14 @@
 
 pub mod detect;
 pub mod diff;
+pub mod drain;
 pub mod evidence;
 pub mod instruments;
 pub mod investigate;
 pub mod jcs;
 pub mod json;
 pub mod leaf;
+pub mod logs;
 pub mod otel;
 pub mod pointer;
 pub mod profile;
