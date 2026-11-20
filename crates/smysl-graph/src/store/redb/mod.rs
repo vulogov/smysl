@@ -76,7 +76,7 @@ use self::tables::{
 };
 use super::interp::Interpretive;
 use super::library::StoreLibrary;
-use super::read::{empty_commits, sealed};
+use super::read::{empty_commits, sealed, Layered};
 use super::{
     digest_of_hashes, state_hash_of, Commits, HotKind, HotRecords, OpenReport, Relations,
     Resolutions, Store, StoreRead, Threads, Views, Withdrawals,
@@ -1151,7 +1151,7 @@ impl StoreRead for RedbStore {
         &self.derived().adjacency
     }
     fn relations(&self) -> Relations<'_> {
-        Relations(self.0.interp.relations.values())
+        Relations(Layered::one(&self.0.interp.relations))
     }
     fn relation_by_id(&self, rid: &Uid) -> Option<&Relation> {
         self.0.interp.relation_by_id(rid)
@@ -1163,22 +1163,22 @@ impl StoreRead for RedbStore {
             .get(&(kind.as_str().to_string(), *from, *to))
     }
     fn threads(&self) -> Threads<'_> {
-        Threads(self.0.interp.threads.values())
+        Threads(Layered::one(&self.0.interp.threads))
     }
     fn views(&self) -> Views<'_> {
-        Views(self.0.interp.views.values())
+        Views(Layered::one(&self.0.interp.views))
     }
     fn contentions(&self) -> &[Contention] {
         &self.0.interp.contentions
     }
     fn withdrawals(&self) -> Withdrawals<'_> {
-        Withdrawals(self.0.interp.withdrawals.values().flatten())
+        Withdrawals::of(Layered::one(&self.0.interp.withdrawals))
     }
     fn resolutions(&self) -> Resolutions<'_> {
-        Resolutions(self.0.interp.resolutions.iter())
+        Resolutions::one(&self.0.interp.resolutions)
     }
     fn commits(&self) -> Commits<'_> {
-        Commits(self.0.interp.commits.iter())
+        Commits(Layered::one(&self.0.interp.commits))
     }
     fn commits_of(&self, uid: &Uid) -> &BTreeSet<Commit> {
         self.0

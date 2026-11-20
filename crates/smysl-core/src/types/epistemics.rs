@@ -520,6 +520,18 @@ impl SourceRef {
         Some(self)
     }
 
+    /// The manifestation a unit was drawn from, with no span (A-2.1 key 6 alone).
+    ///
+    /// Legal on the wire and at the surface — the surface parser has always accepted it — and
+    /// the form RFC SMYSL-3 §8.1 gives a change unit: its reference names the snapshot's part
+    /// and the leaf's pointer, and the manifest names the snapshot, but a leaf has no byte range
+    /// worth stating. A-2.4 rule 1 still holds, because rule 1 is about a span without a
+    /// manifest; [`SourceRef::in_part`] remains the only way to set a span, and it sets both.
+    pub fn of_manifest(mut self, manifest: Mid) -> SourceRef {
+        self.manifest = Some(manifest);
+        self
+    }
+
     /// The part range this unit was drawn from, half-open (A-2.1 key 5).
     pub fn span(&self) -> Option<(u64, u64)> {
         self.span

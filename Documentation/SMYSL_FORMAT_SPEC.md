@@ -152,6 +152,11 @@ uids *and* enforce a different monotonicity rule while believing itself conforma
 | 5 | span | array of two uint `[start, end]`, `start < end` | optional; requires key 1 to name a part |
 | 6 | manifest | 32 bytes: a mid (§2.6) | optional; required when key 5 is present |
 
+Key 7 is **reserved** for an optional sub-millisecond remainder beside `observed` (RFC SMYSL-3
+§10.2). It is not assigned: a writer MUST NOT emit it, and an experiment decides whether it ever
+is. A reader preserves it as it preserves any key it does not know, because `source` is inside the
+uid; an implementation that registers `x.tel/v1` reports it as `SMY-E612`.
+
 `lang` (key 9) is the language the unit's text fields are written in. An absent `lang` means
 "the language of the view that presents the unit" (§2.8, view key 6), which is what every unit
 meant before 1.10. Absent and present are different unit cores and different uids: the language
@@ -547,7 +552,8 @@ would make a commitment impossible to walk back, so `retconned` could never take
 
 Records 14, 15 and 18 were added in 1.10, in the same way again. Records 16, 17 and 19 are
 **allocated and not yet defined here**: 16 is reserved and MUST NOT be emitted until a later
-revision defines it, and 17 and 19 are specified by RFC SMYSL-2.3 A-5 and are folded in with the
+revision defines it (RFC SMYSL-3 keeps it reserved behind an experiment, and expects to release
+it; an implementation that registers `x.tel/v1` reports one as `SMY-E612`), and 17 and 19 are specified by RFC SMYSL-2.3 A-5 and are folded in with the
 release that writes them. A decoder MUST treat all three as unknown type codes, which is what it
 already does with 9.
 
@@ -936,9 +942,10 @@ but an unknown type in hand-written surface text is a typo and stays an error.
 
 ### 5.1 Registered extension schemas
 
-One extension schema is **registered**, so that implementations agree on its names. Registration
-buys it nothing else: every rule of this section applies to it exactly as to a schema invented
-this afternoon, and nothing in it is kernel.
+Two extension schemas are **registered** here, so that implementations agree on their names:
+`x.text/v1` below and `x.tel/v1` (§5.2). Registration buys a schema nothing else: every rule of
+this section applies to it exactly as to a schema invented this afternoon, and nothing in it is
+kernel.
 
 `x.text/v1`, revision 1, for text research:
 
@@ -958,6 +965,68 @@ A store that uses these names SHOULD carry the declaration as a record 8, as it 
 extension: an undeclared relation kind is `SMY-W013`, and the warning is unactionable if nothing
 can declare it. The types of the payload keys are not yet part of this document — schema
 declaration key 4 remains opaque CBOR that no implementation reads (§3.1).
+
+### 5.2 `x.tel/v1` and `dec`
+
+`x.tel/v1`, revision 1, for telemetry study (RFC SMYSL-3 §4):
+
+- **Types**: `x.tel/series`, `x.tel/series-meta`, `x.tel/instrument`, `x.tel/instrument-meta`,
+  `x.tel/change`, `x.tel/recreate`, `x.tel/reset`, `x.tel/stale`, `x.tel/window`,
+  `x.tel/segment`, `x.tel/anomaly`, `x.tel/alert`, `x.tel/episode`, `x.tel/hypothesis`,
+  `x.tel/investigation`, `x.tel/probe`, `x.tel/action`, `x.tel/span`, `x.tel/log-template`.
+- **Relation kinds**: `x.tel/of-series`, `x.tel/via`, `x.tel/measured-by`,
+  `x.tel/same-quantity`, `x.tel/during`, `x.tel/explains`, `x.tel/consulted`, `x.tel/precedes`.
+- **Payload keys**: `tel:scheme`, `tel:key`, `tel:name`, `tel:unit`, `tel:kind`, `tel:of`,
+  `tel:text`, `tel:buckets`, `tel:native_id`, `tel:role`, `tel:version`, `tel:op`,
+  `tel:pointer`, `tel:class`, `tel:vtype`, `tel:from`, `tel:to`, `tel:object`, `tel:old`,
+  `tel:new`, `tel:series`, `tel:at_ms`, `tel:basis`, `tel:marker`, `tel:instrument`,
+  `tel:from_ms`, `tel:to_ms`, `tel:recipe`, `tel:count`, `tel:digest`, `tel:min`, `tel:max`,
+  `tel:sum`, `tel:mean`, `tel:first`, `tel:last`, `tel:qs`, `tel:q`, `tel:alpha`, `tel:level`,
+  `tel:slope`, `tel:score`, `tel:direction`, `tel:system`, `tel:state`, `tel:severity`,
+  `tel:label`, `tel:claim`, `tel:quotes`, `tel:target`, `tel:question`, `tel:opened_ms`,
+  `tel:rotation`, `tel:closed_ms`, `tel:what`, `tel:output`, `tel:confirmed_by`, `tel:trace`,
+  `tel:span_id`, `tel:start_ms`, `tel:end_ms`, `tel:parent`, `tel:span_kind`, `tel:status`,
+  `tel:service`, `tel:template`.
+
+The RFC names its fields without the `tel:` prefix. The prefix is this document's, as `text:` is
+`x.text/v1`'s, because a payload key that is a unit header word has no surface spelling.
+
+**Series and instruments are entity-like.** A unit of type `x.tel/series` or `x.tel/instrument`
+MUST NOT carry `span`, `manifest`, `published`, `observed` or grounds, and its source MUST be
+exactly `{kind: metric (2), reference: "series:<scheme>:<key>"}` or `{kind: tool (3),
+reference: "instrument:<key>"}`, with no other source key. Its identity is then a function of
+its identity tuple alone, and it collapses across time, readers and peers, as an entity does
+(§5.1). A violation is `SMY-E607`.
+
+**`dec`** is the canonical decimal `x.tel/v1` uses for its numeric fields. The kernel float
+(§3, binary32 quantised to 1/1024) cannot carry a latency of 0.0004 s or a counter above 2²⁴. A
+`dec` with value m × 10^e is a CBOR array of exactly two integers `[m, e]`, and a decoder MUST
+refuse any other encoding (`SMY-E602`):
+
+1. `m` and `e` are shortest-form integers, major type 0 or 1.
+2. The magnitude of `m` is at most 2⁶⁴ − 1, with the sign carried by the major type. −2⁶⁴, the
+   one CBOR integer outside that range, is refused. An implementation needs 65 bits.
+3. `e` is in [−400, 400].
+4. If `m ≠ 0`, `m` is not divisible by 10. Zero is `[0, 0]`.
+5. NaN and the infinities are not values.
+
+Every value therefore has exactly one encoding, and one uid wherever it appears.
+
+- **From a decimal token** (a JSON number, a Prometheus sample, a Zabbix value), the token is
+  read exactly as written and never through binary64, so `41`, `41.0` and `4.10e1` are one
+  value.
+- **From a binary64**, the value is the decimal ECMA-262's `Number::toString` selects.
+- **From a typed integer**, it is the integer.
+- **Its text spelling** is a plain decimal: no exponent, no `+`, `-` only if negative, and at
+  least one digit before any point. `[412, -1]` is `41.2` and `[15, -10]` is `0.0000000015`.
+- `fixtures/tel/dec/cases.json` holds cases for each of these.
+
+**`bytes32`** is a 32-byte CBOR byte string that is **not** a reference and is never resolved: a
+window's digest. In a payload it is an ordinary byte string, and like any payload value it is
+preserved under rule X.
+
+Neither type is yet in the field-type vocabulary schema declaration key 4 would carry. That is
+A-7's, and RFC SMYSL-3 §5.4 proposes both for it.
 
 ## 6. The rules
 
@@ -1124,6 +1193,12 @@ with detection kind 4 or 5. A resolution (record 12) names that identity, and an
 MUST NOT write a record 6 with either kind — which keeps a store readable by an implementation
 that predates them.
 
+**So are SMYSL-3's two.** Detection kinds 6 (a rival explanation) and 7 (a witness conflict)
+are derived from the record set by an implementation that registers `x.tel/v1` (RFC SMYSL-3
+§11.5), with the same identity and the same rule: a resolution names the derived id, and an
+implementation MUST NOT write a record 6 with either kind. A store written by one that predates
+them decodes such a record as an unknown kind and keeps it.
+
 ## 7. Conformance classes
 
 An implementation declares what it does, not how complete it is.
@@ -1145,6 +1220,15 @@ retraction. Declare what you do.
 
 C-Read is the floor and everything rests on it. An implementation that cannot round-trip
 bytes is not conformant at any class.
+
+RFC SMYSL-3 §16 adds three classes for `x.tel/v1`:
+
+- **C-Tel-Read:** C-Read, plus decoding `dec` canonically and refusing every non-canonical form
+  (§5.2), and preserving every `x.tel` type, relation and payload field.
+- **C-Tel-Produce:** reproducing the uids of `fixtures/tel/`.
+- **C-Tel-Check:** that schema's rules and diagnostics.
+
+The three ports in this repository are C-Tel-Read from 1.17.
 
 ## 8. Versioning
 

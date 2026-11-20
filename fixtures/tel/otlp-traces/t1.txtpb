@@ -1,0 +1,32 @@
+# proto-file: traces.proto
+# proto-message: smysl.fixture.otlp.ExportTraceServiceRequest
+resource_spans {
+  resource {
+    attributes { key: "service.name" value { string_value: "payment" } }
+    attributes { key: "service.instance.id" value { string_value: "p1" } }
+  }
+  scope_spans {
+    scope { name: "io.opentelemetry.http" version: "1.2.0" }
+    spans {
+      trace_id: "\x4b\xf9\x2f\x35\x77\xb3\x4d\xa6\xa3\xce\x92\x9d\x0e\x0e\x47\x36"
+      span_id: "\xe4\x57\xb5\xa2\xe4\xd8\x6b\xd1"
+      parent_span_id: "\x53\x99\x5c\x3f\x42\xcd\x8a\xd8"
+      name: "POST /pay"
+      kind: SPAN_KIND_SERVER
+      start_time_unix_nano: 1768557600001000400
+      end_time_unix_nano: 1768557600009000000
+      attributes { key: "payment.provider" value { string_value: "acme" } }
+      status { message: "card declined" code: STATUS_CODE_ERROR }
+    }
+    spans {
+      trace_id: "\x4b\xf9\x2f\x35\x77\xb3\x4d\xa6\xa3\xce\x92\x9d\x0e\x0e\x47\x36"
+      span_id: "\xa1\xb2\xc3\xd4\xe5\xf6\x07\x18"
+      parent_span_id: "\xe4\x57\xb5\xa2\xe4\xd8\x6b\xd1"
+      name: "SELECT cards"
+      kind: SPAN_KIND_CLIENT
+      start_time_unix_nano: 1768557600001000400
+      end_time_unix_nano: 1768557600003000000
+      status { message: "" code: STATUS_CODE_UNSET }
+    }
+  }
+}

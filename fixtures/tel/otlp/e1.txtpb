@@ -1,0 +1,105 @@
+# proto-file: metrics.proto
+# proto-message: smysl.fixture.otlp.ExportMetricsServiceRequest
+resource_metrics {
+  resource {
+    attributes { key: "service.name" value { string_value: "cart" } }
+    attributes { key: "service.instance.id" value { string_value: "c1" } }
+  }
+  scope_metrics {
+    scope { name: "io.opentelemetry.http" version: "1.2.0" }
+    metrics {
+      name: "http.server.requests"
+      description: "the http.server.requests"
+      unit: "{request}"
+      sum {
+        data_points {
+          attributes { key: "route" value { string_value: "/a" } }
+          start_time_unix_nano: 1768554000000000000
+          time_unix_nano: 1768557615000000000
+          as_int: 120
+        }
+        data_points {
+          attributes { key: "route" value { string_value: "/b" } }
+          start_time_unix_nano: 1768554000000000000
+          time_unix_nano: 1768557615000000000
+          flags: 1
+        }
+        aggregation_temporality: AGGREGATION_TEMPORALITY_CUMULATIVE
+        is_monotonic: true
+      }
+    }
+    metrics {
+      name: "cpu.temp"
+      description: "the cpu.temp"
+      unit: "Cel"
+      gauge {
+        data_points {
+          attributes { key: "cpu" value { int_value: 0 } }
+          time_unix_nano: 1768557615000000000
+          as_double: nan
+        }
+      }
+    }
+    metrics {
+      name: "http.server.duration"
+      description: "the http.server.duration"
+      unit: "s"
+      histogram {
+        data_points {
+          start_time_unix_nano: 1768554000000000000
+          time_unix_nano: 1768557615000000000
+          count: 6
+          sum: 1.4
+          bucket_counts: 2
+          bucket_counts: 3
+          bucket_counts: 1
+          explicit_bounds: 0.1
+          explicit_bounds: 0.5
+        }
+        aggregation_temporality: AGGREGATION_TEMPORALITY_CUMULATIVE
+      }
+    }
+    metrics {
+      name: "gc.pause"
+      description: "the gc.pause"
+      unit: "s"
+      summary {
+        data_points {
+          start_time_unix_nano: 1768554000000000000
+          time_unix_nano: 1768557615000000000
+          count: 5
+          sum: 0.05
+          quantile_values { quantile: 0.5 value: 0.01 }
+          quantile_values { quantile: 0.99 value: 0.02 }
+        }
+      }
+    }
+    metrics {
+      name: "legacy.hits"
+      description: "the legacy.hits"
+      unit: "1"
+      sum {
+        data_points {
+          time_unix_nano: 1768557615000000000
+          as_int: 10
+        }
+        aggregation_temporality: AGGREGATION_TEMPORALITY_CUMULATIVE
+        is_monotonic: true
+      }
+    }
+    metrics {
+      name: "bytes.sent"
+      description: "the bytes.sent"
+      unit: "By"
+      sum {
+        data_points {
+          start_time_unix_nano: 1768557600000000000
+          time_unix_nano: 1768557615000000000
+          as_int: 1024
+        }
+        aggregation_temporality: AGGREGATION_TEMPORALITY_DELTA
+        is_monotonic: true
+      }
+    }
+  }
+}

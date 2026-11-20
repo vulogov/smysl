@@ -30,7 +30,7 @@ use smysl_core::{
 
 use super::interp::Interpretive;
 use super::library::StoreLibrary;
-use super::read::{empty_commits, sealed};
+use super::read::{empty_commits, sealed, Layered};
 use super::{
     digest_of_hashes, state_hash_of, Commits, HotKind, HotRecords, Relations, Resolutions, Store,
     StoreRead, Threads, Views, Withdrawals,
@@ -50,7 +50,16 @@ pub struct Overlay<'s, S: StoreRead + ?Sized> {
     units: BTreeMap<Uid, Unit>,
     /// How many of `units` the base does not hold.
     added: usize,
-    interp: Interpretive,
+    /// The base's interpretive layer, read through, not copied (AC-8).
+    lower: &'s Interpretive,
+    /// What the batch changes in it: an entry for every key the batch touches, already merged
+    /// with the base's entry for that key, so that it stands for the base's where both have one.
+    upper: Interpretive,
+    /// The base's contentions and the batch's: a list, not a map, so it is held whole.
+    contentions: Vec<Contention>,
+    /// The two layers as one, for a caller that asks for the layer itself (an overlay of this
+    /// overlay, a union of it, the state hash). Built when first asked.
+    whole: OnceLock<Interpretive>,
     library: StoreLibrary,
     /// Attestations whose subject is in neither.
     pending: Vec<Attestation>,
@@ -85,14 +94,32 @@ impl<'s, S: StoreRead + ?Sized> Overlay<'s, S> {
         // code a store absorbs them with. Relations come from the batch *store*, which has
         // already attached the batch's own attestations to them; the raw records would not
         // carry those.
-        let mut interp = sealed::Sealed::interp(base).clone();
+        //
+        // Not a copy of the base's (AC-8, RFC SMYSL-3 §17.1): that copy, and dropping it, was
+        // most of what staging one ledger operation cost once the check was kept. The batch's
+        // keys are copied up from the base before the batch is folded in, so `upper` holds the
+        // union's answer for every key it has.
+        let lower = sealed::Sealed::interp(base);
+        let mut upper = Interpretive::default();
+        let mut contentions = lower.contentions.clone();
         for r in &batch.records {
-            if !matches!(r, Record::Relation(_)) {
-                interp.absorb_hot(r);
+            match r {
+                Record::Relation(_) => {}
+                Record::Contention(c) => {
+                    if !contentions.iter().any(|e| e.id == c.id) {
+                        contentions.push(c.clone());
+                    }
+                }
+                _ => {
+                    lift(lower, &mut upper, r);
+                    upper.absorb_hot(r);
+                }
             }
         }
         for rel in batch.interp.relations.values() {
-            interp.absorb_hot(&Record::Relation(rel.clone()));
+            let r = Record::Relation(rel.clone());
+            lift(lower, &mut upper, &r);
+            upper.absorb_hot(&r);
         }
 
         let mut library = base.library().clone();
@@ -141,7 +168,7 @@ impl<'s, S: StoreRead + ?Sized> Overlay<'s, S> {
                 let mut m = (*b).clone();
                 m.attestations.insert(a.clone());
                 units.insert(a.uid, m);
-            } else if !interp.attach_to_relation(a) {
+            } else if !attach(lower, &mut upper, a) {
                 pending.push(a.clone());
             }
         }
@@ -151,7 +178,10 @@ impl<'s, S: StoreRead + ?Sized> Overlay<'s, S> {
             batch,
             units,
             added,
-            interp,
+            lower,
+            upper,
+            contentions,
+            whole: OnceLock::new(),
             library,
             pending,
             derived: OnceLock::new(),
@@ -173,22 +203,15 @@ impl<'s, S: StoreRead + ?Sized> Overlay<'s, S> {
             // As `Store::derive`: withdrawn edges are kept and not followed, and `unfounded`
             // is only worth computing when something retracts.
             let relations: Vec<Relation> = self
-                .interp
-                .relations
-                .values()
-                .filter(|r| !self.interp.is_withdrawn(r))
+                .relations()
+                .filter(|r| !self.is_withdrawn(r))
                 .cloned()
                 .collect();
             let units: Vec<(Uid, OverlayUnit<'_, S::UnitRef<'_>>)> =
                 self.units().map(|(u, x)| (*u, x)).collect();
             let adjacency = Adjacency::from_parts(&units, &relations);
             let mut unfounded = BTreeSet::new();
-            if self
-                .interp
-                .relations
-                .keys()
-                .any(|(k, _, _)| k == RelKind::Retracts.as_str())
-            {
+            if self.relations().any(|r| r.kind == RelKind::Retracts) {
                 let eff =
                     crate::merge::effective_status(self, crate::merge::RetractionPolicy::Strict);
                 unfounded = units
@@ -207,6 +230,79 @@ impl<'s, S: StoreRead + ?Sized> Overlay<'s, S> {
     fn observed(u: &Unit) -> Option<u64> {
         u.core.source.as_ref().and_then(|s| s.observed)
     }
+
+    /// The two layers as one `Interpretive`, built once.
+    fn whole(&self) -> &Interpretive {
+        self.whole.get_or_init(|| {
+            let mut i = self.lower.clone();
+            i.join(&self.upper);
+            i.contentions = self.contentions.clone();
+            i
+        })
+    }
+}
+
+/// Copy up from `lower` the entry `r` would change, so that folding `r` into `upper` gives the
+/// union's entry. Views and resolutions need nothing: a View replaces, and resolutions are a set
+/// the two layers are read as the union of.
+fn lift(lower: &Interpretive, upper: &mut Interpretive, r: &Record) {
+    match r {
+        Record::Relation(rel) => {
+            copy_up(
+                &lower.relations,
+                &mut upper.relations,
+                super::interp::rel_key(rel),
+            );
+        }
+        Record::Thread(t) => {
+            copy_up(
+                &lower.threads,
+                &mut upper.threads,
+                (t.id.clone(), t.owner.clone()),
+            );
+        }
+        Record::Withdrawal(w) => copy_up(&lower.withdrawals, &mut upper.withdrawals, w.relation),
+        Record::Commit(c) => copy_up(&lower.commits, &mut upper.commits, c.unit),
+        _ => {}
+    }
+}
+
+/// The lower layer's entry for `key`, into the upper, unless the upper has one.
+fn copy_up<K: Ord, V: Clone>(lower: &BTreeMap<K, V>, upper: &mut BTreeMap<K, V>, key: K) {
+    if let btree_map::Entry::Vacant(e) = upper.entry(key) {
+        if let Some(b) = lower.get(e.key()) {
+            e.insert(b.clone());
+        }
+    }
+}
+
+/// An attestation of an edge either layer holds, attached in `upper`: what
+/// `Interpretive::attach_to_relation` does over the union.
+fn attach(lower: &Interpretive, upper: &mut Interpretive, a: &Attestation) -> bool {
+    let Some(key) = upper
+        .rids
+        .get(&a.uid)
+        .or_else(|| lower.rids.get(&a.uid))
+        .cloned()
+    else {
+        return false;
+    };
+    if !upper.relations.contains_key(&key) {
+        match lower.relations.get(&key) {
+            Some(b) => {
+                upper.relations.insert(key.clone(), b.clone());
+            }
+            None => return false,
+        }
+    }
+    upper.rids.insert(a.uid, key.clone());
+    upper
+        .relations
+        .get_mut(&key)
+        .expect("lifted above")
+        .attestations
+        .insert(a.clone());
+    true
 }
 
 /// A unit read from an [`Overlay`]: the base's own handle, or the overlay's merged copy.
@@ -302,7 +398,7 @@ impl<S: StoreRead + ?Sized> sealed::Sealed for Overlay<'_, S> {
         ))
     }
     fn interp(&self) -> &Interpretive {
-        &self.interp
+        self.whole()
     }
     fn pending_attestations(&self) -> &[Attestation] {
         &self.pending
@@ -410,42 +506,59 @@ impl<S: StoreRead + ?Sized> StoreRead for Overlay<'_, S> {
         &self.derived().adjacency
     }
     fn relations(&self) -> Relations<'_> {
-        Relations(self.interp.relations.values())
+        Relations(Layered::two(&self.lower.relations, &self.upper.relations))
     }
     fn relation_by_id(&self, rid: &Uid) -> Option<&Relation> {
-        self.interp.relation_by_id(rid)
+        match self.upper.rids.get(rid) {
+            Some(key) => self
+                .upper
+                .relations
+                .get(key)
+                .or_else(|| self.lower.relations.get(key)),
+            None => self.lower.relation_by_id(rid),
+        }
     }
     fn relation_by_key(&self, kind: &RelKind, from: &Uid, to: &Uid) -> Option<&Relation> {
-        self.interp
+        let key = (kind.as_str().to_string(), *from, *to);
+        self.upper
             .relations
-            .get(&(kind.as_str().to_string(), *from, *to))
+            .get(&key)
+            .or_else(|| self.lower.relations.get(&key))
     }
     fn threads(&self) -> Threads<'_> {
-        Threads(self.interp.threads.values())
+        Threads(Layered::two(&self.lower.threads, &self.upper.threads))
     }
     fn views(&self) -> Views<'_> {
-        Views(self.interp.views.values())
+        Views(Layered::two(&self.lower.views, &self.upper.views))
     }
     fn contentions(&self) -> &[Contention] {
-        &self.interp.contentions
+        &self.contentions
     }
     fn withdrawals(&self) -> Withdrawals<'_> {
-        Withdrawals(self.interp.withdrawals.values().flatten())
+        Withdrawals::of(Layered::two(
+            &self.lower.withdrawals,
+            &self.upper.withdrawals,
+        ))
     }
     fn resolutions(&self) -> Resolutions<'_> {
-        Resolutions(self.interp.resolutions.iter())
+        Resolutions::two(&self.lower.resolutions, &self.upper.resolutions)
     }
     fn commits(&self) -> Commits<'_> {
-        Commits(self.interp.commits.iter())
+        Commits(Layered::two(&self.lower.commits, &self.upper.commits))
     }
     fn commits_of(&self, uid: &Uid) -> &BTreeSet<Commit> {
-        self.interp
+        self.upper
             .commits
             .get(uid)
+            .or_else(|| self.lower.commits.get(uid))
             .unwrap_or_else(|| empty_commits())
     }
     fn is_withdrawn(&self, rel: &Relation) -> bool {
-        self.interp.is_withdrawn(rel)
+        // `Interpretive::is_withdrawn` over the union.
+        !rel.kind.is_lifecycle() && {
+            let rid = rel.uid();
+            self.upper.withdrawals.contains_key(&rid) || self.lower.withdrawals.contains_key(&rid)
+        }
     }
     fn is_unfounded(&self, uid: &Uid) -> bool {
         self.derived().unfounded.contains(uid)
@@ -476,6 +589,6 @@ impl<S: StoreRead + ?Sized> StoreRead for Overlay<'_, S> {
         digest_of_hashes(sealed::Sealed::record_hashes(self))
     }
     fn state_hash(&self) -> [u8; 32] {
-        state_hash_of(self.units(), &self.interp)
+        state_hash_of(self.units(), self.whole())
     }
 }

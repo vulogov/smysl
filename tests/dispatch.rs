@@ -37,7 +37,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_smysl");
 ///
 /// Hardcoding it costs one thing — the list can go stale when a command is added — and
 /// `the_help_lists_exactly_these_commands` below is what covers that, in both directions.
-const COMMANDS: [&str; 38] = [
+const COMMANDS: [&str; 39] = [
     "fmt",
     "check",
     "pack",
@@ -76,6 +76,7 @@ const COMMANDS: [&str; 38] = [
     "lib",
     "schema",
     "migrate",
+    "tel",
 ];
 
 /// Clap's answer when `cli()` never registered the subcommand.
@@ -142,6 +143,9 @@ fn minimal_args(command: &str) -> Vec<&'static str> {
         "schema" => vec!["check"],
         // Both flags are required; with no store given, `migrate` says so.
         "migrate" => vec!["--schema", "x.none/v1", "--to", "2"],
+        // The action and its arguments are required; a profile that is no shipped name and no
+        // file is refused after the router is reached.
+        "tel" => vec!["profile", "check", "no-such-profile/1"],
         _ => vec![],
     }
 }
@@ -149,7 +153,7 @@ fn minimal_args(command: &str) -> Vec<&'static str> {
 /// A directory of this command's own, because several of them write.
 ///
 /// `ingest` appends to `.smysl/staged.smy` and `usage` to `.smysl/usage.log`, both resolved
-/// against the working directory. Running the thirty-eight in a checkout leaves two untracked
+/// against the working directory. Running the thirty-nine in a checkout leaves two untracked
 /// files behind — which is not hypothetical: probing this by hand did exactly that, and the
 /// `usage` invocation then read a ledger the `ingest` invocation had just written. A test that
 /// dirties the tree is one step from a test that depends on the tree.

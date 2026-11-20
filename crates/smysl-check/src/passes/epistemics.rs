@@ -22,6 +22,23 @@ use smysl_core::{Status, Uid};
 use smysl_graph::{topo, EdgeKind, EdgeSet, StoreRead};
 
 pub fn run(store: &(impl StoreRead + ?Sized), report: &mut Report) {
+    run_scoped(store, super::Scope::All, report);
+}
+
+/// Rule M's check reads a unit's authored status and its present grounds' authored statuses,
+/// one hop: the order units are judged in changes nothing, so a `Batch` judges its dirty units
+/// directly and only the whole store walks the topological order.
+pub(crate) fn run_scoped(
+    store: &(impl StoreRead + ?Sized),
+    scope: super::Scope<'_>,
+    report: &mut Report,
+) {
+    if let super::Scope::Batch { units, .. } = scope {
+        for uid in units {
+            judge(store, uid, report);
+        }
+        return;
+    }
     let g = store.adjacency();
     let order = topo(g, &EdgeSet::one(EdgeKind::Grounds));
 
@@ -29,30 +46,34 @@ pub fn run(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     // that rests on it is judged.
     for node in order.order.iter().chain(order.cyclic.iter()) {
         let Some(uid) = g.uid(*node) else { continue };
-        let Some(unit) = store.get(uid) else { continue };
-        let status = unit.core.status;
-        if !status.is_rule_m_constrained() {
-            continue;
-        }
+        judge(store, uid, report);
+    }
+}
 
-        let Some((cap, weakest)) = weakest_ground(store, uid) else {
-            // Every ground is absent. That is `SMY-E060`'s business, not this pass's -
-            // reporting it twice would tell the repair loop to fix one thing in two
-            // places.
-            continue;
-        };
+fn judge(store: &(impl StoreRead + ?Sized), uid: &Uid, report: &mut Report) {
+    let Some(unit) = store.get(uid) else { return };
+    let status = unit.core.status;
+    if !status.is_rule_m_constrained() {
+        return;
+    }
 
-        if status > cap {
-            report.push(
-                Diagnostic::on(Code::E030, *uid)
-                    .with_message(format!(
-                        "{status} exceeds the cap of {cap} set by its weakest ground {weakest}"
-                    ))
-                    .with_suggestion(format!(
-                        "weaken this unit to {cap}, or strengthen {weakest}"
-                    )),
-            );
-        }
+    let Some((cap, weakest)) = weakest_ground(store, uid) else {
+        // Every ground is absent. That is `SMY-E060`'s business, not this pass's -
+        // reporting it twice would tell the repair loop to fix one thing in two
+        // places.
+        return;
+    };
+
+    if status > cap {
+        report.push(
+            Diagnostic::on(Code::E030, *uid)
+                .with_message(format!(
+                    "{status} exceeds the cap of {cap} set by its weakest ground {weakest}"
+                ))
+                .with_suggestion(format!(
+                    "weaken this unit to {cap}, or strengthen {weakest}"
+                )),
+        );
     }
 }
 

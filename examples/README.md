@@ -1,12 +1,15 @@
 # Examples
 
-Two runnable programs over the `smysl` facade crate. Both run offline and print the same
+Three runnable programs over the `smysl` facade crate. All run offline and print the same
 identities on every run and every machine.
 
 | example | run | shows | needs |
 |---|---|---|---|
 | [`simple_demo`](simple_demo/) | `cargo run --example simple_demo` | the format and its core operations: parse, identity, CBOR, store and `check`, sq/1, salience, pack, render, withdraw, `fmt` | nothing beyond the facade; builds under `--no-default-features` |
 | [`information_theory`](information_theory/) | `cargo run --example information_theory` | every layer of SMYSL-2 over one library of texts: readers and identities, pseudonyms, drawn units, consensus text ingest, same-as, time, queries, saved queries, dossiers, measures, export and import, redaction, `check` | the default features (`cli`, `ingest`); add `--features store-redb` for the unit store |
+| [`oko_ledger`](oko_ledger/) | `make oko-ledger` | RFC SMYSL-3 §24's OKO ledger profile: one rotation's investigations, views, probes and actions with redacted output, hypotheses under rule TQ, Zabbix trends through `zabbix/1`, timed per append | `--features tel` |
+| [`ge_m8`](ge_m8/) | `make ge-m8` | RFC SMYSL-3 §26's GE-M8: 120 simulated episodes of twelve fault types, ranked by MinHash over typed features, by exact Jaccard, and by Model2Vec embeddings of the same units (`SMYSL_EMBED_MODEL`); recall@5 decides whether similarity is model-dependent | `--features tel,semantic` |
+| [`ge_m9`](ge_m9/) | `make ge-m9` | RFC SMYSL-3 §14's GE-M9: six months of simulated samples and windows, evicted under rule TL, exported with `--with-substrate`, imported, and merged with a peer that kept them; a P1 failure or a changed unit blocks TL-P8 | `--features tel` |
 
 Start with `simple_demo`. It is one file and one short document, and every later idea rests on
 it: a unit's identity is its content, a claim carries its grounds and its status, and

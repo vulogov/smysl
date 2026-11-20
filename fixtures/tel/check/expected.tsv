@@ -1,0 +1,169 @@
+# RFC SMYSL-3 §16 C-Tel-Check: what each fixtures/tel/check/<case>.cbor derives.
+# case	unit	<uid>	<label it was built under: for reading, not derived>
+# case	code	<SMY code>	<the unit it names, or ->
+# case	status	<hypothesis uid>	<effective status after rule TQ's cap>
+# case	contention	<derived id>	kind=<6|7> over=<uid> positions=<uid>,<uid>...
+# Every code, status and contention, exactly: an extra row fails as a missing one does.
+clean	unit	b3:d4burfnpeln3hby2dlbgcsqa4nxjpcphoricffoufuosvyzazefa	latency_seconds
+clean	unit	b3:k56qmundkxvdotvccfgeyf7q4fuibghqrv7errpwhdsd4cjca7ma	latency jumped
+clean	unit	b3:m2ftahgj6g3o7ikjcr6dvv2de3q2pcnk7zt63aum4g5kwt4rubja	w
+clean	unit	b3:oieeutefzk7ah4z74yzjftcda72adztrrye4opdzlxbvlqrxim2q	h: the deploy made latency jump
+clean	unit	b3:vmiolxtjd5zw5gqhjivu2vf6lm7bnfmhveu5xpkcevgp5qhylwrq	prom-scrape:latency/h1:9100
+clean	unit	b3:4cpejywnzijs7dmbs5kgswimfw5wl4lck5d452slc4ntbsxdiifq	prom-target:latency/h1:9100
+clean	status	b3:oieeutefzk7ah4z74yzjftcda72adztrrye4opdzlxbvlqrxim2q	inferred
+tw	unit	b3:b6loebvptip4vkerdomsn72tsvuegztebleo7b7togpbt76ykwcq	w-sketch
+tw	unit	b3:duk3y74uck44sxxwqumf4hhr3gunobbdoxppl5rs5xqty4wjbcgq	prom-scrape:tw/h1:9100
+tw	unit	b3:emxqm7kci5xjqxubqen4ihm7mwkm2pztrzb2yhxn2ztzwzuindqa	w
+tw	unit	b3:mrcty4w4u4k3mu32u4qp6hrfbsdm6vnnu3f67ipphazevo5jsfra	prom-scrape:tw-b/h1:9100
+tw	unit	b3:nytyu666nwhj3drbmfube2dozdjn2wlyicpwighsrm4r6fqiszta	w614: same key, another digest
+tw	unit	b3:okaz7sarb6ktd4nwg5jcscph2unbmucycik3nlyrzwlzmvaehj2q	e603: sketched, measured
+tw	unit	b3:ptdevbbbwewa7whv47sbq7hlmmualfaskyukjrnp43ajfhpeh7zq	tw_seconds
+tw	unit	b3:wchx7zehxcyyuz4nkkg5r25o53kmznhkalhvl253luncckbpfy3q	prom-target:tw/h1:9100
+tw	unit	b3:wlcri7dyiylfdgawg6ywmdf5vtsgj64p5h3ld45jwu43cpj5fpca	w-platform
+tw	unit	b3:y6kga3qm53pja6m6n6cf6twhvex3pwkukvclyn7s5mdqqr3rlfla	e603: exact, attested transformed
+tw	unit	b3:2ugdtk26c2jwz7qmgjl6c5rynp7yodvhgmmjr4pazlofzn7ughpq	zabbix-server:zbx
+tw	unit	b3:7kconjbpfy5chews5uoplaysuol7ud7xzdlsruxnma43mhip3tjq	e603: platform, with a digest
+tw	code	SMY-E033	b3:y6kga3qm53pja6m6n6cf6twhvex3pwkukvclyn7s5mdqqr3rlfla
+tw	code	SMY-E603	b3:7kconjbpfy5chews5uoplaysuol7ud7xzdlsruxnma43mhip3tjq
+tw	code	SMY-E603	b3:okaz7sarb6ktd4nwg5jcscph2unbmucycik3nlyrzwlzmvaehj2q
+tw	code	SMY-E603	b3:y6kga3qm53pja6m6n6cf6twhvex3pwkukvclyn7s5mdqqr3rlfla
+tw	code	SMY-W035	b3:y6kga3qm53pja6m6n6cf6twhvex3pwkukvclyn7s5mdqqr3rlfla
+tw	code	SMY-W614	-
+tq	unit	b3:cln5ehnpeeabe57xntfzli6ug33focdmcn363ut3gkswvyqj36fq	prom-target:tq/h1:9100
+tq	unit	b3:d7dlqtkp372zj7aibqtcz4keqjii6pi32lt5dir7443or5qc5v3a	w
+tq	unit	b3:fi6ire2ko2nualjhtnba3hbptlgkf4uybwm5ggu3vhi75sfsotzq	h-verifies
+tq	unit	b3:ij54byknn4ujabycrrm5fibod6d44fbujbc6jhochdcztwnj636q	h-not-canonical
+tq	unit	b3:iryq24erecpo4pkutrbcskyxp7bn26fzghcq2brinkwi4shrxmfa	w-sketch
+tq	unit	b3:q2f755agpnsl5illag6twdwzhqpziyykjsj6v6rfd3vs53j5skfq	tq_seconds
+tq	unit	b3:tguycea7sh34gflxdi7ap2wjmp32s7ync4axmwpdkd2ggdxw5waq	w-other
+tq	unit	b3:vx6mrlgsh42j2snwyq5hhuqni5irz56mxljgeonfwtkf3iwx52ca	h-outside-grounds
+tq	unit	b3:ym53ivgvxxoyqyyfckdv7ecxcwtijzlfelrdwbwguodzi5nebfaq	prom-scrape:tq/h1:9100
+tq	unit	b3:3iz26z45smzk3hczmmm2pt2iv75mjhg2sh5y2u7nptywol6225lq	h-wrong-value
+tq	unit	b3:4fkp3fjvepd6l4qd6a5veostgw6ufqxnwsccmariekzxzghtstlq	latency jumped
+tq	unit	b3:5lxdfewm3xgftiwdycbjlwufgaf3whyao6pvkt3n3aivqarxmv2a	h-past-the-list
+tq	unit	b3:7yx5jgk7pzad5u4tcvgzunov67vv65y3tyahsq3ympu6fvzwutoa	h-no-field
+tq	code	SMY-W606	b3:3iz26z45smzk3hczmmm2pt2iv75mjhg2sh5y2u7nptywol6225lq
+tq	code	SMY-W606	b3:5lxdfewm3xgftiwdycbjlwufgaf3whyao6pvkt3n3aivqarxmv2a
+tq	code	SMY-W606	b3:7yx5jgk7pzad5u4tcvgzunov67vv65y3tyahsq3ympu6fvzwutoa
+tq	code	SMY-W606	b3:ij54byknn4ujabycrrm5fibod6d44fbujbc6jhochdcztwnj636q
+tq	code	SMY-W606	b3:vx6mrlgsh42j2snwyq5hhuqni5irz56mxljgeonfwtkf3iwx52ca
+tq	status	b3:fi6ire2ko2nualjhtnba3hbptlgkf4uybwm5ggu3vhi75sfsotzq	inferred
+tq	status	b3:ij54byknn4ujabycrrm5fibod6d44fbujbc6jhochdcztwnj636q	speculative
+tq	status	b3:vx6mrlgsh42j2snwyq5hhuqni5irz56mxljgeonfwtkf3iwx52ca	speculative
+tq	status	b3:3iz26z45smzk3hczmmm2pt2iv75mjhg2sh5y2u7nptywol6225lq	speculative
+tq	status	b3:5lxdfewm3xgftiwdycbjlwufgaf3whyao6pvkt3n3aivqarxmv2a	speculative
+tq	status	b3:7yx5jgk7pzad5u4tcvgzunov67vv65y3tyahsq3ympu6fvzwutoa	speculative
+rivals	unit	b3:byu4l2n2is5k7tw4rcnlprf3cjchdlcv7ghc3f6nf4sbz3iq7jea	prom-target:rivals/h1:9100
+rivals	unit	b3:fxqdy6ifjabwxuib2fteluqvbjy4ncx2pqfbebvdpmtfwywvfbha	rivals_seconds
+rivals	unit	b3:f3zofzwyz7qoc7qqhfq7bk6nkrtbafwfdu6hvjyuv5kcx263fhla	target rebutted
+rivals	unit	b3:f7iop7af5trmhjn55ety2awwlyvsd3yaiwzwh3yldzuqd5ajtw7a	capped/b: max hit 9
+rivals	unit	b3:ivf67egy533l5w44mfptkjmas2qt2o57xrplorzr2w2tdbudivtq	prom-scrape:rivals/h1:9100
+rivals	unit	b3:mgrf6i7777aabutxh2n5ofjgzhfdwp3biznais4kk4jd4qmmbb3a	two/a: the deploy
+rivals	unit	b3:n4hzog2d434nrupks5rfsbey2wmrejoqhycxe65yf2pz2osstjqq	target three
+rivals	unit	b3:odzjvv6cwk3w7n2x4mmrvbeme57qcvxbpeei6vnxizjp3xzyzkxq	speculative/a: the deploy
+rivals	unit	b3:pw7qh5pupsl34p4ne2kng5npxmebh6nuuamxqtsehdb7eyarb2va	capped/a: the deploy
+rivals	unit	b3:qeedk3ohjv4v4mq2x2mfbs7slkhcdstdeflay2sranmmiuqqfywq	speculative/b: cosmic rays
+rivals	unit	b3:tuy2i22wgefrtvknagceaskgazmslcfgqwpkpgpp2oscrlbnjxta	three/a: the deploy
+rivals	unit	b3:2cr557ldsap4xppr54djdoigx7sqy2okrocfcn3cgzyjkedm3dwq	superseded/b: the deploy at 10:00
+rivals	unit	b3:4fzsu7rbt45ncqbhshkduhypcrfn4venzavocipg3f7jfbzvzywq	target superseded
+rivals	unit	b3:4juai6sphemlasq3pqodzy4oiqflvzjmirvvykckx7lun2i6yzlq	rebutted/b: the database
+rivals	unit	b3:4xdi2oyd3xidf5xs6zop5ifliazwlmdmfvlqisykcfprlzgm4z7a	w
+rivals	unit	b3:4xjykzrsbo2d7nrug36gepifszzqdx7crhsf6bpgyhka7okb3l2a	superseded/a: the deploy
+rivals	unit	b3:44oawupaibmylpr7irwivr7mbojokccko3vh5lk4uqkkqdrhr7zq	three/c: the network
+rivals	unit	b3:5cz46qumivfab2x7thy5rcitu5mdcr5tcj6jdjkay5gfdxxxysjq	two/b: the database
+rivals	unit	b3:5mgplpgnqz44gcyvbpgybhoefkpdgsimylzemxuny6xyumzqllhq	target speculative
+rivals	unit	b3:56nextof6rjq6i4kv4ms22m6s3o6qdomtsbdbmeprvfub6uswtgq	rebutted/a: the deploy
+rivals	unit	b3:6acqpeit5acy6qhzavypsuopwsfy7acd536zalmawiimnaawpixq	three/b: the database
+rivals	unit	b3:7j3bbxg5rucgf3asjde2hiscf74uvtoh742ojbximeapjwvjllnq	target two
+rivals	unit	b3:73d23jppjqt3tyqehye54awsdmrbmpuxmflud4zkmhyd7svepuoq	target capped
+rivals	code	SMY-W606	b3:f7iop7af5trmhjn55ety2awwlyvsd3yaiwzwh3yldzuqd5ajtw7a
+rivals	status	b3:f7iop7af5trmhjn55ety2awwlyvsd3yaiwzwh3yldzuqd5ajtw7a	speculative
+rivals	status	b3:mgrf6i7777aabutxh2n5ofjgzhfdwp3biznais4kk4jd4qmmbb3a	inferred
+rivals	status	b3:odzjvv6cwk3w7n2x4mmrvbeme57qcvxbpeei6vnxizjp3xzyzkxq	inferred
+rivals	status	b3:pw7qh5pupsl34p4ne2kng5npxmebh6nuuamxqtsehdb7eyarb2va	inferred
+rivals	status	b3:qeedk3ohjv4v4mq2x2mfbs7slkhcdstdeflay2sranmmiuqqfywq	speculative
+rivals	status	b3:tuy2i22wgefrtvknagceaskgazmslcfgqwpkpgpp2oscrlbnjxta	inferred
+rivals	status	b3:2cr557ldsap4xppr54djdoigx7sqy2okrocfcn3cgzyjkedm3dwq	inferred
+rivals	status	b3:4juai6sphemlasq3pqodzy4oiqflvzjmirvvykckx7lun2i6yzlq	inferred
+rivals	status	b3:4xjykzrsbo2d7nrug36gepifszzqdx7crhsf6bpgyhka7okb3l2a	inferred
+rivals	status	b3:44oawupaibmylpr7irwivr7mbojokccko3vh5lk4uqkkqdrhr7zq	inferred
+rivals	status	b3:5cz46qumivfab2x7thy5rcitu5mdcr5tcj6jdjkay5gfdxxxysjq	inferred
+rivals	status	b3:56nextof6rjq6i4kv4ms22m6s3o6qdomtsbdbmeprvfub6uswtgq	inferred
+rivals	status	b3:6acqpeit5acy6qhzavypsuopwsfy7acd536zalmawiimnaawpixq	inferred
+rivals	contention	k/c42ncjydc3324xo57qwen75ppkj	kind=6 over=b3:n4hzog2d434nrupks5rfsbey2wmrejoqhycxe65yf2pz2osstjqq positions=b3:tuy2i22wgefrtvknagceaskgazmslcfgqwpkpgpp2oscrlbnjxta,b3:44oawupaibmylpr7irwivr7mbojokccko3vh5lk4uqkkqdrhr7zq,b3:6acqpeit5acy6qhzavypsuopwsfy7acd536zalmawiimnaawpixq
+rivals	contention	k/cl3bhn5s3xpdgovzjumvmmnducy	kind=6 over=b3:7j3bbxg5rucgf3asjde2hiscf74uvtoh742ojbximeapjwvjllnq positions=b3:mgrf6i7777aabutxh2n5ofjgzhfdwp3biznais4kk4jd4qmmbb3a,b3:5cz46qumivfab2x7thy5rcitu5mdcr5tcj6jdjkay5gfdxxxysjq
+witnesses	unit	b3:ccdu5ai4bnmda6kulo4tknj2vz2z5my43mfpk7bvyxlenapshnvq	prom-target:app/p99-far
+witnesses	unit	b3:chhhx4jbznb3glsphbox7jgnviwq6l2wlbjtr6r5tifi37tadidq	net/a
+witnesses	unit	b3:chqgq7htr7wb6gymmgoofsjdm2xf46buwsl2rpfrq7tj6cnouyva	prom-target:node/net
+witnesses	unit	b3:dz6rxgemxxltxzwya4dxbfepmsjrqrjoeachfcpbzbstuh5o4ihq	app_cpu
+witnesses	unit	b3:etuxvg322bxh2wli7mxmxxm4mu7k5qkilqopqxgfrtzgifoirhka	app_qps
+witnesses	unit	b3:hhdw7rjkrp3auyuyfhlesmehcygnbsethyy2hbbzv65ilybuouna	prom-target:node/p99-near
+witnesses	unit	b3:hogc67mtdu2twrhe22dr7wyyp4tj7ymcbq5tnjdcbw2q5ee44frq	rule:qps
+witnesses	unit	b3:hzwujad7aatetpkjzxyyiknuzi3vi4jcmtyoh6basfu5k7yhyzla	node_mem
+witnesses	unit	b3:idvqmqqyxmxzneyf5ollem46k3a5mfon5n7w6etlt5dh3ewvnoaq	prom-target:app/mem
+witnesses	unit	b3:jjxidfvac6wb3fd3zsuskm7fxkzl7y3wfjdu5qn2udnetrkqmpmq	app_p99-far
+witnesses	unit	b3:jrowpgfobexo7zpvzu3pn5wr753rky5cyrv6zt4ro2infrg4mfqq	cpu/node
+witnesses	unit	b3:kmn5iefos5lnz5cx7q4iv6nyoap4sgwdpippvkpdlnst5khhrfiq	cpu/app
+witnesses	unit	b3:l2s77totuqh7ps2rx7da7ff7iyu7zrztkjkppu4lyplyese6jj7q	prom-target:node/qps
+witnesses	unit	b3:ncro3zknvppjjeem75j5tfsdvsrwfi66sdbvndr53i5vc2zu3ryq	disk/app
+witnesses	unit	b3:o37q3jfuhq2ouc7dhb67ski7di4ghcdy3tuxyoanxgxmlls5ey6a	prom-target:app/cpu
+witnesses	unit	b3:prnjcl5dqbixkseajcr3ipby3kgqapssc6nzlic3hkwdvqq3fqfa	prom-scrape:central
+witnesses	unit	b3:p2xmyjak7sgc57mjnf2co3aemj27gfgs6jsdh364c2y5rsqt4yyq	node_qps
+witnesses	unit	b3:qb6pwjpq4ajztbgdixecvfijf4isuewm733jifzlhyk6tvwl2bsa	prom-target:node/p99-far
+witnesses	unit	b3:qdipp22yfc226vkp3zr33nyrl2peqjzolhg3hmdtg55g22yvsr4a	qps/node
+witnesses	unit	b3:rw53belsdekjborcc52f3lhs6vdlxnrfwyjk6qx3gzffhm2xj36a	node_disk
+witnesses	unit	b3:r6zutmjnxmxrpzd5ftknm2w6njwmtwlgvdkb6o2mfzvlxfxerejq	prom-target:app/p99-near
+witnesses	unit	b3:skuis7ibvr4t5vk3wjt32hprschbpsunusszszsg2drw5zu66ktq	mem/node
+witnesses	unit	b3:tnpvjwbfs2lgz2uca3muducm4sjksiyqua4gsl4hn54obu7eudra	node_net
+witnesses	unit	b3:ubtsf2b7yahudbzht7644cbwbdzgq74fzbaiz2dokxvguby6jxpq	app_disk
+witnesses	unit	b3:vrbcpyipf3gpbcq3dxikspslp6at76qhhpohpoy225ofhafa4g3q	node_net{replica="b"}
+witnesses	unit	b3:wnnzgfn5l5hwlsykdwhttj3rdegcnoyixf5mv2ltxmq4mosv33yq	prom-target:node/cpu
+witnesses	unit	b3:xgkqy2rmkuvipprcml4myv4cx3ppp2alygp34dl22ywogfecbfca	mem/app, preferred
+witnesses	unit	b3:x5bsgmfd5q54bcynw63ow33kysswfyvpquc3jfjvugaj7asty2na	prom-target:node/mem
+witnesses	unit	b3:ylfebhhynnnycau5njkmirjlhtbti4fdmfwjrfji4j6n4pu6hsnq	p99-far/app
+witnesses	unit	b3:yvnzyrlqmypqfm47pne4zkakpskbanwnlpyaaxmchkzgfhfnghta	node_p99-near
+witnesses	unit	b3:yw6mts73zx2qhzjzacrfxpdtzbotxzomink4xurbz4vunoc6togq	p99-near/node
+witnesses	unit	b3:zghtmd7ihporphi5lzqpp7ykfkvlzk767oghoc2thicai2oiu3ka	node_p99-far
+witnesses	unit	b3:zkbh73jmqhgea4o5nwperobtadumq7ort3c57u6xuwyj2vel2i5a	prom-target:node/disk
+witnesses	unit	b3:2oqeq34szymlcolf6imxnl4gxidhxvkcgjlj7d2jtv3ilgotc3ra	p99-far/node
+witnesses	unit	b3:2zknjmwf6m3amclmrxyetjxzxck5qbjif2jfq63c55yzi7rbqd4q	prom-target:app/qps
+witnesses	unit	b3:3fvoogmwhxsxmn3yqmn2l6oymxqfqqz7akiwtxqmwsokf4sg2raa	app_mem
+witnesses	unit	b3:3l6daeoajv7sftfouvgujs7qt4lynhkst7y466xkzv7oaswu4jwq	disk/node
+witnesses	unit	b3:3sdykwrnmos7omkbqpmcn7sqtbta6y5rbzkkvricpp5jpmw23qza	qps/app
+witnesses	unit	b3:4nz4l2f4mdwhagkeozkqtajzcvnwyqhwpttotkdhgwsdmg67by5q	mem/app, fewer samples
+witnesses	unit	b3:4ojwmwtsfpc73g4mjmtnmmtcdypqbg5hfrnuabrahic5uer37bka	p99-near/app
+witnesses	unit	b3:46mrrwcz7zao2l7x27jvb4a67xbaa6v5zxxegfcas2cmv5kqecyq	net/b
+witnesses	unit	b3:5lzl46oscnehlwklh5z4h5yawtmhy6m6utl2dn6xpm2zvbiqdh6q	prom-target:app/disk
+witnesses	unit	b3:6fi7sqo6ukdjbx4yadyj36axmiq7by5srov7tjixt5uhkuwqur6q	orphan_seconds
+witnesses	unit	b3:6nzyab7c2vxoawhltme4w2xsqlzposdq7lougi4ojpsod6o2u6ca	app_p99-near
+witnesses	unit	b3:7obflvwtpd5srpxegyw6vkvx354resv4ypye6warrxz35ksqobwa	node_cpu
+witnesses	code	SMY-W609	b3:6fi7sqo6ukdjbx4yadyj36axmiq7by5srov7tjixt5uhkuwqur6q
+witnesses	contention	k/csldtcvqct3oxiu3mryileiizb2	kind=7 over=b3:hzwujad7aatetpkjzxyyiknuzi3vi4jcmtyoh6basfu5k7yhyzla positions=b3:skuis7ibvr4t5vk3wjt32hprschbpsunusszszsg2drw5zu66ktq,b3:xgkqy2rmkuvipprcml4myv4cx3ppp2alygp34dl22ywogfecbfca
+witnesses	contention	k/crohikqf7zq3awkkvpczcb3pji4	kind=7 over=b3:jjxidfvac6wb3fd3zsuskm7fxkzl7y3wfjdu5qn2udnetrkqmpmq positions=b3:ylfebhhynnnycau5njkmirjlhtbti4fdmfwjrfji4j6n4pu6hsnq,b3:2oqeq34szymlcolf6imxnl4gxidhxvkcgjlj7d2jtv3ilgotc3ra
+witnesses	contention	k/cqg7mdfmkvzrxhlfa7mnbbiwf24	kind=7 over=b3:rw53belsdekjborcc52f3lhs6vdlxnrfwyjk6qx3gzffhm2xj36a positions=b3:ncro3zknvppjjeem75j5tfsdvsrwfi66sdbvndr53i5vc2zu3ryq,b3:3l6daeoajv7sftfouvgujs7qt4lynhkst7y466xkzv7oaswu4jwq
+events	unit	b3:camnyrozt7g3gl3yuwyycsv22fdqukit3hh3rf55wp6j3fd6yy7q	span: child
+events	unit	b3:fy3jdobgyaomi62ejntyqcp7nk3odozmjyrprvh2ijhbnjkgh5qq	otel-collector:c1
+events	unit	b3:gaqcz4zqiakinatywoqszmheehg633qqbtmdu6zqdrer64bgzera	{"resource":{"service.name":"cart"},"scope":{"name":"io.opentelemetry.http","version":"1.2.0"},"signal":"spans"}
+events	unit	b3:nkuvwxlu47y6eqphe6snoeh7ymsrqms4da4fbtocdyxsx7pakgwq	e603: span, attested transformed
+events	unit	b3:styox3dkrp7psxal57itbbvcanojzp7qmwe3rbp37fywfdzbatrq	{"host":"h1","unit":"cart.service"}
+events	unit	b3:s2z6trixgkinefq32ci22tyzodvz6ddsbawfmzq2twxhyn2kpaeq	e603: span, no digest
+events	unit	b3:whm6tmseh4azhj2g2aiotbuqhqoygyqcab5ukngf65ry3sr6ezhq	template
+events	unit	b3:xxomdilkiqjmy4rycisfauuctlr62xfmfspop5m5bpjy3w7dp5ka	journald:h1
+events	unit	b3:3jtgcvdtumfgvt5l2r2i3drsmjhhvdunbliijtfl76r5rgu2jstq	span: parent
+events	unit	b3:3k7tfdd5moy2nuposc275j4jjuehlnrn465wjkyknjlymmtntuaa	e603: template, measured
+events	code	SMY-E033	b3:nkuvwxlu47y6eqphe6snoeh7ymsrqms4da4fbtocdyxsx7pakgwq
+events	code	SMY-E603	b3:3k7tfdd5moy2nuposc275j4jjuehlnrn465wjkyknjlymmtntuaa
+events	code	SMY-E603	b3:nkuvwxlu47y6eqphe6snoeh7ymsrqms4da4fbtocdyxsx7pakgwq
+events	code	SMY-E603	b3:s2z6trixgkinefq32ci22tyzodvz6ddsbawfmzq2twxhyn2kpaeq
+events	code	SMY-W035	b3:nkuvwxlu47y6eqphe6snoeh7ymsrqms4da4fbtocdyxsx7pakgwq
+reserved	unit	b3:iffdtxqyfjsjagiuh3343w3gsvanc3flbghswo46lhuttsnzn5ja	w
+reserved	unit	b3:l63ds3ri7lgkbyl3lauxqdv2qssm2w67meqfjxggyxpsjkcjl7jq	e612: source key 7
+reserved	unit	b3:pxgezcpaukjqoejaqxj6nribtztgcpxy3uhexuzepoqgqtdjykxa	prom-scrape:reserved/h1:9100
+reserved	unit	b3:ss66ew5baxohuszyfgpxsq2hid2uws5s2nbywmujyrivnfh263ta	e607: a series with a time
+reserved	unit	b3:xmnaxmtuqrq2mhh4xzdjmaugzyirhcfdh5qmtbnbawlbulmxtznq	prom-target:reserved/h1:9100
+reserved	unit	b3:zcebcfkctprcajt6xrkseft6j7noemubynqrxozi2f6u7y2gwlya	reserved_seconds
+reserved	code	SMY-E607	b3:ss66ew5baxohuszyfgpxsq2hid2uws5s2nbywmujyrivnfh263ta
+reserved	code	SMY-E611	-
+reserved	code	SMY-E611	-
+reserved	code	SMY-E612	-
+reserved	code	SMY-E612	b3:l63ds3ri7lgkbyl3lauxqdv2qssm2w67meqfjxggyxpsjkcjl7jq

@@ -1,0 +1,2 @@
+// The first two hours are the baseline.
+{ detector: mad/1, threshold: 3.5, baseline: "1768550400000-1768557600000" }

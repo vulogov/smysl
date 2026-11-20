@@ -765,3 +765,97 @@ fn findings_are_the_effective_answer_less_the_subjects_nothing_bears_on() {
         }
     }
 }
+
+/// A component's answer is the component's (AC-8, RFC SMYSL-3 §17.1): adding units that nothing
+/// ties to a store's subjects changes nothing rule E says about those subjects, contradictions
+/// included. Strict `before` and `after` datings among a few observed units close negative
+/// cycles often, and the network's search stops a node after as many relaxations as its network
+/// has variables, which is the one input that could reach across components. What lets a kept
+/// check and the range index solve only the components a batch touches.
+#[test]
+fn a_components_answer_does_not_depend_on_the_store_around_it() {
+    let reading = |tag: String, ms: u64| {
+        UnitCoreBuilder::new(
+            KernelType::Evidence,
+            format!("a reading {tag} long enough to clear the gist check"),
+            Status::Cited,
+        )
+        .source(SourceRef::new(SourceKind::Metric, format!("m/{tag}")).observed_at(ms))
+        .build()
+        .expect("a unit")
+    };
+    let mut cycles = 0;
+    for seed in 1..=40u64 {
+        let mut rng = Rng(seed * 7919);
+        let mut records = Vec::new();
+        let mut uids = Vec::new();
+        for i in 0..5 {
+            let core = reading(
+                format!("{seed}.{i}"),
+                1_726_500_000_000 + rng.below(5) as u64 * 1_000,
+            );
+            uids.push(smysl_core::canonical_uid(&core));
+            records.push(Record::Unit(core));
+        }
+        for k in 0..6u64 {
+            let (a, b) = (rng.pick(&uids), rng.pick(&uids));
+            if a == b {
+                continue;
+            }
+            let allen = rng.pick(&[smysl_core::Allen::Before, smysl_core::Allen::After]);
+            records.push(Record::Dating(
+                Dating::new(
+                    DatingTarget::Unit(a),
+                    Axis::Said,
+                    DatingValue::Relative {
+                        allen,
+                        target: DatingTarget::Unit(b),
+                    },
+                    agent(),
+                    Hlc::new(100 + k, 0, agent()),
+                )
+                .with_basis(rng.pick(&uids)),
+            ));
+        }
+        let alone = store_of(&records);
+        let mut around = records.clone();
+        for j in 0..60 {
+            around.push(Record::Unit(reading(
+                format!("{seed}.bystander.{j}"),
+                1_700_000_000_000 + j * 60_000,
+            )));
+        }
+        let around = store_of(&around);
+        for axis in [Axis::Said, Axis::Composed] {
+            let (a, b) = (effective(&alone, axis), effective(&around, axis));
+            cycles += usize::from(!a.inconsistent.is_empty());
+            for u in &uids {
+                let s = Subject::Unit(*u);
+                assert_eq!(
+                    a.dated.get(&s).map(|d| (d.interval, d.contested)),
+                    b.dated.get(&s).map(|d| (d.interval, d.contested)),
+                    "seed {seed}, {axis:?}: {u} moved when unrelated units arrived"
+                );
+            }
+            let ids = |e: &smysl_text::time::engine::Effective| {
+                let mut v: Vec<_> = e
+                    .inconsistent
+                    .iter()
+                    .chain(&e.not_applied)
+                    .map(|c| c.id.clone())
+                    .collect();
+                v.sort();
+                v
+            };
+            assert_eq!(
+                ids(&a),
+                ids(&b),
+                "seed {seed}, {axis:?}: the findings moved"
+            );
+        }
+    }
+    assert!(
+        cycles >= 10,
+        "only {cycles} runs had a contradiction to keep still"
+    );
+}

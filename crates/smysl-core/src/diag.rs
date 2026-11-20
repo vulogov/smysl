@@ -180,7 +180,7 @@ macro_rules! registry {
 }
 
 registry! {
-    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure, Export, Schema, Store }
+    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure, Export, Schema, Store, Telemetry }
 
     // --- Parse and encoding ------------------------------------------------
     Parse => {
@@ -508,6 +508,28 @@ registry! {
     // the library's group where the other ingest-side codes (`W443`, `W444`, `W448`) are.
     Library => {
         W457 = "SMY-W457", Warn,  "An answer gist over the bound was cut to it; the claim stands whole in the body";
+    }
+
+    // 1.17, SMYSL-3 TL-P1: the range `SMY-E6xx`/`W6xx` is telemetry's (§15), in a fifteenth
+    // group appended last for the reason the blocks above give. Only the two TL-P1 raises are
+    // registered; the rest arrive with what raises them.
+    Telemetry => {
+        E602 = "SMY-E602", Error, "A non-canonical dec: not two shortest integers, a trailing-zero mantissa, zero with an exponent, out of range, or -2^64";
+        E603 = "SMY-E603", Error, "A window unit's status or attestation is not the one rule TW gives its basis and fields";
+        E604 = "SMY-E604", Error, "Window evidence recomputed from the substrate does not match the unit";
+        W605 = "SMY-W605", Warn,  "Window evidence refers to samples the substrate does not hold (evicted or never received): not re-derivable";
+        W606 = "SMY-W606", Warn,  "A hypothesis's numeric quote does not verify (rule TQ); its effective status is at most speculative";
+        E607 = "SMY-E607", Error, "A series or instrument unit carries what its identity forbids: time, grounds, or another source";
+        W608 = "SMY-W608", Warn,  "A declared keyed array could not be keyed (missing, non-scalar or repeated key); diffed as one json leaf";
+        W609 = "SMY-W609", Warn,  "A series has no x.tel/measured-by: witness counting takes it as its own origin";
+        W610 = "SMY-W610", Warn,  "The profile changed between two snapshots of one manifest chain; the boundary is reported, not diffed";
+        E611 = "SMY-E611", Error, "A record 6 of a detection kind that is derived and never written (6 or 7)";
+        E612 = "SMY-E612", Error, "A writer emitted a reserved number: source key 7 or record 16";
+        W613 = "SMY-W613", Warn,  "A number outside dec's range, kept as its token (vtype text)";
+        W614 = "SMY-W614", Warn,  "The windows of one window key disagree: several sample sets, each window true of its own";
+        W615 = "SMY-W615", Warn,  "Two samples at one series, instrument and instant, with different values or flags; both are kept";
+        W616 = "SMY-W616", Warn,  "An integer window sum outside dec's range; the sum is omitted";
+        W617 = "SMY-W617", Warn,  "Two spans with one trace and span id in one stream, with different contents; both are kept";
     }
 }
 
@@ -1024,9 +1046,27 @@ mod tests {
     /// 156 with `SMY-W457` in 1.16.0: an answer gist over the profile's bound, cut to it with
     /// the claim moved whole into the body. `ask` has no repair turn, and a model cannot count
     /// the way the estimator does, so the cut is where that is settled.
+    ///
+    /// 158 with `SMY-E611` and `SMY-E612` in 1.17 (SMYSL-3 TL-P1), in a fifteenth group,
+    /// `Telemetry`: a record 6 of a kind SMYSL-3 derives, and a reserved number written.
+    ///
+    /// 159 with `SMY-E602` in TL-P1 step 2: a `dec` that is not canonical, refused by its decoder.
+    /// 160 with `SMY-E607` in step 3: a series or instrument unit breaking §4.1's entity-like
+    /// rule, raised by `check`'s extension pass. 162 with `SMY-W608` and `SMY-W613` in TL-P2
+    /// step 3, raised by the canonical diff (`smysl_tel::diff`): a keyed array that could not be
+    /// keyed, and a number outside `dec`'s range. 163 with `SMY-W610` in step 5, raised by
+    /// `smysl_tel::snapshot::record` when an object's previous snapshot was read under another
+    /// profile.
+    /// 166 with `SMY-W614`, `SMY-W615` and `SMY-W616` in TL-P4 step 1: windows of one key that
+    /// disagree, two samples at one instant, and an integer sum outside `dec`'s range.
+    /// 169 with `SMY-E603`, `SMY-E604` and `SMY-W605` in TL-P4 step 3: rule TW, and window
+    /// evidence recomputed from the substrate or found without it.
+    /// 170 with `SMY-W606` in TL-P6 step 2: a numeric quote that does not verify (rule TQ).
+    /// 171 with `SMY-W609` in TL-P7 step 1: a series with no origin instrument.
+    /// 172 with `SMY-W617` in TL-P9 step 2: one span id held twice with different contents.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 156);
+        assert_eq!(Code::ALL.len(), 172);
     }
 
     #[test]
@@ -1037,7 +1077,7 @@ mod tests {
                 "group {g} has no codes"
             );
         }
-        assert_eq!(Group::ALL.len(), 14);
+        assert_eq!(Group::ALL.len(), 15);
     }
 
     #[test]

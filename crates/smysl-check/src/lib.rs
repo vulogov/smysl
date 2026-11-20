@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
+pub mod incremental;
 pub mod passes;
 
 use std::collections::BTreeMap;
@@ -257,12 +258,23 @@ impl CheckOptions {
 /// that is outside every profile present, which is a warning worth having; a unit inside it is
 /// not flagged on the strength of a sort order.
 pub fn store_granularity(store: &(impl StoreRead + ?Sized)) -> GranularityProfile {
-    let mut distinct: Vec<&GranularityProfile> = Vec::new();
+    widest(&distinct_profiles(store))
+}
+
+/// The views' profiles, each once, in the order the views come.
+pub(crate) fn distinct_profiles(store: &(impl StoreRead + ?Sized)) -> Vec<GranularityProfile> {
+    let mut distinct: Vec<GranularityProfile> = Vec::new();
     for v in store.views() {
-        if !distinct.contains(&&v.granularity) {
-            distinct.push(&v.granularity);
+        if !distinct.contains(&v.granularity) {
+            distinct.push(v.granularity.clone());
         }
     }
+    distinct
+}
+
+/// [`store_granularity`] of a store whose views have these profiles.
+pub(crate) fn widest(distinct: &[GranularityProfile]) -> GranularityProfile {
+    let distinct: Vec<&GranularityProfile> = distinct.iter().collect();
     match distinct.as_slice() {
         [] => GranularityProfile::default(),
         [only] => (*only).clone(),
@@ -296,48 +308,66 @@ pub fn store_granularity(store: &(impl StoreRead + ?Sized)) -> GranularityProfil
 ///
 /// Never short-circuits: every requested pass runs, whatever the earlier ones found.
 pub fn check(store: &(impl StoreRead + ?Sized), opts: CheckOptions) -> Report {
-    let mut granularity = opts
-        .granularity
-        .clone()
-        .unwrap_or_else(|| store_granularity(store));
+    let granularity = effective_granularity(|| store_granularity(store), &opts);
+    let mut report = Report::new();
+    run_passes(store, passes::Scope::All, &opts, &granularity, &mut report);
+    report.sort();
+    report
+}
+
+/// The profile units are checked against: the caller's, else the store's, with the caller's
+/// estimator over either.
+pub(crate) fn effective_granularity(
+    from_store: impl FnOnce() -> GranularityProfile,
+    opts: &CheckOptions,
+) -> GranularityProfile {
+    let mut granularity = opts.granularity.clone().unwrap_or_else(from_store);
     if let Some(e) = opts.estimator.clone() {
         granularity.estimator = e;
     }
+    granularity
+}
 
-    let mut report = Report::new();
-    if opts.runs(Pass::Integrity) {
-        passes::integrity::run(store, &mut report);
+/// The passes, over what `scope` says. Integrity and rule E look at the whole store only: a
+/// kept check keeps their findings itself (`incremental`).
+pub(crate) fn run_passes(
+    store: &(impl StoreRead + ?Sized),
+    scope: passes::Scope<'_>,
+    opts: &CheckOptions,
+    granularity: &GranularityProfile,
+    report: &mut Report,
+) {
+    if opts.runs(Pass::Integrity) && scope.is_all() {
+        passes::integrity::run(store, report);
     }
     if opts.runs(Pass::Shape) {
-        passes::shape::run(store, &granularity, &mut report);
+        passes::shape::run_scoped(store, scope, granularity, report);
     }
     if opts.runs(Pass::Closure) {
-        passes::closure::run(store, &opts.labels, &mut report);
+        passes::closure::run_scoped(store, scope, &opts.labels, report);
     }
     if opts.runs(Pass::Granularity) {
-        passes::granularity::run(store, &granularity, &mut report);
+        passes::granularity::run_scoped(store, scope, granularity, report);
     }
     if opts.runs(Pass::Epistemics) {
-        passes::epistemics::run(store, &mut report);
+        passes::epistemics::run_scoped(store, scope, report);
     }
     if opts.runs(Pass::Trust) {
-        passes::trust::run(store, &mut report);
+        passes::trust::run_scoped(store, scope, report);
     }
     if opts.runs(Pass::Extension) {
-        passes::extension::run(store, opts.consumer.as_ref(), &mut report);
+        passes::extension::run_scoped(store, scope, opts.consumer.as_ref(), report);
     }
     if opts.runs(Pass::CommitmentSupport) {
-        passes::commitment::run(store, &mut report);
+        passes::commitment::run_scoped(store, scope, report);
     }
     if opts.runs(Pass::Library) {
-        passes::library::run(store, opts.parts.as_deref(), &mut report);
+        passes::library::run_scoped(store, scope, opts.parts.as_deref(), report);
     }
     #[cfg(feature = "text")]
-    if opts.runs(Pass::Time) {
-        passes::time::run(store, &mut report);
+    if opts.runs(Pass::Time) && scope.is_all() {
+        passes::time::run(store, report);
     }
-    report.sort();
-    report
 }
 
 /// Whether a store is consumable at a conformance class, and why not if it is not.

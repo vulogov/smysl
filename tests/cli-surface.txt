@@ -216,9 +216,9 @@ bundle     --help
 thread     [PATH]
 thread     --config
 thread     --derive
-thread     [possible values: analysis, narrative, brief, qa, plan, exposition, dialogue, dossier]
+thread     [possible values: analysis, narrative, brief, qa, plan, timeline, exposition, dialogue, dossier]
 thread     --schema
-thread     [possible values: analysis, narrative, brief, qa, plan, exposition, dialogue, dossier]
+thread     [possible values: analysis, narrative, brief, qa, plan, timeline, exposition, dialogue, dossier]
 thread     --output
 thread     --only
 thread     --format
@@ -953,6 +953,7 @@ lib        --with-text
 lib        --with-provenance
 lib        --with-staged
 lib        --with-quarantine
+lib        --with-substrate
 lib        --primary
 lib        --index
 lib        --primary-shards
@@ -1008,3 +1009,49 @@ migrate    [possible values: memory, redb]
 migrate    --shard
 migrate    --seed-check
 migrate    --help
+tel        <ACTION>
+tel        [possible values: read, at, window, check, detect, investigate, declare, witnesses, evict, trace, templates, similar, profile]
+tel        [ARG]
+tel        --config
+tel        --profile
+tel        --at
+tel        --store
+tel        --licence
+tel        --format
+tel        [possible values: surface, cbor, pack]
+tel        --job
+tel        --instance
+tel        --strict
+tel        --instrument
+tel        --offline
+tel        --no-color
+tel        --sketch
+tel        --noprogress
+tel        --qs
+tel        --json
+tel        --series
+tel        --during
+tel        --quiet
+tel        --trigger
+tel        --verbose
+tel        --as
+tel        --backend
+tel        [possible values: memory, redb]
+tel        --rotation
+tel        --shard
+tel        --explains
+tel        --seed-check
+tel        --target
+tel        --ground
+tel        --quote
+tel        --output
+tel        --confirmed-by
+tel        --lookback
+tel        --trends
+tel        --items
+tel        --zabbix-api
+tel        --top
+tel        --seed
+tel        --older-than
+tel        --yes
+tel        --help

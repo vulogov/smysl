@@ -1,0 +1,47 @@
+[package]
+name        = "smysl-tel"
+description = "smysl for telemetry (RFC SMYSL-3): readers, profiles, the canonical diff, window evidence, detectors and investigations"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+# `otlp/1`, the protobuf OTLP metrics reader (RFC SMYSL-3 §20.1). `otlp-json/1` needs nothing
+# and is always built.
+reader-otlp = ["dep:prost"]
+
+[dependencies]
+# `dec`, `x.tel/v1`'s names and builders, payload CBOR and the diagnostic registry. The one
+# dependency TL-P2 step 1 needs: a canonical leaf value is a function of JSON text and a
+# profile, and nothing about a store.
+smysl-core = { workspace = true }
+# The series substrate (§19): a scrape's samples go there, and a scrape's resets and stales are
+# decided against what it holds (TL-P3).
+smysl-series = { workspace = true }
+# Strings are NFC (§5.5), as every text field the kernel hashes is.
+unicode-normalization = { workspace = true }
+# Protobuf decoding for `otlp/1`, with the metrics messages declared in `readers/otlp_pb.rs`:
+# `opentelemetry-proto` would bring `opentelemetry_sdk` with its types.
+prost = { workspace = true, optional = true }
+# MinHash's functions (RFC SMYSL-3 §21, TL-P9): ChaCha20 keyed by the recipe and its seed, as
+# `smysl-measure`'s bootstrap draws. Seeded only: `rand_core` without `os_rng` brings no
+# `getrandom`, and the crate's purity scan still bans every unseeded generator by name.
+rand_chacha = { version = "0.9", default-features = false }
+rand_core   = { version = "0.9", default-features = false }
+
+[dev-dependencies]
+# `tests/prom_fixture.rs` records the fixture into the redb backend as well as memory: the
+# substrate round trip TL-P3's exit criterion names.
+smysl-series = { workspace = true, features = ["store-redb"] }
+
+# The OTLP fixture reads each export's protobuf twin as well as its JSON.
+[[test]]
+name = "otlp_fixture"
+required-features = ["reader-otlp"]

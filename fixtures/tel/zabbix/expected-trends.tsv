@@ -1,0 +1,12 @@
+# RFC SMYSL-3 §9.4, §20.1: fixtures/tel/zabbix/trends.json as cited platform windows.
+# Written by crates/smysl-tel/tests/zabbix_history_fixture.rs; SMYSL_BLESS=1 rewrites it.
+export	trends.json	9 windows	1 not values	unknown {"99"}
+window	b3:fycbmgyqa22tpr4l3lrivlzagnkq7rdzp7jqliyd7bdpggtugoxq	host:web-01/item:system.cpu.load[percpu,avg1]	1768546800000	count 60	max 1.2
+window	b3:svvt3en4muvjy62xxhvxhb3hgzkvfxlnu7ffok5ulplyhepfmekq	host:web-01/item:system.cpu.load[percpu,avg1]	1768550400000	count 60	max 0.98
+window	b3:d67tzn3z47cmesw63vuqgsqy4zhau5zmgzzudhjaalnbmcw3frza	host:web-01/item:system.cpu.load[percpu,avg1]	1768554000000	count 60	max -
+window	b3:dugttr7saxpi7cpok2v2y2s7zpfi74laraoeay4pzagwecpvbhxa	host:web-01/item:net.if.in["eth0"]	1768546800000	count 60	max 18446744073709551615
+window	b3:dhf4k5eqzt6yqbmmcum6noownv6eciv5xzra5pmon5ywtxloxg4q	host:web-01/item:net.if.in["eth0"]	1768550400000	count 60	max 18446744073709551615
+window	b3:bxofdhxlif7mtg52xm7cd47gtlq5gie7tkh7qlirsa5j5l2tdkra	host:web-01/item:net.if.in["eth0"]	1768554000000	count 60	max 18446744073709551615
+window	b3:7yy4viuuei4ejyfqurfgz3cqi6pe3qkdkg33yvmtyidsfd2ujloq	host:DB 01/item:mysql.qps	1768546800000	count 58	max 140
+window	b3:ldkwrucamxasdqqxkyoid27bltce5eqicluxtobsletlwb42xlga	host:DB 01/item:mysql.qps	1768550400000	count 60	max 140
+window	b3:ex45buc34jgn7nzbtmrng433j77yzxgy5o6iyx3ejt6odxelej2a	host:DB 01/item:mysql.qps	1768554000000	count 59	max 140

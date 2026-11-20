@@ -234,6 +234,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
+name = "bytes"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+
+[[package]]
 name = "candle-core"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1624,6 +1630,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
+dependencies = [
+ "bytes",
+ "prost-derive",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.14.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad9c5423459fa2f729b8d9235fab810aa29628b171467744fc86d21460ad70d"
+dependencies = [
+ "anyhow",
+ "itertools 0.14.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "pulldown-cmark"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2092,7 +2121,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "smysl"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "clap",
  "getrandom 0.3.4",
@@ -2110,6 +2139,8 @@ dependencies = [
  "smysl-query",
  "smysl-render",
  "smysl-retrieve",
+ "smysl-series",
+ "smysl-tel",
  "smysl-text",
  "smysl-thread",
  "smysl-tui",
@@ -2117,7 +2148,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-check"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -2126,7 +2157,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-core"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "blake3",
  "unicode-normalization",
@@ -2134,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-embed"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "blake3",
  "model2vec-rs",
@@ -2145,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-embed-candle"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "blake3",
  "candle-core",
@@ -2160,7 +2191,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-eval"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "smysl-check",
  "smysl-core",
@@ -2173,7 +2204,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-graph"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "redb",
  "smysl-core",
@@ -2181,7 +2212,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-ingest"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "smysl-check",
  "smysl-core",
@@ -2193,7 +2224,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-lib"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "blake3",
  "smysl-check",
@@ -2206,7 +2237,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-measure"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "brotli",
  "libm",
@@ -2223,7 +2254,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-pack"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -2231,7 +2262,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-provider"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2242,7 +2273,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-query"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -2253,7 +2284,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-render"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -2262,7 +2293,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-retrieve"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "bm25",
  "smysl-check",
@@ -2271,8 +2302,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "smysl-series"
+version = "1.17.0"
+dependencies = [
+ "redb",
+ "smysl-core",
+]
+
+[[package]]
+name = "smysl-tel"
+version = "1.17.0"
+dependencies = [
+ "prost",
+ "rand_chacha",
+ "rand_core",
+ "smysl-core",
+ "smysl-series",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "smysl-text"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "blake3",
  "caseless",
@@ -2297,7 +2348,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-thread"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -2305,7 +2356,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-tui"
-version = "1.16.0"
+version = "1.17.0"
 dependencies = [
  "crossterm",
  "ratatui",
@@ -2941,7 +2992,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "1.16.0"
+version = "1.17.0"
 
 [[package]]
 name = "yoke"

@@ -7,6 +7,2096 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.17.0 — 2026-11-19
+
+SMYSL-3, smysl for telemetry study and research, built from its format phase to its last:
+TL-P1 to TL-P9 of RFC SMYSL-3 (`Documentation/SMYSL-3_RFC/SMYSL-3_TELEMETRY.md`), and AC-8,
+the architecture prerequisite a live ledger needs. Nothing in the kernel changed: `x.tel/v1`
+is an extension schema, `dec` and the timeline thread fill numbers the wire already had room
+for, and `smysl/1.0` holds. Two new crates, `smysl-tel` and `smysl-series`, are published for
+the first time, behind the facade's `tel` feature.
+
+**What a telemetry store holds.** Snapshots of Kubernetes and Zabbix objects become change and
+recreate units by a canonical diff whose uids are the same on x86_64 and aarch64. Samples from
+Prometheus, OTLP and Zabbix history go to a series substrate, not to units, and the units that
+cite them are windows whose digest is a function of the samples alone, exact or sketched, with
+rule TW deciding their status. CUSUM, PELT, robust z and a BARO-style ranking run over the
+substrate and replay to the byte on four platforms in CI (GE-M3). Investigations, hypotheses,
+probes and actions are units, a numeric quote is checked against the window it cites (rule
+TQ, `SMY-W606`), and rival explanations and witness conflicts are derived detections, kinds 6
+and 7. Retention evicts samples without changing a record (rule TL), traces and logs arrive
+as spans and Drain templates, and episodes are compared by MinHash. The registry is 172.
+
+**What the experiments decided, on simulated data.** Each ran with its stop condition stated
+first, and each says so where it is reported:
+
+- **GE-M2:** 39.5% of spans would be misordered at millisecond resolution, so `source` key 7
+  is not released; it is not assigned either, and D-T5 now names what would assign it.
+- **GE-M4:** the substrate answers "value in force at t" as a hold record would, 4 µs at p95;
+  record 16's release stays the owner's decision on real data.
+- **GE-M5:** causal order names a skewed host 20% of the time at ≥ 5 ms, so rule E is
+  unchanged.
+- **GE-M6:** counting independent witnesses changes a conclusion but does not improve it, so
+  D-T10 is kept and witness counts stay a report.
+- **GE-M8:** MinHash recall@5 is 0.970 against embeddings' 0.898, so similarity is
+  model-independent by default.
+- **GE-M9:** six months evicted, exported, imported and merged with no record changed.
+
+**A ledger that grows one operation at a time.** OKO appends a unit and reads it at once, and
+at 6,000 units each commit took 43 ms and growing, because staging checked the batch against
+the whole store. AC-8 keeps the store's check as derived state and recomputes only what a
+batch can change, equal to the full check on every one of 11,659 batches verified. At 10⁵
+units a commit is 7.7 ms, of which 43% is the `fsync` and 41% the text library's range index,
+recorded and not acted on.
+
+**What 1.17 leaves open.** Everything SMYSL-3 asks of real data: GE-M1 on a cluster observed for
+seven days (I-1), the Zabbix fixtures (I-2), GE-M2 and GE-M5 on DeathStarBench, GE-M8 on
+GE-M7's corpus and RCAEval, and GE-M7 itself, the experiment the RFC calls the reason for all
+of this, which needs the Train-Ticket testbed and agent runs. OKO's own ledger, as opposed to
+`examples/oko_ledger`'s stand-in. The range index's tables, rewritten whole per append. And
+what 1.16 left — the cache's written share, the repair that a cut would do, the bound stated in
+tokens, the sizing residual on German, the Ollama arm's model size — and what 1.14 left before
+it, none of which moved in 1.17.
+
+### SMYSL-3 begins: the format's reservations (TL-P1 step 1)
+
+RFC SMYSL-3, smysl for telemetry study and research, is in
+`Documentation/SMYSL-3_RFC/SMYSL-3_TELEMETRY.md`. Its format phase, TL-P1, adds no record type
+and changes no kernel rule. It does fix four numbers the wire already had room for, and step 1
+fixes them before anything writes `x.tel/v1`:
+
+- **Detection kinds 6 and 7** are `rival-explanation` and `witness-conflict`. Both are
+  derived-only, as rule E's 4 and 5 are, so a store refuses a record 6 of either at the door.
+  The refusal now names who derives the kind: rule E for 4 and 5, `x.tel/v1`'s detection for
+  6 and 7. Until TL-P6 and TL-P7 derive them they map to `SMY-W053`, since SMYSL-3 allocates
+  them no reporting code.
+- **Thread schema 5 is `timeline`**, with roles 49 to 59: `trigger`, `onset`, `detection`,
+  `escalation`, `diagnosis`, `mitigation`, `recovery`, `closure`, `impact`, `communication`,
+  `follow-up`. Roles 60 to 63 stay reserved. A timeline requires one `detection` and has no
+  rules yet, so `thread --derive timeline` refuses. Unlike the dossier refusal, it doesn't send
+  the reader to `ask`, which has never made one. Renders head the new roles by name.
+- **`source` key 7 stays reserved, and so does record 16.** Neither is assigned. Both are
+  carried when they arrive (key 7 is inside the uid), and `check` names them.
+- **Two codes, in a fifteenth group, `Telemetry`:**
+  - `SMY-E611`: a record 6 of kind 6 or 7 in a store built without the door, such as a
+    document as written or a log from an older peer.
+  - `SMY-E612`: a reserved number written. A record 16 reports this instead of `SMY-W014`.
+  - The registry has 158 codes.
+  - Rule E's 4 and 5 keep no code, as before. SMYSL-3 §15 allocates `E611` for its own two only.
+
+`fixtures/wire/F14-unknown-codes.cbor` used detection kind 6 as its "unknown" code. It now uses
+9, which is the move TX-P8 made when it assigned thread schema 7.
+
+What step 1 does not do, and where it differs from the RFC:
+
+- **`SMY-E611` is not the store's refusal.** The RFC has the store refuse a kind-6 record with
+  `E611`. This tree's door refuses 4 and 5 with no code, deliberately, because a refusal makes
+  the violation unrepresentable rather than reportable. Kinds 6 and 7 share that door, and
+  `E611` is what `check` says about a store that got one past it.
+- **Neither reserved number is refused on write.** The RFC's TL-P1 says both are "refused on
+  write", and §10.2 says a foreign key 7 is "carried, not refused". These are reconciled by
+  what can write them:
+  - The surface refuses an unknown `source` key and cannot spell record 16.
+  - The CBOR builders cannot construct record 16.
+  - A key 7 can only enter through `SourceRef::extra`, which exists to preserve keys like it.
+
+  So `check` reports both, and nothing refuses them.
+
+
+### `dec`, a decimal that is one value (TL-P1 step 2)
+
+Telemetry values can't use the kernel float. It is binary32 quantised to 1/1024, so it loses a
+latency of 0.0004 s and every counter above 2²⁴. SMYSL-3 §5 gives `x.tel/v1` a type of its
+own, and `smysl_core::Decimal` is it.
+
+- **The pair.** A value is m × 10^e, on the wire a CBOR array of two shortest-form integers.
+  The mantissa carries no trailing zero, and zero is `[0, 0]`. The range is a `u64`
+  magnitude, sign separate, and an exponent in [−400, 400].
+- **Refusals.** The decoder refuses any other encoding of a value as `SMY-E602` rather than
+  normalising it, because two encodings of one value would be two uids. There are 159 codes.
+- **Reading from a source.** A token is read exactly as written, never through binary64:
+  `41`, `41.0` and `4.10e1` are one value. `NaN` and the infinities are refused as not values
+  (a stale marker is a fact, not a number). A binary64 becomes the decimal ECMA-262's
+  `Number::toString` selects, and a typed integer is never routed through a double.
+- **The one spelling.** Each value has exactly one text spelling, plain decimal with no
+  exponent, and it reads back to the same pair.
+
+**Checked against a second reading.** `fixtures/tel/dec/cases.json` is written by a
+JavaScript generator. Its 2,030 binary64 cases are what the engine's own `String(x)` says, so
+the claim that Rust's shortest formatting makes ECMA-262's choice is tested, not assumed. Its
+token, spelling and CBOR cases are the generator's own reading of §5. All agree, and the three
+ports will read the same file in step 4. A fuzz target, `dec`, holds the laws (one encoding per
+value, one spelling per value, no panic) and runs in `make fuzz` and in CI's fuzz job. Its
+first local run was 1.78 million inputs with no failure.
+
+**In a payload.** A `dec` is an ordinary array of two integers, so a payload carries one as
+`[412, -1]`. The generic payload encoder writes exactly `Decimal::to_cbor`'s bytes, which a
+test asserts, so the uid doesn't depend on which path put it there. The surface value model's
+integers are `i64` and closed by design. A mantissa beyond `i64` therefore has no surface
+spelling, and a unit carrying one has no surface form. It lives in CBOR, as a saved query does.
+
+**Found on the way:** an integer literal beyond `i64` in surface text is read as a float, and
+quantised. That predates SMYSL-3 and is left as it is here. It is why a wide `dec` must not be
+spelled at the surface.
+
+
+### `x.tel/v1`, registered (TL-P1 step 3)
+
+`smysl_core::schemas::tel` registers SMYSL-3's schema as `schemas::text` registers
+`x.text/v1`: the id, the seventeen unit types and eight relation kinds of §4, the
+enumerations of §4.3, and a declaration with `payload_shape` absent until A-7. Two things it
+does differently:
+
+- **Fields are tabled per type** (`TYPE_DEFS`), not flat. One key means two things:
+  `tel:basis` is `start-time` or `decrease` on a reset, and `substrate` or `platform` on a
+  window. A flat table would have to give it both value sets, and so check neither.
+  `FieldType` gains `Dec` and `Bytes32`, the two types §5.4 proposes for A-7.
+- **Keys are `tel:`-prefixed.** The RFC names its fields bare (`scheme`, `from_ms`). Every
+  extension schema here prefixes its keys (`text:holder`, `query:text`, `measure:v`), and the
+  prefix isn't taste: a bare payload key that is a unit header word (`status`, `source`,
+  `grounds`) has no surface spelling. The RFC's spellings are otherwise kept, underscores
+  included. Rule TQ's quote syntax (`<uid>#<field>=<value>`) will meet this in TL-P6, which
+  decides whether a quote names `tel:max` or `max`.
+
+**The entity-like rule.** A series and an instrument are what is measured and by what, not
+when, so their identity is a function of an identity tuple.
+
+- `tel::series(scheme, key)` and `tel::instrument(role, key)` take nothing else, as
+  `text::entity` takes nothing but its three. They fix the status at `cited` and the source at
+  `series:<scheme>:<key>` (metric) or `instrument:<key>` (tool).
+- They write only the key and the scheme or role. The declared `tel:name`, `tel:unit` and
+  `tel:kind` are inside the uid, and a reader that spelled a unit differently would split one
+  series into two, so they belong in `x.tel/series-meta`.
+- The gist is the key, cut at 64 characters with an ellipsis. The whole key is in the payload
+  and the reference, so the cut costs no identity, and it keeps a long Prometheus label set
+  under a 30-token gist bound.
+- **`SMY-E607`** is what `check` says of a series or instrument that carries a span, a
+  manifest, a published or observed time, grounds, or a source other than the one its tuple
+  gives. The message names which. 160 codes.
+- Both units round-trip through surface text to the same uid.
+
+**A consequence for later phases:** a window's `tel:digest` is a CBOR byte string, which the
+surface payload model has no value for. A window carrying one has no surface form and lives in
+CBOR, and code that reads its payload has to read CBOR, not the surface object. TL-P4 builds
+windows, so TL-P4 meets it.
+
+
+### Three ports read telemetry (TL-P1 step 4: C-Tel-Read)
+
+SMYSL-3 §16's C-Tel-Read asks two things of a reader: decode `dec` canonically, and preserve
+every `x.tel` type, relation and field under rule X. `python/`, `nodejs/` and `go/` meet
+both.
+
+- **`dec`, three more times.** Each port gains a `dec` module written from RFC SMYSL-3 §5, as
+  the rest of each port is written from the format spec: `python/smysl/dec.py`,
+  `nodejs/src/dec.js` and `go/dec.go`.
+  - Each does what `smysl_core::Decimal` does: the strict decoder with every refusal as
+    `SMY-E602`, the encoder, the exact token reader, conversion from binary64 and the one
+    spelling.
+  - The mantissa is an `int`, a `BigInt` and a `*big.Int`, because §5.2's range needs 65
+    bits.
+  - Each runs `fixtures/tel/dec/cases.json` whole. Python's `repr` and Go's
+    `strconv.FormatFloat(x, 'e', -1, 64)` agree with the engine's `String(x)` on all 2,030
+    binary64 cases, so four implementations now agree on every case.
+  - The one place §5.3 left a choice, the grammar of a token, is marked `SPEC:` in each.
+- **Preservation needs no new code, and a fixture shows it.** `fixtures/wire/F15-telemetry.cbor`,
+  written by `crates/smysl-core/tests/tel_wire_fixture.rs`, holds:
+  - the schema's declaration, a series, an instrument and a window;
+  - in the window's payload: `dec`s, a list of them, a mantissa beyond `i64` and a 32-byte
+    digest, the first byte string in any fixture payload;
+  - an anomaly, a hypothesis quoting the window, and three of the new relation kinds.
+
+  The ports glob `fixtures/wire` and re-encode each file byte for byte, so the file is the
+  cross-implementation test, as F14 was. A test also pins that the window has no surface form
+  and the series does. GE-T15's import and export matrix globs the same directory: P1 holds
+  over F15 in every cell, and `fixtures/ge-t15/duplication.tsv` gains its rows.
+- **The generator is checked too.** CI's Node job regenerates `cases.json` and requires no
+  diff, so the file four implementations are held to can't drift from what it says it is.
+
+
+### TL-P1 closes: the format spec, A-7 and the manual (step 5)
+
+- **Format spec §5.2** registers `x.tel/v1` beside `x.text/v1` in §5.1. It gives:
+  - the seventeen types, eight relation kinds and fifty-seven `tel:` payload keys;
+  - the entity-like rule for series and instruments;
+  - `dec`'s wire form, its five canonical rules, how a source value becomes one, and its one
+    spelling;
+  - `bytes32`.
+
+  §7 names SMYSL-3's three conformance classes and says the three ports are C-Tel-Read.
+- **`spec-tables` reads §5.1 and §5.2 now.** Nothing compared the registered schemas' names
+  with the code before. Every other table in the spec was parsed and checked, and the one list
+  whose whole purpose is that implementations agree on its names was checked by no one. Both
+  schemas' types, relation kinds and payload keys are compared with the Rust modules'
+  constants in both directions, 91 comparisons. Dropping one key from the spec fails it.
+- **A-7**, the field-type vocabulary a schema declaration would carry, gains `dec` and
+  `bytes32` as RFC SMYSL-3 §5.4 proposes, in SMYSL-2.3's text. `smysl_core::schema` decodes
+  both names, where it read them as unknown before.
+- **The manual's Part XI**, Chapter 38, says what 1.17 has of SMYSL-3 and what it doesn't, with
+  real output: `SMY-E607` on a series with a time in it, a clean check without it, and the
+  `timeline` refusal.
+
+**TL-P1's exit, against the RFC's:**
+
+- C-Tel-Read on all four implementations: met.
+- The format spec updated for timeline roles and kinds 6 and 7: met.
+- The A-7 proposal amended: met.
+
+Where step 1 departed from the RFC (the store's refusal of kinds 6 and 7 has no code, and the
+reserved numbers are reported, not refused), the reasons are above. TL-P2 (object snapshots:
+`k8s/1`, `zabbix/1`, the canonical diff) and TL-P3 (the series substrate) can start from here,
+in either order. TL-P0's architecture prerequisites are still owed, and so are the RFC's
+companion documents, which aren't in the repository.
+
+
+### `smysl-tel`, and reading a snapshot exactly (TL-P2 step 1)
+
+TL-P2 is object snapshots: Kubernetes objects and Zabbix hosts and items, diffed leaf by leaf
+into change units (§8). A change carries a leaf's value as text, inside its uid, so two
+implementations that disagree about one leaf's text disagree about the change. Step 1 is the
+reading that agreement rests on, in a new crate, `smysl-tel` (RFC §18). The crate is pure, is
+on `xtask check-purity`'s list from its first commit, and isn't published yet (`UNPUBLISHED`).
+
+- **`json`: JSON with numbers kept as tokens.** A JSON number becomes a `dec` read from its
+  digits (§5.3), so a parser that converts to `f64` has already lost it. `serde_json` does
+  that, and its `arbitrary_precision` feature would keep tokens, but Cargo unifies features
+  across the workspace, so enabling it here would change every other crate's JSON.
+  - The reader follows RFC 8259 strictly. It refuses a key repeated in one object (two readers
+    picking different members would give one snapshot two diffs), lone surrogates, trailing
+    commas, text after the value, and nesting past 128.
+  - Strings and keys are NFC, since both become hashed text.
+  - `parse_lines` reads a watch stream, one event per line.
+- **`jcs`: RFC 8785, with `dec` numbers.** An unkeyed array or opaque object is one leaf of
+  `vtype json`. Members are sorted by UTF-16 code units, and strings are escaped as
+  `JSON.stringify` escapes them. Numbers are written as their `dec` spelling instead of JCS's
+  binary64, which would turn `18446744073709551615` into `…552000`. A number outside `dec`'s
+  range is kept as its token and flagged.
+- **`leaf`: §5.5's table.** A leaf's canonical value is a `vtype` and one text per value:
+  - `41` and `41.0` are no change, and `41.2` and `41.20` from two exporters are one value.
+  - A number is `int` only where the caller says the source types the field as an integer,
+    and only if it is integral.
+  - A number out of range is `text`, flagged for `SMY-W613`.
+- **`pointer`: RFC 6901 and the profile pattern.**
+  - A pointer has one spelling (`~0`, `~1`).
+  - A pattern's `*` matches any one segment, and a literal `*` key is written `~2`.
+    `Pointer::parse` refuses `~2`, which belongs to profiles and never to units.
+  - `covers` is §8.1 step 4's "the pattern or a prefix of it".
+
+**The RFC's PRNG ban is in force for this crate now.** It is H-7, scheduled for TL-P0, but it
+costs nothing to obey from the start, so `xtask check-purity` already forbids in `smysl-tel`'s
+source: `thread_rng`, `StdRng`, `SmallRng`, `HashMap`, `HashSet`, clocks and `std::env`. A
+fuzz target, `tel_json`, holds that the reader never panics and that canonical text reads back
+to itself. It runs in `make fuzz` and CI, and its first run was 1.5 million inputs with no
+failure.
+
+
+### Profiles (TL-P2 step 2)
+
+`smysl_tel::Profile` is §20.2's reader profile: an HJSON file that says which objects it
+selects, which leaves are noise, which arrays are keyed and by what, each leaf's class, and
+where a class's leaves go instead of becoming units. Unknown fields are refused, because a
+misspelt `clases:` silently ignored would leave every leaf a `gauge`.
+
+Three things the RFC needs and doesn't spell out:
+
+- **`ints`**, the pointers the source types as integers. §5.5 makes a number `int` when the
+  source format types it so (a Kubernetes field whose OpenAPI type is `integer`) and `dec`
+  otherwise, but a snapshot doesn't say which, and §20.2's example has nowhere to. A profile
+  lists them.
+- **A tie-break for classification.** §8.1 step 4 takes the longest covering class pattern, but
+  `/a/*` and `/*/b` both cover `/a/b`. The pattern with fewer `*`s wins, then the one whose
+  canonical text sorts first, so two implementations can't classify one leaf two ways.
+- **What the hash is a hash of:** `hash_bytes` over the canonical CBOR of the parsed profile,
+  as a measure recipe's is, and spelled `b3:`. Patterns are re-spelled canonically and the
+  collections sorted, so comments, whitespace, key order and spelling don't move it, and a
+  changed class does. Empty collections are omitted, so a field added later doesn't move the
+  hash of a profile that doesn't use it.
+
+
+### The canonical diff (TL-P2 step 3)
+
+`smysl_tel::diff` is §8.1: two snapshots of one object under one profile become `x.tel/change`
+and `x.tel/recreate` units, and the result is a function of the three inputs.
+
+- **Keying.** Keyed arrays become objects keyed by their elements' key text. An array that
+  can't be keyed (a missing, non-scalar or repeated key) is one `json` leaf and reports
+  `SMY-W608`.
+- **Noise.** Noise patterns remove whole subtrees as the walk descends, after the keying above
+  them.
+- **Units.**
+  - Each `config` or `membership` leaf that was added, removed or replaced is one change. It
+    carries `tel:op`, the pointer, the class, the `vtype` and `tel:from`/`tel:to`, and
+    `tel:object` names the object's own series.
+  - A replaced `identity` leaf is a recreate.
+  - Leaves of a routed class (`gauge` to `series`) are handed back for the substrate, every one
+    of them, because the substrate wants every reading.
+  - A change's source is S₁'s tid with the pointer as its locator, plus S₁'s manifest and
+    instant, and its status is `measured`. The attestation that makes `measured` reachable
+    (`Op::Imported` at `Rung::Computed`) is the caller's, as every producer's is.
+- **`part_text`** is §8.3's stored form: the filtered, keyed object as JCS with `dec` numbers.
+  A snapshot changed only in noise is the same part with the same tid, and a snapshot whose
+  keyed arrays are reordered is too.
+- **`SourceRef::of_manifest`** is new in `smysl-core`. A manifest without a span was always
+  legal on the wire and at the surface, but nothing public could set one, and §8.1's change
+  names its snapshot's manifest with no byte range.
+- **Codes:** `SMY-W608` and `SMY-W613` are registered (162 codes).
+
+Choices §8.1 leaves open, made and stated in the module:
+
+- An empty object is a leaf, `{}`, so emptying one is a change and not a disappearance.
+- A replaced leaf records the new value's `vtype`.
+- An `identity` leaf added or removed is a change of class `identity`, because a recreate needs
+  both identities.
+
+**`fixtures/tel/diff/`** pins it: a Deployment profile carrying §8.3's noise filters, a base
+snapshot, and nine cases, with `expected.tsv` giving each case's part tid, unit uids, notes and
+routed count. The cases check that noise never reaches the part, that a gauge drop is a new
+part and no unit, and that reordered keyed arrays and `3.0`/`1e1`/`8.08E3` are the base's part
+to the byte.
+
+**`F15-telemetry.cbor` now writes uids as text.** Its uid-typed fields were CBOR byte strings.
+Every uid-typed payload field here is `b3:` text until A-7 (`text:holder` is
+`holder.canonical()`), which keeps a surface form. The fixture is re-blessed, the three ports
+still round-trip it, and its `tel:digest` stays bytes, because a digest isn't a reference.
+
+**For TL-P3:** a routed `gauge` can be text. `/status/conditions/Available/status` is `"True"`,
+and the substrate stores `dec`s, so TL-P3 decides what a non-numeric routed leaf becomes.
+
+
+### Readers, and recording a snapshot (TL-P2 step 4)
+
+Readers read files, never the network (§20.1). Collecting is the caller's job, which keeps
+`smysl-tel` pure and every reader replayable from a fixture. A reader returns each object its
+profile selects, with two names:
+
+- its **series key** (§6), the identity a series unit is built from;
+- its **alias**, the library name its manifests chain under.
+
+The alias leaves out the Kubernetes uid. A Deployment deleted and recreated under one name
+therefore continues one chain, and the diff across the gap is a recreate, while the series
+(which has the uid) is a new one. An alias that wouldn't satisfy A-3's grammar, such as a
+Zabbix host called `Web 01`, becomes the reader's prefix and a hash of the series key, not a
+lowercased name, because `Web-01` and `web-01` are two hosts.
+
+- **`k8s/1`** reads a List, single objects and watch events, back to back. `json::parse_seq`
+  reads concatenated JSON, which is what `kubectl get -w -o json` writes.
+  - `BOOKMARK` events are passed over, and an `ERROR` event is refused.
+  - A `Secret`'s `data` and `stringData` are removed the moment the object is recognised, before
+    selection or the profile, and no profile can opt back in (§8.3's MUST NOT). A test holds
+    that the values reach neither the object nor its part.
+- **`zabbix/1`** reads `host.get` and `item.get` exports, as a JSON-RPC response or its `result`
+  array, and refuses one without a supported API version (6.x, 7.x, 8.x).
+  - An item must name its host (`selectHosts: ["host"]`). The alternative, `hostid`, is the
+    identity §6 rejects.
+  - `select` gains `"*"`, meaning "present, with any value", since a Zabbix object has no
+    `kind`: an item is what has a `key_`.
+- **`snapshot::record`** turns one object read at one instant into:
+  - its part;
+  - a reading with an empty segment table (a unit addresses a leaf by pointer);
+  - a manifest: one part, `lang: zxx`, policy `smysl/tel-snapshot/1`, its origin naming the
+    object and the instant, and `supersedes` the previous snapshot's;
+  - the object's series unit;
+  - and, against the previous snapshot, the diff.
+
+  A snapshot whose part is its predecessor's is no manifest and no diff (§8.3). The previous
+  snapshot is its *stored* part, not a raw object, which D-T1 asks of bytes. A test holds that
+  diffing the stored part gives the same uids as diffing the raw object it was stored from:
+  storing only filters noise and keys arrays, and the diff does both again.
+- **Eight profiles ship** in `crates/smysl-tel/profiles/`: Deployments, StatefulSets,
+  DaemonSets, Pods (spec only), Services, Nodes, and Zabbix hosts and items. They're compiled
+  in as `profile::builtin`, and a test holds that every Kubernetes profile applies §8.3's MUST
+  filters. They're a starting point that GE-M1 measures, not a calibration.
+- **Fuzzing:** the `tel_json` fuzz target now drives both readers and the recorder too.
+
+Still to come from TL-P2's list:
+
+- **ConfigMaps**, which the RFC wants "keys only by default". Keeping a key while hiding its
+  value is something a profile can't say yet.
+- **The generic `json/1` profile.** `json/1` is already a SMYSL-2 text reader's id, and a
+  generic object needs identity fields that a profile has no way to declare.
+- **A `DELETED` watch event** is read and marked, and its snapshot recorded like any other. What
+  a deletion becomes as a unit (a stale series, or a recreate's first half) is TL-P3's, with
+  `x.tel/stale`.
+
+
+### `smysl tel` (TL-P2 step 5)
+
+The facade gains a `tel` feature, which `cli` turns on, and `smysl::tel`. The command has two
+actions.
+
+- **`tel read READER FILE... --profile P --at MS --licence L -s LIB`** reads `k8s/1` or
+  `zabbix/1` exports into a library. Each selected object becomes a snapshot (part, reading,
+  chained manifest), its series unit, and the change and recreate units against the previous
+  snapshot of the same object. The previous snapshot is this run's, if the object appeared
+  earlier in it, and otherwise the catalog's head for the alias.
+  - **`--at`, `--licence` and `--profile` are required.** Nothing reads a clock (§23), and a
+    licence nobody gave is not `unknown`, as `text add` already says.
+  - **Without `--yes` nothing is written to the library**, not even its directory. The units
+    are staged and the manifests that would be written are printed. With `--yes`, the same run
+    writes those manifests by the same ids and commits the units.
+
+    The first design wrote the snapshots and staged only the units. It fails twice:
+    `merge --staged` has no way into a library, so the batch could never land, and the catalog
+    would already have moved on, so running again with `--yes` would find nothing changed.
+  - **The units are attested `Imported` at `Computed`** by `tool:smysl-tel`, which is rule T's
+    one path to `measured`. The recipe is the hash of the reader field.
+- **`tel profile check FILE|NAME`** validates a profile and prints its hash.
+
+**The profile's hash is in every manifest.** A snapshot manifest's reader field is
+`k8s/1 profile=b3:…` (`zabbix/1 api=7.0.3 profile=b3:…`), in SMYSL-2.4's `key=value` reader
+grammar, which is where §20.2 wants it. So a later snapshot can tell when its predecessor was
+read under another profile. **`SMY-W610`** reports that boundary, and the snapshot is recorded
+without being diffed: a leaf the profile reclassified would otherwise read as a change to the
+object. There are 163 codes.
+
+**Tests and gates.**
+
+- `tests/cmd_tel.rs` holds, against the binary:
+  - a review writes nothing and `--yes` writes what it said;
+  - a chain is diffed once and noise is nothing;
+  - the three required flags, the scheme check and `zabbix/1`'s API version are refusals.
+- `xtask determinism` gains `tel_read`, the base snapshot and an image bump read into a fresh
+  library, and it is identical across all 16 runs.
+- The command is the 39th in the table, and Appendix A documents it.
+
+**Found on the way:** a `--no-default-features --features cli` build did not compile once
+`tel` turned on `stage` without `providers`. `migrate` (behind `stage`) called `root_beside`
+(behind `providers`), and until today no build had one without the other. The helper is now
+built with either.
+
+### `smysl-series`, the series substrate (TL-P3 step 1)
+
+A new pure crate (unpublished), `smysl-series`. It holds samples well enough to answer what
+TL-P3 and TL-P4 ask of them: "the value in force at t", and the samples and digest of a window.
+It is not a time-series database (§19.1).
+
+- **`Sample`** is §9.1's tuple: (`ts_ms`, `ns`, value as a `dec`, flags). Every value of the
+  type is well formed:
+  - flag 8 is set exactly when `ns` is present;
+  - a stale or no-recorded-value sample's value is `[0, 0]`.
+
+  So two equal samples are one sample. Sample order is §9.1's, and the value's CBOR is computed
+  only when two instants tie.
+- **`digest`** is §9.1's window digest, `BLAKE3("smysl/tel-window/1" ‖ 0x00 ‖ cbor_array(…))`.
+  A test spells out the preimage byte for byte.
+- **Chunks** (§19.2) are one (series, instrument) stream over an epoch-aligned span of 1 min,
+  15 min or 2 h. The span is chosen by the median interval of the series' first batch, aiming
+  for 60 samples a chunk. The format is versioned:
+  - timestamps as delta-of-delta;
+  - the `ns` column only when a sample has one;
+  - integral values within `i64` as deltas, any other `dec` as its CBOR pair;
+  - flags run-length encoded.
+
+  The decoder refuses what the encoder would not write rather than misreading it. §19.2's
+  mantissa XOR stream is left to a later chunk version. It is a layout, and changes no sample.
+- **`Substrate`** over a `Backend` holds §19.3's tables. `MemBackend` keeps them in memory, and
+  `RedbBackend` (feature `store-redb`) in a redb file. The operations:
+  - `add` merges samples into their chunks as a set. Adding twice changes nothing, and two
+    values at one instant are both kept and reported (`SMY-W615`'s condition).
+  - `window` reads `[from, to)` with its digest.
+  - `at` finds the value in force with one key lookup and one chunk decode, plus one more of
+    each when t falls before its span's first sample.
+  - `present` reports which spans a window has, for `SMY-W605`.
+
+**One addition to §19.3.** The `series` row also keeps the series' `scheme` and `key`, so the
+substrate can list its series and `tel at` can name one by key without the unit store. The table
+is local, as chunks are, so this changes no identity.
+
+**Tests.**
+
+- One backend contract runs against both backends. It covers set semantics, late data across a
+  span boundary, the open end of a window, the value in force before a span's first sample,
+  coverage, and the series table.
+- A property test adds 300 samples in five different orders and batchings, some repeated. Every
+  round gives the same window and the digest of the sorted set.
+- A new fuzz target, `series_chunk`, runs in `make fuzz` and CI. It checks that a chunk decodes
+  or is refused without a panic, and that what decodes round-trips. 3.35 million runs found
+  nothing.
+
+The crate is on the purity list with `smysl-tel`'s PRNG ban, and the purity gate now checks
+13 crates. The backend contract lives in `tests/` because it needs a directory, and the gate
+keeps `std::env` out of the crate's own source.
+
+CI's fuzz run found a crash in the chunk decoder after TL-P3 was pushed. A corrupt chunk whose
+flags run was near 2⁶⁴ overflowed `len + run`. The run is now checked as `run > n − len`, and
+the input is a regression test. The other accumulators are `i128` sums bounded by the chunk's
+length, and cannot overflow.
+
+### `prom/1`, and what a scrape establishes (TL-P3 step 2)
+
+**The reader** (`smysl_tel::readers::prom`) reads one scrape, in Prometheus text 0.0.4 or
+OpenMetrics 1.0. The last line decides the format: OpenMetrics ends with `# EOF`.
+
+- **Families** come from `# TYPE`. A sample's family is its name, or its name less a known
+  suffix (`_total`, `_bucket`, `_count`, `_sum`, `_created`, …), whichever is typed.
+- **Values are read exactly** (§5.3). `NaN` and `±Inf` are not values (§5.2). They are kept as
+  samples with flag 4 and counted, rather than stopping the read or being invented.
+- **Timestamps:**
+  - 0.0.4 timestamps are integer ms.
+  - OpenMetrics timestamps are seconds, read exactly to the nanosecond, and a digit finer than
+    that is refused.
+  - Instants before 1970 are refused, since an instant here is unsigned epoch ms, as `observed`
+    is. The format's own example has one.
+- **Identity** (§6) is `name{l1="v1",…}`, labels sorted, with Prometheus' escaping:
+  - The target's labels (`job`, `instance`) are the caller's to give, and are part of it.
+  - A scraped label with a target label's name becomes `exported_<name>`.
+  - An empty label value is the label's absence, as it is to Prometheus.
+- Exemplars are passed over. A malformed line is refused with its line number.
+
+**Recording** (`smysl_tel::scrape`) turns a scrape into substrate samples and the few units it
+establishes. It reads what came before from a `History`, which is the substrate as this
+instrument left it, never a cache of the last run.
+
+- **`x.tel/reset`, `start-time`.** The family's `_created` moved since the last scrape. The
+  source says so, so the unit is `measured`, and its `at_ms` is the new start time.
+- **`x.tel/reset`, `decrease`.** There is no `_created`, and the counter fell. We inferred it,
+  so the unit is `derived`, grounded on the series unit (`SMY-E031` requires grounds), at the
+  sample's instant, with no flag.
+
+  One reset unit per counter, on its headline series: the counter itself, or a histogram's or
+  summary's `_count`. Not one per bucket. `_sum` is never a counter, since a negative
+  observation lowers it.
+- **`x.tel/stale`.** A series this instrument served last time is absent now. That is exactly
+  when Prometheus writes its stale NaN, so the marker is `stale-nan`, and the substrate gets a
+  stale sample at the scrape instant. §20.1 says `prom/1` takes stale from the stale NaN
+  `0x7ff0000000000002`. Text exposition cannot carry that bit pattern, so absence, the
+  condition Prometheus marks with it, is what is read.
+- **The instrument** is `x.tel/instrument`, role `scraper`, keyed `prom-scrape:<job>/<instance>`
+  (§7).
+
+**`fixtures/tel/prom/`** pins two targets' scrapes:
+
+- A text target goes stale on a gauge, then all its counters fall at once.
+- An OpenMetrics target has a summary whose `_created` moves.
+- `expected.tsv` holds every unit's uid and status, and each series' sample count and window
+  digest.
+
+TL-P3's "substrate fixture round trip" is the test: recorded into memory, recorded into redb
+and reopened after every scrape, and the same samples added in reverse order all give the pinned
+digests. Recording the same scrape twice gives the same units and no new samples.
+
+`tel_json`'s fuzz target now reads and records scrapes too, and `make seed-fuzz` seeds it from
+`fixtures/tel/`. `smysl-tel` depends on `smysl-series`.
+
+### `otlp-json/1` and `otlp/1`, and what an export establishes (TL-P3 step 3)
+
+**One reading, two encodings** (`smysl_tel::readers::otlp`). An `ExportMetricsServiceRequest`
+is read as OTLP/JSON (`read_json`, always built) or as protobuf (`read_proto`, feature
+`reader-otlp`). Both decode into the same data points, and one function turns those into series
+samples, so the two cannot disagree about a key or a value.
+
+- **Our own JSON reader** (§20.1):
+  - `asInt` and every 64-bit integer are read from a string or a number, never through a
+    double. `9007199254740993` stays `9007199254740993`.
+  - Field names are accepted in lowerCamelCase and in the proto's snake_case. Enums are
+    accepted as integers or by name. Unknown fields are ignored.
+- **Values** (§5.3):
+  - `asInt`, counts and bucket counts are typed integers.
+  - `asDouble`, sums, bounds and quantiles are binary64. A JSON token is parsed to the double
+    it denotes before taking the ECMA-262 decimal, so `0.1` in JSON and `0.1` in protobuf are
+    one value.
+  - `NaN` and `±Infinity` are kept with flag 4 and counted.
+- **Identity** (§6, scheme `otel`) is the JCS text, with `dec` numbers, of
+  `{resource, scope:{name,version}, name, kind, unit, temporality, monotonic, attributes}`.
+  - Attribute sets are objects, so they are sorted by key.
+  - Bytes are `{"bytes": hex}`, which a string cannot be confused with.
+  - `description` is not in the key.
+- **A point that is not one number is split**, and the key gains a `part`:
+  - A histogram becomes `count`, `sum`, and cumulative `le:<bound>` buckets ending in
+    `le:+Inf`. These are Prometheus' buckets, so the two sources read alike.
+  - A summary becomes `count`, `sum` and `quantile:<q>`.
+  - An exponential histogram becomes `count` and `sum` only. Its bucket index is relative to
+    a scale that can change between points, so it is not an identity. Its buckets are counted
+    as `unsplit`, not dropped silently.
+  - `part` is an addition to §6's tuple. A histogram whose layout changes keeps its `count`
+    and `sum` series and gains bucket series.
+
+**The protobuf messages are declared in `smysl-tel`** (`readers::otlp_pb`), with `prost`'s
+derive and the upstream field numbers. This departs from §18's dependency table:
+`opentelemetry-proto`'s message types come only with its non-optional `opentelemetry` and
+`opentelemetry_sdk` dependencies, and an SDK is not what a pure reader of bytes should link.
+`prost` is pinned at `=0.14.4`, which declares rustc 1.85, the base. It is on the purity gate's
+list of crates allowed only through a feature, here `reader-otlp`.
+
+**Recording** (`smysl_tel::otel`) establishes the same facts a scrape does, told differently:
+
+- **`x.tel/reset`, `start-time`, `measured`.** The count is a cumulative one: a monotonic sum,
+  or a histogram's or summary's `count`. While it accumulates, its start time stays before the
+  previous point's time. A point whose start is at or after the previous point's time began
+  again since then. The unit's `at_ms` is the new start. Comparing against the previous
+  point's time, not its start, means the substrate does not need to store start times.
+- **`x.tel/reset`, `decrease`, `derived`.** A cumulative count with no start time (`0`) fell.
+- **`x.tel/stale`, `no-recorded-value`, `measured`.** A point carries
+  `FLAG_NO_RECORDED_VALUE`. An export is pushed, not polled, so absence is never staleness
+  here.
+- Delta sums and gauges never reset.
+- Several points of one series in one export are taken in time order, each against the one
+  before it.
+- Time keeps its sub-millisecond nanoseconds.
+- The instrument's role and key are the caller's to give.
+
+`scrape`'s unit builders now take the scheme and the stale marker, and both sources share them.
+
+**`fixtures/tel/otlp/`** pins three exports of one service, 15 s apart. Between the second and
+third the process restarts.
+
+- Each export is given as OTLP/JSON and as protobuf. The protobuf is `protoc --encode` of a
+  text proto with `metrics.proto`, the metrics subset with upstream field numbers, so the bytes
+  read are not smysl's own.
+- The test records the JSON into memory and the protobuf into redb reopened after each export,
+  and requires the same units and digests from both. The JSON samples added last export first
+  give the same digests.
+- `expected.tsv` holds the units the exports establish:
+  - in the second export, a stale and a derived reset;
+  - in the third, three measured resets: a sum, a histogram and a summary.
+
+A new fuzz target, `tel_otlp`, hands its bytes to both readers and records each export twice,
+so later exports' resets and stales are reached. `make seed-fuzz` seeds it from the fixture.
+`smysl-tel` joins `make crate-features`.
+
+### `zabbix/1` history (TL-P3 step 4)
+
+**The reader** (`smysl_tel::readers::zabbix_history`) reads `history.get` together with the
+`item.get` it belongs to. A history row names its item by `itemid`, which §6 rejects as
+identity because it changes when templates are re-imported. A row also does not say what type
+its value is. The item export supplies both: the key `host:<host>/item:<key_>` and the
+`value_type`.
+
+- **Only numeric items become samples:** `value_type` 0 (float) and 3 (unsigned).
+  - Values are decimal strings, read exactly. `18446744073709551615` stays exact.
+  - A value outside `dec`'s range is kept with flag 4.
+- **Character, log, text and binary rows** are counted (`not_numeric`) and left out.
+- **A row whose item the export lacks** is counted by `itemid` (`unknown_items`), rather than
+  refusing the whole export. History is usually exported for a time range, and items for a
+  selection.
+- **Time** is `clock` and `ns`, kept to the nanosecond.
+- **The API version is required**, as for hosts and items.
+- **Refused:** an item without `value_type` or without its host, one `itemid` given as two
+  different items, and a malformed row.
+
+`zabbix/1`'s version check, JSON-RPC unwrapping and item-host lookup are now shared between
+the two readers.
+
+**Recording** (`smysl_tel::zabbix_history`) gives each numeric item three things:
+
+- its `x.tel/series`, class `gauge`;
+- its rows as samples;
+- an `x.tel/series-meta`, `cited`, with `tel:native_id` the `itemid` and `tel:text` the item's
+  name.
+
+An item re-imported under a new `itemid` keeps its series and gains a second meta unit. There
+is no reset and no stale: Zabbix states neither a start time nor a stale marker, and does not
+say whether an item counts up. The instrument is `zabbix-server:<name>`, role `collector`, with
+the name given by the caller.
+
+**`fixtures/tel/zabbix/`** holds four exports:
+
+- an item export with three numeric items on two hosts (one named `DB 01`) and a character
+  item;
+- two history exports of five minutes that share the third minute, the second newest first;
+- the character item's history.
+
+The test checks three ways of recording:
+
+- in order as API 7.0 into memory;
+- in reverse as API 6.0 into redb, reopened between exports;
+- recording the first export again.
+
+All three give the pinned digests: the overlap and the repeat add nothing. `tel_json`'s fuzz
+target reads history and items split at a `---` line, and `make seed-fuzz` seeds it with the
+fixture.
+
+### `smysl tel read` for series, `smysl tel at`, and GE-M4 (TL-P3 step 5)
+
+**`tel read prom/1|otlp/1|otlp-json/1 FILE...`** and **`tel read zabbix/1 FILE... --items
+FILE`** read series into `<library>/index/series.redb`.
+
+- **With `--yes`:** the samples are added to the substrate. The units are committed: series,
+  instrument, reset, stale and series-meta, with each reset's and stale's `x.tel/of-series`
+  relation.
+- **Without `--yes`:** nothing is written, not even `series.redb`. The units are staged.
+- **Each file is judged after the ones before it**, in a review as in a write. A review reads
+  the store and its own earlier files as one (`smysl_tel::scrape::Layered`), so the facts it
+  stages are the ones `--yes` commits.
+- **What each reader needs:**
+  - `prom/1` needs `--job` and `--instance`, the target labels every key includes. It takes
+    one scrape per run, at `--at`, because text exposition carries no instant.
+  - OTLP and Zabbix history need `--instrument`, the key of what the export was read from.
+- **Reports:**
+  - samples that are not values;
+  - exponential-histogram buckets not split into series;
+  - non-numeric Zabbix rows;
+  - Zabbix rows of items missing from `--items`;
+  - `SMY-W615` for two samples at one instant.
+- Reading an export twice adds nothing.
+
+**`tel at SERIES MS [--instrument UID]`** prints the value in force at an instant, the last
+sample at or before it, for each instrument the series has samples from.
+
+- `SERIES` is a uid or `<scheme>:<key>`.
+- A stale or no-value sample prints as `stale` or `no-value`, never as a number. A sample
+  its source marked as a reset (flag 2) is marked `(reset)`.
+- It exits 1 when there is nothing, or when the library has no substrate.
+
+**The substrate** gains `Substrate::instruments(series)`, one seek per instrument rather than a
+step per chunk. `RedbBackend::open` now opens a file already in its format with a read
+transaction only. Before, every open committed a write transaction, a durable flush, and that
+was a third of `tel at`'s time.
+
+**GE-M4** (D-T6: is record 16, `hold`, needed?).
+
+- **The harness:** `make ge-m4` runs `crates/smysl-series/examples/ge_m4.rs`.
+  - It writes six months of 20 gauges scraped every minute with jitter, 5.2 million samples
+    in 68 MB, with plateaus and occasional stale gaps.
+  - It keeps every run of one value as a hold record would, 108,847 holds.
+  - It asks both "value in force at t" 237,694 times: at random, and at and one millisecond
+    before every hold's start.
+- **Results:**
+  - Every answer agreed.
+  - `Substrate::at` took 2 µs at p50 and 4 µs at p95, with the page cache warm.
+  - `smysl tel at` as a process took 18 ms at p50 and 21 ms at p95 over 200 runs against
+    the same file, including process start and opening it.
+  - The bar is 50 ms at p95.
+- **Not run:** the RFC's run is on GE-M1's data, a real cluster extended to six months. That
+  data is not available, so this run is simulated, and its report says so.
+
+GE-M4 on simulated data says the substrate answers what a hold would. D-T6's release of record
+16 stays the owner's decision, on the RFC's data.
+
+**Determinism** gains `tel_read_series` (three protobuf exports into a fresh library) and
+`tel_at` (the restart the third export states, read back). Both are identical across the 16
+environment permutations. `tel read` no longer prints the substrate's path, because stdout is
+rule D's.
+
+**Feature `tel`** now brings `smysl-series` with its redb backend, and `smysl-tel/reader-otlp`.
+Unlike `substrate-redb`, the series substrate has no file-less fallback: one that forgets every
+sample at exit answers no "value in force at t". `smysl::series` re-exports the crate.
+
+Chapter 38 has a section on samples and the facts about them, and Appendix A documents the new
+readers, flags and `tel at`. `tests/cmd_tel_series.rs` holds the commands against the binary.
+
+### Window evidence, exact (TL-P4 step 1)
+
+`smysl_tel::evidence` materialises `x.tel/window` units (§9): what a window `[from, to)` of one
+series and instrument contained.
+
+- **One uid per sample set.** The payload holds:
+  - the window: series, instrument, from, to, recipe and basis;
+  - the §9.1 digest of its samples;
+  - their summary.
+
+  The same window over the same samples gives the same uid. Late data gives another uid, and
+  both are true (§9.2). `preferred` picks one window of a key: the largest count, then the
+  smallest digest, a function of the set. `disagree` is `SMY-W614`'s test.
+- **The summary is exact** (§9.3):
+  - `count` excludes stale and no-value samples. `min`, `max`, `first` and `last` are over the
+    counted samples.
+  - The sum is computed as an exact big decimal, so no order of addition can change it.
+  - An integer series' `sum` is that exact integer, omitted with `SMY-W616` when it is
+    outside `dec`'s range. Any other `sum` is rounded once to binary64, half to even.
+  - `mean` is the exact sum divided by the count, rounded once, never derived from a rounded
+    sum. The quotient is carried to 800 significant digits plus a sticky digit, more than
+    the 767 a binary64 halfway point can need, so the rounding is that of the exact quotient.
+  - `0.1 + 0.2` sums to `0.3`. `1e300 + 1.5 − 1e300` sums to `1.5`.
+- **Status follows rule TW** (§9.4):
+  - exact over the substrate is `measured`;
+  - approximate is `derived`, grounded on its series;
+  - a platform aggregate is `cited`.
+- **The digest is `bytes32`**, a 32-byte CBOR byte string, and the payload is canonical CBOR
+  built directly. The surface syntax has no byte string, and the RFC adds no kernel change, so
+  a window unit travels as CBOR only, as a payload with a `dec` beyond `i64` already does.
+
+**`fixtures/tel/window/cases.json`** holds 400 windows of 1 to 40 samples, with exponents from
+−400 to 400 and mantissas up to 2⁶⁴ − 1. Their sums and means were computed independently by
+`gen_cases.py` with Python's exact rationals. Every one agrees.
+
+`SMY-W614`, `SMY-W615` and `SMY-W616` are registered, bringing the registry to 166 codes. W615
+was already printed by `tel read`.
+
+### Window evidence, sketched (TL-P4 step 2)
+
+**`smysl_tel::sketch`** is a DDSketch whose buckets are the same on every machine.
+
+- **Why not `sketches-ddsketch`,** which §21 names. Its bucket index is `ceil(ln x / ln γ)`,
+  and `f64::ln` comes from the platform's libm, which IEEE 754 does not require to be correctly
+  rounded. Two machines could put one value in two buckets, and GE-M3 compares x86_64 and
+  aarch64 byte for byte.
+- **The mapping:**
+  - A value is split exactly into `f × 2^E`, with `f` in `[1, 2)`.
+  - Each octave is cut at `g^0 … g^K = 2`. `g` is found by bisection, and `K` is the smallest
+    value for which `g ≤ (1 + α)/(1 − α)`. So the buckets are at least as fine as DDSketch's,
+    for example 35 an octave at α = 0.01.
+  - Every float operation is a correctly rounded multiplication, division or addition. There
+    is no logarithm and no power function.
+- **Merging adds integer counts**, so sketches of shards merge to the sketch of the whole, bit
+  for bit, in any order.
+- **Quantiles** follow DDSketch's rank rule, and each bucket's value is within α of
+  everything in it.
+- **Range:** α runs from 0.001 to 0.5. A value beyond binary64's range is clamped to the
+  largest finite binary64 of its sign, and one below the smallest subnormal counts as zero.
+
+**Sketched windows.**
+
+- **The unit:** `materialise_sketched` builds a `derived` `x.tel/window` grounded on its
+  series. It holds `count`, the digest, `qs`, `q` and `alpha`, by default ranks 0.5, 0.9, 0.95
+  and 0.99 at α = 0.01.
+- **The recipe carries the parameters:**
+  `tel-window/ddsketch/1?alpha=0.01&qs=0.5,0.9,0.95,0.99`. Two accuracies are therefore two
+  window keys, not two answers to one question. The exact and the sketched window of one span
+  are two units, as §9.4 has it.
+- **Sharding:** `sketch_of` and `sketched_window` build the same unit from a sketch merged
+  from shards. A test sketches five sub-windows separately, merges them in reverse, and gets
+  the whole window's uid.
+
+**Pinned:** `fixtures/tel/window/sketch.tsv` holds the sketch quantiles of all 400 cases at α
+of 0.001, 0.01 and 0.05, at ranks 0 to 1. It was written on aarch64 and is compared wherever the
+tests run, including CI's x86_64. That is GE-M3's cross-architecture check for the first
+detector TL-P4 ships.
+
+The exact sum gains a checked `i128` fast path, falling back to the digits at the first
+overflow, so it gives the same result either way. `tel_otlp`'s fuzz target now materialises
+exact and sketched windows over everything it records, and requires one uid for one window
+materialised twice.
+
+### Rule TW and the `tel-evidence` pass (TL-P4 step 3)
+
+**A window payload is read from its CBOR.** `smysl_core::schemas::tel::window_fields` reads it,
+because the surface payload model has no byte string for the digest. Fields it does not know are
+skipped, under rule X.
+
+**Rule TW, in one place.** `rule_tw` maps a window's basis and fields to the status, op and rung
+§9.4 requires:
+
+| Window | Status | Op | Rung | Digest |
+|---|---|---|---|---|
+| exact, from the substrate | `measured` | imported | computed | required |
+| sketched, from the substrate | `derived` | transformed | computed | required |
+| from a platform | `cited` | imported | document | absent |
+
+`rule_tw_violations` says how a unit and its attestations break it. The producer will attest by
+the same function, so the two cannot drift.
+
+**`check`** raises:
+
+- `SMY-E603` for each window that breaks rule TW. The message says what the window is and
+  what it should be.
+- `SMY-W614` for windows of one key with different digests. Each is true of its own samples,
+  so this is a report, not a contention.
+
+**`smysl_tel::evidence::verify`** is the `tel-evidence` pass (§9.5). It takes each substrate
+window and either reports why it cannot recompute it, or recomputes it.
+
+- **It cannot:** if no chunk of the window is held, or a span was recorded as evicted, it
+  reports `SMY-W605` and nothing else. Status does not depend on the substrate being present.
+- **It can:** the window is recomputed by its recipe, exact or sketched, with α and ranks
+  read back from the recipe. If the result is another unit, it reports `SMY-E604` and names the
+  fields that differ.
+- **It skips** platform windows and recipes this build does not know.
+
+`SMY-E603`, `SMY-E604` and `SMY-W605` are registered, bringing the registry to 169 codes.
+`tests/tel_window_check.rs` runs `check` on materialised windows attested correctly, attested
+wrongly, and disagreeing after late data. `tel_otlp`'s fuzz target also reads its bytes as a
+window payload.
+
+### Zabbix trends as cited evidence (TL-P4 step 4)
+
+**`readers::zabbix_history::read_trends`** reads `trend.get` against its item export, as
+history is read.
+
+- Each row is one item's hour: `clock`, `num`, `value_min`, `value_avg` and `value_max`.
+- Values are read exactly. One outside `dec`'s range is left out of its window and counted.
+- Rows of non-numeric items and of items not in the export are counted, not read.
+- The API version is required.
+- The item-export parsing is now shared with history (`items_by_id`).
+
+**`zabbix_history::record_trends`** makes each hour a platform window (§9.4, §20.1).
+
+- **The unit:** a `cited` `x.tel/window` with `basis: platform` and recipe `zabbix/trend.get`.
+  It covers `[clock, clock + 1 h)` on the item's series, which is the same series its history
+  feeds.
+- **Its fields:** `count` is `num`. `min`, `max` and `mean` are the trend's minimum, maximum
+  and average.
+- **Left out:** there is no digest, because the samples are Zabbix's and may never have
+  reached the substrate. There is no sum, because `avg × num` is not one.
+- **Status:** Zabbix computed these numbers, not us, so rule TW makes them a document,
+  transcribed. Every trend window keeps rule TW with an imported, document-rung attestation.
+
+**`fixtures/tel/zabbix/trends.json`** holds three hours of three items, with one maximum out of
+range and one unknown item. `expected-trends.tsv` pins the nine windows by uid, the same whether
+read as API 6.0 or 7.0. `tel_json`'s fuzz target reads trends too and requires rule TW of every
+window. `make seed-fuzz` seeds it with the fixture.
+
+### `smysl tel window`, `tel check`, and TL-P4's exit runs (TL-P4 step 5)
+
+**`tel window SERIES FROM TO -s LIB`** materialises window evidence over `[FROM, TO)`.
+
+- It makes one `x.tel/window` per instrument the series has samples from, or the one
+  `--instrument` names.
+- By default the summary is exact. `--sketch ALPHA [--qs Q,…]` gives DDSketch quantiles
+  instead.
+- Each line printed is the window's uid and what it says.
+- **With `--yes --at MS`** the windows are committed with their `x.tel/of-series` edges. Each
+  is attested as rule TW requires, by `rule_tw`, the same function `check` applies.
+- **Without `--yes`** nothing is written. A window has no surface form, so there is nothing to
+  stage for review: it is a function of the samples, and the uid printed is the uid `--yes`
+  commits.
+
+**`tel read zabbix/1 FILE... --items FILE --trends`** makes each `trend.get` hour a `cited`
+platform window, committed the same way.
+
+**`tel check -s LIB`** checks a library's windows:
+
+- rule TW (`SMY-E603`);
+- windows of one key that disagree (`SMY-W614`);
+- each window recomputed from `series.redb` (`SMY-E604` and `SMY-W605`).
+
+It exits 3 on an error.
+
+**TL-P4's exit criterion holds:** window uids are reproduced by a second run and by a sharded
+run (`tests/cmd_tel_window.rs`).
+
+- The same three OTLP exports were read into a fresh library, and so were the exact and the
+  sketched windows: the same uids.
+- The exports were read one per invocation, last first: the same uids again.
+
+**A sample is its source's alone.** The sharded run failed at first, and the cause was in TL-P3:
+a sample got flag 2 (reset) by comparison with the sample before it. Read out of order, the same
+export made other samples, other digests and other window uids.
+
+- Readers no longer set flag 2. A reset is a fact about two readings, so it is a unit,
+  `x.tel/reset`, found when both readings are known. Flag 2 stays defined for a source that marks
+  a reset on the sample itself.
+- OTLP and Zabbix samples are now a function of their source record alone. The OTLP fixture
+  test adds the exports read last first, which gives the pinned digests.
+- The fixtures re-blessed: the reset series' flags went from 2 to 0 and their digests moved,
+  and every unit stayed the same.
+- Prometheus staleness is the one exception, and stays: a series that disappeared is seen only
+  by reading scrapes in order.
+
+**Determinism** gains `tel_window` and `tel_window_sketch`, both identical across the 16
+environment permutations. `smysl::Decimal` and `smysl::DecError` are re-exported from the
+facade root, since rule A keeps the CLI to the facade. Chapter 38 has a section on window
+evidence, with transcripts, and Appendix A documents `window`, `check`, `--sketch`, `--qs` and
+`--trends`.
+
+### Detectors: the framework, and CUSUM (TL-P5 step 1)
+
+**`smysl_tel::detect`** is where §21's detectors live, built so GE-M3 can replay them.
+
+- **Every output records its recipe:** the detector and its version, its parameters, and the
+  window it ran over, as `detector?name=value&…` with names in order. That text is the unit's
+  `tel:recipe`, and its hash goes in the attestation.
+  - One recipe over one sample set gives one set of uids.
+  - A changed parameter is a different recipe, not a different answer to the same one.
+- **Built to replay:**
+  - Detectors read counted samples in sample order and reduce in that order.
+  - They use only `+ − × ÷` and `sqrt`, which IEEE 754 rounds correctly on every machine,
+    never the platform libm's `ln`, `exp` or `pow`.
+  - They write numbers by §5.3 and draw no randomness.
+- **Status:** detector outputs are `derived` and grounded on what they came from. `segment` and
+  `anomaly` build §4.1's units, observed at the window's end.
+
+**CUSUM (`cusum/1`)** is Page's two-sided cumulative sum over values standardised by each
+regime's baseline.
+
+- **Parameters:** `k` is the slack in σ (default 0.5), `h` is the threshold in σ (default 5),
+  and `baseline` is the number of samples per regime estimate (default 10).
+- **The change point** is where the alarming sum last left zero, which is where the drift
+  began, not where it became certain. The detector then restarts against the new level.
+- **Output:** each regime is an `x.tel/segment` `[first sample, next regime)`, with `level` its
+  mean. A window with no change is one segment.
+- **A constant baseline** takes σ = 10⁻⁹·max(1, |μ|), so any departure from it is a change.
+
+### PELT (TL-P5 step 2)
+
+**`pelt/1`** is Killick, Fearnhead and Eckley's pruned exact search. It finds the segmentation
+that minimises the total cost of its segments plus β per change, exactly.
+
+- **Cost** is L2, from prefix sums of values centred on the window's mean, so the subtraction
+  in `Σx² − (Σx)²/n` does not cancel the answer away.
+- **Penalty** is `β = penalty · σ̂²`. σ̂ is the median absolute first difference over
+  0.6745·√2, a noise scale a change in level hardly moves. BIC's `2σ² ln n` would need `ln`, so
+  the multiplier is a parameter instead, recorded in the recipe. The default is 10, BIC's value
+  near n = 100.
+- **`min_size`** (default 2) is the shortest segment.
+- **Ties** go to the earliest candidate.
+- **Output:** one `x.tel/segment` per regime, with its mean as `level`.
+
+**A pruning bug found and fixed before it shipped.** With a minimum segment length, the pruning
+theorem holds only once the candidate that beat another is itself admissible, `min_size` samples
+later.
+
+- **How it was found:** the first version pruned at once. A test comparing it with a brute-force
+  search over every segmentation found a series it got wrong.
+- **The fix:** a candidate pruned at `t` is kept until `t + min_size`.
+- **Now tested:** the brute force agrees on 600 series, 200 pseudo-random ones at minimum lengths
+  1, 2 and 3.
+
+### Robust z (TL-P5 step 3)
+
+**`mad/1`** is Iglewicz and Hoaglin's modified z-score, `0.6745 · (x − median) / MAD`, against a
+declared baseline window of the same series and instrument.
+
+- **The baseline is in the recipe** (`baseline=from-to`), because a score means nothing
+  without what it was scored against.
+- **Threshold:** `|z|` above `threshold` is anomalous. The default is 3.5, theirs.
+- **A run is one anomaly.** Consecutive anomalous samples with one direction make one
+  `x.tel/anomaly`, `[its first sample, the next sample)`. It carries the run's largest `|z|` as
+  `score`, and `up` or `down` as `direction`. It is `derived` and grounded on its series.
+- **When the MAD is zero:**
+  - If more than half the baseline is one value, the scale falls back to `1.2533 ×` the mean
+    absolute deviation, as Iglewicz and Hoaglin do.
+  - A baseline with no spread at all takes `10⁻⁹·max(1, |median|)`, so any departure from a
+    constant is anomalous.
+- An empty baseline scores nothing.
+
+### Episodes and a BARO-style ranking (TL-P5 step 4)
+
+**`episode/1`** groups what happened close together, deterministically.
+
+- **Members** are changes, recreates, resets, stales, anomalies and alerts. Each has a time:
+  - an anomaly's start;
+  - a reset's or stale's `at_ms`;
+  - otherwise the reading that showed it (`source.observed`).
+- **Grouping:** members are ordered by (time, uid), and a new episode begins wherever the gap
+  to the previous member exceeds `gap` (default 5 min).
+- **Output:** a group of at least `min` (default 2) becomes an `x.tel/episode`,
+  `[first, last + 1 ms)`, with a label counting its kinds. It is `derived`, grounded on its
+  members, and each member joins it by `x.tel/during`.
+- Input order does not change the uid.
+
+**`baro/1`** is BARO's robust scorer: which series moved most when something went wrong.
+
+- **The score** of a series is the largest `|x − median(pre)| / IQR(pre)` over
+  `[t, t + post)`. `pre` is `[t − pre, t)`, by default an hour before and ten minutes after.
+- **No change-point step:** BARO estimates `t` with a Bayesian change point. Here `t` is given:
+  an anomaly's start, an episode's, or an alert's.
+- **Edge cases:**
+  - An IQR of zero falls back to the robust z's scale.
+  - A series with nothing before or after `t` is not ranked.
+  - Ties go to the series uid.
+- **Output:** the top `top` (default 5) become `derived` `x.tel/hypothesis` units, as §21's
+  table has it.
+  - Each targets its series and is grounded on it, and on the trigger when one is given.
+  - Each claim states the rank, the score and the windows, as a sentence a person can check
+    against the samples.
+
+### `smysl tel detect`, and GE-M3 (TL-P5 step 5)
+
+**Recipes are files.** `smysl_tel::detect::Spec` reads an HJSON recipe: `{ detector: cusum/1,
+k: 0.5, h: 5, baseline: 20 }`, and likewise for `pelt/1`, `mad/1`, `episode/1` and `baro/1`.
+
+- A parameter left out takes its default.
+- A decimal may be a string, so `0.10` is read as written.
+- An unknown key is refused, because a parameter nobody reads is one somebody believes is in
+  force.
+
+**`detect::run_on`** runs a recipe over a substrate, the one path the CLI and GE-M3 share.
+
+- CUSUM, PELT and the robust z run per series and instrument. The robust z reads its baseline
+  window from the same substrate.
+- The ranking takes every series as a candidate.
+- Episodes group units from a store.
+- Segments and anomalies get `x.tel/of-series` edges, and episode members get `x.tel/during`.
+
+**`tel detect RECIPE --series S… --during FROM-TO -s LIB [--trigger UID] [--at MS --yes]`**
+runs a detector.
+
+- **The output** is `derived`, attested as transformed at the computed rung, with the hash of
+  the recipe and window.
+- **Detector units have a surface form,** unlike windows. So a run without `--yes` stages them
+  for review and exits 10, as `tel read` does, and `--yes` commits them.
+- **What each detector reads:** episodes take the library's changes, resets, stales, anomalies
+  and alerts. The ranking takes its `at` from the recipe and its trigger from `--trigger`.
+
+**GE-M3** (§26, H-7) asks whether the analysis layer can be replayed. It now runs for every
+detector TL-P5 ships.
+
+- **The data** is `fixtures/tel/detect/series.tsv`: four series of 240 one-minute samples from
+  `gen_series.py`, with a level shift, a spike, a dip and a constant that changes. There is one
+  recipe file per detector.
+- **The test** is `tests/ge_m3.rs`. It runs every detector twice in one process, compares the
+  units byte for byte, and pins each output by uid in `expected.tsv`, written on aarch64.
+  Episodes group the robust z's anomalies. The ranking is taken at the spike, and its trigger is
+  the episode.
+- **Results:**
+  - PELT finds every change at its sample: cpu at minute 150, errors at 170 and 173, latency at
+    160 and 165, queue at 180.
+  - The robust z flags all four series.
+  - The episode groups them.
+  - The ranking puts latency first.
+  - CUSUM finds the changes and some extra segments where uniform noise crossed `h`. GE-M3
+    measures replay, not accuracy.
+- **CI runs it on four platforms.** `ge_m3` and TL-P4's `window_cases` (the sketch pins) run in
+  the `measure-platforms` job: x86_64 Linux on glibc and musl, x86_64 Windows, and aarch64
+  macOS. A detector whose bytes differ on any of them fails there, which is GE-M3's stop
+  condition.
+
+**End to end:** `series.otlp.json` (from `gen_otlp.py`) is the same samples as one OTLP/JSON
+export. `tests/cmd_tel_detect.rs` reads it, commits every detector's output, and gets the same
+uids from a second run into a fresh library. Determinism gains `tel_detect`, PELT committed into
+a scratch library.
+
+### Investigations: the ledger's units (TL-P6 step 1)
+
+**`smysl_tel::investigate`** builds §11's shape: an investigation, what it looked at, and what
+happened in it.
+
+- **`open(question, opened_ms, rotation)`** is an `x.tel/investigation`, `measured`: that a
+  question was opened, and when, is a recorded event. **`close`** makes the closed investigation
+  and its `supersedes` edge to the open one, because a unit is not changed but superseded.
+- **`hypothesis(claim, quotes, target, grounds)`** is `inferred` with grounds and
+  `speculative` without (§3). Numeric quotes go in `tel:quotes` as `<uid>#<field>=<value>`.
+  Rule TQ checks them when a store is read, not when the unit is made, because whether a quote
+  verifies depends on records that can arrive later.
+- **`probe` and `action`** are `measured`: that the command ran, and what it printed. An
+  action's `confirmed_by` names the human who confirmed an unsafe command. `output` names the
+  part that holds the redacted output.
+- **Edges:**
+  - `consulted`: the investigation looked at a unit;
+  - `during`: a hypothesis, probe or action happened in it;
+  - `explains`: a hypothesis explains a target.
+- **`view`** is the View a TUI opens (D-T8): rooted at the investigation, requiring `x.tel/v1`.
+
+The builders make units and edges, and the caller attests them. Who acted, a human handle or a
+model agent by provider and model hash, is the attestation's to say (§24).
+`tests/tel_investigate.rs` stages an investigation through the facade, and it checks clean.
+
+### Rule TQ: numeric quotes (TL-P6 step 2)
+
+**A hypothesis that quotes a number lists the quote** (§11.4): `<uid>#<field>=<value>`, or
+`<uid>#<field>[<i>]=<value>` into a list field such as a sketch's `q`.
+
+**Rule TQ, in the core** (`smysl_core::schemas::tel`):
+
+- **`parse_quote`** reads a quote.
+- **`quoted_value`** reads the canonical text of a payload's number from its CBOR, so it works
+  on a window, whose payload has no surface form. A `dec` is given by its §5.3 spelling and an
+  integer as itself.
+- **`rule_tq_violations`** gives each quote that does not verify, and why. A quote verifies
+  when the cited unit:
+  - is among the hypothesis's grounds;
+  - resolves;
+  - has the field, and the index;
+  - holds exactly that canonical text. `0.90` does not verify a `0.9`, because a quote is the
+    evidence's own spelling.
+- **`tq_capped`** applies the cap: at most `speculative`.
+
+**`check` raises `SMY-W606`** for each quote that does not verify. It names the quote and says
+why. Like rule M, TQ is a cap and a function of the record set: it reads payloads, never the
+substrate, so it is monotone and safe under merge.
+
+`SMY-W606` is registered, bringing the registry to 170 codes. `tests/tel_investigate.rs` holds
+hypotheses against a materialised window and sketch. Quotes of a max, a count and a sketch
+quantile verify. A wrong value, a non-canonical spelling, an uncited unit, a missing field and a
+missing index each give one `SMY-W606`. The `tel_otlp` fuzz target reads its bytes as a quoted
+payload and as a quote.
+
+The BARO-style ranking's claims (TL-P5) state their score in words and quote nothing. A score
+is not a field of any unit a hypothesis could cite, and TQ checks only what is listed.
+
+### Rival explanations: detection kind 6 (TL-P6 step 3)
+
+**`smysl_core::schemas::tel::rival_explanations`** detects `RivalExplanation` contentions
+(§11.5).
+
+- **When:** two or more live hypotheses each `x.tel/explains` one target. None of them rebuts
+  or supersedes another, and each has an effective status of at least `inferred` after
+  retraction, rule M and rule TQ. A live hypothesis is one nothing supersedes.
+- **One contention per target:** `over` is the target, and `positions` are the hypotheses. The
+  id is the normative §6.2 derivation, so two peers that find the same rivalry name it alike,
+  and a resolution naming it reads through.
+- **Derived-only, like kinds 4 and 5:** found from the record set, never written. The store
+  already refuses a written one (`SMY-E611`, TL-P1).
+- **In the core,** beside rules TW and TQ, taking records rather than a store, so `check`,
+  `smysl-tel` and the CLI can all call it without a new dependency between crates.
+
+**`tel check`** now also reports:
+
+- each hypothesis's `SMY-W606`;
+- each rival explanation, with its derived id, its target, its hypotheses, and whether a
+  resolution has reviewed it.
+
+**Tests:** two inferred hypotheses explaining one target are one contention, whichever order
+the records come in. A third joins the same contention under a new id. Each of these takes it
+away:
+
+- a rebuttal between two of them;
+- a supersession of one;
+- a numeric quote that does not verify, which caps one at `speculative`;
+- a hypothesis without grounds.
+
+### The `timeline` thread, derived (TL-P6 step 4)
+
+**`thread --derive timeline`** now proposes roles from telemetry types (§12), where before it
+refused. The first rule that matches wins:
+
+| Unit | Role |
+|---|---|
+| an investigation that supersedes another (a closed one) | `closure` |
+| an investigation being opened, an alert | `detection` |
+| a change, a recreate | `trigger` |
+| an anomaly, a reset, a stale | `onset` |
+| a hypothesis, a probe | `diagnosis` |
+| an action | `mitigation` |
+
+- **Authored roles:** `escalation`, `recovery`, `impact`, `communication` and `follow-up` have
+  no type that names them, so people author them. `TIMELINE_AUTHORED` lists them.
+- **No catch-all:** the timeline is the one derived schema without one. A series, a window or a
+  kernel claim is not a step of an incident.
+- **Time order:** the steps follow the units' own order (`in_order`): observation time, then
+  the ordering chain, then uid.
+  - Rule E's effective said-time, which §12 names, needs `smysl-text`'s time engine, and a thread
+    does not depend on it.
+  - A telemetry unit's `observed` is its said-time unless a dating says otherwise.
+
+**Two new matchers in `smysl-thread`'s rule tables** let an extension's types take roles:
+
+- `Matcher::Schema(name)` matches a unit type by name, as `Type` does a kernel type;
+- `Matcher::All(&[…])` matches a conjunction.
+
+**The table invariants,** narrowed for a typed schema:
+
+- only schemas that assign everything (`assigns_everything`) must end in a catch-all;
+- a role on the authored list must not be assigned by a rule, and every other role must be;
+- a kernel-only store derives an empty timeline.
+
+A new test derives one from a change, an anomaly, an alert, a probe and an action, plus a series
+that stays out: the five steps come out in time order with their roles.
+
+### `smysl tel investigate`, and the report (TL-P6 step 5)
+
+**`investigate::report`** gathers what one investigation holds and what it missed (§11.2,
+§22.2).
+
+- **Hypotheses `during` it,** each with its effective status after rule TQ and any quotes that
+  failed.
+- **Its probes and actions, and what it consulted.**
+- **Unused evidence:** consulted, and cited by no hypothesis in it, by grounds or by quote.
+- **Unexplored evidence:** windows and changes about a series a hypothesis targets, from
+  `lookback` before the opening to the close, that nobody consulted. The lookback is the
+  caller's, because how long before a question its cause came is not a constant.
+
+Like rule TQ, it is a function of the record set.
+
+**`tel investigate open|consult|hypothesis|probe|action|close|show`** is the ledger, for people,
+scripts and OKO.
+
+- **Each operation commits at once,** attested by `--as` at `--at`. A ledger is written as it
+  happens.
+- **Attestations:**
+  - Probes and actions are imported at the computed rung, because the tool that ran the command
+    says what it printed (§11.3).
+  - Everything else is authored at the document rung.
+- **An investigation is `cited`:** a person's statement that a question was opened. Measured
+  would need an import, and rule T refuses it at the document rung. The smoke test found this
+  before it shipped.
+- **`show`** prints the report and the rival explanations its hypotheses are part of.
+
+**`tests/cmd_tel_investigate.rs`** runs an investigation from opening to closing over Prometheus
+windows.
+
+- Three hypotheses explain one window. The one with a wrong quote is held at `speculative` with
+  `SMY-W606`. The other two are one rival explanation, in `show` and in `tel check`.
+- A consulted, uncited window is unused.
+- A window about the target that nobody consulted is unexplored, and a short enough lookback
+  leaves it out.
+
+Chapter 38 has a section on investigations, and Appendix A documents `investigate` and its
+flags.
+
+**TL-P6's exit criteria are not met here,** and say so:
+
+- OKO's proof of concept writing a rotation ledger is OKO's to run. `investigate` and
+  `smysl::tel::investigate` are the surface it writes through.
+- GE-M7's arms (a) and (b) need the Train-Ticket testbed and models, which this machine does
+  not have.
+
+The incident dossier is reported by `tel investigate show`, not yet as a `dossier` template.
+
+### Instruments: what measured a series (TL-P7 step 1)
+
+TL-P7 is about instruments: what measured a series, and when two series are independent
+witnesses of one quantity (§7). GE-M7 was meant to test §11 before this phase, and it has not
+run, so TL-P7 builds on an investigation design that no experiment has checked yet.
+
+Step 1 records lineage. Every reader now says what measured each series at its origin, and
+what carried it from there:
+
+| Reader | Origin (`x.tel/measured-by`) | Carried by (`x.tel/via`) |
+|---|---|---|
+| `prom/1` | the target, `prom-target:<job>/<instance>`, role `exporter` | the scraper |
+| `otlp/1`, `otlp-json/1` | the resource's process, `otel-sdk:<namespace>/<name>/<instance>`, role `agent` | the `--instrument` collector |
+| `zabbix/1`, history and trends | the item's host, `zabbix-agent:<host>`, role `agent` | the `--instrument` server |
+
+- **A Prometheus scrape names the scraper, not the target.** The target measured the series,
+  and two Prometheus servers scraping one target are one origin. So `measured-by` points at the
+  target and `via` runs from it to the scraper.
+- **An OTLP resource without a string `service.name` gets no origin.** A guess would make two
+  unrelated processes one witness.
+- **`SMY-W609`** (171 codes): a series with no `measured-by`. `check` raises it.
+  `smysl_core::schemas::tel::unmeasured` is the rule. Witness counting will take such a
+  series as its own origin.
+- **`same-quantity` is written one way,** from the smaller uid to the larger, so two
+  declarations of one pair are one relation.
+
+`smysl_core::schemas::tel` gains `measured_by`, `via`, `same_quantity` and `unmeasured`.
+`smysl_tel::scrape` gains `Lineage`, `origin_key` and `Scraped::measured_at`;
+`zabbix_history::origin_key` and `otlp::Raw::origin` give the other readers' origins.
+`tests/tel_lineage.rs` reads each reader's fixtures and checks one `measured-by` per series,
+the `via` hop, no `SMY-W609`, and `SMY-W609` on exactly the series that has no origin.
+
+### `smysl tel declare`: lineage a person states (TL-P7 step 2)
+
+No export says that two series measure one quantity. Nor does one name a recording rule or a
+remote-write store downstream of the scraper, or the origin of an OTLP resource with no
+`service.name`. `tel declare` records these, authored by `--as` at `--at` at the document rung,
+as the ledger is:
+
+| Declaration | Writes |
+|---|---|
+| `instrument ROLE KEY [VERSION]` | an `x.tel/instrument`, and with a version its `x.tel/instrument-meta` read at `--at` |
+| `measured-by SERIES INSTRUMENT` | `x.tel/measured-by` |
+| `via FROM TO` | `x.tel/via` |
+| `same-quantity SERIES SERIES` | `x.tel/same-quantity`, one relation in either order |
+
+- **Both ends must be in the library.** A series is a uid or `<scheme>:<key>`, and an
+  instrument is a uid or its key. An edge to a unit nobody has is refused, with exit 1.
+- **A key two roles share is refused by name.** The role is part of an instrument's uid, so the
+  refusal lists both uids, and you pick one.
+- **The degenerate cases are refused,** with exit 2: an instrument passing data to itself, and
+  a series declared the same quantity as itself.
+
+`smysl_tel::instruments` holds the builders: `instrument_meta`, `key_of`, `role_of` and
+`resolve`. `tests/cmd_tel_declare.rs` covers each declaration. It also clears an
+OTLP series' `SMY-W609` with `measured-by`, and checks each refusal and its exit code.
+
+### Witness counting, and `smysl tel witnesses` (TL-P7 step 3)
+
+§7's rule, computed. `smysl_core::schemas::tel::LineageGraph` reads the record set's
+`measured-by`, `via` and `same-quantity` edges and each instrument's role. It lives in core, so
+the dossier can use it later.
+
+- **Origins** of a series are what measured it. A series with no `measured-by` is its own
+  origin.
+- **Lineage** is the origins, and every instrument reachable from them by `via`. A cycle is
+  walked once.
+- **Independent:**
+  - the origins are disjoint;
+  - no `transform` is on both lineages.
+- **Witnesses** of a quantity, meaning a `same-quantity` component: series that are not
+  independent are merged, transitively, and each class is one witness. Merging transitively
+  never counts more witnesses than pairwise reading would.
+- **Reported, merging nothing:**
+  - common transport: a `scraper`, `collector`, `pipeline` or `store` on the lineages of two
+    witnesses (D-T10);
+  - duplicate paths: an origin whose data left it by more than one `via`;
+  - unmeasured series.
+
+`smysl tel witnesses SERIES` prints that report. The three cases §7 gives are unit tests:
+- two scrapes of one exporter are one witness, and the second path is reported;
+- an exporter and the application's own metric are two;
+- two series from one recording rule are one.
+
+`tests/cmd_tel_witnesses.rs` runs them through the binary, over a Prometheus series and a
+Zabbix item declared the same quantity.
+
+**A correction to step 1.** `SMY-W609`'s documentation said an unmeasured series "never counts
+as independent". §7 says the opposite: as its own origin it counts as independent of every
+other series, which can overcount. The warning exists because of that. The rustdoc, the check
+pass and Appendix A now say so.
+
+### Witness conflicts: detection kind 7 (TL-P7 step 4)
+
+`smysl_core::schemas::tel::witness_conflicts` derives kind 7 (§11.5) from the record set. It
+is never written, like kind 6. It applies to two series joined by `same-quantity` and
+independent by §7, whose preferred windows over one `(from_ms, to_ms, recipe)` disagree.
+There is one contention per pair of windows, `over` the smaller series uid, with the two
+windows as positions.
+
+- **Disagree** (`windows_disagree`):
+  - an exact field both carry differs: `count`, `min`, `max`, `first`, `last`, `sum` or
+    `mean`. A field only one carries is not compared;
+  - or a quantile at one index differs by more than 2 × the larger `alpha`, relative to the
+    larger estimate.
+- **The tolerance is decided exactly** (`quantiles_conflict`): `|a − b| > 2 alpha max(|a|, |b|)`
+  in integer arithmetic over the decimals, with no float. Against the larger estimate is the
+  lenient reading of "relative". Each of two honest DDSketch estimates is within `alpha` of
+  the true value, so they cannot be further apart than that. The edge is pinned: 98 and 100 at
+  alpha 0.01 do not conflict, and 97.9 and 100 do.
+- **The preferred window of a series** is §9.2's, taken over every instrument that carried the
+  series: the largest `count`, then the smallest digest (none first), then the smallest uid.
+  Evidence about one series is one witness (§7), so one window speaks for it. §9.2 defines the
+  preferred window per window key, which includes the instrument. Taking it across instruments
+  is the reading this implementation makes, and §11.5 needs it to compare series rather than
+  carriers.
+
+`tel check` lists each conflict, with which field disagrees and whether a resolution has
+reviewed it, and counts conflicts beside the rival explanations. `tel investigate show` adds,
+for each series the evidence is about, the quantity's witness count and its common transport,
+followed by the conflicts on that evidence.
+
+`tests/cmd_tel_conflict.rs` has two processes reporting one gauge over OTLP, declared one
+quantity:
+- equal values: no conflict;
+- 1% apart: the exact windows conflict on `min`, the sketched windows at alpha 0.01 do not,
+  and a second `tel check` gives the same contention id;
+- a recording rule declared on both lineages: one witness, and no conflict;
+- an investigation that consulted one window: `show` reports 2 witnesses, 1 common transport
+  (the shared collector) and the conflict.
+
+C-Tel-Check (§16) wants kinds 6 and 7 pinned on `fixtures/tel/check/`. That fixture does not
+exist yet, for kind 6 either, and is owed.
+
+### GE-M6: do independent instruments change conclusions? (TL-P7 step 5)
+
+D-T10 keeps witness counts out of every status rule unless GE-M6 shows they change a
+conclusion. `make ge-m6` runs `crates/smysl-tel/examples/ge_m6.rs`.
+
+- **The incidents:** 12 gauges, an hour of baseline and ten minutes after the anomaly.
+  - One quantity, the root cause, shifts by 3 to 10 noise widths.
+  - Two symptoms shift 1 to 5 minutes later by 0.4 to 1.1 of that, so plain BARO is right
+    about two times in three.
+  - Each quantity reaches smysl as real instrument units and `measured-by`/`via` edges, and
+    `LineageGraph` counts its witnesses (the harness asserts the count it meant to build).
+    - single: one exporter, one series;
+    - duplicated: one exporter, two scrapers, two series;
+    - independent: two exporters, two series on different scales.
+- **The arms**, 2,000 incidents each:
+  - control;
+  - duplicated;
+  - independent;
+  - artifact: one origin of a non-root quantity reports a shift its twin does not see;
+  - blind: one of the root cause's two origins misses the fault;
+  - mixed.
+- **The rankings**, all from one set of BARO scores:
+  - plain: per series, as shipped;
+  - collapse: one entry per witness, at the class's best score;
+  - corroborate: one entry per quantity, at its weakest witness's score.
+- **Results**, seed 6. Hit@1 is how often the root cause ranks first:
+
+  | arm | plain | collapse | corroborate |
+  |---|---|---|---|
+  | control | 65.6 % | 65.6 % | 65.6 % |
+  | duplicated | 64.5 % | 64.5 % | 64.5 % |
+  | independent | 67.1 % | 67.1 % | 69.2 % |
+  | artifact | 34.9 % | 34.9 % | 67.0 % |
+  | blind | 49.2 % | 49.2 % | 0.5 % |
+  | mixed | 57.2 % | 57.2 % | 56.9 % |
+
+  - Collapse never changed a conclusion, meaning the first three distinct quantities in
+    order. It only freed the slots duplicates took: in the duplicated arm, hit@3 by slot went
+    from 95.0 % to 99.9 %.
+  - Corroborate changed 5,218 of 12,000 conclusions.
+    - It gained where an instrument lied: artifact, 34.9 % → 67.0 %.
+    - It lost as much where an instrument was blind: blind, 49.2 % → 0.5 %.
+    - Mixed came out even.
+  - Seeds 7 and 8, and 24 quantities, give the same picture.
+- **Reading:**
+  - Lineage alone tells which series are one witness. It cannot tell a lying instrument from
+    a blind one: in both, independent witnesses disagree.
+  - Whether a corroboration rule helps depends on how often each happens, which no record
+    holds.
+  - The disagreement itself is what carries information, and kind 7 (step 4) already reports
+    it as a contention.
+- **Not run:** a real cluster with duplicated scrapers and independent sources. The run is
+  simulated, and its report says so.
+
+**D-T10 is kept.** Corroborate meets its literal condition, "changes a conclusion", but it does
+not improve the conclusion. Collapse does not change one. Witness counts stay a report, in
+dossiers and in kind 7. The RFC's D-T10 row, §7 and the §14 reservations table record this.
+GE-M6 built its whole lineage from instrument units, so no `SourceKind` is allocated for an
+instrument either.
+
+### C-Tel-Check: `fixtures/tel/check/`
+
+The fixture step 4 owed. Six stores, as CBOR record sequences, and `expected.tsv`: every
+diagnostic each one raises, with the unit it names; each hypothesis's effective status after
+rule TQ's cap; and each derived contention of kind 6 or 7, by id, `over` and `positions`. Exact
+in both directions. `crates/smysl-check/tests/tel_check_fixture.rs` writes the stores
+(`SMYSL_BLESS=1`) and derives the rows from the bytes on disk.
+
+- `clean`: nothing.
+- `tw`: rule TW's three rows, and one window against each (`SMY-E603`). The exact one also
+  breaks rule T (`SMY-E033`, `SMY-W035`). Two digests under one key (`SMY-W614`).
+- `tq`: a quote that verifies, and the wrong value, a non-canonical spelling, a unit outside
+  the grounds, a missing field and an index past the list (`SMY-W606` each, capped at
+  `speculative`).
+- `rivals`: two rivals of one target, three of another as one contention, and none where one
+  rebuts or supersedes the other, one is speculative, or rule TQ caps one.
+- `witnesses`: kind 7 for independent exact windows that differ, for sketches 3 % apart at alpha
+  0.01, and for a pair whose preferred window, by count across instruments, differs where the
+  other window would agree. None for one origin under two series, a transform on both lineages,
+  sketches 1 % apart, or agreement. `SMY-W609` for a series with no origin.
+- `reserved`: `SMY-E607`, `SMY-E611` for kinds 6 and 7, and `SMY-E612` for record 16 and
+  `source` key 7.
+
+The substrate's codes (`SMY-E604`, `SMY-W605`) need samples no record set holds, and stay with
+`fixtures/tel/window/`.
+
+### TL-P6's leftovers: an OKO ledger stand-in, and GE-M7 still owed
+
+**OKO's rotation ledger.** OKO is a separate project, and its code is not in this repository, so
+TL-P6's criterion that *OKO* writes a rotation ledger stays owed.
+`examples/oko_ledger` (`make oko-ledger`) runs smysl's side of it through the library API, with
+every mechanism §24 maps an OKO decision to:
+
+- one library for the rotation, with `rotation` on every investigation, and a View rooted at
+  each one;
+- attestations by `human:<handle>` and by `model:ollama/<hash>`;
+- probe and action output redacted, then kept as parts;
+- `confirmed_by` on a model's action;
+- Zabbix trends through `zabbix/1` as cited windows;
+- hypotheses quoting them, one in five on purpose with a number the window does not hold.
+
+Each operation is committed alone and read back at once, as OKO appends. The default run:
+
+- **Size:** 1,500 investigations, 10,310 operations and 59,687 records: 8,827 units and 14,695
+  relations, 6.4 MB on disk. The library reopens in 98 ms.
+- **Check:** 605 fabricated quotes written, and 605 `SMY-W606`. Nothing else was raised, and
+  every investigation carries its rotation.
+- **Commit latency grows with the ledger.** p50 is 6.0 ms over the first tenth of the run and
+  66.5 ms over the last (max 97 ms); the run took 355 s. A read after a commit stays under
+  1 µs.
+- **Where the time goes**, from a 300-investigation run:
+  - Staging grows from 0.9 ms to 6.7 ms at p50. That step checks the batch against the
+    whole store.
+  - Appending grows from 4.0 ms to 5.4 ms.
+  - Both are O(store) per append. This is AC-8 (incremental derived state), measured on OKO's
+    path at 10⁴ units. At §24's upper bound of 10⁵ the trend is several hundred ms per
+    operation.
+
+**GE-M7, arms (a) and (b), stays owed.** It needs the Train-Ticket testbed (D-T12) and agent
+runs, which this machine does not have. No simulated run stands in for it. Because of that,
+§11 is still untested against an agent, which the RFC wanted before TL-P7.
+
+### Retention: `smysl tel evict` (TL-P8 step 1)
+
+Rule TL (§13) for samples. `Substrate::evict(bound, at)` deletes every chunk whose span ends at
+or before the bound, and records each as evicted at `at`. Eviction is by whole chunk, so a
+chunk with any sample at or after the bound is kept whole and nothing younger than the bound is
+removed. A series' row stays, with its span, so the series keeps its chunking if its samples
+come back, and `present` can say which spans were evicted. The row's count and first instant
+follow what remains. `Substrate::evictable` plans the same eviction without making it, and
+`Substrate::evictions` lists the records.
+
+`Backend` gains `chunk_keys`, `evictions` and `evict`, for memory and redb. A chunk written where
+one was evicted clears the record: a merge can bring substrate back. Both backends run one
+eviction contract:
+- whole chunks only;
+- planned equals done;
+- idempotent;
+- the samples added back give the same digest;
+- the redb records survive a reopen.
+
+`smysl tel evict --older-than DUR --at MS -s LIB [--yes]` evicts at `--at` less `DUR`. Without
+`--yes` it reports and removes nothing. It writes no record. Against the binary, evicting three
+OTLP exports' samples:
+- changes no unit, relation or attestation;
+- turns both windows over them into `SMY-W605`, with no error;
+- after the same exports are read again, checks clean.
+
+Snapshot part texts (§13's other half) are step 2.
+
+### Retention for snapshot texts (TL-P8 step 2)
+
+Rule TL's other half (§13): the part texts of manifests whose reader is an `x.tel` reader.
+`smysl_tel::snapshot::evictable_parts(manifests, bound)` chooses them, and
+`TEL_READERS`/`is_tel_reader` say which manifests are telemetry. A part goes when every
+manifest naming it is a telemetry snapshot taken before the bound (its `origin.observed`) that
+another snapshot of its chain supersedes. Three things are kept:
+- **Each chain's head, however old.** It is the previous snapshot the next read of that object
+  diffs against (§8.3).
+- **A part any other manifest names.** SMYSL-2 texts are governed by SMYSL-2 alone.
+- **A snapshot with no observed instant.** It has no age.
+
+A reading goes with its part, unless a kept entry names it.
+
+`smysl tel evict` now removes those parts and readings too, under the library's locks, and
+reports how many. Against the binary, three snapshots of one Deployment, evicted a day later:
+- the two superseded parts go, and the head stays;
+- no record changes;
+- the next read of the object still diffs against the head and writes its change.
+
+After eviction, `smysl check` is unchanged, and `lib export --scope all` writes and verifies with
+P1 and P3 holding.
+
+### Exchanging samples: `lib export --with-substrate` (TL-P8 step 3)
+
+§19.5. `smysl_series::exchange` writes samples, not chunks. There is one file per
+(series, instrument, UTC day): a CBOR sequence of §9.1 sample arrays in sample order, named
+`<BLAKE3>.cbor`. `listing.cbor` names the series (scheme, key, class), each day held with its
+file and count, and the days known evicted. A day file is a function of its samples alone, so
+two peers holding the same samples write the same file.
+
+`decode_day` refuses anything `encode_day` would not write:
+- a sample outside the day;
+- samples out of order or repeated;
+- a file that is not canonical.
+
+`verify` checks every file against its name, day and count before anything is written.
+`import` then adds the samples day by day, as a set.
+
+`smysl lib export --with-substrate` writes the library's whole substrate under `substrate/`.
+That is beside the collection and outside its index, so P1 and P3 are checked as before.
+`--with-substrate` over a plain store is refused (exit 2). `smysl lib import` of an export that
+carries one verifies it first, so a bad day file imports nothing (exit 1). After the records it
+adds the samples, and reports how many were new, how many already held, and the exporter's
+evicted days.
+
+Against the binary, with one library that evicted everything and an unevicted peer:
+- the evicted export carries no samples, and a fresh library importing it has `SMY-W605`;
+- the peer's export on top brings the samples back, changes no unit, and checks clean;
+- a second import adds nothing;
+- the peer's export into the evicted library itself restores it.
+
+### Gaps: `SMY-W605` in an investigation (TL-P8 step 4)
+
+`smysl tel investigate show` gains a last section, `gaps`, which is the dossier's open
+questions. It lists every window the investigation consulted or cited (its hypotheses' grounds)
+whose samples the substrate does not hold, evicted or never received, each as `SMY-W605`. It
+reads the substrate through the same `tel-evidence` recomputation `tel check` uses, and reports
+only the warning: a hypothesis grounded in an evicted window keeps its status.
+
+Against the binary: an investigation that consulted one window and cited another reports
+0 gaps, then 2 after `tel evict`, and its hypothesis is unchanged. Reading the scrapes again
+brings it back to 0.
+
+A probe's output is a SMYSL-2 text part. It names no samples, and rule TL never evicts it, so
+§15's "or a probe output" had nothing structured to point at. The RFC's row now names window
+evidence only.
+
+### GE-M9: retention keeps the round trip (TL-P8 step 5)
+
+TL-P8's gate. `examples/ge_m9` (`make ge-m9`) builds library A from simulated data: 20 gauges,
+one scrape a minute, 182 days, which is 5.24 M samples and 3,640 daily windows committed by rule
+TW. Peer B is a copy of A. A then evicts all but its last 30 days, exports with its substrate,
+and the libraries import and merge:
+
+| step | result |
+|---|---|
+| A evicts 152 days | 36,480 chunks, 4.38 M samples; records unchanged; 3,040 of 3,040 old windows `SMY-W605`; no `SMY-E604` |
+| A's export | 600 day files, 3,040 days listed evicted, 14.7 MB; P1 and P3 hold |
+| C imports it | C's records are A's (rsd, units, relations, attestations); same 3,040 gaps |
+| C merges B | 4.38 M samples back, 0.86 M already held; records unchanged; no `SMY-E604`, no `SMY-W605`; C's samples are B's |
+| A merges B | the same, and no eviction record left |
+| set | a second import adds nothing; D (B then A) equals C |
+| control | a peer with one sample more on an evicted day: exactly one `SMY-E604`, and no record changed |
+
+There was no P1 failure, and no resurrection changed a unit, so TL-P8's gate holds. The run took
+90 s and 630 MB, removed afterwards. The data is simulated, as GE-M4's is: the RFC's run is on
+GE-M1's data, which 1.17 does not have.
+
+### Spans and log templates: TL-P9's design, and two types (TL-P9 step 1)
+
+The RFC named TL-P9's work and defined none of it. It now does, on D-T1's terms: a span and a
+log record are readings, so they live in an **event substrate** beside the samples (§19.6), and
+units are made only for what is asserted about them.
+
+- **Events** are (stream, instrument, instant, body) tuples, the body the reader's canonical
+  record in deterministic CBOR. The substrate is a set, ordered by instant then body, and has a
+  digest of its own (`smysl/tel-events/1`). Rule TL may evict events, and `--with-substrate`
+  carries them by day, as it carries samples.
+- **`x.tel/span`** (§9.6) is span evidence, materialised from the substrate when a trace is
+  asked for. It is `measured`, its digest is its one event's, and materialising a trace writes
+  `x.tel/precedes` from parent to child. The sub-millisecond remainders stay in the body, so
+  `source` key 7 stays reserved for GE-M2 to decide.
+- **`x.tel/log-template`** (§9.7) is one Drain template over a window of a log stream. It is
+  `derived`, grounded on its stream, and its digest is the whole window's, because Drain's
+  templates depend on every record it read and on their order.
+- **Readers** (§20.1): `otlp-traces/1`, `otlp-traces-json/1`, `journald/1` (`journalctl -o
+  json`) and `cloudevents/1` (structured mode). New streams are keyed in §6, with two new
+  schemes, `journald` and `cloudevents`, and three new kinds, `span`, `log` and `event`.
+- **Drain's and MinHash's recipes** are fixed in §21. `tel trace`, `tel templates` and `tel
+  similar` are the commands still to come (§23).
+
+`x.tel/v1` now has nineteen types, with nine new payload keys and the enumerations `span_kind`
+and `status`. Rule TW covers the two new types: a span is attested as an exact window is, a
+template as a sketched one, and both need a digest, or `SMY-E603`. C-Tel-Check has a seventh
+case, `events`, that pins this. The other six cases derive what they did. Their bytes changed
+only in the schema declaration each one carries, which now names nineteen types. For the same
+reason the wire fixture `F15-telemetry.cbor` was re-blessed. The three ports still round-trip
+it byte for byte.
+
+### Traces: spans as events, and `smysl tel trace` (TL-P9 step 2)
+
+**The event substrate** (`smysl-series`, §19.6) holds spans beside the samples, in the same redb
+file:
+- Four new tables: event hours, their eviction records, a row per stream, and an index from a
+  trace id to the hours holding its spans.
+- A file written before them gains them, empty, when it is opened, so the format stays
+  `smysl-series/1`.
+- `Substrate::add_events` adds as a set, and `events` reads a range with its
+  `smysl/tel-events/1` digest.
+- `evict` takes whole hours under the same bound as chunks. Its report counts both, and
+  `tel evict` prints an `events` line when it evicts any.
+
+**Readers.** `otlp-traces/1` (protobuf, with the traces messages declared as the metrics ones
+are) and `otlp-traces-json/1`:
+- Each span is one event, at its start, whose body keeps the times to the nanosecond.
+- A stream is one resource and scope. The stream's `x.tel/series` unit, the collector and each
+  service's origin are committed with their lineage.
+- No span becomes a unit on read.
+- `fixtures/tel/otlp-traces/` holds two exports, one per service, with one trace across both.
+  Their protobuf twins were written by `protoc` and set a `trace_state`, a span event and a
+  link, which are not kept. The two encodings give the same events.
+
+**`smysl tel trace TRACE-ID`** materialises a trace's spans as `x.tel/span` units, `measured`,
+and prints them as a tree. Siblings are in start order, and children under their parents even
+when all start in one millisecond. With `--yes --at MS` it commits the units and an
+`x.tel/precedes` from each parent to each child. Materialising twice gives the same uids.
+
+**Checking spans:**
+- `tel check` recomputes span units against the substrate. A span that is there but is another
+  span is `SMY-E604`. One that is not there, or was evicted, is `SMY-W605`.
+- Reading the exports again brings the spans back, and the same units with them.
+- `SMY-W617` is registered (172 codes): one stream holds a span id twice with different
+  contents. Both are kept and both materialise, and `tel trace` names it.
+
+Exchanging events through `--with-substrate` comes with logs, in step 3.
+
+### Logs: journald, CloudEvents, Drain and `smysl tel templates` (TL-P9 step 3)
+
+**Two readers** write the event substrate, never a unit:
+- **`journald/1`** reads `journalctl -o json`. An entry is one event at
+  `__REALTIME_TIMESTAMP`. Its body is the message, the priority, and every field not starting
+  `__`, so the cursor and monotonic clock are not identity and a journal read twice adds
+  nothing. A message that is not UTF-8 is read lossily and kept exactly. A stream is a host and
+  unit, with origin `journald:<host>`.
+- **`cloudevents/1`** reads CloudEvents 1.0 JSON: one event, a batch or JSON lines. `time` is
+  required, as an RFC 3339 instant to the nanosecond, and the body is the whole event, so a
+  producer's retry is one event. A stream is a source and type, with origin
+  `cloudevents:<source>`.
+- Fixtures: `fixtures/tel/journald/j0.json` and `fixtures/tel/cloudevents/c0.json`, both
+  hand-written in the formats' shapes.
+
+**Drain** (`smysl_tel::drain`) is our own implementation, recipe
+`tel/drain/1?depth=4&sim=0.4&children=100&masks=uuid,ip,hex,num`:
+- UUIDs, IPv4 addresses, hex runs and numbers are masked as whole tokens.
+- Messages are routed by length and first token.
+- Similarity is compared in integer arithmetic, and a tie goes to the oldest cluster.
+- Writing it found one thing to fix in the RFC: "depth 4" is Drain3's count of layers (root,
+  length, one token layer, leaves), so a message is routed by its first token, not its first
+  two. §21 now says so.
+
+**`smysl tel templates STREAM FROM TO`** runs Drain over the stream's messages in event order
+and prints each template with its count. With `--yes --at MS` it commits each as an
+`x.tel/log-template`: `derived`, grounded on the stream, attested `Transformed` at `Computed`,
+and carrying the window's event digest. `tel check` recomputes templates:
+- A record added since, or a changed template or count, is `SMY-E604`.
+- An evicted window is `SMY-W605`.
+
+**Exchange.** `lib export --with-substrate` now carries spans and log records:
+- One file per stream, instrument and UTC day, named by its BLAKE3.
+- The listing gains three lists after the sample days: the streams, the event days held, and
+  those evicted.
+- `lib import` verifies the event day files with the sample day files before importing
+  anything, adds the events as a set, and re-indexes each span under its trace id, so `tel
+  trace` finds it in the importing library.
+- Both commands print an `events` line, and their JSON an `events` member, when there are any.
+
+### GE-M2 and GE-M5: milliseconds, and causal order (TL-P9 step 4)
+
+Both experiments ran on simulated traces. The measures and stop conditions went into the RFC
+(§26) before either ran.
+
+**The simulator.** `crates/smysl-tel/examples/common/traces.rs` models a social-network service
+graph after DeathStarBench's:
+- Eleven instrumented services, one per host, with client and server spans per call.
+- Cache and database calls are client spans only.
+- Handlers call in stages: parallel within one, sequential across them.
+- Latencies are log-normal with published-order medians.
+- Each host's clock has a residual offset within ±0.25 ms.
+
+Both runs go through `otlp-traces/1`'s path, the event substrate and `trace::materialise`.
+
+**GE-M2 (`make ge-m2`), is a millisecond enough? No.**
+- 5,000 traces, 72,177 spans, 66.7 % of them under 1 ms.
+- 39.5 % are *affected*: a sibling ran strictly before or after them, and the two units share a
+  `start_ms`.
+- Nearly all of them are memcached and redis calls made in sequence by one handler.
+- The substrate's nanoseconds put all 25,311 collapsed pairs in the order they ran.
+- By the stop condition key 7 is not released. It is not assigned on simulated data either,
+  since no rule reads sub-millisecond order from units (GE-M5). The run at production load
+  decides.
+
+**GE-M5 (`make ge-m5`), does causal order catch skew? Not as §10.4 states it.**
+
+Each host in turn was skewed by ±1 to 500 ms, giving 198 runs of 300 traces each, plus 20 runs
+with no skew. As fixed, *detected* means the skewed host is the one touching the most violated
+`x.tel/precedes` edges.
+
+| at ≥ 5 ms | start-only (§10.4) | with "child ends before parent" |
+|---|---|---|
+| detected, as fixed | 20.1 % | 26.0 % |
+| noticed, post hoc (an edge of the host off by ≥ 2 ms) | 63.6 % | 100 % |
+
+- **No host was named reliably.** A violated edge says that two clocks disagree, not which one
+  is wrong. A host with one caller ties with it.
+- **The start-only constraint cannot notice some skews.** A leaf service running ahead, or the
+  entry point running behind, never violates it: 8 of 22 host-and-direction cases.
+- **The noise trips it.** With no skew, the residual offsets violate 1.3 % of edges at
+  millisecond resolution, in 18 of 20 runs. No edge was off by 2 ms or more.
+
+The constraint fails its bar, so rule E is unchanged and `x.tel/precedes` stays ordinary.
+§10.4 records what a later design would need:
+- a second instant per span, for the response constraint;
+- a tolerance, or the sub-millisecond part.
+
+DeathStarBench at load is still owed for both experiments.
+
+### Similar episodes: MinHash, `smysl tel similar`, and GE-M8 (TL-P9 step 5)
+
+**`smysl_tel::similar`** reads an episode's typed features:
+- its members by `x.tel/during`: the series of each, change pointers, anomalies with their
+  direction, and alerts;
+- the log templates whose window overlaps it.
+
+It estimates their Jaccard index with MinHash (`tel/minhash/1?k=128&seed=S`):
+- 128 functions mod 2⁶¹ − 1, drawn from ChaCha20 keyed by the recipe and seed;
+- a seeded generator, which `smysl-tel`'s purity scan allows and its unseeded-generator ban
+  still forbids otherwise;
+- `rand_chacha` and `rand_core` join the crate's dependencies, without default features, as
+  `smysl-measure` has them.
+
+**`smysl tel similar EPISODE [--top N] [--seed S]`** prints the nearest episodes:
+- the MinHash similarity out of 128;
+- the exact Jaccard index;
+- the episode's gist and label, and the label most common among the nearest.
+
+It writes nothing. `smysl_embed::Model::embed` is now public, for GE-M8.
+
+**GE-M8 (`make ge-m8`), do episodes recur detectably? Yes, and without a model.** The
+measures were fixed in §26 first:
+- 120 simulated episodes of twelve fault types, two per service sharing half their core.
+- Each episode is units, grouped by the episode detector.
+- Each is ranked against the other 119 by three arms.
+
+| recall@5 | seed 8 | five other seeds |
+|---|---|---|
+| MinHash, 128 functions | 0.970 | 0.968–0.987 |
+| exact Jaccard | 0.982 | 0.972–0.985 |
+| Model2Vec `potion-base-8M`, over a text rendering of the same units | 0.898 | 0.880–0.945 |
+
+The stop condition (MinHash below 0.6 where embeddings exceed 0.8) does not fire, so
+similarity is model-independent by default. The corpus names things by shared identifiers,
+which favours sets by construction. Renamed series and paraphrased alerts are what GE-M7's
+corpus and RCAEval would test, and both are still owed.
+
+**TL-P9 is complete:** traces, logs, Drain, MinHash, and its three experiments run on simulated
+data, with the real runs owed.
+
+**`source` key 7 stays reserved, with a trigger (D-T5).** GE-M2 keeps it from release. It is
+assigned only when something needs sub-millisecond order between units, not events: a `check`
+rule that orders spans across hosts, or a unit that must keep its order after its events are
+evicted. The RFC's §10.2 no longer ties assignment to GE-M2's 1 % threshold, which governs
+release only.
+
+
+### AC-8: a store's check kept as derived state (step 1)
+
+OKO stages every ledger operation against the whole store, and that cost grows with the store.
+`make oko-ledger` at 6 × 10³ units: a commit at 43 ms p50, against 5.8 ms at the start, and 30 ms
+of it staging. A profile of the late commits found rule E's solve twice per commit (in `check`
+and in the range index's append, ~40 %), the ten passes' loops, `Overlay::new` cloning the
+interpretive layer and the library, and the adjacency rebuilt. All of it is O(store). RFC SMYSL-3
+§17.1 now holds AC-8's design, since the architecture proposal that names it is not in the
+repository.
+
+- **`smysl_check::incremental::Checked`** keeps a store's report. `with_batch` gives the report of
+  the store with a batch, and `advance` adopts it once the batch is appended. Each batch report
+  says how it was reached: incrementally, or in full and why. In this step every batch is checked
+  in full; the next steps make it incremental, family by family.
+- **The contract is exact:** equal to `check` over the store with the batch. It is held by
+  `crates/smysl-check/tests/incremental.rs` over every fixture store the check is pinned on
+  (one by one and all together) and 60 generated stores. Each store is dealt at random into a
+  base and up to five batches, some records arriving twice. A cache that returns the stale report
+  fails all three tests, which was tried.
+- **`stage::prepare_checked`** checks what will be committed: the staged records with their
+  attestations, and the caller's `extra` records, which `Staged::records` now carries. Every
+  other `prepare` checks what it did. `Staged` gains `extra` and `checked`.
+- **`examples/oko_ledger`** stages through `prepare_checked`, and with `--verify` it asserts the
+  contract after every operation. The time `--verify` spends is not counted in the commit timings.
+
+### AC-8 step 2: the kept check, family by family
+
+`Checked::with_batch` now recomputes only what a batch can change. The passes still run over the
+whole store with the batch, so every lookup a rule makes (a ground, a `b3:` prefix, a cited
+payload) is answered as the full check answers it. What they iterate is narrowed to the units
+and records the batch can change. The kept report is spliced by rule family (RFC §17.1):
+
+- **Per unit:** recomputed for the dirty units. Those are the batch's units, units grounding on
+  one of them, the subjects of new attestations, the endpoints of new relations, and units whose
+  body has a `b3:` token that is a prefix of a new uid.
+- **Dangling references (`SMY-E060`):** dropped for a uid the batch adds, and added for one it
+  references that the store does not hold.
+- **Per record:** kept, with the batch's new records' findings added (`W432`, `W409`, `E612`).
+- **Aggregates:** `SMY-W013` gains the batch's undeclared kinds, `SMY-W614` is recounted for the
+  window keys that gain a digest, and `SMY-W111` is recomputed.
+- **Cycles:** `SMY-W062` is recomputed when a `causes` or `sequences` edge arrives.
+- **Rule E** is still recomputed over the whole store. That is step 3.
+
+The cache keeps small indexes beside the report, so a batch needs no walk of the store: who
+grounds on each uid, the `b3:` tokens in bodies, the views' distinct profiles, the window keys
+and their digests, the series with a `measured-by`, and the withdrawn relations.
+
+A batch falls back to the full check, and its `path` says why, when it:
+
+- carries a View whose profile the store has no view with;
+- carries a schema declaration the store does not hold;
+- carries an edge a withdrawal already names;
+- carries any record other than a unit, relation, attestation, label binding or View;
+- is checked under options other than the cache's.
+
+**What the passes gained.** Each pass gains a `run_scoped` beside `run`, which keeps its
+signature. `check` is unchanged in what it reports: every existing check test passes as before.
+`SMY-W609` and the other per-unit findings that a cache rebuilds are built by one shared function
+each, so the two paths cannot word them differently.
+
+**The harness:**
+
+- Every batch must match the full check, and at least a share of batches must take the
+  incremental path. Today 1,260 of 1,544 fixture batches and 492 of 572 generated batches are
+  incremental; the rest are the fallbacks above.
+- The generator now writes bodies that name other units by `b3:` prefix, some short enough to be
+  ambiguous, and Views under two profiles.
+- Seven mutations of the dirty-unit rules were tried, and each fails the harness: grounds,
+  attestations, relation endpoints, prefix tokens, dangling references, W614's recount and W609.
+
+**On OKO's path**, measured with `oko_ledger` over 1,000 investigations:
+
+| Late in the run (p50) | Step 1 | Step 2 |
+|---|---|---|
+| Staging | 30.4 ms | 14.6 ms |
+| Commit | 43.2 ms | 27.2 ms |
+
+6,896 of 6,898 batches took the incremental path; the other two were the first schema
+declaration and the first View. With `--verify`, all 1,032 operations of a 150-investigation
+run matched the full check. What still grows with the store is rule E, `Overlay::new` and the
+append's range index: steps 3 and 4.
+
+### AC-8 step 3: rule E by component
+
+**The engine solves each component on its own.** Two subjects are in one component when a live
+dating or a free constraint names both. `engine::solve` now gathers the datings and free
+constraints as before and solves each component as its own network, in the full check too, with
+its subjects, datings and constraints in their original order.
+
+- **Why the answer is unchanged:** no edge joins two components, so a shortest path stays in
+  its own. A tie between causes is broken by their relative order, which each component keeps.
+- **The one input that crossed components** was the search's cutoff on a negative cycle, which
+  counts the network's variables. A new property in `tests/time_algebra.rs` adds 60 unrelated
+  units around 40 stores whose strict datings close contradictory cycles, and rule E says the
+  same about each. That held for the old single network as well, so the cutoff was not seen to
+  change a finding. Every existing rule E test passes, P-E1 to P-E8 among them.
+
+**A region can be solved alone.** In a store with no datings and no manifests, only `replies`
+and `quotes` relations tie two units, and every rule E finding is a unit's.
+
+- `engine::findings_within(store, axis, units, links)` solves the components of `units`, given
+  the ties that touch them. It returns `None` for a store with datings or manifests.
+- `constraints::free` is split so that the full and regional paths build each constraint with
+  the same code: `free_within` gives the region's constraints in the full list's order.
+- **The kept check** keeps the ties under each end. For a batch, it re-solves the closure of
+  the batch's units, its attestations' subjects and its new ties' ends, and replaces rule E's
+  findings about those units. Elsewhere it runs the whole pass, as before.
+- **The range index** does the same on append (`axis_on_append`): it solves the region and
+  rewrites only its rows. A schema declaration, a View or a label binding in the batch does not
+  stop it, since rule E reads none of them. A dating or a manifest in the library sends it to
+  the path it had.
+
+**Held by:**
+
+- **The kept check's harness:** the generator now writes publication dates (well formed,
+  malformed, out of range), observations, attestation clocks that agree or contradict them, and
+  `replies` and `quotes` ties. Four mutations of the region are caught: attestation subjects,
+  new units, the closure and new ties.
+- **The range index:** a new test grows six libraries with no manifests over 40 appends each,
+  some ties arriving before their units, and compares the kept `said` and `composed` tables with
+  a rebuild after every append. Two mutations of the region are caught.
+
+**On OKO's path** (`oko_ledger`, 1,000 investigations, late commits, p50):
+
+| | Stage | Commit | Whole run |
+|---|---|---|---|
+| Before AC-8 | 30.4 ms | 43.2 ms | 167 s |
+| Step 2 | 14.6 ms | 27.2 ms | 107 s |
+| Step 3 | 2.9 ms | 6.9 ms | 39 s |
+
+What still grows with the store is `Overlay::new`, which clones the interpretive layer and the
+library for every batch, and the adjacency it rebuilds. That is step 4.
+
+### AC-8 step 4: an overlay without a copy of the store, and cycles from the new edges
+
+**`Overlay` reads through its base's interpretive layer.** It used to clone the base's relations,
+threads, views, withdrawals, resolutions and commitments for every batch, then fold the batch
+in. Building and dropping that clone was most of what staging cost once the check was kept.
+
+- **What it keeps:** the batch's entries, each copied up from the base's entry for the same key
+  before the batch is folded in, so it is the union's answer for every key it has.
+- **How it is read:** lookups check the batch's entries first; iteration merges the two layers
+  in key order, the batch's entry standing for an equal key's.
+- **What it builds:** the merged layer whole only for a caller that asks for the layer itself,
+  which is an overlay of an overlay, a union of it, or its state hash.
+- **No API change:** `Relations`, `Threads`, `Views`, `Withdrawals`, `Resolutions` and `Commits`
+  keep their `Debug` and `Clone`; their fields were never public.
+- **Held by** `crates/smysl-graph/tests/store_conformance.rs`, which already compared an overlay,
+  split at four points, an overlay of an overlay and an interleaved one, with the store built
+  from all their records, method by method, lifecycle records included. It passes unchanged.
+
+**`SMY-W062` moves only when it can.** The kept check keeps the causal edges and the nodes
+W062 reports, and recomputes W062 over the union's adjacency only when a new `causes` or
+`sequences` edge closes a cycle or points at a node already on one or upstream of one. An edge
+points at what its node depends on, so `topo` cannot order a node that reaches a cycle, and
+`cycles` reports each such node as a group of its own. The first version of this rule checked
+the other end of the edge, and the harness caught it on generated store 39. Two mutations of
+the rule are caught.
+
+**On OKO's path** (`oko_ledger`, 1,000 investigations, p50):
+
+| | Stage, first tenth | Stage, last tenth | Commit, first tenth | Commit, last tenth | Whole run |
+|---|---|---|---|---|---|
+| Before AC-8 | 1.4 ms | 30.4 ms | 5.8 ms | 43.2 ms | 167 s |
+| Step 3 | 0.35 ms | 2.9 ms | 4.0 ms | 6.9 ms | 39 s |
+| Step 4 | 0.10 ms | 0.21 ms | 3.9 ms | 4.0 ms | 28 s |
+
+The commit no longer grows with the ledger: almost all of it is the append's `fsync`, which is
+per commit and constant. Step 5 measures at 10⁴ and 10⁵ units.
+
+### AC-8 step 5: measured at 10⁴ and 10⁵ units
+
+`oko_ledger` at §24's two sizes, p50 over the first and last tenth of the run:
+
+| Ledger | Operations | Staging | Commit | Run |
+|---|---|---|---|---|
+| 10⁴ units (1,700 investigations), `--verify` | 11,661 | 0.05 → 0.10 ms | 3.3 → 4.5 ms | 498 s, most of it the oracle |
+| 10⁵ units (17,000 investigations) | 116,224 | 0.15 → 0.63 ms | 4.0 → 7.7 ms | 789 s |
+
+- **Correctness:** with `--verify`, all 11,659 batches the kept check took at 10⁴ units equal
+  the full check.
+- **Fallbacks:** two batches at either size were checked in full, the first schema declaration
+  and the first View.
+- **At the end of the 10⁵ run:** the library reopens in 1.5 s (99,241 units, 166,199 relations,
+  71 MB), and its full `check` finds each of the 6,806 fabricated quotes and nothing else.
+- **Against the trend before AC-8:** 43 ms per commit at 6 × 10³ units, which RFC §17.1 put at
+  several hundred milliseconds by 10⁵.
+
+**What still grows**, from a profile of the 10⁵ run's last commits:
+
+| Where | Share | Why |
+|---|---|---|
+| The append's `fsync` | 43 % | per commit, constant |
+| The range index's tables | 41 % | rewritten whole on every append (`Ranges::spliced` rebuilds the row vector and its segment tree; the `observed` table likewise), so O(rows) in copies |
+| Staging | 8 % | the kept report's clone and splice, O(findings), here 6,806 W606 |
+
+The range index is the text library's, and making its tables O(log n) per append needs a
+different structure, so it is left out of AC-8 and recorded in RFC §17.1.
+
+The manual's chapter on telemetry has a new section, "A ledger that grows one operation at a
+time", with `prepare_checked`, `Checked` and these numbers. **AC-8 is complete.**
+
+---
+
 ## 1.16.0 — 2026-11-16
 
 What 1.15 recorded and did not act on, measured and acted on, each item below with its

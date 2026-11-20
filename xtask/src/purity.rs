@@ -78,6 +78,10 @@ const NOT_IN_THE_CORE: &[(&str, &str)] = &[
         "only through `reader-osis` and `reader-zefania` of `smysl-text`",
     ),
     ("pulldown-cmark", "only through `reader-md` of `smysl-text`"),
+    // OTLP's protobuf encoding (RFC SMYSL-3 §20.1, TL-P3 step 3). `prost` 0.14.4 declares
+    // rustc 1.85, the base, and brings `bytes` and its derive; with the messages declared in
+    // `smysl-tel` there is no `opentelemetry-proto`, which would have linked an SDK.
+    ("prost", "only through `reader-otlp` of `smysl-tel`"),
     // A Slack export is an archive, and TX-P2 step 2 is where that stopped being a plan. Both
     // are here for the reason the parsers are: a reader's dependency is recorded against the
     // reader, and a later edit that made `reader-slack` a default feature would put a zip
@@ -181,6 +185,16 @@ const PURE_CRATES: &[&str] = &[
     // `std::fs` that `write_collection` and `import` use is the store's own precedent, not a
     // runtime.
     "smysl-lib",
+    // Telemetry (RFC SMYSL-3 §18, TL-P2 step 1). Pure from its first commit, with
+    // `smysl-core` and `unicode-normalization` for dependencies: a canonical leaf value is a
+    // function of JSON text and a profile. The readers that need more arrive behind features,
+    // as `smysl-text`'s do. `CRATE_SYMBOLS` adds the RFC's PRNG ban (H-7) for it now rather
+    // than at TL-P0, because a list obeyed from the start is a list nobody has to argue with.
+    "smysl-tel",
+    // The series substrate (RFC SMYSL-3 §19, TL-P3 step 1). Pure, with redb behind
+    // `store-redb` as `smysl-graph`'s store is: a window's digest is a function of its
+    // samples, so the same ban as `smysl-tel`'s.
+    "smysl-series",
 ];
 
 /// Symbols forbidden in one pure crate's source beyond [`FORBIDDEN_SYMBOLS`], each list with
@@ -190,17 +204,56 @@ const PURE_CRATES: &[&str] = &[
 /// recipe, and a result's identity is its value, so a clock, the environment or an unseeded
 /// generator anywhere in the crate would let one recipe write two units. `rand_core` without
 /// `os_rng` already cannot draw an unseeded number; the scan is for whoever adds the feature.
-const CRATE_SYMBOLS: &[(&str, &[&str])] = &[(
-    "smysl-measure",
-    &[
-        "thread_rng",
-        "OsRng",
-        "from_entropy",
-        "SystemTime",
-        "Instant",
-        "std::env",
-    ],
-)];
+///
+/// `smysl-tel` and `smysl-series`: RFC SMYSL-3 §17's PRNG ban (H-7) and the same clock and
+/// environment as `smysl-measure`'s. A change, window or anomaly unit's uid is a function of
+/// its inputs, and a window's digest of its samples, so nothing on a record path may draw from an unseeded generator, read a clock, or iterate a
+/// `HashMap` or `HashSet` in the order a random hasher gives it — `BTreeMap` replaces both.
+const CRATE_SYMBOLS: &[(&str, &[&str])] = &[
+    (
+        "smysl-measure",
+        &[
+            "thread_rng",
+            "OsRng",
+            "from_entropy",
+            "SystemTime",
+            "Instant",
+            "std::env",
+        ],
+    ),
+    (
+        "smysl-tel",
+        &[
+            "thread_rng",
+            "rand::random",
+            "StdRng",
+            "SmallRng",
+            "OsRng",
+            "from_entropy",
+            "HashMap",
+            "HashSet",
+            "SystemTime",
+            "Instant",
+            "std::env",
+        ],
+    ),
+    (
+        "smysl-series",
+        &[
+            "thread_rng",
+            "rand::random",
+            "StdRng",
+            "SmallRng",
+            "OsRng",
+            "from_entropy",
+            "HashMap",
+            "HashSet",
+            "SystemTime",
+            "Instant",
+            "std::env",
+        ],
+    ),
+];
 
 /// Rule A, as `src/lib.rs` states it: *"no CLI capability may be unreachable from here, and
 /// no code path may be CLI-only."*

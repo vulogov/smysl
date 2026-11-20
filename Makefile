@@ -53,7 +53,7 @@ MATRIX := \
 .PHONY: help all rebuild release test lint clippy fmt fix test-matrix crate-features gates purity update seed-fuzz fuzz-build \
         determinism check-native conformance eval live-ollama live-hosted doc fuzz clean sweep \
         commit ci toolchain eval-live eval-semantic docs doc-output doc-cargo spec-tables dep-versions msrv seed-fuzz fuzz-long \
-        proposition-classes
+        proposition-classes ge-m4 ge-m6 ge-m2 ge-m5 ge-m8 ge-m9 oko-ledger
 
 help: ## Show this help
 	@echo "smysl - make targets"
@@ -137,9 +137,9 @@ PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-re
 # for them and would report "version not found in registry" — a red job saying nothing. They
 # join PUBLISHED at the release that first publishes them.
 #
-# Empty since 1.10.0, which first published `smysl-text`, `smysl-query`, `smysl-measure`,
-# `smysl-lib` and `smysl-embed-candle`.
-UNPUBLISHED :=
+# Empty from 1.10.0, which first published `smysl-text`, `smysl-query`, `smysl-measure`,
+# `smysl-lib` and `smysl-embed-candle`, until `smysl-tel` and `smysl-series` (RFC SMYSL-3) in 1.17.
+UNPUBLISHED := smysl-tel smysl-series
 
 # The library crates behind the facade: everything published except the facade itself, plus
 # the ones not published yet. Their *surface* is watched from the first commit — `api-check`
@@ -153,7 +153,7 @@ LIBRARIES := $(filter-out smysl,$(PUBLISHED)) $(UNPUBLISHED)
 # absence as if it were the intent.
 COMMAND_NAMES := fmt check pack merge diff trace view bundle thread salience find retract \
                  withdraw resolve review commit render import relink compact ingest attest providers \
-                 usage reindex ui text date same-as link summarise q ask measure assess lib schema migrate
+                 usage reindex ui text date same-as link summarise q ask measure assess lib schema migrate tel
 
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 
@@ -324,7 +324,7 @@ test-matrix: ## Every feature combination CI builds
 		RUSTFLAGS="-D warnings" $(CARGO) test --workspace $$args; \
 	done
 
-FEATURED := smysl-graph smysl-provider smysl-ingest smysl-render smysl-pack smysl-text
+FEATURED := smysl-graph smysl-provider smysl-ingest smysl-render smysl-pack smysl-text smysl-series smysl-tel
 
 crate-features: ## Each crate with features, alone, at its defaults and with none
 	@set -e; for c in $(FEATURED); do \
@@ -419,6 +419,45 @@ doc-cargo: ## Replay the manual's `cargo` transcripts and check its feature tabl
 	@# The first had gone stale *again* by 1.1, one release after being fixed by hand, which
 	@# is the argument: a version number in prose drifts every release.
 	python3 scripts/verify-doc-cargo.py
+
+ge-m4: ## GE-M4 (RFC SMYSL-3 §14): the value in force at t against simulated holds, six months
+	@# Simulated data: GE-M1's cluster is not here, and the report says so. About 15 s and
+	@# 70 MB under target/ge-m4, removed afterwards.
+	$(CARGO) run --release --quiet -p smysl-series --features store-redb --example ge_m4 -- --dir target/ge-m4; \
+		status=$$?; rm -rf target/ge-m4; exit $$status
+
+ge-m6: ## GE-M6 (RFC SMYSL-3 §7, D-T10): do witness counts change a BARO ranking? Simulated
+	@# Simulated incidents through duplicated scrapers and independent sources; no files, about
+	@# 5 s. It decides, it does not fail: exit 0 with the verdict printed.
+	$(CARGO) run --release --quiet -p smysl-tel --example ge_m6
+
+ge-m2: ## GE-M2 (RFC SMYSL-3 §26, D-T5): is a millisecond enough? Simulated traces
+	@# 5,000 simulated traces through otlp-traces/1's path, materialised; no files, about 35 s.
+	@# It decides, it does not fail: exit 0 with the verdict printed.
+	$(CARGO) run --release --quiet -p smysl-tel --example ge_m2
+
+ge-m5: ## GE-M5 (RFC SMYSL-3 §10.4): does causal order catch clock skew? Simulated traces
+	@# 218 simulated runs of 300 traces, one host's clock skewed in each; about 35 s. It decides,
+	@# it does not fail: exit 0 with the verdict printed.
+	$(CARGO) run --release --quiet -p smysl-tel --example ge_m5
+
+ge-m8: ## GE-M8 (RFC SMYSL-3 §26): do episodes recur detectably? MinHash against embeddings
+	@# 120 simulated episodes; under a second. The embeddings arm needs a Model2Vec model:
+	@# SMYSL_EMBED_MODEL=/path/to/potion-base-8M. Without it that arm is not run, and the report
+	@# says so. It decides, it does not fail: exit 0 with the verdict printed.
+	$(CARGO) run --release --quiet --features tel,semantic --example ge_m8
+
+ge-m9: ## GE-M9 (RFC SMYSL-3 §14, rule TL): six months evicted, exported, imported, merged
+	@# Simulated data: GE-M1's cluster is not here, and the report says so. Exit 1 blocks TL-P8.
+	@# About 90 s and 630 MB under target/ge-m9, removed afterwards.
+	$(CARGO) run --release --quiet --features tel --example ge_m9 -- --dir target/ge-m9; \
+		status=$$?; rm -rf target/ge-m9; exit $$status
+
+oko-ledger: ## A stand-in for OKO's POC (RFC SMYSL-3 §24): a rotation's ledger via the library API
+	@# OKO is not in this repository: this is smysl's side of TL-P6's exit criterion, timed per
+	@# append (AC-8). About 6 minutes and 7 MB under target/oko-ledger, removed afterwards.
+	$(CARGO) run --release --quiet --features tel --example oko_ledger -- --dir target/oko-ledger; \
+		status=$$?; rm -rf target/oko-ledger; exit $$status
 
 dep-versions: ## Fail if an internal crate requirement is behind the workspace version
 	python3 scripts/verify-dep-versions.py
@@ -521,7 +560,7 @@ live-hosted: ## Live ingest gate against whichever hosted providers have keys se
 # than from the minutes a cold run spends discovering that `find` is a word.
 FUZZ_TARGETS := surface cbor merge_algebra pack_constraints pipeline pack_exact readers \
                 redaction_merge edtf time_engine sq_parse lib_roundtrip lib_import lens_laws \
-                store_union
+                store_union dec tel_json series_chunk tel_otlp
 
 # Seeds, not a corpus. The repo already holds inputs worth starting from — the corpus
 # fixtures are real `.smy` documents, and `fuzz/artifacts/` holds every input that has ever
@@ -573,7 +612,15 @@ seed-fuzz: ## Copy the repo's own inputs into each fuzz corpus
 	@# `lens_laws` reads an input that decodes as records as records, so the FC-9 fixtures
 	@# are seeds as they stand: every op tag, a widening, an unknown op and an opaque key 5.
 	@mkdir -p fuzz/corpus/lens_laws; cp -f fixtures/schema/fc9/*.cbor fuzz/corpus/lens_laws/ 2>/dev/null || true
-	@echo "seeded from fixtures/corpus, fixtures/library/readers, fixtures/sq, fixtures/schema/fc9 and fuzz/artifacts"
+	@# `tel_json` reads its input as JSON, as `k8s/1` and `zabbix/1` exports, and as a
+	@# Prometheus scrape, so the telemetry fixtures are seeds as they stand (TL-P3 step 2).
+	@mkdir -p fuzz/corpus/tel_json; cp -f fixtures/tel/diff/*.json fixtures/tel/diff/*/*.json fixtures/tel/prom/*.prom fixtures/tel/prom/*.om fuzz/corpus/tel_json/ 2>/dev/null || true
+	@# Zabbix history is read with its items: history, a `---` line, the item export.
+	@{ cat fixtures/tel/zabbix/history-a.json; printf '\n---\n'; cat fixtures/tel/zabbix/items.json; } > fuzz/corpus/tel_json/zabbix-history-a
+	@{ cat fixtures/tel/zabbix/trends.json; printf '\n---\n'; cat fixtures/tel/zabbix/items.json; } > fuzz/corpus/tel_json/zabbix-trends
+	@# `tel_otlp` takes the OTLP fixture's exports in both encodings (TL-P3 step 3).
+	@mkdir -p fuzz/corpus/tel_otlp; cp -f fixtures/tel/otlp/*.json fixtures/tel/otlp/*.pb fuzz/corpus/tel_otlp/ 2>/dev/null || true
+	@echo "seeded from fixtures/corpus, fixtures/library/readers, fixtures/sq, fixtures/schema/fc9, fixtures/tel and fuzz/artifacts"
 
 fuzz: seed-fuzz ## Fuzz every target for 60s each, as CI does (nightly)
 	@echo "The parser targets existed from the start and nothing ran them, which is how two"

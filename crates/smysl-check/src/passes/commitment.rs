@@ -20,7 +20,15 @@ use smysl_core::Commitment;
 use smysl_graph::StoreRead;
 
 pub fn run(store: &(impl StoreRead + ?Sized), report: &mut Report) {
-    for (uid, unit) in store.units() {
+    run_scoped(store, super::Scope::All, report);
+}
+
+pub(crate) fn run_scoped(
+    store: &(impl StoreRead + ?Sized),
+    scope: super::Scope<'_>,
+    report: &mut Report,
+) {
+    for (uid, unit) in scope.units(store) {
         let Some(level) = store.commitment_of(uid) else {
             continue;
         };

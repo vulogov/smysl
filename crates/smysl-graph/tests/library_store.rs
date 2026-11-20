@@ -231,6 +231,7 @@ fn a_log_refuses_text_with_e452() {
 }
 
 /// A time contention offered to a log is refused: rule E derives those, nobody writes them.
+/// So are SMYSL-3's rival explanation and witness conflict (TL-P1, §11.5), for the same reason.
 ///
 /// A-8.2 says an implementation MUST NOT write a record 6 with detection kind 4 or 5, and the
 /// cheapest place to keep a MUST NOT is the door — the same decision as `SMY-E452` above, and
@@ -259,7 +260,13 @@ fn a_log_refuses_a_contention_rule_e_derives() {
         match err {
             Error::Lib(lib @ LibError::DerivedContention { .. }) => {
                 assert_eq!(lib.code(), None, "the refusal is not a diagnostic");
-                assert!(lib.to_string().contains("rule E"), "{lib}");
+                // It names who derives it: rule E for 4 and 5, SMYSL-3's detection for 6 and 7.
+                let by = if kind.is_derived_by_rule_e() {
+                    "rule E"
+                } else {
+                    "x.tel/v1"
+                };
+                assert!(lib.to_string().contains(by), "{lib}");
             }
             other => panic!("{other:?}"),
         }

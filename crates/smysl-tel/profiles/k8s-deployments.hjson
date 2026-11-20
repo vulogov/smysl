@@ -1,0 +1,54 @@
+# Deployments (RFC SMYSL-3 §20.2). Configuration is `/spec`, membership is labels, identity is
+# what names the object; `/status` is gauges, routed to the series substrate and never to units.
+# §8.3's noise filters are the MUST list plus the generation counters and condition times that
+# move on every reconcile. A starting point that GE-M1 measures, not a calibration.
+{
+  profile: "k8s-deployments/1"
+  scheme: k8s
+  select: { apiVersion: "apps/v1", kind: "Deployment" }
+  noise: [
+    "/metadata/managedFields"
+    "/metadata/resourceVersion"
+    "/metadata/generation"
+    "/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration"
+    "/status/observedGeneration"
+    "/status/conditions/*/lastHeartbeatTime"
+    "/status/conditions/*/lastProbeTime"
+    "/status/conditions/*/lastUpdateTime"
+  ]
+  keys: {
+    "/spec/template/spec/containers": "name"
+    "/spec/template/spec/initContainers": "name"
+    "/spec/template/spec/containers/*/env": "name"
+    "/spec/template/spec/initContainers/*/env": "name"
+    "/spec/template/spec/containers/*/ports": "containerPort"
+    "/spec/template/spec/containers/*/volumeMounts": "mountPath"
+    "/spec/template/spec/volumes": "name"
+    "/status/conditions": "type"
+  }
+  classes: {
+    "/spec": config
+    "/metadata/labels": membership
+    "/metadata/annotations": config
+    "/metadata/ownerReferences": config
+    "/metadata/uid": identity
+    "/metadata/name": identity
+    "/metadata/namespace": identity
+    "/metadata/creationTimestamp": identity
+    "/apiVersion": identity
+    "/kind": identity
+    "/status": gauge
+  }
+  ints: [
+    "/spec/replicas"
+    "/spec/revisionHistoryLimit"
+    "/spec/template/spec/containers/*/ports/*/containerPort"
+    "/spec/template/spec/terminationGracePeriodSeconds"
+    "/status/replicas"
+    "/status/readyReplicas"
+    "/status/availableReplicas"
+    "/status/updatedReplicas"
+    "/status/currentReplicas"
+  ]
+  route: { gauge: series }
+}

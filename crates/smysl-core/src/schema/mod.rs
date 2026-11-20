@@ -55,6 +55,11 @@ pub enum FieldType {
     Enum,
     List(Box<FieldType>),
     Other(String),
+    /// A canonical decimal (RFC SMYSL-3 §5.4, proposed for A-7). Appended, so the order of the
+    /// variants a 1.16 build named does not move.
+    Dec,
+    /// A 32-byte byte string, never resolved as a reference (RFC SMYSL-3 §5.4).
+    Bytes32,
 }
 
 impl FieldType {
@@ -66,6 +71,8 @@ impl FieldType {
             "uid" => FieldType::Uid,
             "edtf" => FieldType::Edtf,
             "enum" => FieldType::Enum,
+            "dec" => FieldType::Dec,
+            "bytes32" => FieldType::Bytes32,
             _ => match s.strip_prefix("list<").and_then(|r| r.strip_suffix('>')) {
                 Some(inner) => FieldType::List(Box::new(FieldType::parse(inner))),
                 None => FieldType::Other(s.to_string()),
@@ -83,6 +90,8 @@ impl FieldType {
             FieldType::Enum => "enum".into(),
             FieldType::List(t) => format!("list<{}>", t.as_string()),
             FieldType::Other(s) => s.clone(),
+            FieldType::Dec => "dec".into(),
+            FieldType::Bytes32 => "bytes32".into(),
         }
     }
 }

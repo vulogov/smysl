@@ -317,7 +317,16 @@ impl RelEnds {
     fn for_rules(store: &(impl StoreRead + ?Sized), def: &SchemaDef) -> RelEnds {
         let mut sources: BTreeMap<RelKind, BTreeSet<Uid>> = BTreeMap::new();
         let mut targets: BTreeMap<RelKind, BTreeSet<Uid>> = BTreeMap::new();
-        for (matcher, _) in def.rules {
+        // `All` nests matchers, so its edge kinds are gathered with the rest.
+        let mut flat: Vec<&Matcher> = Vec::new();
+        let mut todo: Vec<&Matcher> = def.rules.iter().map(|(m, _)| m).collect();
+        while let Some(m) = todo.pop() {
+            match m {
+                Matcher::All(ms) => todo.extend(ms.iter()),
+                other => flat.push(other),
+            }
+        }
+        for matcher in flat {
             match matcher {
                 Matcher::SourceOf(k) => {
                     sources.entry(k.clone()).or_insert_with(|| {
@@ -402,6 +411,10 @@ fn matches(
     match m {
         Matcher::Any => true,
         Matcher::Type(k) => unit.core.schema.kernel() == Some(*k),
+        Matcher::Schema(name) => unit.core.schema.as_str() == *name,
+        Matcher::All(ms) => ms
+            .iter()
+            .all(|inner| matches(store, inner, uid, order, ranked, ends)),
         Matcher::StatusAtLeast(s) => unit.core.status >= *s,
         Matcher::SourceOf(k) => ends.sources.get(k).is_some_and(|s| s.contains(uid)),
         Matcher::TargetOf(k) => ends.targets.get(k).is_some_and(|s| s.contains(uid)),
@@ -1036,9 +1049,54 @@ mod tests {
                 assert!(t.steps.is_empty(), "{s} has no rules and derived something");
                 continue;
             }
+            if s == ThreadSchema::Timeline {
+                // Typed: kernel units are not steps of an incident (see the next test).
+                assert!(t.steps.is_empty(), "a timeline took kernel units");
+                continue;
+            }
             assert!(!t.steps.is_empty(), "{s} derived nothing");
             assert!(satisfies_rule_l(&store, &t).is_empty(), "{s} broke rule L");
         }
+    }
+
+    /// SMYSL-3 §12: a timeline from telemetry units, by type, in time order.
+    #[test]
+    fn a_timeline_is_derived_from_telemetry_types_in_time_order() {
+        use smysl_core::{SchemaId, SourceKind, SourceRef};
+        let at = |ty: &str, gist: &str, t: u64| {
+            UnitCoreBuilder::new(SchemaId::Extension(ty.to_string()), gist, Status::Measured)
+                .source(SourceRef::new(SourceKind::Tool, format!("tool:{gist}")).observed_at(t))
+                .build()
+                .unwrap()
+        };
+        let deploy = at("x.tel/change", "image bumped", 100);
+        let spike = at("x.tel/anomaly", "latency spike", 200);
+        let alert = at("x.tel/alert", "checkout p99 alert", 300);
+        let probe = at("x.tel/probe", "kubectl get pods", 400);
+        let undo = at("x.tel/action", "rollout undo", 500);
+        let series = at("x.tel/series", "a series is not a step", 50);
+        let units = [&deploy, &spike, &alert, &probe, &undo, &series];
+        let store = Store::from_records(units.iter().map(|u| Record::Unit((*u).clone())).collect());
+        let (t, _) = derive(&store, ThreadSchema::Timeline);
+        let roles: Vec<Role> = t.steps.iter().map(|s| s.role).collect();
+        assert_eq!(
+            roles,
+            [
+                Role::Trigger,
+                Role::Onset,
+                Role::Detection,
+                Role::Diagnosis,
+                Role::Mitigation
+            ]
+        );
+        let order: Vec<Uid> = t.steps.iter().map(|s| s.unit).collect();
+        assert_eq!(
+            order,
+            [&deploy, &spike, &alert, &probe, &undo]
+                .map(canonical_uid)
+                .to_vec(),
+            "in time order"
+        );
     }
 
     #[test]

@@ -1,0 +1,45 @@
+# The Deployment profile the diff fixtures are read under (RFC SMYSL-3 §20.2), with §8.3's
+# noise filters that k8s/1 MUST apply. The cases beside it are pairs of snapshots of one
+# Deployment, and `expected.tsv` is what §8.1 makes of each pair.
+{
+  profile: "k8s-deployments/1"
+  scheme: k8s
+  select: { apiVersion: "apps/v1", kind: "Deployment" }
+  noise: [
+    "/metadata/managedFields"
+    "/metadata/resourceVersion"
+    "/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration"
+    "/metadata/generation"
+    "/status/conditions/*/lastHeartbeatTime"
+    "/status/conditions/*/lastProbeTime"
+    "/status/conditions/*/lastUpdateTime"
+    "/status/observedGeneration"
+  ]
+  keys: {
+    "/spec/template/spec/containers": "name"
+    "/spec/template/spec/containers/*/env": "name"
+    "/spec/template/spec/containers/*/ports": "containerPort"
+    "/status/conditions": "type"
+  }
+  classes: {
+    "/spec": config
+    "/metadata/labels": membership
+    "/metadata/annotations": config
+    "/metadata/uid": identity
+    "/metadata/name": identity
+    "/metadata/namespace": identity
+    "/apiVersion": identity
+    "/kind": identity
+    "/status": gauge
+  }
+  ints: [
+    "/spec/replicas"
+    "/spec/revisionHistoryLimit"
+    "/spec/template/spec/containers/*/ports/*/containerPort"
+    "/status/replicas"
+    "/status/readyReplicas"
+    "/status/availableReplicas"
+    "/status/updatedReplicas"
+  ]
+  route: { gauge: series }
+}

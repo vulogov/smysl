@@ -19,7 +19,7 @@
 //! method resolution, so nothing that calls them on a concrete `Store` changes.
 
 use std::borrow::Cow;
-use std::collections::{btree_map, btree_set, BTreeSet};
+use std::collections::{btree_map, btree_set, BTreeMap, BTreeSet};
 use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -91,14 +91,71 @@ impl HotKind {
     }
 }
 
+/// Two sorted maps read as one, the upper's entry standing for an equal key's: an [`Overlay`]'s
+/// batch over its base, without a copy of the base (AC-8). A store reads one map.
+///
+/// [`Overlay`]: crate::Overlay
+#[derive(Debug, Clone)]
+pub(crate) struct Layered<'a, K, V> {
+    lower: std::iter::Peekable<btree_map::Iter<'a, K, V>>,
+    upper: Option<std::iter::Peekable<btree_map::Iter<'a, K, V>>>,
+}
+
+impl<'a, K: Ord, V> Layered<'a, K, V> {
+    pub(crate) fn one(map: &'a BTreeMap<K, V>) -> Self {
+        Layered {
+            lower: map.iter().peekable(),
+            upper: None,
+        }
+    }
+
+    pub(crate) fn two(lower: &'a BTreeMap<K, V>, upper: &'a BTreeMap<K, V>) -> Self {
+        Layered {
+            lower: lower.iter().peekable(),
+            upper: Some(upper.iter().peekable()),
+        }
+    }
+}
+
+impl<'a, K: Ord, V> Iterator for Layered<'a, K, V> {
+    type Item = (&'a K, &'a V);
+    fn next(&mut self) -> Option<Self::Item> {
+        let Some(upper) = self.upper.as_mut() else {
+            return self.lower.next();
+        };
+        match (self.lower.peek(), upper.peek()) {
+            (Some((l, _)), Some((u, _))) => match l.cmp(u) {
+                std::cmp::Ordering::Less => self.lower.next(),
+                std::cmp::Ordering::Greater => upper.next(),
+                std::cmp::Ordering::Equal => {
+                    self.lower.next();
+                    upper.next()
+                }
+            },
+            (Some(_), None) => self.lower.next(),
+            (None, _) => upper.next(),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.upper {
+            None => self.lower.size_hint(),
+            Some(u) => {
+                let (l, lh) = self.lower.size_hint();
+                let (n, nh) = u.size_hint();
+                (l.max(n), lh.zip(nh).map(|(a, b)| a + b))
+            }
+        }
+    }
+}
+
 /// Relations, in canonical `(kind, from, to)` order.
 #[derive(Debug, Clone)]
-pub struct Relations<'a>(pub(crate) btree_map::Values<'a, RelKey, Relation>);
+pub struct Relations<'a>(pub(crate) Layered<'a, RelKey, Relation>);
 
 impl<'a> Iterator for Relations<'a> {
     type Item = &'a Relation;
     fn next(&mut self) -> Option<&'a Relation> {
-        self.0.next()
+        self.0.next().map(|(_, r)| r)
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.0.size_hint()
@@ -107,53 +164,98 @@ impl<'a> Iterator for Relations<'a> {
 
 /// Threads, by `(id, owner)`.
 #[derive(Debug, Clone)]
-pub struct Threads<'a>(pub(crate) btree_map::Values<'a, (ThreadId, AgentId), Thread>);
+pub struct Threads<'a>(pub(crate) Layered<'a, (ThreadId, AgentId), Thread>);
 
 impl<'a> Iterator for Threads<'a> {
     type Item = &'a Thread;
     fn next(&mut self) -> Option<&'a Thread> {
-        self.0.next()
+        self.0.next().map(|(_, t)| t)
     }
 }
 
 /// Views, by id.
 #[derive(Debug, Clone)]
-pub struct Views<'a>(pub(crate) btree_map::Values<'a, ViewId, View>);
+pub struct Views<'a>(pub(crate) Layered<'a, ViewId, View>);
 
 impl<'a> Iterator for Views<'a> {
     type Item = &'a View;
     fn next(&mut self) -> Option<&'a View> {
-        self.0.next()
+        self.0.next().map(|(_, v)| v)
     }
 }
 
 /// Withdrawals, grouped by the rid they name, in rid order.
 #[derive(Debug, Clone)]
-pub struct Withdrawals<'a>(
-    pub(crate) std::iter::Flatten<btree_map::Values<'a, Uid, BTreeSet<Withdrawal>>>,
-);
+pub struct Withdrawals<'a> {
+    pub(crate) sets: Layered<'a, Uid, BTreeSet<Withdrawal>>,
+    pub(crate) at: Option<btree_set::Iter<'a, Withdrawal>>,
+}
+
+impl<'a> Withdrawals<'a> {
+    pub(crate) fn of(sets: Layered<'a, Uid, BTreeSet<Withdrawal>>) -> Self {
+        Withdrawals { sets, at: None }
+    }
+}
 
 impl<'a> Iterator for Withdrawals<'a> {
     type Item = &'a Withdrawal;
     fn next(&mut self) -> Option<&'a Withdrawal> {
-        self.0.next()
+        loop {
+            if let Some(w) = self.at.as_mut().and_then(Iterator::next) {
+                return Some(w);
+            }
+            self.at = Some(self.sets.next()?.1.iter());
+        }
     }
 }
 
 /// Resolutions, in their order.
 #[derive(Debug, Clone)]
-pub struct Resolutions<'a>(pub(crate) btree_set::Iter<'a, Resolution>);
+pub struct Resolutions<'a> {
+    pub(crate) lower: std::iter::Peekable<btree_set::Iter<'a, Resolution>>,
+    pub(crate) upper: Option<std::iter::Peekable<btree_set::Iter<'a, Resolution>>>,
+}
+
+impl<'a> Resolutions<'a> {
+    pub(crate) fn one(set: &'a BTreeSet<Resolution>) -> Self {
+        Resolutions {
+            lower: set.iter().peekable(),
+            upper: None,
+        }
+    }
+
+    pub(crate) fn two(lower: &'a BTreeSet<Resolution>, upper: &'a BTreeSet<Resolution>) -> Self {
+        Resolutions {
+            lower: lower.iter().peekable(),
+            upper: Some(upper.iter().peekable()),
+        }
+    }
+}
 
 impl<'a> Iterator for Resolutions<'a> {
     type Item = &'a Resolution;
     fn next(&mut self) -> Option<&'a Resolution> {
-        self.0.next()
+        let Some(upper) = self.upper.as_mut() else {
+            return self.lower.next();
+        };
+        match (self.lower.peek(), upper.peek()) {
+            (Some(l), Some(u)) => match (*l).cmp(*u) {
+                std::cmp::Ordering::Less => self.lower.next(),
+                std::cmp::Ordering::Greater => upper.next(),
+                std::cmp::Ordering::Equal => {
+                    self.lower.next();
+                    upper.next()
+                }
+            },
+            (Some(_), None) => self.lower.next(),
+            (None, _) => upper.next(),
+        }
     }
 }
 
 /// Commitments, by the uid they name — present in the store or not — in uid order.
 #[derive(Debug, Clone)]
-pub struct Commits<'a>(pub(crate) btree_map::Iter<'a, Uid, BTreeSet<Commit>>);
+pub struct Commits<'a>(pub(crate) Layered<'a, Uid, BTreeSet<Commit>>);
 
 impl<'a> Iterator for Commits<'a> {
     type Item = (&'a Uid, &'a BTreeSet<Commit>);
@@ -493,7 +595,7 @@ impl StoreRead for Store {
         Store::adjacency(self)
     }
     fn relations(&self) -> Relations<'_> {
-        Relations(self.interp.relations.values())
+        Relations(Layered::one(&self.interp.relations))
     }
     fn relation_by_id(&self, rid: &Uid) -> Option<&Relation> {
         self.interp.relation_by_id(rid)
@@ -504,22 +606,22 @@ impl StoreRead for Store {
             .get(&(kind.as_str().to_string(), *from, *to))
     }
     fn threads(&self) -> Threads<'_> {
-        Threads(self.interp.threads.values())
+        Threads(Layered::one(&self.interp.threads))
     }
     fn views(&self) -> Views<'_> {
-        Views(self.interp.views.values())
+        Views(Layered::one(&self.interp.views))
     }
     fn contentions(&self) -> &[Contention] {
         Store::contentions(self)
     }
     fn withdrawals(&self) -> Withdrawals<'_> {
-        Withdrawals(self.interp.withdrawals.values().flatten())
+        Withdrawals::of(Layered::one(&self.interp.withdrawals))
     }
     fn resolutions(&self) -> Resolutions<'_> {
-        Resolutions(self.interp.resolutions.iter())
+        Resolutions::one(&self.interp.resolutions)
     }
     fn commits(&self) -> Commits<'_> {
-        Commits(self.interp.commits.iter())
+        Commits(Layered::one(&self.interp.commits))
     }
     fn commits_of(&self, uid: &Uid) -> &BTreeSet<Commit> {
         self.interp

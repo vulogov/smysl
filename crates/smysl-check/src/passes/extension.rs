@@ -71,6 +71,39 @@ pub fn run(
     profile: Option<&ConsumerProfile>,
     report: &mut Report,
 ) {
+    run_scoped(store, super::Scope::All, profile, report);
+}
+
+/// In a `Batch`: the per-unit rules over the dirty units, the per-record rules over the new
+/// records, and `SMY-W013` for the new records' relation kinds (which `crate::incremental`
+/// adds only when not already reported). A schema declaration, an unknown record or a
+/// contention sends a batch to the full check, so their rules have nothing new to see, and
+/// `SMY-W614`'s window keys are kept by `crate::incremental`.
+pub(crate) fn run_scoped(
+    store: &(impl StoreRead + ?Sized),
+    scope: super::Scope<'_>,
+    profile: Option<&ConsumerProfile>,
+    report: &mut Report,
+) {
+    if scope.is_all() {
+        declarations(store, report);
+    }
+    undeclared(store, scope, report);
+    if scope.is_all() {
+        unknown_records(store, report);
+    }
+    lang_keys(store, scope, report);
+    reserved(store, scope, report);
+    entity_like(store, scope, report);
+    windows(store, scope, report);
+    quotes(store, scope, report);
+    unmeasured(store, scope, report);
+    unknown_codes(store, scope, report);
+    unknown_types(store, scope, profile, report);
+}
+
+/// `SMY-E012`.
+fn declarations(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     // `SMY-E012` - an extension that redefines a kernel type or relation kind.
     for r in store.hot_records(HotKind::SchemaDecls) {
         if let smysl_core::Record::SchemaDecl(d) = r {
@@ -82,20 +115,40 @@ pub fn run(
             }
         }
     }
+}
 
-    // `SMY-W013` - an unknown relation kind, treated as `elaborates` for closure.
+/// `SMY-W013` - an unknown relation kind, treated as `elaborates` for closure. One per kind.
+fn undeclared(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &mut Report) {
     let mut unknown_kinds: BTreeSet<String> = BTreeSet::new();
-    for rel in store.relations() {
-        if !rel.kind.is_kernel() && !declared(store, &rel.kind) {
-            unknown_kinds.insert(rel.kind.as_str().to_string());
+    let mut note = |kind: &RelKind| {
+        if !kind.is_kernel() && !declared(store, kind) {
+            unknown_kinds.insert(kind.as_str().to_string());
+        }
+    };
+    if scope.is_all() {
+        for rel in store.relations() {
+            note(&rel.kind);
+        }
+    } else {
+        for r in scope.records(store) {
+            if let smysl_core::Record::Relation(rel) = &*r {
+                note(&rel.kind);
+            }
         }
     }
     for k in unknown_kinds {
-        report.push(Diagnostic::new(Code::W013).with_message(format!(
-            "relation kind `{k}` is undeclared; treated as elaborates"
-        )));
+        report.push(w013(&k));
     }
+}
 
+/// `SMY-W013`'s diagnostic for one kind.
+pub(crate) fn w013(kind: &str) -> Diagnostic {
+    Diagnostic::new(Code::W013).with_message(format!(
+        "relation kind `{kind}` is undeclared; treated as elaborates"
+    ))
+}
+
+fn unknown_records(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     // `SMY-W014` - a whole record type this build does not know.
     //
     // The code was in the registry from 0.1 with no emission site anywhere, so an unknown
@@ -104,6 +157,11 @@ pub fn run(
     // about it is how a reader comes to believe they have seen the whole document.
     for r in store.hot_records(HotKind::Unknown) {
         if let smysl_core::Record::Unknown { code, payload } = r {
+            // Record 16 is not merely unknown but reserved (SMYSL-3 D-T6): `SMY-E612` below
+            // says so, and saying `W014` as well would describe one record twice.
+            if *code == smysl_core::types::record::code::HOLD {
+                continue;
+            }
             report.push(Diagnostic::new(Code::W014).with_message(format!(
                 "record type {code} is not known to this build; \
                  {} byte(s) preserved verbatim, skipped semantically",
@@ -111,7 +169,9 @@ pub fn run(
             )));
         }
     }
+}
 
+fn lang_keys(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &mut Report) {
     // `SMY-W432` - a payload key named `lang`, which is now unit core key 9 spelled unquoted.
     //
     // The lint was the migration, and the migration has happened: FC-1 activated in TX-P5 step 1,
@@ -121,7 +181,7 @@ pub fn run(
     // carrying the language in two hashed places is a unit whose language nothing can agree on.
     // The code stays rather than being retired: a store written before this release still holds
     // such units, and the advice is still the advice.
-    for r in store.records() {
+    for r in scope.records(store) {
         if let smysl_core::Record::Unit(u) = &*r {
             if let Some(bytes) = &u.payload {
                 if let Ok(o) = smysl_core::surface::payload_to_object(bytes) {
@@ -136,7 +196,9 @@ pub fn run(
             }
         }
     }
+}
 
+fn unknown_codes(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &mut Report) {
     // `SMY-W409` - an enumeration *code* this build does not know, which is W014's argument
     // one level down. 1.9 opened four enumerations so that an unrecognised code no longer
     // fails the decode, and 1.10 opened the fifth, `admission`; preserving it silently would
@@ -145,7 +207,7 @@ pub fn run(
     //
     // The code is reported, not the value: `Unknown` is what the build calls it, and the raw
     // byte is the only thing that identifies which future kind was meant.
-    for r in store.records() {
+    for r in scope.records(store) {
         match &*r {
             smysl_core::Record::Unit(u) => {
                 if let Some(s) = u.source.as_ref() {
@@ -197,12 +259,19 @@ pub fn run(
             _ => {}
         }
     }
+}
 
+fn unknown_types(
+    store: &(impl StoreRead + ?Sized),
+    scope: super::Scope<'_>,
+    profile: Option<&ConsumerProfile>,
+    report: &mut Report,
+) {
     // `SMY-W010` - a type this *build* does not know, which is stronger than the
     // consumer-profile case below and does not depend on one being supplied. A unit whose
     // type arrived from a later version decodes and round-trips (rule X), but nothing here
     // can interpret it, and a reader who is not told that has been misled by silence.
-    for (uid, unit) in store.units() {
+    for (uid, unit) in scope.units(store) {
         if let smysl_core::SchemaId::UnknownKernel(name) = &unit.core.schema {
             report.push(Diagnostic::on(Code::W010, *uid).with_message(format!(
                 "unit type `{name}` is not known to this build; \
@@ -213,7 +282,7 @@ pub fn run(
 
     // `SMY-W010` - a schema this consumer does not implement.
     if let Some(p) = profile {
-        for (uid, unit) in store.units() {
+        for (uid, unit) in scope.units(store) {
             if !p.understands(&unit.core.schema) {
                 report.push(Diagnostic::on(Code::W010, *uid).with_message(format!(
                     "schema {} is not implemented by `{}`; payload preserved, interpretation lost",
@@ -271,6 +340,264 @@ pub fn fidelity(store: &(impl StoreRead + ?Sized), profile: &ConsumerProfile) ->
         overall,
         degraded,
         missing,
+    }
+}
+
+/// `SMY-E607` - a series or instrument unit that breaks SMYSL-3 §4.1's entity-like rule.
+///
+/// The rule is `x.text/v1` rule 7's argument for telemetry: a series is what is measured, not
+/// when, so its identity is a function of its identity tuple and one series seen by fifty
+/// scrapes is one unit. Give it an `observed` and it becomes fifty. The implementation is
+/// `smysl_core::schemas::tel::entity_like_violations`, shared with the producer, for the reason
+/// the library pass gives for sharing rule 7's.
+fn entity_like(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &mut Report) {
+    use smysl_core::schemas::tel;
+    for (uid, unit) in scope.units(store) {
+        let broken = tel::entity_like_violations(&unit.core);
+        if broken.is_empty() {
+            continue;
+        }
+        report.push(
+            Diagnostic::on(Code::E607, *uid)
+                .with_message(format!(
+                    "an `{}` carries what its identity forbids: {}",
+                    unit.core.schema.as_str(),
+                    broken.join(", ")
+                ))
+                .with_suggestion(
+                    "a series or instrument has no span, manifest, published or observed time, \
+                     and no grounds, and its source is exactly `series:<scheme>:<key>` (metric) \
+                     or `instrument:<key>` (tool); what varies over time belongs in its `-meta` \
+                     unit"
+                        .to_string(),
+                ),
+        );
+    }
+}
+
+/// SMYSL-3's window evidence (TL-P4): rule TW per window, and the windows of one key.
+///
+/// - `SMY-E603`: a window whose status or attestation is not the one rule TW gives its basis
+///   and fields (§9.4), or a span or log template (TL-P9) not attested as an exact or a sketched
+///   window is. The rule is `smysl_core::schemas::tel::rule_tw_violations`, which the
+///   producer attests by, so the two cannot drift.
+/// - `SMY-W614`: several windows of one window key with different digests (§9.2). Each is true
+///   of its own sample set, so this is a report, not a contention.
+///
+/// Recomputing a window against the substrate (`SMY-E604`, `SMY-W605`) needs the substrate,
+/// which a store does not hold; that is `smysl_tel::evidence::verify`'s, and `tel check`'s.
+fn windows(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &mut Report) {
+    use smysl_core::schemas::tel;
+    let mut by_key: std::collections::BTreeMap<WindowKey, BTreeSet<[u8; 32]>> =
+        std::collections::BTreeMap::new();
+    for (uid, unit) in scope.units(store) {
+        let ty = unit.core.schema.as_str();
+        if ty == tel::SPAN || ty == tel::LOG_TEMPLATE {
+            let atts: Vec<smysl_core::Attestation> = unit.attestations.iter().cloned().collect();
+            let broken = tel::rule_tw_violations(&unit.core, &atts);
+            if !broken.is_empty() {
+                let what = if ty == tel::SPAN {
+                    "a span"
+                } else {
+                    "a log template"
+                };
+                report.push(
+                    Diagnostic::on(Code::E603, *uid)
+                        .with_message(format!("{what} breaks rule TW: {}", broken.join("; ")))
+                        .with_suggestion(
+                            "a span is measured (imported, computed); a log template is derived \
+                             (transformed, computed); both carry the digest of their events"
+                                .to_string(),
+                        ),
+                );
+            }
+            continue;
+        }
+        if ty != tel::WINDOW {
+            continue;
+        }
+        let atts: Vec<smysl_core::Attestation> = unit.attestations.iter().cloned().collect();
+        let broken = tel::rule_tw_violations(&unit.core, &atts);
+        if !broken.is_empty() {
+            report.push(
+                Diagnostic::on(Code::E603, *uid)
+                    .with_message(format!("a window breaks rule TW: {}", broken.join("; ")))
+                    .with_suggestion(
+                        "exact evidence from the substrate is measured (imported, computed); \
+                         sketched is derived (transformed, computed); a platform's aggregate is \
+                         cited (imported, document) and has no digest"
+                            .to_string(),
+                    ),
+            );
+        }
+        if let Some((key, digest)) = window_key(&unit.core) {
+            by_key.entry(key).or_default().insert(digest);
+        }
+    }
+    if !scope.is_all() {
+        return;
+    }
+    for (key, digests) in by_key {
+        if digests.len() > 1 {
+            report.push(w614(&key, digests.len()));
+        }
+    }
+}
+
+/// `SMY-W614`'s grouping: (series, instrument, from, to, recipe).
+pub(crate) type WindowKey = (String, String, u64, u64, String);
+
+/// A window unit's key and digest, when it has every field of both.
+pub(crate) fn window_key(core: &smysl_core::UnitCore) -> Option<(WindowKey, [u8; 32])> {
+    use smysl_core::schemas::tel;
+    if core.schema.as_str() != tel::WINDOW {
+        return None;
+    }
+    let w = tel::window_fields(core.payload.as_deref()?).ok()?;
+    Some((
+        (w.series?, w.instrument?, w.from_ms?, w.to_ms?, w.recipe?),
+        w.digest?,
+    ))
+}
+
+/// `SMY-W614`'s diagnostic for a key with `n` digests.
+pub(crate) fn w614(key: &WindowKey, n: usize) -> Diagnostic {
+    let (series, _, from, to, recipe) = key;
+    Diagnostic::new(Code::W614).with_message(format!(
+        "{n} windows of series {series} over [{from}, {to}) by {recipe} disagree: \
+         each describes a different sample set"
+    ))
+}
+
+/// Rule TQ (SMYSL-3 §11.4, TL-P6): `SMY-W606` for each numeric quote of a hypothesis that does
+/// not verify against the unit it cites. The rule is `smysl_core::schemas::tel::rule_tq_violations`,
+/// a function of the record set: it reads payloads, never the substrate, so it is monotone and
+/// safe under merge. The cap it implies, at most `speculative`, is `tq_capped`'s.
+fn quotes(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &mut Report) {
+    use smysl_core::schemas::tel;
+    for (uid, unit) in scope.units(store) {
+        if unit.core.schema.as_str() != tel::HYPOTHESIS {
+            continue;
+        }
+        let failed = tel::rule_tq_violations(&unit.core, |u| {
+            store
+                .get(u)
+                .map(|c| c.core.payload.clone().unwrap_or_default())
+        });
+        for (quote, why) in failed {
+            report.push(
+                Diagnostic::on(Code::W606, *uid)
+                    .with_message(format!(
+                        "quote `{quote}` does not verify: {why}; the hypothesis is at most \
+                         speculative"
+                    ))
+                    .with_suggestion(
+                        "cite a unit among the hypothesis's grounds, by a field it has, with \
+                         the value's canonical spelling"
+                            .to_string(),
+                    ),
+            );
+        }
+    }
+}
+
+/// `SMY-W609` (SMYSL-3 §7, TL-P7): a series with no `x.tel/measured-by`. Witness counting takes
+/// it as its own origin, so it counts as independent of every other series and can overcount
+/// witnesses; the warning says which series are counted that way. The rule is `smysl_core::schemas::tel::unmeasured`.
+fn unmeasured(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &mut Report) {
+    use smysl_core::schemas::tel;
+    // Every relation is read, withdrawn ones too, so a `Batch` leaves this rule to
+    // `crate::incremental`, which keeps the series that have a `measured-by`.
+    if !scope.is_all() {
+        return;
+    }
+    let units: Vec<(smysl_core::Uid, smysl_core::UnitCore)> = store
+        .units()
+        .filter(|(_, u)| u.core.schema.as_str() == tel::SERIES)
+        .map(|(uid, u)| (*uid, u.core.clone()))
+        .collect();
+    if units.is_empty() {
+        return;
+    }
+    for uid in tel::unmeasured(units.iter().map(|(u, c)| (u, c)), store.relations()) {
+        report.push(w609(uid));
+    }
+}
+
+/// `SMY-W609`'s diagnostic for a series.
+pub(crate) fn w609(uid: smysl_core::Uid) -> Diagnostic {
+    Diagnostic::on(Code::W609, uid)
+        .with_message(
+            "a series with no `x.tel/measured-by`: witness counting takes it as its own \
+             origin"
+                .to_string(),
+        )
+        .with_suggestion(
+            "relate the series to the instrument that measures it at its origin \
+             (`smysl tel declare measured-by SERIES INSTRUMENT`)"
+                .to_string(),
+        )
+}
+
+/// SMYSL-3's reservations (TL-P1): what no writer may emit, found in a store that holds it.
+///
+/// `SMY-E611` is a record 6 of a detection kind SMYSL-3 derives, 6 or 7. A store of this build
+/// refuses one at the door, as it refuses rule E's 4 and 5, so this is what a store built some
+/// other way holds: a document checked as written, or a log written by a peer that predates
+/// TL-P1 and kept the record as `Unknown`. 4 and 5 have no code, and stay without one: the
+/// door is their whole enforcement, and SMYSL-3 §15 allocates a code for its own two only.
+///
+/// `SMY-E612` is a reserved number written: record 16 (`hold`, D-T6) or `source` key 7 (a
+/// sub-millisecond remainder, D-T5). Both are **carried**, not refused. Record 16 decodes as
+/// `Unknown` and key 7 lands in the source's `extra`, both kept byte for byte because rule X
+/// says so and, for key 7, because it is inside the uid. Reporting is the whole response.
+fn reserved(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &mut Report) {
+    use smysl_core::cbor::keys::source::RESERVED_SUB_MS;
+    use smysl_core::types::record::code::HOLD;
+    use smysl_core::DetectionKind;
+
+    for r in scope.records(store) {
+        if let smysl_core::Record::Unit(u) = &*r {
+            if u.source
+                .as_ref()
+                .is_some_and(|s| s.extra.contains_key(&RESERVED_SUB_MS))
+            {
+                report.push(
+                    Diagnostic::on(Code::E612, smysl_core::canonical_uid(u)).with_message(
+                        "source key 7 is reserved (a sub-millisecond remainder) and MUST NOT \
+                         be written; preserved verbatim, because it is inside the uid",
+                    ),
+                );
+            }
+        }
+    }
+    if !scope.is_all() {
+        return;
+    }
+    for c in store.contentions() {
+        if matches!(
+            c.detected.kind,
+            DetectionKind::RivalExplanation | DetectionKind::WitnessConflict
+        ) {
+            report.push(Diagnostic::new(Code::E611).with_message(format!(
+                "contention {} is of detection kind {} ({}), which is derived from the record \
+                 set and never written; a resolution names its derived id instead",
+                c.id,
+                c.detected.kind.as_u8(),
+                c.detected.kind
+            )));
+        }
+    }
+    for r in store.hot_records(HotKind::Unknown) {
+        if let smysl_core::Record::Unknown { code, payload } = r {
+            if *code == HOLD {
+                report.push(Diagnostic::new(Code::E612).with_message(format!(
+                    "record 16 is reserved (hold) and MUST NOT be written; \
+                     {} byte(s) preserved verbatim",
+                    payload.len()
+                )));
+            }
+        }
     }
 }
 

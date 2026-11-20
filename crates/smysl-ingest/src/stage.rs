@@ -62,6 +62,13 @@ pub struct Staged {
     /// proposes for a migrated unit's new uid (`SMY-W472`) — committed only if the reviewed
     /// text keeps them.
     pub proposals: Vec<Record>,
+    /// Records the caller commits with the batch ([`prepare_checked`]'s `extra`), checked with
+    /// it and carried by [`Staged::records`].
+    pub extra: Vec<Record>,
+    /// The check [`prepare_checked`] made, which advances the caller's
+    /// [`Checked`](smysl_check::incremental::Checked) once the records are appended. `None`
+    /// from every other `prepare`.
+    pub checked: Option<smysl_check::incremental::BatchReport>,
 }
 
 impl Staged {
@@ -106,6 +113,7 @@ impl Staged {
         );
         out.extend(self.relations.iter().cloned().map(Record::Relation));
         out.extend(self.proposals.iter().cloned());
+        out.extend(self.extra.iter().cloned());
         out.extend(self.attestations.iter().cloned().map(Record::Attestation));
         out
     }
@@ -185,6 +193,77 @@ pub fn prepare_under(
     attest: &dyn Attesting,
     granularity: Option<smysl_core::GranularityProfile>,
 ) -> Staged {
+    let mut staged = settle(store, units, relations, labels, schemas, attest);
+    // Rule M needs both the batch and the store in view, so the check runs over their
+    // union. The staged units are still only the batch's.
+    // A throwaway union, never written: staging must not touch the store, which is exactly
+    // what rule S is about.
+    //
+    // An `Overlay` since TX-P13a step 10 (SMYSL-2.8 §3.7): it answers as the store of every
+    // record of both would, and costs the batch and the interpretive layer rather than a copy of
+    // the store.
+    let mut batch: Vec<Record> = staged
+        .schemas
+        .iter()
+        .cloned()
+        .map(Record::SchemaDecl)
+        .collect();
+    batch.extend(staged.units.iter().cloned().map(Record::Unit));
+    batch.extend(staged.relations.iter().cloned().map(Record::Relation));
+    let merged = Overlay::new(store, batch);
+
+    let mut opts = CheckOptions::default().with_labels(staged.labels.clone());
+    if let Some(g) = granularity {
+        opts = opts.with_granularity(g);
+    }
+    staged.report = check(&merged, opts);
+    staged.weakening_said();
+    staged
+}
+
+/// [`prepare_attested`], checked against a store's kept report (AC-8, RFC SMYSL-3 §17.1).
+///
+/// What is checked is what will be committed: [`Staged::records`], attestations included, and
+/// `extra`, records the caller commits with the batch (an investigation's View, say), which
+/// `records` then carries. That is more than [`prepare_under`] checks, which leaves the
+/// attestations out, and it is what lets the cache advance: once `staged.records()` is
+/// appended, `checked.advance(staged.checked.take().unwrap())` describes the store.
+///
+/// The report equals the one [`check`] gives over the store with those records; the path
+/// [`Checked::with_batch`] took is in `staged.checked`.
+///
+/// [`Checked::with_batch`]: smysl_check::incremental::Checked::with_batch
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_checked(
+    store: &(impl StoreRead + ?Sized),
+    checked: &smysl_check::incremental::Checked,
+    units: Vec<UnitCore>,
+    relations: Vec<Relation>,
+    labels: BTreeMap<Label, Uid>,
+    schemas: Vec<SchemaDecl>,
+    attest: &dyn Attesting,
+    extra: Vec<Record>,
+) -> Staged {
+    let mut staged = settle(store, units, relations, labels, schemas, attest);
+    staged.extra = extra;
+    let opts = CheckOptions::default().with_labels(staged.labels.clone());
+    let batch = checked.with_batch(store, staged.records(), &opts);
+    staged.report = batch.report.clone();
+    staged.checked = Some(batch);
+    staged.weakening_said();
+    staged
+}
+
+/// Rule M, the edges and labels following it, and the attestations: everything staging does
+/// but the check.
+fn settle(
+    store: &(impl StoreRead + ?Sized),
+    units: Vec<UnitCore>,
+    relations: Vec<Relation>,
+    labels: BTreeMap<Label, Uid>,
+    schemas: Vec<SchemaDecl>,
+    attest: &dyn Attesting,
+) -> Staged {
     // Rule M first, and *before* the check: weakening moves identities, so a report
     // computed over the model's original uids would describe a batch that no longer
     // exists. This was the bug the SM-P14 gate kept hitting - the report was taken before
@@ -210,38 +289,6 @@ pub fn prepare_under(
         .map(|(l, u)| (l, applied.remap.get(&u).copied().unwrap_or(u)))
         .collect();
 
-    // Rule M needs both the batch and the store in view, so the check runs over their
-    // union. The staged units are still only the batch's.
-    // A throwaway union, never written: staging must not touch the store, which is exactly
-    // what rule S is about.
-    //
-    // An `Overlay` since TX-P13a step 10 (SMYSL-2.8 §3.7): it answers as the store of every
-    // record of both would, and costs the batch and the interpretive layer rather than a copy of
-    // the store.
-    let mut batch: Vec<Record> = schemas.iter().cloned().map(Record::SchemaDecl).collect();
-    batch.extend(applied.units.iter().cloned().map(Record::Unit));
-    batch.extend(relations.iter().cloned().map(Record::Relation));
-    let merged = Overlay::new(store, batch);
-
-    let mut opts = CheckOptions::default().with_labels(labels.clone());
-    if let Some(g) = granularity {
-        opts = opts.with_granularity(g);
-    }
-    let mut report = check(&merged, opts);
-
-    // What the weakening did, said out loud. A warning: the unit is in rule M now, and the
-    // record exists so a reviewer can see the model overclaimed rather than discovering it
-    // by comparing statuses.
-    for w in &applied.weakened {
-        report.push(
-            Diagnostic::on(smysl_core::Code::W036, w.after).with_message(format!(
-                "rule M: {} lowered to {} by its weakest ground",
-                w.from, w.to
-            )),
-        );
-    }
-    report.sort();
-
     let kept = applied.units;
     // Edges are attested as units are, by their rid (1.4). Until then a staged `rebuts` edge a
     // model proposed committed with no record of who asserted it, indistinguishable from a
@@ -263,9 +310,28 @@ pub fn prepare_under(
         attestations,
         labels,
         schemas,
-        report,
+        report: Report::new(),
         weakened: applied.weakened,
         proposals: Vec::new(),
+        extra: Vec::new(),
+        checked: None,
+    }
+}
+
+impl Staged {
+    /// What rule M's weakening did, said out loud, into the report. A warning: the unit is in
+    /// rule M now, and the record exists so a reviewer can see the model overclaimed rather than
+    /// discovering it by comparing statuses.
+    fn weakening_said(&mut self) {
+        for w in &self.weakened {
+            self.report.push(
+                Diagnostic::on(smysl_core::Code::W036, w.after).with_message(format!(
+                    "rule M: {} lowered to {} by its weakest ground",
+                    w.from, w.to
+                )),
+            );
+        }
+        self.report.sort();
     }
 }
 

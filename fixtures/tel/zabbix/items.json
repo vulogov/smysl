@@ -1,0 +1,58 @@
+{
+ "jsonrpc": "2.0",
+ "id": 1,
+ "result": [
+  {
+   "itemid": "42",
+   "key_": "system.cpu.load[percpu,avg1]",
+   "name": "Load average (1m avg)",
+   "value_type": "0",
+   "units": "",
+   "hosts": [
+    {
+     "hostid": "10084",
+     "host": "web-01"
+    }
+   ]
+  },
+  {
+   "itemid": "43",
+   "key_": "net.if.in[\"eth0\"]",
+   "name": "Interface eth0: Bits received",
+   "value_type": "3",
+   "units": "bps",
+   "hosts": [
+    {
+     "hostid": "10084",
+     "host": "web-01"
+    }
+   ]
+  },
+  {
+   "itemid": "44",
+   "key_": "agent.version",
+   "name": "Version of Zabbix agent running",
+   "value_type": "1",
+   "units": "",
+   "hosts": [
+    {
+     "hostid": "10084",
+     "host": "web-01"
+    }
+   ]
+  },
+  {
+   "itemid": "51",
+   "key_": "mysql.qps",
+   "name": "MySQL: Queries per second",
+   "value_type": "0",
+   "units": "qps",
+   "hosts": [
+    {
+     "hostid": "10091",
+     "host": "DB 01"
+    }
+   ]
+  }
+ ]
+}

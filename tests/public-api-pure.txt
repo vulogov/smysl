@@ -58,6 +58,8 @@ pub use smysl::Date
 pub use smysl::Dating
 pub use smysl::DatingTarget
 pub use smysl::DatingValue
+pub use smysl::DecError
+pub use smysl::Decimal
 pub use smysl::DeriveOptions
 pub use smysl::DeriveReport
 pub use smysl::Detected
@@ -240,6 +242,7 @@ pub use smysl::from_cbor_seq
 pub use smysl::granularity_distribution
 pub use smysl::hash_bytes
 pub use smysl::hop_diff
+pub use smysl::incremental
 pub use smysl::json_escape
 pub use smysl::kernel_major
 pub use smysl::label_bindings

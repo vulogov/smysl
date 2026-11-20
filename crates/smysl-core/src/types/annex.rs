@@ -36,6 +36,13 @@ pub enum DetectionKind {
     /// A negative cycle or an empty interval in rule E's constraint graph (1.10). Reported as
     /// `SMY-W413`.
     TemporalInconsistency = 5,
+    /// Two or more live hypotheses explain one target and none rebuts or supersedes another
+    /// (SMYSL-3 §11.5). Derived by an implementation that registers `x.tel/v1`, never written.
+    RivalExplanation = 6,
+    /// Two series of one quantity, from independent instruments, whose preferred windows over
+    /// one span disagree (SMYSL-3 §11.5). Derived by an implementation that registers
+    /// `x.tel/v1`, never written.
+    WitnessConflict = 7,
     /// A detection kind this build does not know (1.9). See `ThreadSchema::Unknown`.
     Unknown = 255,
 }
@@ -48,6 +55,8 @@ impl DetectionKind {
         DetectionKind::CommitmentFork,
         DetectionKind::DatingNotApplied,
         DetectionKind::TemporalInconsistency,
+        DetectionKind::RivalExplanation,
+        DetectionKind::WitnessConflict,
     ];
 
     /// The kinds a store MUST NOT hold a record 6 for (SMYSL-2.3 A-8.2).
@@ -58,10 +67,27 @@ impl DetectionKind {
     /// 1.9 was to stop a code it cannot name from making a store unopenable; a code it *can*
     /// preserve but not interpret is still a contention it cannot act on. A resolution (record
     /// 12) names the derived id, which needs no contention record at all.
+    ///
+    /// SMYSL-3's two (TL-P1) join before anything writes `x.tel/v1`: a rival explanation and a
+    /// witness conflict are functions of the record set in the same way, and refusing them at
+    /// the door from the start means no store of this build ever holds one to be migrated away.
     pub const DERIVED_ONLY: &'static [DetectionKind] = &[
         DetectionKind::DatingNotApplied,
         DetectionKind::TemporalInconsistency,
+        DetectionKind::RivalExplanation,
+        DetectionKind::WitnessConflict,
     ];
+
+    /// Whether this kind is derived by rule E, as against by an extension schema's detection.
+    ///
+    /// The refusal of a record 6 names who derives it, and "rule E" said of a rival
+    /// explanation would send a reader to the time engine for something it never computes.
+    pub fn is_derived_by_rule_e(self) -> bool {
+        matches!(
+            self,
+            DetectionKind::DatingNotApplied | DetectionKind::TemporalInconsistency
+        )
+    }
 
     /// Whether this kind is derived rather than recorded, so a record 6 carrying it is refused.
     pub fn is_derived_only(self) -> bool {
@@ -80,6 +106,8 @@ impl DetectionKind {
             3 => Some(DetectionKind::CommitmentFork),
             4 => Some(DetectionKind::DatingNotApplied),
             5 => Some(DetectionKind::TemporalInconsistency),
+            6 => Some(DetectionKind::RivalExplanation),
+            7 => Some(DetectionKind::WitnessConflict),
             255 => Some(DetectionKind::Unknown),
             _ => None,
         }
@@ -93,6 +121,8 @@ impl DetectionKind {
             DetectionKind::CommitmentFork => "commitment-fork",
             DetectionKind::DatingNotApplied => "dating-not-applied",
             DetectionKind::TemporalInconsistency => "temporal-inconsistency",
+            DetectionKind::RivalExplanation => "rival-explanation",
+            DetectionKind::WitnessConflict => "witness-conflict",
             DetectionKind::Unknown => "unknown",
         }
     }
@@ -111,6 +141,12 @@ impl DetectionKind {
             // applicable, and `W413` names a set of records that cannot all be true.
             DetectionKind::DatingNotApplied => crate::diag::Code::W412,
             DetectionKind::TemporalInconsistency => crate::diag::Code::W413,
+            // SMYSL-3's two, derived since TL-P6 (6) and TL-P7 (7) by `schemas::tel`'s
+            // `rival_explanations` and `witness_conflicts`. §15 allocates them no code, so they
+            // are what W053 says: two things that disagree, for a reviewer to resolve.
+            DetectionKind::RivalExplanation | DetectionKind::WitnessConflict => {
+                crate::diag::Code::W053
+            }
             // A kind this build cannot name has no diagnostic of its own. W053 is the generic
             // "these disagree" code, which is the most that can honestly be said about it.
             DetectionKind::Unknown => crate::diag::Code::W053,
@@ -517,9 +553,24 @@ mod tests {
 
     #[test]
     fn detection_kinds_round_trip_and_map_to_codes() {
-        // Six as of TX-P3 step 2, with rule E's two. Four of them merge detects and writes;
-        // two it derives and never writes, which is what `DERIVED_ONLY` is for.
-        assert_eq!(DetectionKind::ALL.len(), 6);
+        // Six as of TX-P3 step 2, with rule E's two; eight with SMYSL-3's two (TL-P1). Four of
+        // them merge detects and writes; four are derived and never written, which is what
+        // `DERIVED_ONLY` is for.
+        assert_eq!(DetectionKind::ALL.len(), 8);
+        assert_eq!(DetectionKind::DERIVED_ONLY.len(), 4);
+        assert_eq!(
+            DetectionKind::from_u8(6),
+            Some(DetectionKind::RivalExplanation)
+        );
+        assert_eq!(
+            DetectionKind::from_u8(7),
+            Some(DetectionKind::WitnessConflict)
+        );
+        assert_eq!(DetectionKind::from_u8(8), None, "8 is unallocated");
+        assert!(DetectionKind::RivalExplanation.is_derived_only());
+        assert!(DetectionKind::WitnessConflict.is_derived_only());
+        assert!(!DetectionKind::WitnessConflict.is_derived_by_rule_e());
+        assert!(DetectionKind::TemporalInconsistency.is_derived_by_rule_e());
         for &k in DetectionKind::ALL {
             assert_eq!(DetectionKind::from_u8(k.as_u8()), Some(k));
         }
@@ -547,18 +598,21 @@ mod tests {
         );
     }
 
-    /// Rule E's two kinds are derived and never written, and the enumeration says which.
+    /// Rule E's two kinds and SMYSL-3's two are derived and never written, and the
+    /// enumeration says which.
     ///
     /// Asserted here rather than only at the store's door, because `DERIVED_ONLY` is what the
     /// refusal reads: a kind added later and left off this list would be a record 6 a store
     /// accepts and an older reader cannot interpret.
     #[test]
-    fn the_two_time_kinds_are_derived_and_the_other_four_are_not() {
+    fn four_kinds_are_derived_and_the_four_merge_writes_are_not() {
         assert_eq!(
             DetectionKind::DERIVED_ONLY,
             &[
                 DetectionKind::DatingNotApplied,
-                DetectionKind::TemporalInconsistency
+                DetectionKind::TemporalInconsistency,
+                DetectionKind::RivalExplanation,
+                DetectionKind::WitnessConflict,
             ]
         );
         assert!(DetectionKind::DatingNotApplied.is_derived_only());

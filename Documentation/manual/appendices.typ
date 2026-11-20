@@ -973,6 +973,7 @@ part the library has redacted is dropped at the door (`SMY-W414`).
     ([`--with-provenance`], [—], [Export the import manifests the records arrived under (`export`, a library). Outside P3.]),
     ([`--with-staged`], [—], [Export staged imports too (`export`, a library).]),
     ([`--with-quarantine`], [—], [Export quarantined records too (`export`, a library).]),
+    ([`--with-substrate`], [—], [Export the series substrate's samples, spans and log records under `substrate/`: one file per series or stream, instrument and UTC day, named by its BLAKE3, and a listing of the days held and evicted (`export`, a library). `import` of an export that carries one adds them as a set, and imports nothing if a day file is not its name.]),
     ([`--as-of`], [`EDTF`], [Export only what was known before the end of this date: a record's own clock, a unit's earliest attestation (`SMY-W415` for one with none), and nothing resting on what was not yet known (`SMY-W498`) (`export`).]),
     ([`--target-revision`], [`ID@N`], [Export the selection as revision `N` of schema `ID` writes it, through the schema's lenses (`export`).]),
     ([`--agent`], [`ID`], [The agent of the attestations `--target-revision` adds (`export`); `tool:smysl-lib` by default.]),
@@ -1107,6 +1108,188 @@ the supersession pass prefers the new heads, and `smysl relink` re-points refere
 migrate or under `--dry-run`, and 1 when the store does not declare the target revision
 (`SMY-E466`) or a unit lacks a key the target requires and no `default` supplies
 (`SMY-E473`, which a model recipe would be needed for and this build does not offer).
+
+#section("tel")
+
+*Read telemetry into a library; the value in force at an instant; window evidence; detectors;
+investigations; traces; check a profile.* Pure · TL-P2 to TL-P9.
+
+`tel read READER FILE...` reads platform exports with one of SMYSL-3's object readers. `k8s/1`
+reads `kubectl get -o json` lists, objects and watch events; `zabbix/1` reads `host.get` and
+`item.get` exports. Each object the profile selects becomes a snapshot in the library:
+
+- a part (the object with noise removed and keyed arrays keyed);
+- a manifest under the object's alias, chained to the one before;
+- the object's `x.tel/series` unit;
+- the `x.tel/change` and `x.tel/recreate` units that say what changed since the previous
+  snapshot of that object.
+
+A snapshot that differs from its predecessor only in noise is nothing: no part, no manifest. A
+Secret's `data` and `stringData` are never read. Chapter 38 explains what a snapshot is.
+
+Without `--yes` nothing is written to the library, not even the directory. The units are
+staged in `.smysl/staged.smy` for review, and the manifests that would be written are printed.
+The same command with `--yes` writes those manifests, by the same ids, and commits the units.
+`tel profile check FILE|NAME` validates a profile and prints its name, scheme and hash, the
+hash every manifest it reads records.
+
+The series readers write samples, not snapshots (TL-P3, chapter 38). `prom/1` reads one
+Prometheus scrape, text 0.0.4 or OpenMetrics, taken at `--at`. `otlp/1` and `otlp-json/1`
+read OTLP metrics exports. `zabbix/1` with `--items` reads `history.get` exports against
+their `item.get`. With `--yes` the samples go to `<library>/index/series.redb`, and the facts
+they establish are committed with their `x.tel/of-series` relations: `x.tel/reset`,
+`x.tel/stale` and Zabbix's `x.tel/series-meta`. Without `--yes` nothing is written, and each
+file is still judged after the ones before it. Reading an export twice adds nothing.
+
+The trace readers write spans, not units (TL-P9). `otlp-traces/1` reads OTLP traces protobuf
+and `otlp-traces-json/1` OTLP/JSON. With `--yes` each span goes to the substrate as an event,
+and each span stream (a resource and scope) is committed as an `x.tel/series` with its
+lineage. `tel trace TRACE-ID` prints a trace's spans from the substrate as a tree, each under
+its parent. With `--yes --at MS` it commits them as `x.tel/span` units, with `x.tel/precedes`
+from each parent to each child. `SMY-W617` names a span held twice with different contents, and
+`SMY-W605` an hour of the trace that was evicted.
+
+`journald/1` reads `journalctl -o json` and `cloudevents/1` CloudEvents JSON (one event, a
+batch or JSON lines). Each entry or event is an event of the substrate too, never a unit, and
+each stream (a host and unit, or a source and type) is an `x.tel/series`. `tel templates STREAM
+FROM TO` runs Drain over the stream's messages in `[FROM, TO)` and prints one line per
+template, with its count. With `--yes --at MS` each is committed as an `x.tel/log-template`,
+`derived`. `tel check` recomputes templates as it does windows.
+
+`tel similar EPISODE` ranks the library's other episodes by how alike their features are: the
+series, changes, anomalies and alerts that are members of each, and the log templates over its
+window. Each line gives the MinHash similarity out of 128, the exact Jaccard index it
+estimates, and the episode's label. When the nearest carry labels, the most common is printed.
+It writes nothing.
+
+`tel at SERIES MS` prints the value in force at `MS`, the last sample at or before it, for each
+instrument the series has samples from. `SERIES` is a series uid or `<scheme>:<key>`. A stale
+or no-value sample is printed as `stale` or `no-value`, and one its source marked as a reset is
+marked `(reset)`. A reset that `tel read` found is a unit, `x.tel/reset`, not a mark on a
+sample.
+
+`tel window SERIES FROM TO` materialises window evidence over `[FROM, TO)`: one `x.tel/window`
+per instrument, carrying the digest of its samples and their exact summary (`measured`). With
+`--sketch ALPHA` it carries a DDSketch's quantiles at `--qs` instead (`derived`). A window has
+no surface form, so nothing is staged: without `--yes` the uids it would commit are printed,
+and with `--yes --at MS` they are committed with their `x.tel/of-series` edges, attested as
+rule TW requires. `tel read zabbix/1 --trends` makes each hour of a `trend.get` export a `cited`
+platform window the same way.
+
+`tel check` checks a library's windows: rule TW (`SMY-E603`), windows of one key that disagree
+(`SMY-W614`), and each window recomputed from the substrate (`SMY-E604` if it is another unit,
+`SMY-W605` if its samples are gone). It then lists the derived contentions, each with whether a
+resolution has reviewed it:
+
+- rival explanations (kind 6);
+- witness conflicts (kind 7): two independent series of one quantity whose preferred windows
+  over one span and recipe disagree.
+
+It exits 3 on an error.
+
+`tel detect RECIPE` runs a detector. `RECIPE` is an HJSON file naming it and its parameters, for
+example `{ detector: pelt/1, penalty: 10, min_size: 3 }`. A parameter left out takes its default,
+and an unknown one is refused. The detectors are:
+
+- `cusum/1` and `pelt/1`, regimes of a series' level, as `x.tel/segment`;
+- `mad/1`, points far from a declared baseline window, as `x.tel/anomaly`;
+- `episode/1`, the library's changes and anomalies close in time, as `x.tel/episode`;
+- `baro/1`, the series that moved most after an instant, as ranked `x.tel/hypothesis`.
+
+Every output is `derived`. Without `--yes` the outputs are staged for review (exit 10), and with
+`--yes --at MS` they are committed with their edges.
+
+`tel investigate ACTION` keeps an investigation's ledger. Each operation commits at once,
+attested by `--as` at `--at`.
+
+- `open QUESTION [--rotation R]` writes an `x.tel/investigation`.
+- `consult INV UNIT…` writes an `x.tel/consulted` edge per unit.
+- `hypothesis INV CLAIM` writes an `x.tel/hypothesis`, `during` the investigation. It takes:
+  - `--explains U…`, what it explains;
+  - `--ground U…`, the evidence it rests on;
+  - `--quote Q…`, the numbers it quotes;
+  - `--target U`, what it is about.
+- `probe INV WHAT` and `action INV WHAT [--confirmed-by H]` write an `x.tel/probe` or
+  `x.tel/action`, with `--output TID`.
+- `close INV` writes the closed investigation, superseding the open one.
+- `show INV [--lookback MS]` writes nothing. It prints the report: hypotheses with their
+  effective status and any `SMY-W606`, probes, actions, consulted, unused and unexplored
+  evidence, and rival explanations. For each series the evidence is about, it prints how many
+  independent witnesses its quantity has and the common transport, followed by the witness
+  conflicts on that evidence. Last come the gaps: each window it consulted or cited whose
+  samples the substrate does not hold, as `SMY-W605`.
+
+Probes and actions are attested as imported at the computed rung, because a tool ran them. The
+rest are authored at the document rung.
+
+`tel declare WHAT` records lineage no export states, authored by `--as` at `--at`:
+
+- `instrument ROLE KEY [VERSION]` writes an `x.tel/instrument`, and with a version its
+  `x.tel/instrument-meta` at `--at`.
+- `measured-by SERIES INSTRUMENT` says what measured a series at its origin.
+- `via FROM TO` says that what `FROM` measured or carried passed through `TO`.
+- `same-quantity SERIES SERIES` says the two measure one quantity in one unit. Either order
+  writes the same relation.
+
+A series is a uid or `<scheme>:<key>`, and an instrument is a uid or its key. Both must already
+be in the library. A key that two roles share is refused, and you name the instrument by its uid.
+
+`tel witnesses SERIES` writes nothing. It prints the quantity the series measures (it and every
+series joined to it by `same-quantity`), and the quantity's independent witnesses, each with
+what measured it. It also prints common transport, origins carried by more than one path, and
+series with no origin (`SMY-W609`). It exits 1 when the series is not in the library.
+
+`tel evict --older-than DUR --at MS` is retention, rule TL. Every chunk of samples whose span
+ends at or before `--at` less `DUR` is deleted from the substrate and recorded as evicted. A
+chunk holding anything younger is kept whole. So are the part texts of telemetry snapshots taken
+before the bound, except each object's latest and any part another manifest names. It writes no
+record and touches no unit: evidence
+over evicted samples keeps its status, and `tel check` reports it as `SMY-W605`. Without `--yes`
+it prints what it would evict and removes nothing.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`read`, `at`, `window`, `check`, `detect`, `investigate`, `declare`, `witnesses`, `evict`, `trace`, `templates`, `similar` or `profile`.]),
+    ([`ARG…`], [positional], [`read`: the reader (`k8s/1`, `zabbix/1`, `prom/1`, `otlp/1`, `otlp-json/1`, `otlp-traces/1`, `otlp-traces-json/1`, `journald/1`, `cloudevents/1`), then the files. `trace`: a trace id, 32 hex digits. `templates`: a stream, then `FROM` and `TO` in epoch ms. `similar`: an episode uid. `at`: a series and an instant in epoch ms. `window`: a series, then `FROM` and `TO` in epoch ms. `detect`: the recipe file. `investigate`: the action, then its arguments. `declare`: what is declared, then its arguments. `witnesses`: a series. `profile`: `check` and a profile file or shipped name.]),
+    ([`--profile`], [`P`], [A shipped profile (`k8s-deployments/1`, `k8s-statefulsets/1`, `k8s-daemonsets/1`, `k8s-pods/1`, `k8s-services/1`, `k8s-nodes/1`, `zabbix-hosts/1`, `zabbix-items/1`) or an HJSON profile file. Required for the object readers; it must be for the reader's scheme.]),
+    ([`--at`], [`MS`], [When the snapshots were taken, epoch milliseconds, and for `prom/1` the scrape instant. Required for `read`: nothing here reads a clock.]),
+    ([`--licence`], [`SPDX`], [The manifests' licence. Required for the object readers, as `text add` requires it.]),
+    ([`--zabbix-api`], [`VERSION`], [The Zabbix API version the export came from (`apiinfo.version`). Required for `zabbix/1`: 6.x, 7.x or 8.x.]),
+    ([`--job`, `--instance`], [`JOB`, `INSTANCE`], [`prom/1`: the target's labels, which the exposition does not carry and every series key includes. Required.]),
+    ([`--instrument`], [`I`], [`read`: the key of what an OTLP, journald, CloudEvents or Zabbix export was read from, such as `otel-collector:c1`, `journald:h1` or `zabbix-server:main`. Required for those readers. `at`, `window` and `templates`: an instrument uid, to ask one instrument only.]),
+    ([`--items`], [`FILE`], [`zabbix/1`: the `item.get` export (with `selectHosts`) the files' history belongs to. With it, the files are `history.get` exports.]),
+    ([`--trends`], [—], [`zabbix/1` with `--items`: the files are `trend.get` exports, each hour a `cited` window.]),
+    ([`--sketch`], [`ALPHA`], [`window`: a DDSketch of this relative accuracy, 0.001 to 0.5, rather than the exact summary.]),
+    ([`--qs`], [`Q,…`], [`window --sketch`: the quantile ranks. Default `0.5,0.9,0.95,0.99`.]),
+    ([`--series`], [`SERIES` (repeatable)], [`detect`: a series to run over, as a uid or `<scheme>:<key>`. Required, except for `episode/1`.]),
+    ([`--during`], [`FROM-TO`], [`detect`: the window, epoch ms. Required, except for `baro/1`, which takes its window from its `at`.]),
+    ([`--trigger`], [`UID`], [`detect` with `baro/1`: the unit the ranking answers, such as an episode or an alert. Each hypothesis is grounded on it.]),
+    ([`--as`], [`AGENT`], [`investigate` and `declare`: who did it or says so, `human:<handle>` or a model agent such as `model:<name>`. Required, except for `show`.]),
+    ([`--rotation`], [`NAME`], [`investigate open`: the on-call rotation the investigation belongs to.]),
+    ([`--explains`, `--ground`], [`UID` (repeatable)], [`investigate hypothesis`: what it explains, and the evidence it rests on.]),
+    ([`--quote`], [`UID#FIELD=VALUE` (repeatable)], [`investigate hypothesis`: a number it quotes, as rule TQ checks it.]),
+    ([`--target`], [`UID`], [`investigate hypothesis`: what it is about, usually a series. Default: the first `--explains`.]),
+    ([`--output`], [`TID`], [`investigate probe` and `action`: the part holding the redacted output.]),
+    ([`--confirmed-by`], [`HANDLE`], [`investigate action`: who confirmed an unsafe command.]),
+    ([`--lookback`], [`MS`], [`investigate show`: how far before the opening to look for unexplored evidence. Default one hour.]),
+    ([`--top`], [`N`], [`similar`: how many episodes to print. Default 5.]),
+    ([`--seed`], [`S`], [`similar`: the MinHash seed, which is part of its recipe. Default 0.]),
+    ([`--older-than`], [`DUR`], [`evict`: the retention bound before `--at`, a whole number and `s`, `m`, `h`, `d` or `w`. Required.]),
+    ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing. `evict`: evict, rather than report what would go. `trace` and `templates`: commit the units, with `--at`.]),
+    ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),
+  ),
+)
+
+`tel read` exits 0 when it commits, 10 when it stages, and 2 when a required flag is missing,
+the reader is not a telemetry reader, or the profile is for another scheme. `tel at` exits 0
+when some instrument has a sample at or before the instant, and 1 when none has or the library
+has no substrate. `tel window` exits 0 when it printed or committed, and 1 when the series has
+no sample or the accuracy is out of range. `tel check` exits 3 when any window is in error. It reports
+`SMY-W608` for a keyed array it could not key, `SMY-W613` for a number out of `dec`'s range,
+and `SMY-W610` for an object whose previous snapshot was read under another profile. That
+boundary is recorded and not diffed.
 
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference
@@ -1273,6 +1456,22 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W455`], [warning], [The output limit was spent on the model's reasoning before any answer began, on a provider whose reasoning is spent from the same limit as its answer; the span degraded to opaque prose under rule I. The message names the limit, the reasoning's share where the provider reports one, and the remedy, which is `max_output`.]),
     ([`SMY-W456`], [warning], [A sampling temperature was set for a provider whose endpoint takes none; the run sampled at the model's default. Said once per run, before the first call.]),
     ([`SMY-W457`], [warning], [An answer gist was over the profile's bound (`l0_max`) and was cut to it, ending in an ellipsis; the claim as the model wrote it stands whole in the unit's body, above any body it had. `ask --answer` has no repair turn, so this is how the one shape defect a constructed unit can carry is met. The message gives both counts.]),
+    ([`SMY-E602`], [error], [A `dec`, SMYSL-3's canonical decimal, that is not canonical: not an array of two shortest-form integers, a mantissa with a trailing zero, zero with a non-zero exponent, an exponent outside −400 to 400, or a mantissa of −2#super[64]. One value has exactly one encoding, so the decoder refuses the others rather than normalising them; normalising would give one value two uids. From 1.17.]),
+    ([`SMY-E603`], [error], [An `x.tel/window` whose status or attestation is not the one rule TW gives it. Exact evidence computed from the substrate is `measured` and attested as imported at the computed rung. A sketched window is `derived`, transformed and computed. A platform's own aggregate, such as a Zabbix trend, is `cited`, imported at the document rung, and has no digest. An `x.tel/span` is attested as an exact window is and an `x.tel/log-template` as a sketched one, and both need a digest. The message says what the unit is and what it should be. From 1.17.]),
+    ([`SMY-E604`], [error], [A window recomputed from the substrate by its recipe is another unit: its samples changed after it was materialised, or it was never what the substrate gave. Raised by the `tel-evidence` pass, which names the fields that differ. A window of an earlier sample set is still true of that set; the error says the substrate no longer agrees. From 1.17.]),
+    ([`SMY-W605`], [warning], [A window's samples are not in the substrate (evicted, or never received), so it cannot be re-derived. Nothing else is said: a window's status does not depend on the substrate being present. From 1.17.]),
+    ([`SMY-W606`], [warning], [A hypothesis's numeric quote does not verify (rule TQ). A quote is `<uid>#<field>=<value>`, or `#<field>[<i>]=<value>` into a list. It verifies when the cited unit is among the hypothesis's grounds, is in the store, has that field, and holds that value in its canonical spelling (`0.90` does not verify a `0.9`). A hypothesis with a quote that does not verify has an effective status of at most `speculative`, whatever it was authored as. The message names the quote and says why. From 1.17.]),
+    ([`SMY-E607`], [error], [An `x.tel/series` or `x.tel/instrument` unit carries what its identity forbids: a span, a manifest, a published or observed time, grounds, a source of another kind or reference than `series:<scheme>:<key>` (metric) or `instrument:<key>` (tool), or any other source key. The message names the fields. A series is what is measured, not when, so one series seen at fifty instants is one unit; what varies over time goes in its `-meta` unit. From 1.17.]),
+    ([`SMY-W608`], [warning], [A keyed array in a telemetry snapshot could not be keyed: an element that is not an object, a key that is missing or not a scalar, or a key value that repeats (Kubernetes admits two `env` entries with one name). The whole array is diffed as one `json` leaf, and the message names its pointer. From 1.17.]),
+    ([`SMY-W609`], [warning], [An `x.tel/series` has no `x.tel/measured-by` relation to the instrument that measures it at its origin. Witness counting then takes the series as its own origin, so it counts as independent of every other series, which can overcount witnesses. The readers emit the relation whenever the source names its origin: a Prometheus target, an OpenTelemetry resource with a `service.name`, a Zabbix host. The message names the series. From 1.17.]),
+    ([`SMY-W610`], [warning], [An object's previous snapshot was read under another profile, by the profile hash its manifest's reader field records. The new snapshot is recorded and not diffed against the old one: a leaf the profile reclassified would otherwise read as a change to the object. From 1.17.]),
+    ([`SMY-E611`], [error], [A record 6 of detection kind 6 (a rival explanation) or 7 (a witness conflict). SMYSL-3 derives both from the record set and never writes them, so a store refuses one at the door, as it refuses rule E's kinds 4 and 5; this is what `check` says of one that arrived some other way, a document as written or a log from an older peer. From 1.17.]),
+    ([`SMY-E612`], [error], [A reserved number was written: record 16 (`hold`), or `source` key 7 (a sub-millisecond remainder). SMYSL-3 keeps both reserved behind experiments. Both are carried, not refused: record 16 is kept verbatim, and key 7 is inside the uid, so dropping it would change the unit's identity. Record 16 reports this instead of `SMY-W014`. From 1.17.]),
+    ([`SMY-W613`], [warning], [A number in a telemetry snapshot is outside `dec`'s range: a mantissa over 2#super[64] − 1 or an exponent past ±400. It is kept as its token, as `vtype text`, so it is recorded, but two spellings of it are no longer one value. From 1.17.]),
+    ([`SMY-W614`], [warning], [Several `x.tel/window` units share one window key (series, instrument, from, to, recipe) and disagree: they were materialised over different sample sets, typically before and after late data arrived. Each is true of its own samples, and its digest says which. Neither supersedes the other, and a consumer that needs one takes the largest count, then the smallest digest. From 1.17.]),
+    ([`SMY-W615`], [warning], [Two samples at one series, instrument and instant, with different values or flags. The substrate is a set of samples, so both are kept and both enter every window digest over that instant. A data error at the source, reported by `tel read`. From 1.17.]),
+    ([`SMY-W616`], [warning], [The exact sum of an integer window is outside `dec`'s range. The window's `sum` is omitted rather than rounded, and every other field stands. From 1.17.]),
+    ([`SMY-W617`], [warning], [One stream holds two spans with the same trace and span id whose contents differ: two exports disagree about one span. Both are kept, both materialise as `x.tel/span` units, and each is a parent of the other's children. `tel trace` reports it. From 1.17.]),
   ),
 )
 

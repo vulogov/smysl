@@ -4,7 +4,7 @@ exclude  = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
-version      = "1.16.0"
+version      = "1.17.0"
 edition      = "2021"
 # The floor the nine pure-path crates actually build at, measured rather than declared:
 # `blake3` pulls `constant_time_eq` 0.4.2, whose manifest is edition 2024, so a Cargo older
@@ -19,22 +19,24 @@ authors      = ["Vladimir Ulogov"]
 repository   = "https://github.com/vulogov/smysl"
 
 [workspace.dependencies]
-smysl-core     = { path = "crates/smysl-core",     version = "1.16.0" }
-smysl-graph    = { path = "crates/smysl-graph",    version = "1.16.0" }
-smysl-check    = { path = "crates/smysl-check",    version = "1.16.0" }
-smysl-pack     = { path = "crates/smysl-pack",     version = "1.16.0" }
-smysl-thread   = { path = "crates/smysl-thread",   version = "1.16.0" }
-smysl-render   = { path = "crates/smysl-render",   version = "1.16.0" }
-smysl-retrieve = { path = "crates/smysl-retrieve", version = "1.16.0" }
-smysl-embed    = { path = "crates/smysl-embed",    version = "1.16.0" }
-smysl-embed-candle = { path = "crates/smysl-embed-candle", version = "1.16.0" }
-smysl-provider = { path = "crates/smysl-provider", version = "1.16.0" }
-smysl-ingest   = { path = "crates/smysl-ingest",   version = "1.16.0", default-features = false }
-smysl-tui      = { path = "crates/smysl-tui",      version = "1.16.0" }
-smysl-text     = { path = "crates/smysl-text",     version = "1.16.0" }
-smysl-query    = { path = "crates/smysl-query",    version = "1.16.0" }
-smysl-measure  = { path = "crates/smysl-measure",  version = "1.16.0" }
-smysl-lib      = { path = "crates/smysl-lib",      version = "1.16.0" }
+smysl-core     = { path = "crates/smysl-core",     version = "1.17.0" }
+smysl-graph    = { path = "crates/smysl-graph",    version = "1.17.0" }
+smysl-check    = { path = "crates/smysl-check",    version = "1.17.0" }
+smysl-pack     = { path = "crates/smysl-pack",     version = "1.17.0" }
+smysl-thread   = { path = "crates/smysl-thread",   version = "1.17.0" }
+smysl-render   = { path = "crates/smysl-render",   version = "1.17.0" }
+smysl-retrieve = { path = "crates/smysl-retrieve", version = "1.17.0" }
+smysl-embed    = { path = "crates/smysl-embed",    version = "1.17.0" }
+smysl-embed-candle = { path = "crates/smysl-embed-candle", version = "1.17.0" }
+smysl-provider = { path = "crates/smysl-provider", version = "1.17.0" }
+smysl-ingest   = { path = "crates/smysl-ingest",   version = "1.17.0", default-features = false }
+smysl-tui      = { path = "crates/smysl-tui",      version = "1.17.0" }
+smysl-text     = { path = "crates/smysl-text",     version = "1.17.0" }
+smysl-query    = { path = "crates/smysl-query",    version = "1.17.0" }
+smysl-measure  = { path = "crates/smysl-measure",  version = "1.17.0" }
+smysl-lib      = { path = "crates/smysl-lib",      version = "1.17.0" }
+smysl-tel      = { path = "crates/smysl-tel",      version = "1.17.0" }
+smysl-series   = { path = "crates/smysl-series",   version = "1.17.0" }
 
 # `pure` keeps the C SIMD backend out of the build: zero C in the core path (§13).
 blake3                = { version = "1", default-features = false, features = ["std", "pure"] }
@@ -121,6 +123,9 @@ flate2                = { version = "=1.1.10", default-features = false, feature
 # `cache_metrics` and `python` are all opt-in. Its only normal dependency on Linux and macOS is
 # `libc` — no `cc`, no C toolchain, which is what §13 asks for and `make crate-features` checks.
 redb                  = { version = "=2.6.4", default-features = false }
+# `otlp/1` (RFC SMYSL-3 §20.1). 0.14.4 declares rustc 1.85, the pure tier's base; derive and std
+# only. Pinned like the other readers' parsers: a reader's output is identity.
+prost                 = { version = "=0.14.4", default-features = false, features = ["derive", "std"] }
 
 # ---------------------------------------------------------------------------
 # Facade crate: [lib] + [[bin]] (RFC SMYSL-1 §12.1)
@@ -171,6 +176,24 @@ path = "src/lib.rs"
 name              = "information_theory"
 required-features = ["cli", "ingest"]
 
+# A stand-in for OKO's proof of concept (RFC SMYSL-3 §24): a rotation's ledger through the
+# library API, timed per append. `make oko-ledger`.
+[[example]]
+name              = "oko_ledger"
+required-features = ["tel"]
+
+# GE-M9 (RFC SMYSL-3 §14, rule TL): six months, evicted, exported, imported and merged with a
+# peer that kept them. `make ge-m9`.
+[[example]]
+name              = "ge_m9"
+required-features = ["tel"]
+
+# GE-M8 (RFC SMYSL-3 §26): MinHash, exact Jaccard and Model2Vec embeddings over simulated
+# episodes. `make ge-m8`.
+[[example]]
+name              = "ge_m8"
+required-features = ["tel", "semantic"]
+
 [[bin]]
 name              = "smysl"
 path              = "src/main.rs"
@@ -203,6 +226,10 @@ cli       = [
     # Stemming. Free here and nowhere else: `reader-json` has already put `serde` in this
     # tree, so the one thing `smysl-text/stem` costs a CLI build is the stemmer itself.
     "smysl-text/stem",
+    # `smysl tel` (RFC SMYSL-3 §23). In `cli` because it costs one pure crate whose two
+    # dependencies are already in the tree, and a command that only exists in some builds of
+    # the CLI is a command nobody's script can rely on.
+    "tel",
 ]
 # `dep:getrandom` is here and not in `smysl-text`, and the reason is the whole shape of
 # pseudonymisation (SMYSL-2.4 §3.2): the key under `<library>/secrets/pseudonym.key` is
@@ -220,6 +247,16 @@ text      = ["dep:smysl-text", "dep:getrandom", "dep:smysl-measure", "dep:smysl-
 # that only some builds had would have made a mid depend on a feature flag. Here so that a
 # library consumer who wants `smysl::text::lang` can have it by name.
 lang-detect = ["text", "smysl-text/detect"]
+# Telemetry (RFC SMYSL-3): `smysl::tel`, the readers, profiles and canonical diff. `text` for the
+# library its snapshots are kept in, `stage` for staging what they say, and nothing that talks
+# to a provider: a reader reads files.
+#
+# The series readers (TL-P3) write `<library>/index/series.redb`, so `tel` brings `smysl-series`
+# with its redb backend. Unlike `substrate-redb`, there is no file-less fallback to keep the
+# default: a substrate that forgets every sample when the process ends answers no "value in
+# force at t". `redb` is pinned for both, so this adds a feature of a crate already pinned, and
+# `prost` for `otlp/1`.
+tel       = ["dep:smysl-tel", "dep:smysl-series", "smysl-series/store-redb", "smysl-tel/reader-otlp", "text", "stage"]
 # The substrate index's backing store (SMYSL-2.4 §3.8). Off by default, and the default is the
 # decision rather than an oversight: it puts `redb` in the tree of a binary that runs perfectly
 # well without it, and what it buys shows up on a corpus large enough for 1.1 KB a unit to
@@ -278,6 +315,11 @@ smysl-measure  = { workspace = true, optional = true }
 # TX-P11 step 5: `lib` imports into a library and exports from one (SMYSL-2.7). Behind
 # `text`, because an import writes manifests into a library and the library is `smysl-text`'s.
 smysl-lib      = { workspace = true, optional = true }
+# Telemetry (RFC SMYSL-3). Pure, and two dependencies deep: `smysl-core` and
+# `unicode-normalization`, both already here.
+smysl-tel      = { workspace = true, optional = true }
+# The series substrate (RFC SMYSL-3 §19), for `tel read`'s series readers and `tel at`.
+smysl-series   = { workspace = true, optional = true }
 smysl-thread   = { workspace = true }
 smysl-render   = { workspace = true }
 smysl-provider = { workspace = true, optional = true }

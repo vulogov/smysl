@@ -275,6 +275,13 @@ pub mod source {
     /// place in bytes nobody can say they obtained the same way.
     pub const MANIFEST: u16 = 6;
     pub const HIGHEST: u16 = MANIFEST;
+    /// Reserved for a sub-millisecond remainder beside [`OBSERVED`] (SMYSL-3 §10.2, D-T5).
+    ///
+    /// **Not assigned, and not in [`HIGHEST`].** GE-M2 decides whether it ever is; until then
+    /// no writer may emit it (`SMY-E612`). Reserving it does not refuse it: a foreign
+    /// producer's key 7 arrives in [`crate::types::SourceRef::extra`], is carried byte for
+    /// byte because it is inside the uid, and `check` names it.
+    pub const RESERVED_SUB_MS: u16 = 7;
 }
 
 /// GranularityProfile, nested inside a view under [`view::GRANULARITY`].

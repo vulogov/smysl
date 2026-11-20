@@ -6,6 +6,7 @@
 // reading is worth more than a second one, and for what this still does not reach.
 
 export { CborError, MAX_NESTING, decodeOne, encodeOne } from "./cbor.js";
+export { DecError, fromCbor as decFromCbor, fromF64 as decFromF64, parseToken as decParseToken, spell as decSpell, toCbor as decToCbor } from "./dec.js";
 export {
   RECORD_NAMES,
   Record,
@@ -69,4 +70,4 @@ export {
   uidText,
   validate,
 } from "./uid.js";
-export const VERSION = "1.16.0";
+export const VERSION = "1.17.0";

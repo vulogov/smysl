@@ -1,0 +1,14 @@
+# HELP http_requests_total Requests served.
+# TYPE http_requests_total counter
+http_requests_total{code="200",method="get"} 1101
+http_requests_total{code="500",method="get"} 3
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_bucket{le="0.05"} 960
+http_request_duration_seconds_bucket{le="0.5"} 1090
+http_request_duration_seconds_bucket{le="+Inf"} 1104
+http_request_duration_seconds_sum 44.5
+http_request_duration_seconds_count 1104
+# TYPE node_temperature_celsius gauge
+node_temperature_celsius{sensor="a"} 41.00
+# TYPE node_load_ratio gauge
+node_load_ratio 0.75

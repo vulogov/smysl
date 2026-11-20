@@ -1,0 +1,86 @@
+{
+ "jsonrpc": "2.0",
+ "id": 5,
+ "result": [
+  {
+   "itemid": "42",
+   "clock": "1768546800",
+   "num": "60",
+   "value_min": "0.12",
+   "value_avg": "0.4417",
+   "value_max": "1.2"
+  },
+  {
+   "itemid": "43",
+   "clock": "1768546800",
+   "num": "60",
+   "value_min": "0",
+   "value_avg": "1250000.5",
+   "value_max": "18446744073709551615"
+  },
+  {
+   "itemid": "51",
+   "clock": "1768546800",
+   "num": "58",
+   "value_min": "80.5",
+   "value_avg": "101.2667",
+   "value_max": "140"
+  },
+  {
+   "itemid": "42",
+   "clock": "1768550400",
+   "num": "60",
+   "value_min": "0.3",
+   "value_avg": "0.5",
+   "value_max": "0.98"
+  },
+  {
+   "itemid": "43",
+   "clock": "1768550400",
+   "num": "60",
+   "value_min": "0",
+   "value_avg": "1250000.5",
+   "value_max": "18446744073709551615"
+  },
+  {
+   "itemid": "51",
+   "clock": "1768550400",
+   "num": "60",
+   "value_min": "80.5",
+   "value_avg": "101.2667",
+   "value_max": "140"
+  },
+  {
+   "itemid": "42",
+   "clock": "1768554000",
+   "num": "60",
+   "value_min": "0.05",
+   "value_avg": "0.31",
+   "value_max": "1E+500"
+  },
+  {
+   "itemid": "43",
+   "clock": "1768554000",
+   "num": "60",
+   "value_min": "0",
+   "value_avg": "1250000.5",
+   "value_max": "18446744073709551615"
+  },
+  {
+   "itemid": "51",
+   "clock": "1768554000",
+   "num": "59",
+   "value_min": "80.5",
+   "value_avg": "101.2667",
+   "value_max": "140"
+  },
+  {
+   "itemid": "99",
+   "clock": "1768554000",
+   "num": "60",
+   "value_min": "1",
+   "value_avg": "1",
+   "value_max": "1"
+  }
+ ]
+}

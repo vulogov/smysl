@@ -1,0 +1,37 @@
+# RFC SMYSL-3 §8: the canonical diff of base.json against each case's s1.json
+# under profile.hjson. Written by crates/smysl-tel/tests/diff_fixture.rs;
+# SMYSL_BLESS=1 rewrites it.
+profile	b3:67ki25ei45teypiyayhvsx56uskdt74meqgrketgdtc72hodspcq
+mid	m3:r4dp56dh2yyfqvdtnsuw7yp3qvuvj4isv7wrnqyevxkxn4cb55vq	blake3("fixtures/tel/diff")
+at_ms	1768557600000
+object	b3:4vwfykq7alcxq6be22g42czcyeaxyeuvlejmung5oi7avapb7sza	series k8s apps/v1/Deployment/shop/checkout#6f1c2a8e-0b1d-4c55-9f43-2d6c1a7e9b10
+base	part	t3:svm2wcjqubbjnkzegwv35vb3mfoghcl2fakps6opdx5awpjmwkca
+image-bump	part	t3:tuqciktgcusfxqvvyzai3y5teaxjq7gdma3oyzvsgs6vrgsumyiq
+image-bump	unit	b3:wzds53v32yzezilvif7me7bykymtkwildgnzlstndy3acdbuh5sq	replace	/spec/template/spec/containers/checkout/image
+image-bump	routed	10
+scale	part	t3:dgllof4cfbyc2t2u2up3ftnc47unlrwqicmrilveijgonr4vc72a
+scale	unit	b3:ayeqvypr4iiieja6grdmcx7ns6unw76dlalgif4wkue7mbp7qhtq	replace	/spec/replicas
+scale	routed	10
+heartbeat-only	part	t3:svm2wcjqubbjnkzegwv35vb3mfoghcl2fakps6opdx5awpjmwkca
+heartbeat-only	routed	10
+ready-drop	part	t3:s5pn7usgr32mbufskzf6pxg5u43ecrmvd735rkujkfaqjyl7c7vq
+ready-drop	routed	10
+reorder	part	t3:svm2wcjqubbjnkzegwv35vb3mfoghcl2fakps6opdx5awpjmwkca
+reorder	routed	10
+labels	part	t3:gkhjvfh2msjvwc6a3bxrcivzkknb3ddfkrz4ve2xpr2mjro6gslq
+labels	unit	b3:vw2s55eqdwgs3e2mdxjazsdyi5laqaqprbcpx4pk5kchslyowkeq	replace	/metadata/labels/team
+labels	unit	b3:eogthblyz6la3ztagpcnxq7p7y5trfbkvd27776kgioyq5dmkelq	add	/metadata/labels/tier
+labels	routed	10
+recreate	part	t3:4pepsxlfozsrvzywkal4qypqhrgheaia2ucaamskfpgicnpv23za
+recreate	unit	b3:bbs4rd67hippamdl5vaira57i5phg3veazltc3jitpwbujcdangq	recreate	/metadata/uid
+recreate	routed	10
+env-duplicate	part	t3:jo2hub734aflydccsstnnn6rjwkzu6tcphdcr4skwu24dgumjyua
+env-duplicate	unit	b3:tkajwomyagd5ysyp4uhmiolhbti6rfnbdpazsjodqjlq32emmrpa	add	/spec/template/spec/containers/checkout/env
+env-duplicate	unit	b3:uz3yqyldjbjiixq2tzecdwlifbp7vrpz4gg4pccn6oubhqsfmd2q	remove	/spec/template/spec/containers/checkout/env/POOL_SIZE/name
+env-duplicate	unit	b3:s66tbkehnpvdyirtwrekptqgz64zkw4rl4ce5c2e2njww7z4ykyq	remove	/spec/template/spec/containers/checkout/env/POOL_SIZE/value
+env-duplicate	unit	b3:myvzxftljfvog34jlalcrutyaslnbgb5krhgby6xznzj7kxnjbka	remove	/spec/template/spec/containers/checkout/env/TIMEOUT_MS/name
+env-duplicate	unit	b3:yxwwrozvt47dbyv2vkw4o7z6x4idirzsrb2xqrotckkhqlcjg52q	remove	/spec/template/spec/containers/checkout/env/TIMEOUT_MS/value
+env-duplicate	note	SMY-W608	/spec/template/spec/containers/checkout/env
+env-duplicate	routed	10
+spelled-numbers	part	t3:svm2wcjqubbjnkzegwv35vb3mfoghcl2fakps6opdx5awpjmwkca
+spelled-numbers	routed	10

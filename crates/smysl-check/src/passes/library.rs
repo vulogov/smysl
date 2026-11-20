@@ -52,13 +52,28 @@ pub fn run(
     parts: Option<&(dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe)>,
     report: &mut Report,
 ) {
-    malformed_identities(store, report);
-    entities(store, report);
-    forks(store, report);
-    text_in_the_log(store, report);
+    run_scoped(store, super::Scope::All, parts, report);
+}
+
+/// In a `Batch`, the per-unit rules only: what a manifest, a part or a text record says is
+/// store-level, and a batch carrying one is checked in full (`crate::incremental`).
+pub(crate) fn run_scoped(
+    store: &(impl StoreRead + ?Sized),
+    scope: super::Scope<'_>,
+    parts: Option<&(dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe)>,
+    report: &mut Report,
+) {
+    malformed_identities(store, scope, report);
+    entities(store, scope, report);
+    if scope.is_all() {
+        forks(store, report);
+        text_in_the_log(store, report);
+    }
     if let Some(parts) = parts {
-        objects(store, parts, report);
-        spans(store, parts, report);
+        if scope.is_all() {
+            objects(store, parts, report);
+        }
+        spans(store, scope, parts, report);
     }
 }
 
@@ -74,10 +89,11 @@ pub fn run(
 /// this pass can check, and reporting one would name the wrong thing.
 fn spans(
     store: &(impl StoreRead + ?Sized),
+    scope: super::Scope<'_>,
     parts: &(dyn PartResolver + Send + Sync + core::panic::RefUnwindSafe),
     report: &mut Report,
 ) {
-    for (uid, unit) in store.units() {
+    for (uid, unit) in scope.units(store) {
         let Some(source) = unit.core.source.as_ref() else {
             continue;
         };
@@ -164,8 +180,12 @@ fn part_of_reference(reference: &str) -> Option<Tid> {
 ///
 /// `source.manifest` is the other carrier §4.3.3 names. It is `Option<Mid>` from TX-P5, so it
 /// cannot be malformed by then and cannot exist now; the reference is the whole of it here.
-fn malformed_identities(store: &(impl StoreRead + ?Sized), report: &mut Report) {
-    for (uid, unit) in store.units() {
+fn malformed_identities(
+    store: &(impl StoreRead + ?Sized),
+    scope: super::Scope<'_>,
+    report: &mut Report,
+) {
+    for (uid, unit) in scope.units(store) {
         if let Some(source) = unit.core.source.as_ref() {
             if let Some(claimed) = ill_formed(source) {
                 report.push(
@@ -185,6 +205,9 @@ fn malformed_identities(store: &(impl StoreRead + ?Sized), report: &mut Report) 
     }
     // A manifest's `origin` is a `SourceRef` too, and a manifest that recorded where its text
     // came from with a malformed identity is the same defect with no unit to hang it on.
+    if !scope.is_all() {
+        return;
+    }
     for (mid, manifest) in store.library().manifests() {
         if let Some(claimed) = manifest.origin.as_ref().and_then(ill_formed) {
             report.push(Diagnostic::new(Code::E403).with_message(format!(
@@ -250,8 +273,8 @@ fn kind_of(claimed: &str) -> &'static str {
 /// `smysl_core::schemas::text::rule_7_violations` is the one implementation, shared with the
 /// producer: this crate may not depend on `smysl-text`, so a copy here would be the same rule
 /// read twice.
-fn entities(store: &(impl StoreRead + ?Sized), report: &mut Report) {
-    for (uid, unit) in store.units() {
+fn entities(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &mut Report) {
+    for (uid, unit) in scope.units(store) {
         let broken = smysl_core::schemas::text::rule_7_violations(&unit.core);
         if broken.is_empty() {
             continue;

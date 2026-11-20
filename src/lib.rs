@@ -68,14 +68,14 @@ pub use smysl_core::{
     canonical_uid, format_version_supported, from_cbor, from_cbor_seq, hash_bytes, json_escape,
     kernel_major, quantise, to_cbor, to_cbor_seq, tokens, unit_core_bytes, verify, Admission,
     AgentId, AgentKind, Attestation, Code, CodecError, Commit, Commitment, Contention,
-    ContentionId, ContentionStatus, Date, Detected, DetectionKind, Diagnostic, DropReason,
-    ExitCode, Extra, Fidelity, GranularityProfile, Group, Hlc, IdError, IntegrityError, KernelType,
-    Label, LabelBinding, LangTag, Lod, NonDetReason, Op, Optimality, PackInfo, PackMode,
-    ParseError, ProfileEstimator, Record, RelKind, Relation, Report, Resolution, ResolutionTarget,
-    Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind, SourcePolicy, SourceRef,
-    Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema, TokenEstimator, Uid, UidPrefix,
-    Unit, UnitCore, UnitCoreBuilder, View, ViewId, Withdrawal, FORMAT_VERSIONS_SUPPORTED,
-    FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
+    ContentionId, ContentionStatus, Date, DecError, Decimal, Detected, DetectionKind, Diagnostic,
+    DropReason, ExitCode, Extra, Fidelity, GranularityProfile, Group, Hlc, IdError, IntegrityError,
+    KernelType, Label, LabelBinding, LangTag, Lod, NonDetReason, Op, Optimality, PackInfo,
+    PackMode, ParseError, ProfileEstimator, Record, RelKind, Relation, Report, Resolution,
+    ResolutionTarget, Role, Rung, SchemaDecl, SchemaId, Severity, ShapeError, SourceKind,
+    SourcePolicy, SourceRef, Span, Status, Step, Subject, Thread, ThreadId, ThreadSchema,
+    TokenEstimator, Uid, UidPrefix, Unit, UnitCore, UnitCoreBuilder, View, ViewId, Withdrawal,
+    FORMAT_VERSIONS_SUPPORTED, FORMAT_VERSION_DEFAULT, KERNEL_MAJOR, KERNEL_SCHEMA,
 };
 
 /// The library records, and the four identities over them (RFC SMYSL-2.4, TX-P1).
@@ -123,6 +123,8 @@ pub use smysl_core::schemas;
 pub use smysl_core::schema;
 
 // ---- check ----------------------------------------------------------------
+/// A store's check kept as derived state, so a batch is checked against it (AC-8).
+pub use smysl_check::incremental;
 pub use smysl_check::{
     check, check_and_fail_on, conformance, fidelity, granularity_distribution, CheckOptions,
     ConformanceClass, ConformanceVerdict, ConsumerProfile, FidelityReport, Pass,
@@ -422,6 +424,17 @@ pub mod translate {
 #[cfg(feature = "text")]
 pub use smysl_text as text;
 
+/// Telemetry (RFC SMYSL-3): exact JSON, canonical leaf values, profiles, the canonical diff,
+/// the `k8s/1` and `zabbix/1` readers and the snapshot recorder. Behind `tel`, which `cli`
+/// turns on.
+#[cfg(feature = "tel")]
+pub use smysl_tel as tel;
+
+/// The series substrate (RFC SMYSL-3 §19): chunks, windows and the value in force at an
+/// instant, over redb. Behind `tel`.
+#[cfg(feature = "tel")]
+pub use smysl_series as series;
+
 /// The crate version, as a convenience for embedders recording provenance.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -569,8 +582,18 @@ mod tests {
         // (1.15.0), raised by a span the model declined as a matter of policy; 155 with
         // `SMY-W455` and `SMY-W456` (1.15.0), an output limit spent on reasoning before any
         // answer, and a temperature set for a provider that takes none; 156 with `SMY-W457`
-        // (1.16.0), an answer gist over the bound, cut to it with the claim whole in the body.
-        assert_eq!(Code::ALL.len(), 156);
+        // (1.16.0), an answer gist over the bound, cut to it with the claim whole in the body;
+        // 158 with `SMY-E611` and `SMY-E612` (1.17, SMYSL-3 TL-P1), a derived-only contention
+        // and a reserved number, raised by `check`'s extension pass; 159 with `SMY-E602` (TL-P1
+        // step 2), a non-canonical `dec`, refused by `smysl_core::Decimal`'s decoder; 160 with
+        // `SMY-E607` (step 3), a series or instrument unit breaking the entity-like rule; 162
+        // with `SMY-W608` and `SMY-W613` (TL-P2 step 3), raised by `smysl_tel::diff`; 163 with
+        // `SMY-W610` (step 5), a profile changed within one snapshot chain; 166 with `SMY-W614`,
+        // `SMY-W615` and `SMY-W616` (TL-P4 step 1), window evidence and samples; 169 with
+        // `SMY-E603`, `SMY-E604` and `SMY-W605` (step 3), rule TW and recomputation; 170 with
+        // `SMY-W606` (TL-P6 step 2), rule TQ; 171 with `SMY-W609` (TL-P7 step 1), a series with
+        // no origin instrument; 172 with `SMY-W617` (TL-P9 step 2), one span id held twice.
+        assert_eq!(Code::ALL.len(), 172);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
@@ -631,7 +654,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "1.16.0");
+        assert_eq!(VERSION, "1.17.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

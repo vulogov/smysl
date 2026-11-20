@@ -604,6 +604,51 @@ def main() -> int:
     )
     check("§6.4 free constraints are the five D-3 names", spec_free, rust_free)
 
+    # -- §5.1 and §5.2: the registered extension schemas -----------------------
+    #
+    # The names are the whole of what registration buys, so they are the thing to hold the
+    # document to. Read from the bullets (`- **Types**: ...`) of each section and from the Rust
+    # module's own lists, resolved through its constants, so a name renamed in one place and
+    # not the other fails here rather than in a peer that spelled it the spec's way.
+    def spec_bullets(section: str, label: str) -> list[str]:
+        start = text.find(f"### {section} ")
+        if start < 0:
+            fail(f"the spec has no §{section}")
+            return []
+        nxt = re.search(r"^#{2,3} ", text[start + 4:], re.M)
+        body = text[start: start + 4 + nxt.start()] if nxt else text[start:]
+        m = re.search(rf"^- \*\*{label}\*\*: (.*?)(?=^\S|^- \*\*|\Z)", body, re.M | re.S)
+        if not m:
+            fail(f"§{section} has no **{label}** bullet")
+            return []
+        # In order, once each: a bullet may name a type again in its own note.
+        return list(dict.fromkeys(re.findall(r"`([^`]+)`", m.group(1))))
+
+    def rust_list(src: str, name: str) -> list[str]:
+        consts = dict(re.findall(r'pub const (\w+): &str = "([^"]+)";', src))
+        m = re.search(rf"pub const {name}: &\[&str\] = &\[(.*?)\];", src, re.S)
+        if not m:
+            fail(f"no `{name}` list in the schema module")
+            return []
+        return [consts.get(n, f"?{n}") for n in re.findall(r"\b([A-Z_]+)\b", m.group(1))]
+
+    schemas_rs = read("crates/smysl-core/src/schemas.rs")
+    text_mod = block(schemas_rs, "pub mod text {", "pub const ALIAS_REF")
+    check("§5.1 x.text/v1 types", rust_list(text_mod, "TYPES"), spec_bullets("5.1", "Types"))
+    check("§5.1 x.text/v1 relation kinds", rust_list(text_mod, "RELATIONS"),
+          spec_bullets("5.1", "Relation kinds"))
+    check("§5.1 x.text/v1 payload keys", re.findall(r'key: "([a-z]+:[a-z_]+)"', text_mod),
+          spec_bullets("5.1", "Payload keys"))
+
+    tel_rs = read("crates/smysl-core/src/schemas/tel.rs")
+    check("§5.2 x.tel/v1 types", rust_list(tel_rs, "TYPES"), spec_bullets("5.2", "Types"))
+    check("§5.2 x.tel/v1 relation kinds", rust_list(tel_rs, "RELATIONS"),
+          spec_bullets("5.2", "Relation kinds"))
+    tel_fields = block(tel_rs, "// Fields (§4.1), per type", "pub fn type_def")
+    tel_keys = list(dict.fromkeys(re.findall(r'"(tel:[a-z_]+)"', tel_fields)))
+    check("§5.2 x.tel/v1 payload keys (as a set)", sorted(tel_keys),
+          sorted(spec_bullets("5.2", "Payload keys")))
+
     # -- The gate cannot have quietly stopped checking -----------------------
     #
     # Every assertion above is `check`, and a `check` that never runs is indistinguishable from

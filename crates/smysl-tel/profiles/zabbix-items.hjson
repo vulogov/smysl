@@ -1,0 +1,13 @@
+# Zabbix items from `item.get` with `selectHosts: ["host"]` (RFC SMYSL-3 §20.2). The last-value
+# fields are readings, which history (TL-P3) carries properly, so here they are noise.
+{
+  profile: "zabbix-items/1"
+  scheme: zabbix
+  select: { key_: "*" }
+  noise: [ "/lastclock", "/lastns", "/lastvalue", "/prevvalue" ]
+  classes: {
+    "": config
+    "/key_": identity
+    "/hosts": identity
+  }
+}

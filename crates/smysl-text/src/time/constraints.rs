@@ -29,7 +29,7 @@
 use std::collections::BTreeMap;
 
 use smysl_core::types::{RelKind, Status};
-use smysl_core::Uid;
+use smysl_core::{Relation, Uid};
 use smysl_graph::StoreRead;
 
 use super::{Instant, Subject, TimeStatus};
@@ -134,33 +134,10 @@ pub fn free(store: &(impl StoreRead + ?Sized)) -> (Vec<Free>, Unbuilt) {
     // the answered message is the earlier subject.
     let replies = RelKind::Extension(REPLIES.to_string());
     for r in store.relations() {
-        if r.kind != replies {
-            continue;
+        if r.kind == replies {
+            unbuilt.reply_needs_ingest = false;
         }
-        unbuilt.reply_needs_ingest = false;
-        out.push(Free::Order {
-            kind: FreeKind::Reply,
-            earlier: Subject::Unit(r.to),
-            later: Subject::Unit(r.from),
-            status: TimeStatus::Cited,
-        });
-    }
-
-    // Quotation. The status is the quoting unit's, mapped from its epistemic status: a claim
-    // somebody speculated about cannot order two publication dates as firmly as a measurement.
-    for r in store.relations() {
-        if r.kind != RelKind::Extension(QUOTES.to_string()) {
-            continue;
-        }
-        let Some(quoting) = store.get(&r.from) else {
-            continue;
-        };
-        out.push(Free::Order {
-            kind: FreeKind::Quotation,
-            earlier: Subject::Unit(r.to),
-            later: Subject::Unit(r.from),
-            status: of_status(quoting.core.status),
-        });
+        out.extend(order_of(store, r));
     }
 
     // Derivation and supersession, between manifests.
@@ -193,25 +170,10 @@ pub fn free(store: &(impl StoreRead + ?Sized)) -> (Vec<Free>, Unbuilt) {
     let earliest: BTreeMap<Uid, u64> = store
         .attested_units()
         .into_iter()
-        .filter_map(|uid| {
-            let ms = store
-                .attestations_of(&uid)
-                .iter()
-                .map(|a| a.ts.wall_ms)
-                .min()?;
-            Some((uid, ms))
-        })
+        .filter_map(|uid| Some((uid, earliest_of(store, &uid)?)))
         .collect();
     for (uid, ms) in &earliest {
-        let Ok(ms) = i64::try_from(*ms) else { continue };
-        out.push(Free::NoLater {
-            kind: FreeKind::FirstSeen,
-            subject: Subject::Unit(*uid),
-            // The *end* of the millisecond, because a unit said in the same millisecond it was
-            // attested is not a contradiction and a half-open bound at `ms` would make it one.
-            than: Instant(ms.saturating_add(1)),
-            status: TimeStatus::Derived,
-        });
+        out.extend(first_seen(uid, *ms));
     }
 
     // And the same ceiling for a manifest, through the parts it lists: a catalog entry was not
@@ -238,6 +200,87 @@ pub fn free(store: &(impl StoreRead + ?Sized)) -> (Vec<Free>, Unbuilt) {
         });
     }
 
+    in_order(&mut out);
+    (out, unbuilt)
+}
+
+/// The free constraints over `units`, for a store with no manifests, given the `replies` and
+/// `quotes` relations that touch them (AC-8, RFC SMYSL-3 §17.1).
+///
+/// What [`free`] gives for those units, in the same order, provided `links` holds every
+/// `replies` and `quotes` relation either of whose ends is among them, withdrawn ones included,
+/// as `free` reads them. Others in `links` are harmless: a constraint is kept only when it
+/// names one of `units`. A store with manifests has constraints this cannot see; the caller
+/// asks [`free`] instead.
+pub fn free_within(
+    store: &(impl StoreRead + ?Sized),
+    units: &std::collections::BTreeSet<Uid>,
+    links: &[Relation],
+) -> Vec<Free> {
+    let mut out: Vec<Free> = links
+        .iter()
+        .filter(|r| units.contains(&r.from) || units.contains(&r.to))
+        .filter_map(|r| order_of(store, r))
+        .collect();
+    for uid in units {
+        if let Some(ms) = earliest_of(store, uid) {
+            out.extend(first_seen(uid, ms));
+        }
+    }
+    in_order(&mut out);
+    out
+}
+
+/// A `replies` or `quotes` relation's order, if it is one and it can be built.
+fn order_of(store: &(impl StoreRead + ?Sized), r: &Relation) -> Option<Free> {
+    // Reply. `cited`, because the conversation's own export said which message answers which;
+    // the answered message is the earlier subject.
+    if r.kind == RelKind::Extension(REPLIES.to_string()) {
+        return Some(Free::Order {
+            kind: FreeKind::Reply,
+            earlier: Subject::Unit(r.to),
+            later: Subject::Unit(r.from),
+            status: TimeStatus::Cited,
+        });
+    }
+    // Quotation. The status is the quoting unit's, mapped from its epistemic status: a claim
+    // somebody speculated about cannot order two publication dates as firmly as a measurement.
+    if r.kind == RelKind::Extension(QUOTES.to_string()) {
+        let quoting = store.get(&r.from)?;
+        return Some(Free::Order {
+            kind: FreeKind::Quotation,
+            earlier: Subject::Unit(r.to),
+            later: Subject::Unit(r.from),
+            status: of_status(quoting.core.status),
+        });
+    }
+    None
+}
+
+/// The earliest `ts` among a uid's attestations.
+fn earliest_of(store: &(impl StoreRead + ?Sized), uid: &Uid) -> Option<u64> {
+    store
+        .attestations_of(uid)
+        .iter()
+        .map(|a| a.ts.wall_ms)
+        .min()
+}
+
+/// A unit's first-seen ceiling, from its earliest attestation.
+fn first_seen(uid: &Uid, ms: u64) -> Option<Free> {
+    let ms = i64::try_from(ms).ok()?;
+    Some(Free::NoLater {
+        kind: FreeKind::FirstSeen,
+        subject: Subject::Unit(*uid),
+        // The *end* of the millisecond, because a unit said in the same millisecond it was
+        // attested is not a contradiction and a half-open bound at `ms` would make it one.
+        than: Instant(ms.saturating_add(1)),
+        status: TimeStatus::Derived,
+    })
+}
+
+/// Sorted by kind and then by subject, and each once.
+fn in_order(out: &mut Vec<Free>) {
     out.sort_by_key(|f| match f {
         Free::Order {
             kind,
@@ -253,7 +296,6 @@ pub fn free(store: &(impl StoreRead + ?Sized)) -> (Vec<Free>, Unbuilt) {
         } => (*kind, *subject, None, Some(*than)),
     });
     out.dedup();
-    (out, unbuilt)
 }
 
 /// A unit's epistemic status as a time status.
