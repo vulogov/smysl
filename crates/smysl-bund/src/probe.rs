@@ -50,6 +50,37 @@ pub fn probe_bund_binary(explicit: Option<&Path>) -> Result<BundBinaryInfo, Bund
     read_version(&path, first)
 }
 
+/// [`probe_bund_binary`], remembered per binary for as long as its file is unchanged. A probe
+/// is a process of its own, and was two thirds of a call's cost over a small store.
+pub fn probe_cached(explicit: Option<&Path>) -> Result<BundBinaryInfo, BundError> {
+    use std::collections::BTreeMap;
+    use std::sync::{Mutex, OnceLock};
+    type Seen = BTreeMap<PathBuf, (std::time::SystemTime, u64, BundBinaryInfo)>;
+    static SEEN: OnceLock<Mutex<Seen>> = OnceLock::new();
+    let path = match explicit {
+        Some(p) => p.to_path_buf(),
+        None => on_path("bund2").ok_or_else(|| BundError::BinaryNotFound {
+            searched: "bund2 on PATH".to_string(),
+        })?,
+    };
+    let stamp = std::fs::metadata(&path)
+        .ok()
+        .and_then(|m| Some((m.modified().ok()?, m.len())));
+    let seen = SEEN.get_or_init(|| Mutex::new(BTreeMap::new()));
+    if let (Some((at, len)), Ok(map)) = (stamp, seen.lock()) {
+        if let Some((a, l, info)) = map.get(&path) {
+            if *a == at && *l == len {
+                return Ok(info.clone());
+            }
+        }
+    }
+    let info = probe_bund_binary(Some(&path))?;
+    if let (Some((at, len)), Ok(mut map)) = (stamp, seen.lock()) {
+        map.insert(path, (at, len, info.clone()));
+    }
+    Ok(info)
+}
+
 /// Read `--version`'s first line, and refuse what this bridge does not run.
 pub fn read_version(path: &Path, line: &str) -> Result<BundBinaryInfo, BundError> {
     let unsupported = || BundError::BinaryUnsupported {

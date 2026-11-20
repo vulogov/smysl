@@ -89,6 +89,36 @@ The captured output of a real run is in `tests/fixtures/`, so the decoder is tes
 `bund2`. With `BUND2_BIN` set, the probe runs against the binary as well. RFC §6 to §9 record
 the findings.
 
+### `smysl-bund` runs a script: the snapshot and the process (SMYSL-4 BQ-P2)
+
+`eval_store`, `eval_library` and `eval_over_sq` run a script under `Trust::Trusted`, and refuse
+`Trust::Sandboxed` with `SandboxUnavailable` until BQ-P3 builds the sandbox.
+
+- **The snapshot is written, not copied** (§4). A store's records go into a fresh library in a
+  private `tempfile` directory. A library is opened with this release's reader and written the
+  same way, with its part texts and readings copied. A library whose shards are primary on redb,
+  which `bund2`'s smysl 1.15 refuses with `SM02`, reads through the snapshot's CBOR logs (the
+  `store-redb` feature, tested). The live library's bytes are hashed before and after a call, and
+  are unchanged.
+- **The process** gets flags before the script's path, a cleared environment (`LC_ALL=C`,
+  `TZ=UTC`, `COLUMNS=80`, `NO_COLOR=1`, `HOME` and `TMPDIR` inside the snapshot), and a process
+  group of its own. Two threads read stdout and stderr up to `max_output_bytes`. At
+  `max_wall_ms`, or past the output bound, the group is killed. A `true { true } while` stops at
+  500 ms and leaves no process and no directory behind.
+- **`eval_over_sq`** runs `sq` over the snapshot as a library (`LibraryScope`), so a query reads
+  as it does in `smysl q` and in Bund2's `smysl.query`. Its answer is bound to `:seed`.
+- **Two defects found by the first run.** Uids were written into the preamble with `Display`,
+  which is the 26-character short form, and `Uid::parse` refuses it. They are now written in
+  their canonical form. And an empty answer is `:seed list var`, since Bund2 cannot parse `[ ]`.
+- **What a call costs:** 10.0 ms p50 over F1, of which about 5 ms is the `bund2` process.
+  Probing `bund2 --version` on every call made it 14.6 ms, so the probe is cached per binary
+  while its file is unchanged.
+- `QueryPolicy` gains `with_*` builders, since it is `#[non_exhaustive]`.
+
+`max_inferences` is not applied yet. It needs `smysl.kb` wrapped in the preamble, which moves to
+BQ-P3, and the field's doc says so. Ten tests run against a real `bund2` when `BUND2_BIN` is set,
+and pass trivially without it; `cost` is ignored and prints the numbers above.
+
 ---
 
 ## 1.17.0 — 2026-11-19

@@ -47,7 +47,9 @@ pub struct QueryPolicy {
     pub max_nesting_depth: usize,
     pub max_output_bytes: usize,
     pub max_wall_ms: u64,
-    /// Applied with `kb.inferences` to every KB `smysl.kb` builds. Bund2 has no other step limit.
+    /// To be applied with `kb.inferences` to every KB `smysl.kb` builds. Bund2 has no other step
+    /// limit. **Not applied yet**: it needs `smysl.kb` wrapped in the preamble, which is BQ-P3's.
+    /// Until then the wall clock is the only bound on a logic query.
     pub max_inferences: Option<u64>,
     /// Fail when a returned uid is not in the source store.
     pub verify_uids: bool,
@@ -66,5 +68,54 @@ impl Default for QueryPolicy {
             max_inferences: Some(1_000_000),
             verify_uids: true,
         }
+    }
+}
+
+/// Builders, since a caller outside this crate cannot name every field of a
+/// `#[non_exhaustive]` struct.
+impl QueryPolicy {
+    pub fn with_binary(mut self, path: impl Into<PathBuf>) -> QueryPolicy {
+        self.bund_binary = Some(path.into());
+        self
+    }
+
+    pub fn with_word_policy(mut self, words: WordPolicy) -> QueryPolicy {
+        self.word_policy = words;
+        self
+    }
+
+    pub fn with_trust(mut self, trust: Trust) -> QueryPolicy {
+        self.trust = trust;
+        self
+    }
+
+    pub fn with_max_script_bytes(mut self, n: usize) -> QueryPolicy {
+        self.max_script_bytes = n;
+        self
+    }
+
+    pub fn with_max_nesting_depth(mut self, n: usize) -> QueryPolicy {
+        self.max_nesting_depth = n;
+        self
+    }
+
+    pub fn with_max_output_bytes(mut self, n: usize) -> QueryPolicy {
+        self.max_output_bytes = n;
+        self
+    }
+
+    pub fn with_max_wall_ms(mut self, ms: u64) -> QueryPolicy {
+        self.max_wall_ms = ms;
+        self
+    }
+
+    pub fn with_max_inferences(mut self, n: Option<u64>) -> QueryPolicy {
+        self.max_inferences = n;
+        self
+    }
+
+    pub fn with_verify_uids(mut self, verify: bool) -> QueryPolicy {
+        self.verify_uids = verify;
+        self
     }
 }

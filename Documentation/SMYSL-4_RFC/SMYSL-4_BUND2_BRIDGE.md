@@ -221,7 +221,9 @@ it.
 The bridge writes `<tmp>/query.bund` as three parts:
 
 1. **The preamble** binds the snapshot: `:lib "<snapshot root>" smysl.open var`, and for
-   `eval_over_sq`, `:seed [ <uids> ] var`. A script reads them with `:lib var?` and `:seed var?`,
+   `eval_over_sq`, `:seed [ <uids> ] var`. The uids are written in their canonical 52-character
+   form, since `Uid`'s `Display` writes the short form, which `Uid::parse` does not read. An empty
+   answer is `:seed list var`, because Bund2 does not parse `[ ]`. A script reads them with `:lib var?` and `:seed var?`,
    Bund2's binding idiom (Bund2 `stdlib/src/check.rs:1496-1513`).
 2. **The script**, verbatim.
 3. **The encoder**: a line holding the opening sentinel, then `debug.display_stack`, then a
@@ -306,10 +308,15 @@ pub fn eval_over_sq(store: &Store, sq: &str, script: &str, policy: &QueryPolicy)
 - `probe_bund_binary` reads `bund2 --version`, which prints `bund2 <version> (features: …)` and
   names `smysl` when it is compiled in (Bund2 `main.rs:56-58`, `help.rs:231`). It refuses a
   version below 0.56.0, and a binary without `smysl` with `BinaryMissingSmyslFeature`.
+- `eval_over_sq` runs `sq` over the snapshot, opened as a library through `LibraryScope`, as
+  `smysl q` does. A query then reads the same inside and outside Bund2 (`from library`, not
+  `from store:…`).
 - `QueryPolicy` holds the draft's fields (`bund_binary`, `word_policy`, `max_script_bytes`,
   `max_nesting_depth`, `max_output_bytes`, `max_wall_ms`, `verify_uids`) and adds `trust: Trust`
   and `max_inferences: Option<u64>`. When `max_inferences` is set, the preamble applies
-  `kb.inferences` to every KB `smysl.kb` builds.
+  `kb.inferences` to every KB `smysl.kb` builds. That needs `smysl.kb` wrapped in the preamble,
+  and it lands in BQ-P3. Until then the wall clock is the only bound on a logic query. Each field
+  has a `with_*` builder, since the struct is `#[non_exhaustive]`.
 - `Trust` is `Sandboxed` (the default) or `Trusted`.
 - `QueryValue`, `BundQueryResult` and `BundError` are as in the draft. `BundError` adds
   `InferenceCapReached`, `SandboxUnavailable`, `ScriptFailed` (a Bund2 error that is not a
@@ -354,8 +361,8 @@ until BQ-P4, when it joins `PUBLISHED` with the release that first publishes it.
 | Phase | Content | Exit criteria |
 |---|---|---|
 | **BQ-P1** spike and skeleton (**done**: findings in §7 and §8) | Against a local `bund2 --features smysl`: confirm the flags, that a script's stack is not dumped on stdout at exit (or the flag that stops it), the encoder's words (§7), and `bund2 words` → the lists of §6. Crate skeleton: `QueryPolicy`, the gate, `QueryValue`, the decoder, the error mapping. | The gate and the decoder unit-tested without `bund2`. The word lists regenerated and their diff against Appendix A recorded. |
-| **BQ-P2** snapshot and runner | §4 and §5 for `Trust::Trusted`: snapshot from a store and from a library (a redb library included), env, bounded readers, wall clock, process-group kill, cleanup. | Tests gated on `BUND2_BIN`. A timeout leaves no child and no directory. A live library's bytes, hashed before and after, are unchanged. |
-| **BQ-P3** sandbox and determinism | §5.5 on macOS and on Linux; `SandboxUnavailable` elsewhere. Determinism replay over 20 or more scripts, including `smysl.kb` with `kb.query` and the CLP(FD) and `kb.inferences` examples of `bund_examples/smysl_demo_full/demo.bund`, over equal stores written in shuffled record order. | Adversarial suite: `"system." "shell" + call, !`, `compile`, a `url` fetch, a file read outside the snapshot, `time.now`, an infinite loop. Each is stopped by the sandbox, the gate or the clock, and each is named in the result. |
+| **BQ-P2** snapshot and runner (**done**) | §4 and §5 for `Trust::Trusted`: snapshot from a store and from a library (a redb library included), env, bounded readers, wall clock, process-group kill, cleanup. | Tests gated on `BUND2_BIN`. A timeout leaves no child and no directory. A live library's bytes, hashed before and after, are unchanged. |
+| **BQ-P3** sandbox, determinism, and `max_inferences` | §5.5 on macOS and on Linux; `SandboxUnavailable` elsewhere. Determinism replay over 20 or more scripts, including `smysl.kb` with `kb.query` and the CLP(FD) and `kb.inferences` examples of `bund_examples/smysl_demo_full/demo.bund`, over equal stores written in shuffled record order. | Adversarial suite: `"system." "shell" + call, !`, `compile`, a `url` fetch, a file read outside the snapshot, `time.now`, an infinite loop. Each is stopped by the sandbox, the gate or the clock, and each is named in the result. |
 | **BQ-P4** CLI | `smysl bund` behind `bund`; `smysl-bund` joins `PUBLISHED`; the manual gains a section. | `cli-surface`, `doc-output` and the crate-features matrix cover it. Published with the release that ships it. |
 
 ## 13. Risks
@@ -366,7 +373,7 @@ until BQ-P4, when it joins `PUBLISHED` with the release that first publishes it.
 | Bund2 adds an impure word | The gate is not the boundary (D-B2). The word-list diff of §6.3 is read before a new Bund2 version is admitted by `probe_bund_binary`. |
 | Bund2's pin moves past 1.15 | Nothing here depends on the pin. The snapshot is `smysl/1.0` and layout `smysl/library/2`, which 1.15 reads. A later reader reads more of it. |
 | A 1.17 record that a 1.15 reader does not know | Read as Unknown or as an opaque extension unit. 1.17's timeline schema decodes as Unknown in 1.15 (`smysl-core` 1.15 `cbor/envelope.rs:1010, 1030`). BQ-P2 tests a library holding `x.tel/v1` units. |
-| Process start cost | Accepted. A snapshot and a process cost milliseconds. Interactive queries stay with `sq/1`. BQ-P2 measures it. |
+| Process start cost | Accepted. Measured in BQ-P2 over F1 (21 records): 10.0 ms p50 a call, of which about 5 ms is the `bund2` process and the rest is writing the snapshot. Probing `bund2 --version` on every call made it 14.6 ms, so the probe is now cached per binary while its file is unchanged. Interactive queries stay with `sq/1`. |
 
 ## 14. Open questions
 

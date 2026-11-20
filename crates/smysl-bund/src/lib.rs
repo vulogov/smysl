@@ -4,8 +4,6 @@
 //! its answer comes back as a [`QueryValue`]. Bund2 is never linked (D-B1): it pins every smysl
 //! crate at `=1.15.0`, so the two meet at `smysl/1.0` and a process boundary.
 //!
-//! This is phase BQ-P1: what can be decided without running anything.
-//!
 //! - [`policy`]: [`QueryPolicy`], [`WordPolicy`] and [`Trust`], with the RFC's defaults.
 //! - [`words`]: Bund2 0.56.0's words, which of them a script may name, and why the rest may not.
 //! - [`gate`]: the word gate (§6). A first check that names a mistake early. **It is not the
@@ -16,8 +14,9 @@
 //! - [`error`]: [`BundError`], and a refusal's class read from its text. Bund2 prints a
 //!   refusal's text and not its `SMnn` code (§8).
 //! - [`probe`]: what `bund2 --version` says about a binary.
-//!
-//! Running a script (the snapshot, the process, the sandbox) is BQ-P2 and BQ-P3.
+//! - [`snapshot`]: the library the process sees, written fresh in a private directory (§4).
+//! - [`run`]: the wrapper, the process, the wall clock; [`eval_store`], [`eval_library`] and
+//!   [`eval_over_sq`] (§5, §7). BQ-P2 runs `Trust::Trusted` only; the sandbox is BQ-P3.
 
 #![forbid(unsafe_code)]
 
@@ -26,12 +25,15 @@ pub mod error;
 pub mod gate;
 pub mod policy;
 pub mod probe;
+pub mod run;
+pub mod snapshot;
 pub mod value;
 pub mod words;
 
 pub use error::BundError;
 pub use policy::{QueryPolicy, Trust, WordPolicy};
-pub use probe::BundBinaryInfo;
+pub use probe::{probe_bund_binary, BundBinaryInfo};
+pub use run::{eval_library, eval_over_sq, eval_store, BundQueryResult};
 pub use value::QueryValue;
 
 /// The oldest `bund2` this bridge runs: the release its word lists and its decoder were read
