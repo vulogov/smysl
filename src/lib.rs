@@ -435,6 +435,11 @@ pub use smysl_tel as tel;
 #[cfg(feature = "tel")]
 pub use smysl_series as series;
 
+/// The Bund2 bridge (RFC SMYSL-4): a Bund2 script over a snapshot of a store or a library, run
+/// in a separate `bund2` process, sandboxed where the platform allows. Behind `bund`.
+#[cfg(feature = "bund")]
+pub use smysl_bund as bund;
+
 /// The crate version, as a convenience for embedders recording provenance.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

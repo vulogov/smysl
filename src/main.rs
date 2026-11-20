@@ -194,6 +194,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "schema",    about: "Show schema revisions; check the naming rule and lens totality", purity: Purity::Pure,  phase: "TX-P12" , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "migrate",   about: "Re-derive a schema's units under a newer revision; staged", purity: Purity::Pure,  phase: "TX-P12" , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "tel",       about: "Read telemetry into a library; the value in force at t; check a profile", purity: Purity::Pure,  phase: "TL-P2"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "bund",      about: "Run a Bund2 script over a store or a library, in a bund2 process", purity: Purity::Pure,  phase: "BQ-P4"  , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -2523,6 +2524,62 @@ fn cli() -> Command {
                         .long("force")
                         .help("Write into an output directory that is not empty (`export`)")
                         .action(ArgAction::SetTrue),
+                ),
+            "bund" => sub
+                .after_help(
+                    "Purity: pure. The script runs over a snapshot of the store in a separate \
+                     bund2 process, sandboxed unless --trusted (RFC SMYSL-4). Needs bund2 built \
+                     with `cargo build -p bund2-cli --features smysl`.",
+                )
+                .arg(
+                    Arg::new("probe")
+                        .long("probe")
+                        .help("Say which bund2 would run and what it was built with; run nothing")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("script")
+                        .long("script")
+                        .value_name("FILE")
+                        .help("The Bund2 script to run; it reads the store as `:lib var?`"),
+                )
+                .arg(
+                    Arg::new("eval")
+                        .long("eval")
+                        .value_name("SCRIPT")
+                        .help("The script, given inline"),
+                )
+                .arg(
+                    Arg::new("sq")
+                        .long("sq")
+                        .value_name("QUERY")
+                        .help("Run this sq/1 query first and bind its uids to `:seed`"),
+                )
+                .arg(
+                    Arg::new("trusted")
+                        .long("trusted")
+                        .help("Run without the sandbox; for a script you wrote yourself, never for one a model wrote")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("bund2")
+                        .long("bund2")
+                        .value_name("PATH")
+                        .help("The bund2 binary (default: bund2 on PATH)"),
+                )
+                .arg(
+                    Arg::new("timeout-ms")
+                        .long("timeout-ms")
+                        .value_name("MS")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("Stop the script after this many milliseconds (default 2000)"),
+                )
+                .arg(
+                    Arg::new("max-inferences")
+                        .long("max-inferences")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("Cap every KB the script makes at N inferences (default 1000000)"),
                 ),
             "tel" => sub
                 .arg(
@@ -12655,6 +12712,139 @@ fn cmd_ui(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+// ---------------------------------------------------------------------------
+// `bund` — the Bund2 bridge (RFC SMYSL-4, BQ-P4)
+// ---------------------------------------------------------------------------
+
+/// `smysl bund`: a Bund2 script over a snapshot of `-s`, in a `bund2` process (RFC SMYSL-4 §10).
+///
+/// `--trusted` is the only way to `Trust::Trusted`, and only a person types it (OQ-B2): no
+/// command that has a model write a script hands that script here, so there is no model path
+/// to refuse.
+#[cfg(feature = "bund")]
+fn cmd_bund(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::bund::{self, BundError, QueryPolicy, Trust};
+
+    let mut policy = QueryPolicy::default();
+    if let Some(b) = m.get_one::<String>("bund2") {
+        policy = policy.with_binary(b);
+    }
+    if m.get_flag("probe") {
+        return match bund::probe_bund_binary(policy.bund_binary.as_deref()) {
+            Ok(info) => {
+                let sandbox = match bund::sandbox::available() {
+                    Ok(()) => "available".to_string(),
+                    Err(e) => e.to_string(),
+                };
+                if global.get_flag("json") {
+                    println!(
+                        "{{\"path\":{},\"version\":{},\"smysl\":{},\"sandbox\":{}}}",
+                        bund::QueryValue::Text(info.path.display().to_string()).to_json(),
+                        bund::QueryValue::Text(info.version.clone()).to_json(),
+                        info.has_smysl,
+                        bund::QueryValue::Text(sandbox).to_json(),
+                    );
+                } else {
+                    println!("bund2:   {}", info.path.display());
+                    println!("version: {}", info.version);
+                    println!("smysl:   {}", if info.has_smysl { "yes" } else { "no" });
+                    println!("sandbox: {sandbox}");
+                }
+                if info.has_smysl {
+                    ExitCode::Success
+                } else {
+                    ExitCode::Failure
+                }
+            }
+            Err(e) => {
+                eprintln!("smysl bund: {e}");
+                ExitCode::Failure
+            }
+        };
+    }
+
+    let script = match (m.get_one::<String>("script"), m.get_one::<String>("eval")) {
+        (Some(_), Some(_)) => {
+            eprintln!("smysl bund: give the script once, with --script or --eval");
+            return ExitCode::Usage;
+        }
+        (Some(f), None) => match std::fs::read_to_string(f) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("smysl bund: {f}: {e}");
+                return ExitCode::Failure;
+            }
+        },
+        (None, Some(t)) => t.clone(),
+        (None, None) => {
+            eprintln!("smysl bund: no script given (--script FILE or --eval SCRIPT)");
+            return ExitCode::Usage;
+        }
+    };
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl bund: no store given (-s PATH; a library root or a store file)");
+        return ExitCode::Usage;
+    };
+    if m.get_flag("trusted") {
+        policy = policy.with_trust(Trust::Trusted);
+    }
+    if let Some(ms) = m.get_one::<u64>("timeout-ms") {
+        policy = policy.with_max_wall_ms(*ms);
+    }
+    if let Some(n) = m.get_one::<u64>("max-inferences") {
+        policy = policy.with_max_inferences(Some(*n));
+    }
+
+    let root = std::path::Path::new(&path);
+    let is_library = smysl::text::library::Library::is_library(root);
+    let sq = m.get_one::<String>("sq");
+    let result = match (is_library, sq) {
+        (true, None) => bund::eval_library(root, &script, &policy),
+        (false, None) | (_, Some(_)) => {
+            let store = match load_store(&path) {
+                Ok((s, _)) => s.into_memory(),
+                Err(e) => {
+                    eprintln!("smysl bund: {e}");
+                    return ExitCode::Failure;
+                }
+            };
+            match sq {
+                Some(q) => bund::eval_over_sq(&store, q, &script, &policy),
+                None => bund::eval_store(&store, &script, &policy),
+            }
+        }
+    };
+    match result {
+        Ok(r) => {
+            for w in &r.warnings {
+                eprintln!("bund2: {w}");
+            }
+            if global.get_flag("json") {
+                println!("{}", r.value.to_json());
+            } else {
+                println!("{}", r.value);
+            }
+            ExitCode::Success
+        }
+        Err(e) => {
+            eprintln!("smysl bund: {e}");
+            match e {
+                BundError::PolicyViolation { .. }
+                | BundError::ScriptTooLarge { .. }
+                | BundError::SandboxUnavailable { .. }
+                | BundError::InvalidScriptOrArgs { .. } => ExitCode::Usage,
+                _ => ExitCode::Failure,
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "bund"))]
+fn cmd_bund(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl bund: this build has no Bund2 bridge (build with --features bund)");
+    ExitCode::Usage
+}
+
 /// How progress should be reported for this invocation.
 ///
 /// One place, so a command cannot draw in one branch and stay silent in another.
@@ -12981,6 +13171,7 @@ fn main() -> ProcExitCode {
         "schema" => cmd_schema(sub, &matches),
         "migrate" => cmd_migrate(sub, &matches),
         "tel" => cmd_tel(sub, &matches),
+        "bund" => cmd_bund(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -18329,7 +18520,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 39);
+        assert_eq!(COMMANDS.len(), 40);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -18372,7 +18563,8 @@ mod tests {
                 "lib",
                 "schema",
                 "migrate",
-                "tel"
+                "tel",
+                "bund"
             ]
         );
     }
@@ -18469,10 +18661,11 @@ mod tests {
     #[test]
     fn every_command_names_the_phase_that_wires_it() {
         for c in COMMANDS {
-            // Three phase vocabularies, because there are three RFCs: `SM-P*` is SMYSL-1's
-            // delivery plan, `TX-P*` is SMYSL-2.4's and `TL-P*` is SMYSL-3's. A release
-            // number is the fourth form, for a command that arrived outside any plan.
-            let phase = ["SM-P", "TX-P", "TL-P"]
+            // Four phase vocabularies, because there are four RFCs: `SM-P*` is SMYSL-1's
+            // delivery plan, `TX-P*` is SMYSL-2.4's, `TL-P*` is SMYSL-3's and `BQ-P*` is
+            // SMYSL-4's. A release number is the fifth form, for a command that arrived outside
+            // any plan.
+            let phase = ["SM-P", "TX-P", "TL-P", "BQ-P"]
                 .iter()
                 .any(|p| c.phase.starts_with(p));
             let cycle = c

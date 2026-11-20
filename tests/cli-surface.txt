@@ -1055,3 +1055,28 @@ tel        --seed
 tel        --older-than
 tel        --yes
 tel        --help
+bund       --config
+bund       --probe
+bund       --store
+bund       --script
+bund       --eval
+bund       --output
+bund       --format
+bund       [possible values: surface, cbor, pack]
+bund       --sq
+bund       --strict
+bund       --trusted
+bund       --bund2
+bund       --offline
+bund       --no-color
+bund       --timeout-ms
+bund       --max-inferences
+bund       --noprogress
+bund       --json
+bund       --quiet
+bund       --verbose
+bund       --backend
+bund       [possible values: memory, redb]
+bund       --shard
+bund       --seed-check
+bund       --help

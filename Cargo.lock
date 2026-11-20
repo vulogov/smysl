@@ -2145,6 +2145,7 @@ dependencies = [
  "clap",
  "getrandom 0.3.4",
  "serde_json",
+ "smysl-bund",
  "smysl-check",
  "smysl-core",
  "smysl-embed",

@@ -99,6 +99,9 @@ jobs:
           - "--no-default-features --features remote"
           - "--no-default-features --features exact-pack"
           - "--no-default-features --features render-typst,render-html"
+          # `smysl bund` (RFC SMYSL-4 BQ-P4). Its tests run against a real `bund2` only in
+          # `bund2-bridge`; here they build, and the rest pass trivially.
+          - "--no-default-features --features bund"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -673,3 +676,4 @@ jobs:
           export BUND2_BIN="$PWD/bund2-bin/bund2"
           "$BUND2_BIN" --version
           cargo test -p smysl-bund --features store-redb
+          cargo test --features bund --test cmd_bund

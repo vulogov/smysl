@@ -56,6 +56,10 @@
   // Chapter 38: what 1.17 builds of RFC SMYSL-3, its format phase TL-P1.
   include "manual/ch38-telemetry.typ",
 
+  // ── Part XII — Programmable queries (SMYSL-4) ─────────────────────────
+  // Chapter 39: `smysl bund`, RFC SMYSL-4's Bund2 bridge, built in 1.18.
+  include "manual/ch39-bund.typ",
+
   // ── Appendices ─────────────────────────────────────────────────────────
   include "manual/appendices.typ",
 

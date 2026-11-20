@@ -89,6 +89,42 @@ The captured output of a real run is in `tests/fixtures/`, so the decoder is tes
 `bund2`. With `BUND2_BIN` set, the probe runs against the binary as well. RFC §6 to §9 record
 the findings.
 
+### `smysl bund`: Bund2 scripts from the command line (SMYSL-4 BQ-P4)
+
+RFC SMYSL-4 is complete. Behind the new `bund` feature, off by default, `smysl bund` runs a
+Bund2 script over a store or a library and prints the value it leaves:
+
+```
+smysl bund -s fixtures/corpus/F1-incident.smy \
+  --eval ':lib var? "from library" smysl.kb [ [ unit U claim S ] [ gist U G ] ] kb.query'
+```
+
+- **Input.** `-s` takes a store file or a library root. `--script FILE` or `--eval SCRIPT`
+  gives the script, and `--sq QUERY` seeds it with an `sq/1` answer as `:seed`.
+- **Output.** Indented text, or JSON with `--json`. Both are deterministic: map keys sorted,
+  uids canonical. `QueryValue` gains `to_json` and `Display` for this.
+- **The sandbox** is used unless `--trusted`. On a platform without it the command refuses
+  instead.
+- **The other flags:** `--probe` says which `bund2` would run, what it was built with, and
+  whether the sandbox is there. `--timeout-ms`, `--max-inferences` and `--bund2 PATH` set the
+  limits and the binary.
+- **Exit status:** 2 for a script refused before it runs, 1 for a failure once it has
+  started.
+- **The facade** re-exports the crate as `smysl::bund` under `bund`.
+- **Without the feature,** the command is still listed, and says which feature it needs.
+- **The manual** gains Part XII, chapter 39.
+
+Two open questions are decided in the RFC:
+- **OQ-B2:** `--trusted` is the only way to run unsandboxed, and no command that has a model
+  write a script hands that script to the bridge.
+- **OQ-B1:** the snapshot always carries the part texts.
+
+`smysl-bund` will be published with the release, and joins `PUBLISHED` at that release's
+baseline commit. CI:
+- a test-matrix row builds `--no-default-features --features bund`;
+- `bund2-bridge` runs the command's tests (`tests/cmd_bund.rs`) against `bund2`;
+- `crate-features` covers the crate.
+
 ### `smysl-bund` runs a script in the sandbox (SMYSL-4 BQ-P3)
 
 `Trust::Sandboxed`, the default, now runs on macOS and on Linux.

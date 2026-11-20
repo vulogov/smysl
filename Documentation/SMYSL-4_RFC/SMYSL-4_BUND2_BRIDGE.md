@@ -387,6 +387,31 @@ smysl bund -s ./notes.smy --sq 'from library where kind = claim' --eval '<script
   time-dependent on standard output.
 - A TUI tab is optional and is not part of this RFC's exit criteria.
 
+**As built (BQ-P4).** The command follows the house conventions where this section's sketch
+did not:
+- **The store is `-s`.** `-s` takes a store file or a library root, recognised by its
+  `LIBRARY` marker, as every other command's does. There is no `--library` flag.
+- **`--json` replaces `--format json`.** `--format` names the document forms a command
+  writes (`surface`, `cbor`), and `--json` is the global machine-readable switch. Without it
+  the value is printed as indented text: a list as `- ` items, a map as `key: value` lines, a
+  string quoted.
+- **The flags:**
+  - `--script FILE` or `--eval SCRIPT`, exactly one;
+  - `--sq QUERY`;
+  - `--trusted`;
+  - `--bund2 PATH`;
+  - `--timeout-ms`;
+  - `--max-inferences`;
+  - `--probe`, which also says whether the sandbox is available.
+- **Exit status:**
+  - 0 for an answer;
+  - 2 (usage) for a script refused before it ran: by the gate, by its size, or for want of a
+    sandbox;
+  - 1 for anything that fails once the process has started.
+- **Without `bund`,** the command is in the table and the help, as `ui` is without `tui`,
+  and says which feature it needs. Its argument surface is recorded in either build, and the
+  manual's one replayable transcript is that refusal.
+
 ---
 
 # Part B — Delivery
@@ -406,7 +431,7 @@ until BQ-P4, when it joins `PUBLISHED` with the release that first publishes it.
 | **BQ-P1** spike and skeleton (**done**: findings in §7 and §8) | Against a local `bund2 --features smysl`: confirm the flags, that a script's stack is not dumped on stdout at exit (or the flag that stops it), the encoder's words (§7), and `bund2 words` → the lists of §6. Crate skeleton: `QueryPolicy`, the gate, `QueryValue`, the decoder, the error mapping. | The gate and the decoder unit-tested without `bund2`. The word lists regenerated and their diff against Appendix A recorded. |
 | **BQ-P2** snapshot and runner (**done**) | §4 and §5 for `Trust::Trusted`: snapshot from a store and from a library (a redb library included), env, bounded readers, wall clock, process-group kill, cleanup. | Tests gated on `BUND2_BIN`. A timeout leaves no child and no directory. A live library's bytes, hashed before and after, are unchanged. |
 | **BQ-P3** sandbox, determinism, and `max_inferences` (**done**) | §5.5 on macOS and on Linux; `SandboxUnavailable` elsewhere. Determinism replay over 20 or more scripts, including `smysl.kb` with `kb.query` and the CLP(FD) and `kb.inferences` examples of `bund_examples/smysl_demo_full/demo.bund`, over equal stores written in shuffled record order. | Adversarial suite: `"system." "shell" + call, !`, `compile`, a `url` fetch, a file read outside the snapshot, `time.now`, an infinite loop. Each is stopped by the sandbox, the gate or the clock, and each is named in the result. |
-| **BQ-P4** CLI | `smysl bund` behind `bund`; `smysl-bund` joins `PUBLISHED`; the manual gains a section. | `cli-surface`, `doc-output` and the crate-features matrix cover it. Published with the release that ships it. |
+| **BQ-P4** CLI (**done**) | `smysl bund` behind `bund`; `smysl-bund` joins `PUBLISHED`; the manual gains a section. | `cli-surface`, `doc-output` and the crate-features matrix cover it. Published with the release that ships it. |
 
 ## 13. Risks
 
@@ -423,9 +448,27 @@ until BQ-P4, when it joins `PUBLISHED` with the release that first publishes it.
 - **OQ-B1.** Does the snapshot need the object store at all? Only `smysl.texts` and the words that
   resolve a locator read part text. Copying objects only when the script names one of them would
   save the copy. Decided in BQ-P2 by measurement.
+
+  **Decided in BQ-P4: always copied.** BQ-P2 did not measure a large library, so the decision
+  rests on this:
+  - On F1 and on the test libraries the copy is lost in the process's start.
+  - Copying only for some words would make the gate decide what the process sees, and the gate
+    is not meant to be relied on (D-B2).
+  - A word reached through a name built at run time would then find no text, and would answer
+    differently instead of being refused.
+
+  If a large library shows the copy costing more than the process, the remedy is a hard link
+  and not a selection.
 - **OQ-B2.** Should `Trust::Trusted` be refused when the script came from a model, by a flag on the
   call? The bridge cannot know where a script came from. The CLI can, when `ask` or an agent hands
   it a script. Decided before BQ-P4.
+
+  **Decided in BQ-P4: no flag on the call.**
+  - `Trust::Trusted` is reached only through `--trusted`, which a person types.
+  - No command that has a model write a script hands that script to the bridge. `ask` and the
+    agent paths produce dossiers and staged units, not Bund2.
+  - A later command that does must call the bridge with `Trust::Sandboxed` and offer no
+    `--trusted`. That is a rule for that command's review, not a field every caller must set.
 
 ---
 
