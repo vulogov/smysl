@@ -120,6 +120,28 @@ pub struct Ranges {
     /// re-solve and rewrite only those rows (see `axis_on_append`). Never written down; a table
     /// read from the sidecar has none, and its first such append solves the whole axis.
     involved: Option<std::sync::Arc<BTreeSet<Subject>>>,
+    /// The `replies` and `quotes` relations under each end, withdrawn ones included: what ties
+    /// two units into one of rule E's components in a library with no datings or manifests, so
+    /// that an append re-solves only the components it touches (AC-8). Built from the store the
+    /// first time it is needed, and carried; never written down.
+    links: Option<std::sync::Arc<Links>>,
+}
+
+/// Rule E's ties, under each end.
+type Links = BTreeMap<Uid, Vec<smysl_core::Relation>>;
+
+fn is_link(kind: &smysl_core::RelKind) -> bool {
+    use smysl_core::schemas::text::{QUOTES, REPLIES};
+    matches!(kind, smysl_core::RelKind::Extension(k) if k == REPLIES || k == QUOTES)
+}
+
+fn link(links: &mut Links, r: &smysl_core::Relation) {
+    if is_link(&r.kind) {
+        links.entry(r.from).or_default().push(r.clone());
+        if r.to != r.from {
+            links.entry(r.to).or_default().push(r.clone());
+        }
+    }
 }
 
 /// Equal by what a table answers: its rows and whether anything dangled. The tree is derived
@@ -171,6 +193,7 @@ impl Ranges {
             danglers,
             maxhi,
             involved: None,
+            links: None,
         }
     }
 
@@ -208,6 +231,7 @@ impl Ranges {
             danglers,
             maxhi,
             involved: self.involved.clone(),
+            links: self.links.clone(),
         }
     }
 
@@ -372,6 +396,9 @@ pub fn axis_on_append(
         })
         .collect();
     let store = lib.store();
+    if !table.danglers() && region_on_append(table, lib, axis, records) {
+        return;
+    }
     if table.danglers() || records.iter().any(bears_on_time) {
         let Some(before) = table.involved.clone() else {
             *table = axis_rebuild(lib, axis);
@@ -411,6 +438,106 @@ pub fn axis_on_append(
         })
         .collect();
     *table = table.spliced(&batch, add, false);
+}
+
+/// [`axis_on_append`] for a library with no datings and no manifests (AC-8, RFC SMYSL-3
+/// §17.1): rule E solved over the components the batch touches, and only their rows rewritten.
+///
+/// In such a library nothing but a `replies` or `quotes` relation ties two units, and since
+/// each component is solved on its own (`engine::solve_components`), a row outside the
+/// components the batch touches is what it was. Those components are the closure, over the
+/// ties, of the batch's units, the subjects of its attestations and the ends of its new ties.
+/// `false`, having changed nothing, when the library has datings or manifests, or the batch
+/// carries a record rule E reads other than a unit, a relation or an attestation (a schema
+/// declaration, a View and a label binding it does not read): the general path then decides. The table forgets what the last full solve involved, which only
+/// that path reads, so the next time it is taken it solves the whole axis.
+fn region_on_append(
+    table: &mut Ranges,
+    lib: &crate::library::Library,
+    axis: Axis,
+    records: &[Record],
+) -> bool {
+    let store = lib.store();
+    let catalog = store.library();
+    if catalog.datings().next().is_some() || catalog.manifests().next().is_some() {
+        return false;
+    }
+    if !records.iter().all(|r| {
+        matches!(
+            r,
+            Record::Unit(_)
+                | Record::Relation(_)
+                | Record::Attestation(_)
+                | Record::LabelBinding(_)
+                | Record::SchemaDecl(_)
+                | Record::View(_)
+        )
+    }) {
+        return false;
+    }
+    // The store already holds the batch: the ties are read from it the first time, and only the
+    // batch's are added after.
+    let mut links = match table.links.take() {
+        Some(l) => {
+            let mut l = l;
+            for r in records {
+                if let Record::Relation(rel) = r {
+                    link(std::sync::Arc::make_mut(&mut l), rel);
+                }
+            }
+            l
+        }
+        None => {
+            let mut l = Links::new();
+            for r in store.relations() {
+                link(&mut l, r);
+            }
+            std::sync::Arc::new(l)
+        }
+    };
+    let mut todo: Vec<Uid> = Vec::new();
+    for r in records {
+        match r {
+            Record::Unit(core) => todo.push(smysl_core::canonical_uid(core)),
+            Record::Attestation(a) => todo.push(a.uid),
+            Record::Relation(rel) if is_link(&rel.kind) => {
+                todo.push(rel.from);
+                todo.push(rel.to);
+            }
+            _ => {}
+        }
+    }
+    let mut units: BTreeSet<Uid> = BTreeSet::new();
+    let mut ties: BTreeMap<Uid, smysl_core::Relation> = BTreeMap::new();
+    while let Some(u) = todo.pop() {
+        if !units.insert(u) {
+            continue;
+        }
+        for r in links.get(&u).into_iter().flatten() {
+            ties.entry(r.uid()).or_insert_with(|| r.clone());
+            for end in [r.from, r.to] {
+                if !units.contains(&end) {
+                    todo.push(end);
+                }
+            }
+        }
+    }
+    let ties: Vec<smysl_core::Relation> = ties.into_values().collect();
+    let Some(found) = crate::time::engine::findings_within(store, axis, &units, &ties) else {
+        table.links = Some(links);
+        return false;
+    };
+    let touched: BTreeSet<Subject> = units.iter().map(|u| Subject::Unit(*u)).collect();
+    let add: Vec<Row> = touched
+        .iter()
+        .filter(|s| matches!(s, Subject::Unit(u) if store.contains_uid(u)))
+        .map(|s| row_of(store, &found, *s, axis))
+        .collect();
+    let mut next = table.spliced(&touched, add, false);
+    next.involved = None;
+    next.links = Some(std::mem::take(&mut links));
+    *table = next;
+    true
 }
 
 /// Whether a record can move a subject's effective time other than by seeding its own.

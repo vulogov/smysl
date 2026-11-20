@@ -228,9 +228,23 @@ fn generate(rng: &mut Rng, size: usize) -> Vec<Record> {
     for i in 0..size {
         let gist = format!("generated unit {}", rng.below(10_000));
         let built = match rng.below(4) {
-            0 => UnitCoreBuilder::new(KernelType::Evidence, gist, Status::Measured)
-                .source(SourceRef::new(SourceKind::Metric, "m"))
-                .build(),
+            0 => {
+                // Times for rule E: a publication date (well formed, malformed, or out of the
+                // instant range) and an observation, which the first sighting can contradict.
+                let mut src = SourceRef::new(SourceKind::Metric, "m");
+                if rng.chance(2) {
+                    src.published = Some(
+                        ["2020-05", "1999", "2031-02-03", "20x0", "99999-01"][rng.below(5)]
+                            .to_string(),
+                    );
+                }
+                if rng.chance(2) {
+                    src = src.observed_at([5, 1_588_291_200_000, 1_900_000_000_000][rng.below(3)]);
+                }
+                UnitCoreBuilder::new(KernelType::Evidence, gist, Status::Measured)
+                    .source(src)
+                    .build()
+            }
             1 => UnitCoreBuilder::new(KernelType::Hypothesis, gist, Status::Speculative).build(),
             _ if uids.is_empty() => {
                 UnitCoreBuilder::new(KernelType::Claim, gist, Status::Speculative).build()
@@ -259,7 +273,12 @@ fn generate(rng: &mut Rng, size: usize) -> Vec<Record> {
                 a.clone(),
                 [Op::Authored, Op::Imported, Op::Transformed][rng.below(3)],
                 [Rung::Computed, Rung::Document, Rung::Web, Rung::Model][rng.below(4)],
-                Hlc::new(rng.below(100) as u64, rng.below(4) as u32, a),
+                // A first sighting before or after the times the unit states.
+                Hlc::new(
+                    [rng.below(100) as u64, 1_600_000_000_000, 2_000_000_000_000][rng.below(3)],
+                    rng.below(4) as u32,
+                    a,
+                ),
             )));
         }
     }
@@ -296,6 +315,7 @@ fn generate(rng: &mut Rng, size: usize) -> Vec<Record> {
         }
         records.push(Record::View(v));
     }
+    // `replies` and `quotes` tie units into rule E's components.
     let kinds = [
         RelKind::Rebuts,
         RelKind::Supersedes,
@@ -303,6 +323,9 @@ fn generate(rng: &mut Rng, size: usize) -> Vec<Record> {
         RelKind::Sequences,
         RelKind::Elaborates,
         RelKind::Retracts,
+        RelKind::Extension(smysl_core::schemas::text::REPLIES.to_string()),
+        RelKind::Extension(smysl_core::schemas::text::QUOTES.to_string()),
+        RelKind::Extension(smysl_core::schemas::text::REPLIES.to_string()),
     ];
     for _ in 0..size {
         if uids.len() < 2 {

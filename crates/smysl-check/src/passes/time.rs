@@ -44,6 +44,43 @@ pub fn run(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     consequences(store, report);
 }
 
+/// The pass over a region of units, for a kept check (AC-8, RFC SMYSL-3 §17.1): what [`run`]
+/// reports about them, in a store with no datings and no manifests, where every finding is a
+/// unit's. `false`, having reported nothing, for a store with either.
+///
+/// `units` must be closed under the `replies` and `quotes` relations, and `links` must hold
+/// every one touching them, as `findings_within` asks.
+pub(crate) fn run_within(
+    store: &(impl StoreRead + ?Sized),
+    units: &std::collections::BTreeSet<smysl_core::Uid>,
+    links: &[smysl_core::Relation],
+    report: &mut Report,
+) -> bool {
+    let mut found = Vec::new();
+    for axis in Axis::ALL.iter().copied() {
+        match smysl_text::time::engine::findings_within(store, axis, units, links) {
+            Some(e) => found.push((axis, e)),
+            None => return false,
+        }
+    }
+    for u in units {
+        let Some(unit) = store.get(u) else { continue };
+        if let Some(published) = unit
+            .core
+            .source
+            .as_ref()
+            .and_then(|s| s.published.as_deref())
+        {
+            judge(published, Subject::Unit(*u), "`source.published`", report);
+        }
+        observed_outside(u, &unit.core, report);
+    }
+    for (axis, e) in &found {
+        report_findings(store, *axis, e, report);
+    }
+    true
+}
+
 /// `SMY-E410` and `SMY-W449`: every EDTF string a store holds, read on its own.
 ///
 /// Three carriers, and all three are checked rather than only the unit field: a manifest's
@@ -119,24 +156,30 @@ fn judge(text: &str, subject: Subject, carrier: &str, report: &mut Report) {
 /// because which of the two is wrong is not a thing a checker can know.
 fn observed_outside_published(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     for (uid, unit) in store.units() {
-        let Some(source) = unit.core.source.as_ref() else {
-            continue;
+        observed_outside(uid, &unit.core, report);
+    }
+}
+
+fn observed_outside(uid: &smysl_core::Uid, core: &smysl_core::UnitCore, report: &mut Report) {
+    {
+        let Some(source) = core.source.as_ref() else {
+            return;
         };
         let (Some(observed), Some(published)) = (source.observed, source.published.as_deref())
         else {
-            continue;
+            return;
         };
         let Ok(v) = edtf::parse(published) else {
             // Malformed is `SMY-E410`'s to say, and saying it twice about one string would
             // make a reader look for two defects.
-            continue;
+            return;
         };
         let Ok(ms) = i64::try_from(observed) else {
-            continue;
+            return;
         };
         let interval = extent::to_interval(&v);
         if interval.is_undated() || interval.contains(Instant(ms)) {
-            continue;
+            return;
         }
         report.push(
             Diagnostic::new(Code::W411)
@@ -159,6 +202,18 @@ fn consequences(store: &(impl StoreRead + ?Sized), report: &mut Report) {
         // What rule E found, without the effective time of every subject: the network over the
         // subjects anything bears on, which on a store with nothing dated is none of them.
         let e = findings(store, axis);
+        report_findings(store, axis, &e, report);
+    }
+}
+
+/// One axis's findings, as diagnostics.
+fn report_findings(
+    store: &(impl StoreRead + ?Sized),
+    axis: Axis,
+    e: &smysl_text::time::engine::Effective,
+    report: &mut Report,
+) {
+    {
         for c in &e.inconsistent {
             let datings = if c.datings.is_empty() {
                 "no dating".to_string()

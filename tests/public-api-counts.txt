@@ -34,7 +34,7 @@ smysl-embed      73
 smysl-provider   806
 smysl-ingest     2004
 smysl-tui        232
-smysl-text       4195
+smysl-text       4197
 smysl-query      4029
 smysl-measure    3608
 smysl-lib        1651

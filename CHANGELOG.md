@@ -1961,6 +1961,57 @@ declaration and the first View. With `--verify`, all 1,032 operations of a 150-i
 run matched the full check. What still grows with the store is rule E, `Overlay::new` and the
 append's range index: steps 3 and 4.
 
+### AC-8 step 3: rule E by component
+
+**The engine solves each component on its own.** Two subjects are in one component when a live
+dating or a free constraint names both. `engine::solve` now gathers the datings and free
+constraints as before and solves each component as its own network, in the full check too, with
+its subjects, datings and constraints in their original order.
+
+- **Why the answer is unchanged:** no edge joins two components, so a shortest path stays in
+  its own. A tie between causes is broken by their relative order, which each component keeps.
+- **The one input that crossed components** was the search's cutoff on a negative cycle, which
+  counts the network's variables. A new property in `tests/time_algebra.rs` adds 60 unrelated
+  units around 40 stores whose strict datings close contradictory cycles, and rule E says the
+  same about each. That held for the old single network as well, so the cutoff was not seen to
+  change a finding. Every existing rule E test passes, P-E1 to P-E8 among them.
+
+**A region can be solved alone.** In a store with no datings and no manifests, only `replies`
+and `quotes` relations tie two units, and every rule E finding is a unit's.
+
+- `engine::findings_within(store, axis, units, links)` solves the components of `units`, given
+  the ties that touch them. It returns `None` for a store with datings or manifests.
+- `constraints::free` is split so that the full and regional paths build each constraint with
+  the same code: `free_within` gives the region's constraints in the full list's order.
+- **The kept check** keeps the ties under each end. For a batch, it re-solves the closure of
+  the batch's units, its attestations' subjects and its new ties' ends, and replaces rule E's
+  findings about those units. Elsewhere it runs the whole pass, as before.
+- **The range index** does the same on append (`axis_on_append`): it solves the region and
+  rewrites only its rows. A schema declaration, a View or a label binding in the batch does not
+  stop it, since rule E reads none of them. A dating or a manifest in the library sends it to
+  the path it had.
+
+**Held by:**
+
+- **The kept check's harness:** the generator now writes publication dates (well formed,
+  malformed, out of range), observations, attestation clocks that agree or contradict them, and
+  `replies` and `quotes` ties. Four mutations of the region are caught: attestation subjects,
+  new units, the closure and new ties.
+- **The range index:** a new test grows six libraries with no manifests over 40 appends each,
+  some ties arriving before their units, and compares the kept `said` and `composed` tables with
+  a rebuild after every append. Two mutations of the region are caught.
+
+**On OKO's path** (`oko_ledger`, 1,000 investigations, late commits, p50):
+
+| | Stage | Commit | Whole run |
+|---|---|---|---|
+| Before AC-8 | 30.4 ms | 43.2 ms | 167 s |
+| Step 2 | 14.6 ms | 27.2 ms | 107 s |
+| Step 3 | 2.9 ms | 6.9 ms | 39 s |
+
+What still grows with the store is `Overlay::new`, which clones the interpretive layer and the
+library for every batch, and the adjacency it rebuilds. That is step 4.
+
 ---
 
 ## 1.16.0 — 2026-11-16

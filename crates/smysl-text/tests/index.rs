@@ -1171,3 +1171,104 @@ fn a_one_document_scope_cannot_tell_a_common_term_from_a_rare_one() {
         "a one-document scope distinguished two terms it has no statistics to distinguish"
     );
 }
+
+/// AC-8 (RFC SMYSL-3 §17.1): in a library with no datings and no manifests, an append re-solves
+/// only the components it touches and rewrites their rows. After every append of a random
+/// growth (units with publication dates and observations, attestations whose clocks agree or
+/// contradict them, `replies` and `quotes` ties, a tie arriving before either of its units),
+/// the kept axis tables are the tables rebuilt from scratch.
+#[test]
+fn axis_tables_kept_by_component_are_the_tables_rebuilt() {
+    use smysl_core::types::provenance::{Attestation, Op, Rung};
+    use smysl_core::{canonical_uid, RelKind, Relation};
+
+    struct Rng(u64);
+    impl Rng {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            ((z ^ (z >> 31)) % n as u64) as usize
+        }
+    }
+
+    for seed in 0..6u64 {
+        let dir = Scratch::new(&format!("components-{seed}"));
+        let mut lib = Library::create(dir.path()).expect("created");
+        let mut r = Rng(seed);
+        let mut uids: Vec<smysl_core::Uid> = Vec::new();
+        let mut held: Vec<Record> = Vec::new();
+        for step in 0..40 {
+            let mut batch = Vec::new();
+            for _ in 0..1 + r.below(3) {
+                let mut src = SourceRef::new(SourceKind::Metric, "m");
+                if r.below(2) == 0 {
+                    src.published = Some(["2020-05", "1999", "2031-02-03"][r.below(3)].to_string());
+                }
+                if r.below(2) == 0 {
+                    src = src.observed_at([5, 1_588_291_200_000, 1_900_000_000_000][r.below(3)]);
+                }
+                let core = UnitCoreBuilder::new(
+                    KernelType::Evidence,
+                    format!("unit {seed}.{step}.{}", r.below(10_000)),
+                    Status::Measured,
+                )
+                .source(src)
+                .build()
+                .expect("a unit");
+                let uid = canonical_uid(&core);
+                // Some units are held back a step, so a tie can arrive before its end does.
+                if r.below(4) == 0 {
+                    held.push(Record::Unit(core));
+                } else {
+                    batch.push(Record::Unit(core));
+                }
+                uids.push(uid);
+            }
+            batch.append(&mut held);
+            for _ in 0..r.below(3) {
+                let u = uids[r.below(uids.len())];
+                let ms = [r.below(100) as u64, 1_600_000_000_000, 2_000_000_000_000][r.below(3)];
+                batch.push(Record::Attestation(Attestation::new(
+                    u,
+                    agent(),
+                    Op::Imported,
+                    Rung::Computed,
+                    Hlc::new(ms, 0, agent()),
+                )));
+            }
+            if uids.len() > 1 {
+                for _ in 0..r.below(3) {
+                    let (a, b) = (uids[r.below(uids.len())], uids[r.below(uids.len())]);
+                    let kind = [
+                        smysl_core::schemas::text::REPLIES,
+                        smysl_core::schemas::text::QUOTES,
+                    ][r.below(2)];
+                    batch.push(Record::Relation(Relation::new(
+                        RelKind::Extension(kind.to_string()),
+                        a,
+                        b,
+                    )));
+                }
+            }
+            lib.append_records(&batch).expect("appended");
+            let rebuilt = Index::rebuild(&lib);
+            assert_eq!(
+                lib.index().said,
+                rebuilt.said,
+                "seed {seed}, step {step}: the kept `said` table is not the rebuilt one"
+            );
+            assert_eq!(
+                lib.index().composed,
+                rebuilt.composed,
+                "seed {seed}, step {step}: `composed`"
+            );
+        }
+        // Not vacuous: dated units put rows in the table.
+        assert!(
+            lib.index().said.rows().len() > 10,
+            "seed {seed}: the table stayed empty"
+        );
+    }
+}

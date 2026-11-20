@@ -141,6 +141,15 @@ struct Derived {
     measured: BTreeSet<Uid>,
     /// Relations a withdrawal names.
     withdrawn: BTreeSet<Uid>,
+    /// The `replies` and `quotes` relations, withdrawn ones included, under each end: what ties
+    /// two units into one of rule E's components in a store with no datings or manifests.
+    links: BTreeMap<Uid, Vec<smysl_core::Relation>>,
+}
+
+/// Whether a relation ties two units for rule E.
+fn is_link(kind: &RelKind) -> bool {
+    use smysl_core::schemas::text::{QUOTES, REPLIES};
+    matches!(kind, RelKind::Extension(k) if k == REPLIES || k == QUOTES)
 }
 
 fn measured_by() -> RelKind {
@@ -164,6 +173,7 @@ impl Derived {
             if r.kind == kind {
                 d.measured.insert(r.from);
             }
+            d.link(r);
         }
         for w in store.withdrawals() {
             d.withdrawn.insert(w.relation);
@@ -189,14 +199,26 @@ impl Derived {
         }
     }
 
+    fn link(&mut self, r: &smysl_core::Relation) {
+        if is_link(&r.kind) {
+            self.links.entry(r.from).or_default().push(r.clone());
+            if r.to != r.from {
+                self.links.entry(r.to).or_default().push(r.clone());
+            }
+        }
+    }
+
     /// The batch's new records, which [`Checked::refusal`] let through.
     fn absorb(&mut self, fresh: &[Record]) {
         let kind = measured_by();
         for r in fresh {
             match r {
                 Record::Unit(core) => self.unit(&smysl_core::canonical_uid(core), core),
-                Record::Relation(rel) if rel.kind == kind => {
-                    self.measured.insert(rel.from);
+                Record::Relation(rel) => {
+                    if rel.kind == kind {
+                        self.measured.insert(rel.from);
+                    }
+                    self.link(rel);
                 }
                 _ => {}
             }
@@ -427,6 +449,13 @@ impl Checked {
         let time = opts.runs(Pass::Time);
         #[cfg(not(feature = "text"))]
         let time = false;
+        // Rule E over the components the batch touches, where the store's findings are all
+        // units' (no datings, no manifests); otherwise over the whole store.
+        let region = if time {
+            self.region(union, fresh)
+        } else {
+            None
+        };
 
         // The kept findings the batch cannot change.
         let mut out = Report::new();
@@ -444,7 +473,10 @@ impl Checked {
                 Family::Kept | Family::Windows => true,
                 Family::Repeats => false,
                 Family::Causal => !causal,
-                Family::Time => !time,
+                Family::Time => match (&region, &f.subject) {
+                    (Some((units, _)), Subject::Unit(u)) => !units.contains(u),
+                    _ => !time,
+                },
             };
             if keep {
                 out.push(f.clone());
@@ -491,7 +523,13 @@ impl Checked {
         }
         #[cfg(feature = "text")]
         if time {
-            passes::time::run(union, &mut out);
+            let done = match &region {
+                Some((units, links)) => passes::time::run_within(union, units, links, &mut out),
+                None => false,
+            };
+            if !done {
+                passes::time::run(union, &mut out);
+            }
         }
         // Counted afresh: a recount removed findings the counts still hold.
         let mut report = Report::new();
@@ -500,6 +538,63 @@ impl Checked {
         }
         report.sort();
         Some(report)
+    }
+
+    /// The units rule E must solve again, closed under `replies` and `quotes`, and the relations
+    /// that tie them; `None` where rule E's findings are not all units' (a dating, a manifest,
+    /// or a kept finding that names no unit), so the whole store is solved.
+    fn region<S: StoreRead + ?Sized>(
+        &self,
+        union: &Overlay<'_, S>,
+        fresh: &[Record],
+    ) -> Option<(BTreeSet<Uid>, Vec<smysl_core::Relation>)> {
+        let lib = union.library();
+        if lib.datings().next().is_some() || lib.manifests().next().is_some() {
+            return None;
+        }
+        let unit_time = self
+            .report
+            .diagnostics
+            .iter()
+            .all(|f| family(f) != Some(Family::Time) || matches!(f.subject, Subject::Unit(_)));
+        if !unit_time {
+            return None;
+        }
+        // What the batch can move: its units' seeds and first sightings, an attested unit's
+        // first sighting, and the ends of a new tie.
+        let mut fresh_links: BTreeMap<Uid, Vec<&smysl_core::Relation>> = BTreeMap::new();
+        let mut todo: Vec<Uid> = Vec::new();
+        for r in fresh {
+            match r {
+                Record::Unit(core) => todo.push(smysl_core::canonical_uid(core)),
+                Record::Attestation(a) => todo.push(a.uid),
+                Record::Relation(rel) if is_link(&rel.kind) => {
+                    fresh_links.entry(rel.from).or_default().push(rel);
+                    fresh_links.entry(rel.to).or_default().push(rel);
+                    todo.push(rel.from);
+                    todo.push(rel.to);
+                }
+                _ => {}
+            }
+        }
+        let mut units: BTreeSet<Uid> = BTreeSet::new();
+        let mut links: BTreeMap<Uid, smysl_core::Relation> = BTreeMap::new();
+        while let Some(u) = todo.pop() {
+            if !units.insert(u) {
+                continue;
+            }
+            let kept = self.derived.links.get(&u).into_iter().flatten();
+            let new = fresh_links.get(&u).into_iter().flatten().copied();
+            for r in kept.chain(new) {
+                links.entry(r.uid()).or_insert_with(|| r.clone());
+                for end in [r.from, r.to] {
+                    if !units.contains(&end) {
+                        todo.push(end);
+                    }
+                }
+            }
+        }
+        Some((units, links.into_values().collect()))
     }
 
     /// `SMY-W614`, recounted for the keys the batch adds a digest to.

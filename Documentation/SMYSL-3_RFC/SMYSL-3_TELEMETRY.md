@@ -889,12 +889,23 @@ union, restricted in what they iterate. The cached report is kept by rule family
 | cycles | E061, W062 | the strongly connected components a new edge can close |
 | time | rule E | the constraint components the batch touches (below) |
 
-**Rule E by component.** Variables are tied by `reply` and `quotes` edges, manifest parents and
-supersedes, and relative datings with a unit target. Contested status and bounds are local to a
-component of those edges, so a batch is solved over the components it touches. The range index's
-`axis_on_append` uses the same components. One question is open until it is measured: under a
-negative cycle, Bellman-Ford's cutoff is the network's variable count, so a variable upstream of a
-cycle might be bounded differently when its component is solved alone.
+**Rule E by component.** Two subjects are in one component when a live dating or a free
+constraint names both. The engine solves each component as its own network, in the full check
+too, with its subjects, datings and free constraints in their original order: no edge joins two
+components, and a tie between causes is broken by their relative order, so the answer is the
+one network's. The one input that reached across components was the search's cutoff on a
+negative cycle, which counts the network's variables. `tests/time_algebra.rs` adds unrelated
+units around 40 stores whose strict datings close contradictory cycles and finds rule E's answer
+about each unchanged, under the old single network as under the split. The cutoff was not seen
+to change a finding.
+
+In a store with no datings and no manifests, only `replies` and `quotes` relations tie two units,
+and every rule E finding is a unit's. There `engine::findings_within` solves a region: the
+closure, over those relations, of the batch's units, the subjects of its attestations and the
+ends of its new ties. The kept check keeps the relations under each end and re-solves only that
+region. The range index's `axis_on_append` does the same and rewrites only the region's rows. A
+store with datings or manifests is solved whole, as before: that is the text library's shape,
+where appends are few and large, and not the ledger's.
 
 **Fallbacks**, each recorded in the report's `path`: options other than the cache's; a View
 whose granularity profile the store does not have; a schema declaration the store does not hold;
@@ -905,6 +916,12 @@ transitive through rule R.
 harness and `--verify`. (2) Per-unit, dangling, per-record and aggregate families. (3) Rule E
 by component, in `check` and in the range index. (4) `Overlay` without cloning the store's
 interpretive layer and library; cycles from the new edges. (5) Measured at 10⁴ and 10⁵ units.
+
+| `make oko-ledger`, 1,000 investigations, late commits, p50 | stage | commit | run |
+|---|---|---|---|
+| before AC-8 | 30.4 ms | 43.2 ms | 167 s |
+| step 2 | 14.6 ms | 27.2 ms | 107 s |
+| step 3 | 2.9 ms | 6.9 ms | 39 s |
 
 ## 18. Crates
 

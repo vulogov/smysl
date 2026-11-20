@@ -234,6 +234,54 @@ pub fn findings_among(
     solve(store, axis, Some(maybe_empty), false)
 }
 
+/// [`findings`] over a region: what it reports about the units of `units`, for a store with no
+/// datings and no manifests (AC-8, RFC SMYSL-3 §17.1). `None` for a store with either.
+///
+/// Exact when `units` is closed under the store's components: every unit a `replies` or
+/// `quotes` relation ties to one of them is among them, and `links` holds those relations,
+/// as [`constraints::free_within`] asks. In such a store nothing else ties two subjects, so the
+/// region's components are the store's, and `solve_components` solves each the same way
+/// whatever else the store holds. `dated` holds the region's involved subjects; the
+/// store-level findings (held, not live, unresolved) are a dating's, and there are none.
+pub fn findings_within(
+    store: &(impl StoreRead + ?Sized),
+    axis: Axis,
+    units: &BTreeSet<Uid>,
+    links: &[smysl_core::Relation],
+) -> Option<Effective> {
+    if store.library().datings().next().is_some() || store.library().manifests().next().is_some() {
+        return None;
+    }
+    let mut out = Effective {
+        axis_said: axis == Axis::Said,
+        ..Default::default()
+    };
+    let frees = constraints::free_within(store, units, links);
+    let mut involved: BTreeSet<Subject> = BTreeSet::new();
+    for f in &frees {
+        involved.extend(free_names(f));
+    }
+    involved.retain(|s| match s {
+        Subject::Unit(u) => store.contains_uid(u),
+        Subject::Manifest(_) => false,
+    });
+    // An empty seed is a contradiction by itself, and only the said axis seeds from a core.
+    if axis == Axis::Said {
+        for u in units {
+            let s = Subject::Unit(*u);
+            if involved.contains(&s) || !store.contains_uid(u) {
+                continue;
+            }
+            if seed(store, &s, axis).interval.is_empty() {
+                involved.insert(s);
+            }
+        }
+    }
+    let subjects: Vec<Subject> = involved.into_iter().collect();
+    solve_components(store, axis, &[], &frees, subjects, &mut out);
+    Some(out)
+}
+
 /// Rule E over the subjects anything bears on; `every` fills in the rest from their seeds, and
 /// `among`, when given, is the only subjects whose seeds can be empty.
 fn solve(
@@ -321,23 +369,141 @@ fn solve(
     // In a fixed order: a variable index is a function of the store's contents and not of its
     // iteration order, and the involved subjects keep the relative order all of them had.
     let subjects: Vec<Subject> = involved.into_iter().collect();
+    solve_components(store, axis, &live, &frees, subjects, &mut out);
+    out
+}
+
+/// Steps 2 to 6, one connected component at a time (AC-8, RFC SMYSL-3 §17.1).
+///
+/// Two subjects are in one component when a live dating or a free constraint names both. Each
+/// component is its own network, over its own subjects in their order, with the datings and
+/// free constraints that name one of them in theirs, so that a tie between two causes breaks the
+/// same way however the store around it grows.
+///
+/// What makes this the same answer as one network over every subject: no edge joins two
+/// components, so a shortest path stays inside its own, and a tie between two causes is broken
+/// by their relative order, which each component keeps. The one input that did reach across
+/// components is the search's cutoff on a negative cycle, which counts the network's variables;
+/// within a component it counts the component's. `tests/time_algebra.rs` holds that adding
+/// unrelated units changes nothing rule E says about a component, contradictions included, and
+/// it held for one network over the store too: the cutoff was not seen to change a finding.
+/// What the split buys is a region that can be solved alone (`findings_within`), and a solve
+/// that grows with components rather than with the store's whole network.
+fn solve_components(
+    store: &(impl StoreRead + ?Sized),
+    axis: Axis,
+    live: &[Live],
+    frees: &[Free],
+    subjects: Vec<Subject>,
+    out: &mut Effective,
+) {
     let index: BTreeMap<Subject, usize> =
         subjects.iter().enumerate().map(|(i, s)| (*s, i)).collect();
-    if subjects.is_empty() {
-        out.held.sort_unstable();
-        out.held.dedup();
-        out.not_live.sort_unstable();
-        out.not_live.dedup();
-        out.unresolved.sort_unstable();
-        out.unresolved.dedup();
-        return out;
+    // Union-find over the subjects, joined by what each constraint names.
+    let mut parent: Vec<usize> = (0..subjects.len()).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
     }
+    let join = |parent: &mut Vec<usize>, named: &[Subject]| -> Option<usize> {
+        let mut first: Option<usize> = None;
+        for s in named {
+            let Some(&i) = index.get(s) else { continue };
+            match first {
+                None => first = Some(i),
+                Some(f) => {
+                    let (a, b) = (root(parent, f), root(parent, i));
+                    if a != b {
+                        parent[a.max(b)] = a.min(b);
+                    }
+                }
+            }
+        }
+        first
+    };
+    for l in live {
+        join(&mut parent, &dating_names(l));
+    }
+    for f in frees {
+        join(&mut parent, &free_names(f));
+    }
+    // Each component's subjects, datings and free constraints, each in its original order.
+    let mut parts: BTreeMap<usize, Part> = BTreeMap::new();
+    for (i, s) in subjects.iter().enumerate() {
+        let r = root(&mut parent, i);
+        parts.entry(r).or_default().0.push(*s);
+    }
+    for l in live {
+        if let Some(i) = dating_names(l).iter().find_map(|s| index.get(s).copied()) {
+            let r = root(&mut parent, i);
+            parts.entry(r).or_default().1.push(l.clone());
+        }
+    }
+    for f in frees {
+        if let Some(i) = free_names(f).iter().find_map(|s| index.get(s).copied()) {
+            let r = root(&mut parent, i);
+            parts.entry(r).or_default().2.push(*f);
+        }
+    }
+    for (_, (subjects, live, frees)) in parts {
+        solve_part(store, axis, &live, &frees, subjects, out);
+    }
+    out.not_applied.sort_by(|a, b| a.id.cmp(&b.id));
+    out.not_applied.dedup_by(|a, b| a.id == b.id);
+    out.inconsistent.sort_by(|a, b| a.id.cmp(&b.id));
+    out.inconsistent.dedup_by(|a, b| a.id == b.id);
+    out.held.sort_unstable();
+    out.held.dedup();
+    out.not_live.sort_unstable();
+    out.not_live.dedup();
+    out.unresolved.sort_unstable();
+    out.unresolved.dedup();
+}
+
+/// One component: its subjects, live datings and free constraints, each in original order.
+type Part = (Vec<Subject>, Vec<Live>, Vec<Free>);
+
+/// The subjects a live dating names: its scope, and a unit it is relative to.
+fn dating_names(l: &Live) -> Vec<Subject> {
+    let mut v = l.scope.clone();
+    if let DatingValue::Relative {
+        target: DatingTarget::Unit(u),
+        ..
+    } = &l.dating.value
+    {
+        v.push(Subject::Unit(*u));
+    }
+    v
+}
+
+/// The subjects a free constraint names.
+fn free_names(f: &Free) -> Vec<Subject> {
+    match f {
+        Free::Order { earlier, later, .. } => vec![*earlier, *later],
+        Free::NoLater { subject, .. } => vec![*subject],
+    }
+}
+
+/// Steps 2 to 6 over one component's subjects.
+fn solve_part(
+    store: &(impl StoreRead + ?Sized),
+    axis: Axis,
+    live: &[Live],
+    frees: &[Free],
+    subjects: Vec<Subject>,
+    out: &mut Effective,
+) {
+    let index: BTreeMap<Subject, usize> =
+        subjects.iter().enumerate().map(|(i, s)| (*s, i)).collect();
 
     // 2. Seeds: the as-recorded interval and the status of the value that set it.
     let mut state: Vec<Dated> = subjects.iter().map(|s| seed(store, s, axis)).collect();
 
     // 3. Offsets, applied to the as-recorded instant before propagation (step 4).
-    apply_offsets(&live, &index, &mut state, &mut out, store, axis);
+    apply_offsets(live, &index, &mut state, out, store, axis);
 
     // 6. Stratified tightening.
     for s in TimeStatus::STRATA.iter().copied() {
@@ -354,13 +520,13 @@ fn solve(
                 net.upper(i, last(at), current);
             }
         }
-        for d in &live {
+        for d in live {
             if d.status < s {
                 continue;
             }
             add_dating(&mut net, &mut causes, d, &index, &state);
         }
-        for f in &frees {
+        for f in frees {
             if f.status() < s {
                 continue;
             }
@@ -379,8 +545,8 @@ fn solve(
             out.inconsistent.push(contention(
                 DetectionKind::TemporalInconsistency,
                 subjects[*v],
-                &live,
-                &frees,
+                live,
+                frees,
                 s,
             ));
         }
@@ -449,26 +615,15 @@ fn solve(
                 out.inconsistent.push(contention(
                     DetectionKind::TemporalInconsistency,
                     subjects[i],
-                    &live,
-                    &frees,
+                    live,
+                    frees,
                     s,
                 ));
             }
         }
     }
 
-    out.not_applied.sort_by(|a, b| a.id.cmp(&b.id));
-    out.not_applied.dedup_by(|a, b| a.id == b.id);
-    out.inconsistent.sort_by(|a, b| a.id.cmp(&b.id));
-    out.inconsistent.dedup_by(|a, b| a.id == b.id);
-    out.held.sort_unstable();
-    out.held.dedup();
-    out.not_live.sort_unstable();
-    out.not_live.dedup();
-    out.unresolved.sort_unstable();
-    out.unresolved.dedup();
     out.dated.extend(subjects.into_iter().zip(state));
-    out
 }
 
 /// The last instant a half-open end admits: a network speaks in inclusive instants.
