@@ -922,6 +922,13 @@ interpretive layer and library; cycles from the new edges. (5) Measured at 10⁴
 | before AC-8 | 30.4 ms | 43.2 ms | 167 s |
 | step 2 | 14.6 ms | 27.2 ms | 107 s |
 | step 3 | 2.9 ms | 6.9 ms | 39 s |
+| step 4 | 0.21 ms | 4.0 ms | 28 s |
+
+Step 4's `Overlay` reads through its base's interpretive layer and holds only the batch's
+entries, each merged with the base's entry for its key; the merged layer is built whole only for
+a caller that asks for the layer itself. `SMY-W062` is recomputed only when a new causal edge
+closes a cycle or points at a node on or upstream of one. What remains of the commit is the
+append's `fsync`.
 
 ## 18. Crates
 

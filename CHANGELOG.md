@@ -2012,6 +2012,43 @@ and `quotes` relations tie two units, and every rule E finding is a unit's.
 What still grows with the store is `Overlay::new`, which clones the interpretive layer and the
 library for every batch, and the adjacency it rebuilds. That is step 4.
 
+### AC-8 step 4: an overlay without a copy of the store, and cycles from the new edges
+
+**`Overlay` reads through its base's interpretive layer.** It used to clone the base's relations,
+threads, views, withdrawals, resolutions and commitments for every batch, then fold the batch
+in. Building and dropping that clone was most of what staging cost once the check was kept.
+
+- **What it keeps:** the batch's entries, each copied up from the base's entry for the same key
+  before the batch is folded in, so it is the union's answer for every key it has.
+- **How it is read:** lookups check the batch's entries first; iteration merges the two layers
+  in key order, the batch's entry standing for an equal key's.
+- **What it builds:** the merged layer whole only for a caller that asks for the layer itself,
+  which is an overlay of an overlay, a union of it, or its state hash.
+- **No API change:** `Relations`, `Threads`, `Views`, `Withdrawals`, `Resolutions` and `Commits`
+  keep their `Debug` and `Clone`; their fields were never public.
+- **Held by** `crates/smysl-graph/tests/store_conformance.rs`, which already compared an overlay,
+  split at four points, an overlay of an overlay and an interleaved one, with the store built
+  from all their records, method by method, lifecycle records included. It passes unchanged.
+
+**`SMY-W062` moves only when it can.** The kept check keeps the causal edges and the nodes
+W062 reports, and recomputes W062 over the union's adjacency only when a new `causes` or
+`sequences` edge closes a cycle or points at a node already on one or upstream of one. An edge
+points at what its node depends on, so `topo` cannot order a node that reaches a cycle, and
+`cycles` reports each such node as a group of its own. The first version of this rule checked
+the other end of the edge, and the harness caught it on generated store 39. Two mutations of
+the rule are caught.
+
+**On OKO's path** (`oko_ledger`, 1,000 investigations, p50):
+
+| | Stage, first tenth | Stage, last tenth | Commit, first tenth | Commit, last tenth | Whole run |
+|---|---|---|---|---|---|
+| Before AC-8 | 1.4 ms | 30.4 ms | 5.8 ms | 43.2 ms | 167 s |
+| Step 3 | 0.35 ms | 2.9 ms | 4.0 ms | 6.9 ms | 39 s |
+| Step 4 | 0.10 ms | 0.21 ms | 3.9 ms | 4.0 ms | 28 s |
+
+The commit no longer grows with the ledger: almost all of it is the append's `fsync`, which is
+per commit and constant. Step 5 measures at 10⁴ and 10⁵ units.
+
 ---
 
 ## 1.16.0 — 2026-11-16

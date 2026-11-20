@@ -31,9 +31,11 @@
 //!   back would change): kept, and the batch's new records' added;
 //! - **aggregates**: `SMY-W013` gains the batch's undeclared kinds, `SMY-W614` is recounted for
 //!   the window keys the batch adds a digest to, `SMY-W111` is recomputed (it is a count);
-//! - **cycles**: `SMY-W062` is recomputed when the batch adds a `causes` or `sequences` edge.
-//!   `SMY-E061` is unreachable (`passes::integrity`) and is kept;
-//! - **rule E**: recomputed over the whole store (until AC-8 step 3).
+//! - **cycles**: `SMY-W062` is recomputed only when a new `causes` or `sequences` edge closes a
+//!   cycle or points at a node already on one or upstream of one, which the cache finds over the
+//!   causal edges it keeps. `SMY-E061` is unreachable (`passes::integrity`) and is kept;
+//! - **rule E**: re-solved over the components the batch touches, where every finding is a
+//!   unit's (no datings, no manifests); otherwise over the whole store.
 //!
 //! A batch falls back to the full check when it changes something global: other options, a
 //! View whose profile the store does not have, a schema declaration, an edge a withdrawal
@@ -117,8 +119,9 @@ pub struct BatchReport {
 
 #[derive(Debug, Clone)]
 enum Next {
-    /// The batch's new records, folded into the indexes.
-    Absorb(Vec<Record>),
+    /// The batch's new records, folded into the indexes, and `SMY-W062`'s nodes when the batch
+    /// moved them.
+    Absorb(Vec<Record>, Option<BTreeSet<Uid>>),
     /// Indexes rebuilt from the store with the batch.
     Replace(Box<Derived>),
 }
@@ -144,6 +147,30 @@ struct Derived {
     /// The `replies` and `quotes` relations, withdrawn ones included, under each end: what ties
     /// two units into one of rule E's components in a store with no datings or manifests.
     links: BTreeMap<Uid, Vec<smysl_core::Relation>>,
+    /// The `causes` and `sequences` edges, not withdrawn: `SMY-W062`'s graph.
+    causal: BTreeMap<Uid, BTreeSet<Uid>>,
+    /// The nodes `SMY-W062` reports: on a causal cycle, or with a path into one.
+    cyclic: BTreeSet<Uid>,
+}
+
+fn is_causal(kind: &RelKind) -> bool {
+    matches!(kind, RelKind::Causes | RelKind::Sequences)
+}
+
+/// `SMY-W062`'s groups' members, from a store's adjacency.
+fn cyclic_of(store: &(impl StoreRead + ?Sized)) -> BTreeSet<Uid> {
+    use smysl_graph::{cycles, EdgeKind, EdgeSet};
+    let kinds = EdgeSet::of(
+        [RelKind::Causes, RelKind::Sequences]
+            .into_iter()
+            .filter_map(EdgeKind::kernel),
+    );
+    let g = store.adjacency();
+    cycles(g, &kinds)
+        .into_iter()
+        .flatten()
+        .filter_map(|n| g.uid(n).copied())
+        .collect()
 }
 
 /// Whether a relation ties two units for rule E.
@@ -174,6 +201,12 @@ impl Derived {
                 d.measured.insert(r.from);
             }
             d.link(r);
+            if is_causal(&r.kind) && !store.is_withdrawn(r) {
+                d.causal.entry(r.from).or_default().insert(r.to);
+            }
+        }
+        if !d.causal.is_empty() {
+            d.cyclic = cyclic_of(store);
         }
         for w in store.withdrawals() {
             d.withdrawn.insert(w.relation);
@@ -219,6 +252,9 @@ impl Derived {
                         self.measured.insert(rel.from);
                     }
                     self.link(rel);
+                    if is_causal(&rel.kind) {
+                        self.causal.entry(rel.from).or_default().insert(rel.to);
+                    }
                 }
                 _ => {}
             }
@@ -354,11 +390,11 @@ impl Checked {
             Some(_) => None,
         };
         match (report, why) {
-            (Some(report), _) => BatchReport {
+            (Some((report, cyclic)), _) => BatchReport {
                 report,
                 path: Path::Incremental,
                 key,
-                next: Next::Absorb(union.batch_records().to_vec()),
+                next: Next::Absorb(union.batch_records().to_vec(), cyclic),
             },
             (None, why) => BatchReport {
                 report: check(&union, opts.clone()),
@@ -397,7 +433,7 @@ impl Checked {
         &self,
         union: &Overlay<'_, S>,
         opts: &CheckOptions,
-    ) -> Option<Report> {
+    ) -> Option<(Report, Option<BTreeSet<Uid>>)> {
         let fresh = union.batch_records();
         let d = &self.derived;
 
@@ -406,7 +442,7 @@ impl Checked {
         let mut referenced: BTreeSet<Uid> = BTreeSet::new();
         let mut dirty: BTreeSet<Uid> = BTreeSet::new();
         let mut measured: BTreeSet<Uid> = BTreeSet::new();
-        let mut causal = false;
+        let mut causal_edges: Vec<(Uid, Uid)> = Vec::new();
         let kind = measured_by();
         for r in fresh {
             match r {
@@ -437,14 +473,17 @@ impl Checked {
                     if rel.kind == kind {
                         measured.insert(rel.from);
                     }
-                    if matches!(rel.kind, RelKind::Causes | RelKind::Sequences) {
-                        causal = true;
+                    if is_causal(&rel.kind) {
+                        causal_edges.push((rel.from, rel.to));
                     }
                 }
                 _ => {}
             }
         }
         let integrity = opts.runs(Pass::Integrity);
+        // `SMY-W062` moves only when a new causal edge closes a cycle, or points at a node
+        // already on one or upstream of one: anything else leaves every group as it was.
+        let causal = integrity && self.moves_cycles(&causal_edges);
         #[cfg(feature = "text")]
         let time = opts.runs(Pass::Time);
         #[cfg(not(feature = "text"))]
@@ -521,6 +560,7 @@ impl Checked {
                 passes::integrity::causal_cycles(union.adjacency(), &mut out);
             }
         }
+        let cyclic = causal.then(|| cyclic_of(union));
         #[cfg(feature = "text")]
         if time {
             let done = match &region {
@@ -537,7 +577,40 @@ impl Checked {
             report.push(f);
         }
         report.sort();
-        Some(report)
+        Some((report, cyclic))
+    }
+
+    /// Whether new causal edges can change `SMY-W062`: one points at a node already on a cycle or
+    /// upstream of one (an edge points at what its node depends on, so `topo` cannot order a node
+    /// that reaches a cycle), or one closes a cycle, its head reaching its tail over the kept
+    /// edges and the new.
+    fn moves_cycles(&self, edges: &[(Uid, Uid)]) -> bool {
+        if edges.is_empty() {
+            return false;
+        }
+        if edges.iter().any(|(_, to)| self.derived.cyclic.contains(to)) {
+            return true;
+        }
+        let mut new: BTreeMap<Uid, Vec<Uid>> = BTreeMap::new();
+        for (from, to) in edges {
+            new.entry(*from).or_default().push(*to);
+        }
+        edges.iter().any(|(from, to)| {
+            let mut seen: BTreeSet<Uid> = BTreeSet::new();
+            let mut todo = vec![*to];
+            while let Some(u) = todo.pop() {
+                if u == *from {
+                    return true;
+                }
+                if !seen.insert(u) {
+                    continue;
+                }
+                let kept = self.derived.causal.get(&u).into_iter().flatten();
+                let added = new.get(&u).into_iter().flatten();
+                todo.extend(kept.chain(added).copied());
+            }
+            false
+        })
     }
 
     /// The units rule E must solve again, closed under `replies` and `quotes`, and the relations
@@ -634,7 +707,12 @@ impl Checked {
         self.key = batch.key;
         self.report = batch.report;
         match batch.next {
-            Next::Absorb(fresh) => self.derived.absorb(&fresh),
+            Next::Absorb(fresh, cyclic) => {
+                self.derived.absorb(&fresh);
+                if let Some(c) = cyclic {
+                    self.derived.cyclic = c;
+                }
+            }
             Next::Replace(d) => self.derived = *d,
         }
     }

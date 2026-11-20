@@ -35,7 +35,7 @@ use smysl_core::{Attestation, Commit, Contention, Record, RelKind, Relation, Sta
 
 use super::interp::Interpretive;
 use super::library::StoreLibrary;
-use super::read::{empty_commits, sealed};
+use super::read::{empty_commits, sealed, Layered};
 use super::{
     digest_of_hashes, state_hash_of, Commits, HotKind, HotRecords, Relations, Resolutions, Store,
     StoreRead, Threads, Views, Withdrawals,
@@ -528,7 +528,7 @@ impl<S: StoreRead> StoreRead for Union<S> {
         &self.derived().adjacency
     }
     fn relations(&self) -> Relations<'_> {
-        Relations(self.interp.relations.values())
+        Relations(Layered::one(&self.interp.relations))
     }
     fn relation_by_id(&self, rid: &Uid) -> Option<&Relation> {
         self.interp.relation_by_id(rid)
@@ -539,22 +539,22 @@ impl<S: StoreRead> StoreRead for Union<S> {
             .get(&(kind.as_str().to_string(), *from, *to))
     }
     fn threads(&self) -> Threads<'_> {
-        Threads(self.interp.threads.values())
+        Threads(Layered::one(&self.interp.threads))
     }
     fn views(&self) -> Views<'_> {
-        Views(self.interp.views.values())
+        Views(Layered::one(&self.interp.views))
     }
     fn contentions(&self) -> &[Contention] {
         &self.interp.contentions
     }
     fn withdrawals(&self) -> Withdrawals<'_> {
-        Withdrawals(self.interp.withdrawals.values().flatten())
+        Withdrawals::of(Layered::one(&self.interp.withdrawals))
     }
     fn resolutions(&self) -> Resolutions<'_> {
-        Resolutions(self.interp.resolutions.iter())
+        Resolutions::one(&self.interp.resolutions)
     }
     fn commits(&self) -> Commits<'_> {
-        Commits(self.interp.commits.iter())
+        Commits(Layered::one(&self.interp.commits))
     }
     fn commits_of(&self, uid: &Uid) -> &BTreeSet<Commit> {
         self.interp
