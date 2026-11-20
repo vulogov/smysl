@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.17.0
+## 1.17.0 — 2026-11-19
 
 SMYSL-3, smysl for telemetry study and research, built from its format phase to its last:
 TL-P1 to TL-P9 of RFC SMYSL-3 (`Documentation/SMYSL-3_RFC/SMYSL-3_TELEMETRY.md`), and AC-8,
