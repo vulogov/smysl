@@ -1,6 +1,6 @@
 [package]
 name        = "smysl-tel"
-description = "smysl for telemetry (RFC SMYSL-3): exact JSON, canonical leaf values, profiles and the canonical diff"
+description = "smysl for telemetry (RFC SMYSL-3): readers, profiles, the canonical diff, window evidence, detectors and investigations"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true

@@ -14,7 +14,7 @@
 
 ## Getting it
 
-**On crates.io.** Seventeen crates: the facade, plus the sixteen behind it that exist so the
+**On crates.io.** Nineteen crates: the facade, plus the eighteen behind it that exist so the
 compiler can check that the pure set stays pure. The evaluation harness stays unpublished — its
 tests read `fixtures/corpus` from outside its own package root, so a published copy would ship
 tests nobody could run.
@@ -28,47 +28,47 @@ As a library:
 
 ```toml
 [dependencies]
-smysl = "1.14"
+smysl = "1.17"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.16.0` and the format is `smysl/1.0`.** The crate version means the API is
+**The crate is `1.17.0` and the format is `smysl/1.0`.** The crate version means the API is
 frozen: every public item moves only with a 2.0, enforced per crate by `cargo-semver-checks` on
 every push. [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise
 written down. The format version means nothing about the format changed incompatibly:
 `smysl/0.1` held across fourteen releases and four independent implementations — the Rust, and
 Python, JavaScript and Go written from the specification alone — and `smysl/1.0` reports that
-record rather than a change. SMYSL-2's library records are additions a 1.0 reader skips.
+record rather than a change. SMYSL-2's library records and SMYSL-3's `x.tel/v1` are additions a 1.0 reader skips.
 
-## Release 1.16.0
+## Release 1.17.0
 
-What 1.15 recorded and did not act on, measured and acted on: the chunk, the channel, the
-stream, the one other model call the CLI makes, and four more figures the cycle's own entries
-rested on. The full account, with every figure measured, is in [`CHANGELOG.md`](CHANGELOG.md).
+SMYSL-3: smysl for telemetry study and research, all nine phases of its RFC, and the
+incremental check a live ledger needed. The kernel did not change. The full account, with
+every figure measured, is in [`CHANGELOG.md`](CHANGELOG.md).
 
-- **A chunk is sized to the answer, not the passage.** Measured across three models and three
-  efforts, an answer is three to seven times its passage's tokens, so a chunk is `max_output`
-  less the reasoning headroom, divided by four. It is measured in a sizing estimate by class
-  of character, fitted to the tokeniser on 93 samples; Latin script that is not English counts
-  its letters dearer, because the tokeniser does.
-- **The open path costs less and buys no fewer units.** On Anthropic as on DeepSeek, the
-  surface path stages the same units as the structured channel for 41% fewer tokens, and
-  every request runs at `low` effort unless the configuration says otherwise: `high` bought
-  nothing `low` did not, on ingest or on `ask`.
-- **Every stream is read as the answer is written**, on Anthropic, DeepSeek, OpenAI and
-  Ollama; the first token arrives before the last, a dropped receiver stops the download, and
-  an error status is classified rather than read as an empty answer.
-- **`ask --answer` keeps its answers.** A gist over the bound is cut to it with the claim whole
-  in the body (`SMY-W457`), a saved query's gist the same, and the template states rule M, so
-  a lowering means an overclaim. Twelve answers of twelve stage where one of twenty-four did.
-  The call is in the usage ledger. The registry is 156.
-- **The ledger counts calls, and the cache's share is measured**: 42% of an ingest's input
-  read from the cache, 21% written, the passages the rest.
-- **The Ollama mapper is not the defect.** A 3B model stages surface records whole and runs to
-  the limit through a JSON schema; the finding H-10 waited on is recorded.
+- **Telemetry reaches a store as evidence, not as rows.** Kubernetes and Zabbix snapshots
+  become change units by a canonical diff. Prometheus, OTLP and Zabbix history go to a series
+  substrate, and a unit cites a window of it by a digest of its samples, exact or sketched.
+- **Detectors that replay to the byte.** CUSUM, PELT, robust z, episodes and a BARO-style
+  ranking, identical across four platforms in CI.
+- **Investigations a person or an agent writes into.** Hypotheses, probes and actions are
+  units. A number quoted from a window is checked against it (rule TQ, `SMY-W606`). Rival
+  explanations and witness conflicts are derived, and so is an incident's `timeline` thread.
+- **Instruments and witnesses.** What measured a series is declared, and independent
+  witnesses are counted and reported.
+- **Retention without rewriting history.** Old samples are evicted, and no record changes. A
+  library exports with its substrate and merges back unchanged.
+- **Traces and logs.** OTLP spans, journald and CloudEvents, Drain templates, and episodes
+  compared by MinHash.
+- **A commit stays fast as the store grows.** The check is kept as derived state, and a batch
+  recomputes only what it can change: 7.7 ms per commit at 10⁵ units, where it was 43 ms and
+  climbing at 6,000.
+- **Six experiments decided on simulated data, and said so.** Millisecond time is kept, rule E
+  is unchanged, witness counts stay a report, and similarity is model-independent. The real
+  data runs, and GE-M7 on agents, are still owed. The registry is 172.
 
 Building from source:
 
@@ -275,6 +275,31 @@ What the library layer adds:
 The design is RFC SMYSL-2, in [`Documentation/SMYSL-2_RFC/`](Documentation/SMYSL-2_RFC/):
 nine documents, an index and a roadmap whose phases TX-P0 to TX-P13 are complete.
 
+## Telemetry (SMYSL-3)
+
+Since 1.17, smysl also holds what an incident investigation is made of: what changed in the
+cluster, what the metrics, traces and logs said, and what someone concluded from them. Behind
+the facade's `tel` feature:
+
+```sh
+cargo install smysl --features tel
+```
+
+| | |
+|---|---|
+| **Snapshots** | `tel read k8s/1` and `zabbix/1`: one snapshot per object, change and recreate units by a canonical diff |
+| **Series** | `tel read prom/1`, `otlp/1`, `otlp-json/1`, `zabbix/1` history into the series substrate; `tel at`, the value in force at an instant |
+| **Evidence** | `tel window`: exact or sketched summaries whose uid is a digest of the samples; rule TW; `tel check` |
+| **Detectors** | `tel detect`: CUSUM, PELT, robust z, episodes, a BARO-style ranking |
+| **Investigations** | `tel investigate`: hypotheses, probes, actions, what was consulted; rule TQ on numeric quotes; the `timeline` thread |
+| **Instruments** | `tel declare`, `tel witnesses`: lineage, and how many independent instruments saw a quantity |
+| **Traces and logs** | `tel trace`, `tel templates`, `tel similar`: spans, Drain templates, MinHash over episodes |
+| **Retention** | `tel evict`, and `lib export --with-substrate` |
+
+The design is RFC SMYSL-3, in
+[`Documentation/SMYSL-3_RFC/`](Documentation/SMYSL-3_RFC/SMYSL-3_TELEMETRY.md); its phases
+TL-P1 to TL-P9 are complete.
+
 ## Getting content in
 
 Existing prose gets converted by a model — the one place a model is required:
@@ -384,7 +409,7 @@ and `cargo run --example information_theory` for the library layer. See
 
 ## Status
 
-Crate `1.16.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.17.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 
@@ -415,6 +440,17 @@ in the RFC set beside the measurements that made them.
 | TX-P5 – P7 | ingest over texts with consensus extraction, sq/1, same-as engines, linker, summary tree | **done** |
 | TX-P8 – P9 | dossiers, saved queries, text, graph, channel and dialogue measures, `assess` | **done** |
 | TX-P10 – P13 | semantic retrieval, export and import, lenses and `migrate`, scale (shards, redb) | **done** |
+
+RFC SMYSL-3, telemetry, is built to its last phase. Its experiments ran on simulated data and
+say so; the runs on real data, and GE-M7 on agents, are owed.
+
+| Phase | Delivers | State |
+|---|---|---|
+| TL-P1 – P3 | `dec`, `x.tel/v1`, snapshots and the canonical diff, the series substrate and its readers | **done** |
+| TL-P4 – P5 | window evidence, rule TW, detectors | **done** |
+| TL-P6 – P7 | investigations, rule TQ, kinds 6 and 7, the timeline thread, instruments and witnesses | **done** |
+| TL-P8 – P9 | retention and exchange, traces and logs, similar episodes | **done** |
+| AC-8 | a store's check kept as derived state | **done** |
 
 Model providers, and how far each has actually been proven — an untested mapper is a
 reading of a vendor's documentation, not a fact about their API:
@@ -458,8 +494,8 @@ crates/smysl-text      SMYSL-2 library: readers, parts, readings, time, substrat
 crates/smysl-query     sq/1: parser, planner, executor, saved queries, dossiers
 crates/smysl-measure   text, graph, channel and dialogue measures; assessment
 crates/smysl-lib       library export, import and verify
-crates/smysl-tel       SMYSL-3 telemetry: exact JSON, leaf values, pointers (not published yet)
-crates/smysl-series    SMYSL-3 series substrate: samples, window digests, chunks (not published yet)
+crates/smysl-tel       SMYSL-3 telemetry: readers, diff, evidence, detectors, investigations
+crates/smysl-series    SMYSL-3 series substrate: samples, window digests, chunks
 crates/smysl-tui       seven-pane terminal UI, with a live pack simulator
 crates/smysl-eval      evaluation harness E1-E9 (not published)
 examples/              simple_demo and information_theory

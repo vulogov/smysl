@@ -9,40 +9,54 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.17.0
 
-What 1.16 leaves open, by what it blocks rather than the order it is easiest. 1.16 measured
-what 1.15 had recorded and found two premises wrong under it; what 1.16 itself measured and
-chose not to move is where 1.17 starts.
+SMYSL-3, smysl for telemetry study and research, built from its format phase to its last:
+TL-P1 to TL-P9 of RFC SMYSL-3 (`Documentation/SMYSL-3_RFC/SMYSL-3_TELEMETRY.md`), and AC-8,
+the architecture prerequisite a live ledger needs. Nothing in the kernel changed: `x.tel/v1`
+is an extension schema, `dec` and the timeline thread fill numbers the wire already had room
+for, and `smysl/1.0` holds. Two new crates, `smysl-tel` and `smysl-series`, are published for
+the first time, behind the facade's `tel` feature.
 
-**A third of the cache was written where one write in forty-seven would do.** The ingest's
-prompt never changes between chunks, and the repair turn's system prompt accounts for one
-more write, not nine. The ledger writes one line per run, so it cannot say which calls wrote;
-either the line gains a per-call record, or a run is instrumented once to find out. Until then
-the cache's saving is the 42% read, and the 21% written is a cost nobody has explained.
+**What a telemetry store holds.** Snapshots of Kubernetes and Zabbix objects become change and
+recreate units by a canonical diff whose uids are the same on x86_64 and aarch64. Samples from
+Prometheus, OTLP and Zabbix history go to a series substrate, not to units, and the units that
+cite them are windows whose digest is a function of the samples alone, exact or sketched, with
+rule TW deciding their status. CUSUM, PELT, robust z and a BARO-style ranking run over the
+substrate and replay to the byte on four platforms in CI (GE-M3). Investigations, hypotheses,
+probes and actions are units, a numeric quote is checked against the window it cites (rule
+TQ, `SMY-W606`), and rival explanations and witness conflicts are derived detections, kinds 6
+and 7. Retention evicts samples without changing a record (rule TL), traces and logs arrive
+as spans and Drain templates, and episodes are compared by MinHash. The registry is 172.
 
-**Ten repair turns of forty-seven bought what a cut does for nothing.** Every repair in the
-README ingest was `SMY-E022`, a gist one to seven tokens over the bound, and `ask --answer`
-meets the same defect without a turn (`SMY-W457`). Ingest's repair loop has a measurement
-behind it, and `UNIT_LOCAL` already names `E022` as a defect one unit can carry alone; whether
-the cut should run before the turn is one measurement on the same README.
+**What the experiments decided, on simulated data.** Each ran with its stop condition stated
+first, and each says so where it is reported:
 
-**A model told the bound still writes past it once an answer.** Fifteen cuts across twelve
-answers with the bound stated in tokens, sixteen with rule M stated beside it. A model counts
-words better than tokens; a template that states the bound in words per script is the next
-version, and `SMY-W457`'s count is the instrument.
+- **GE-M2:** 39.5% of spans would be misordered at millisecond resolution, so `source` key 7
+  is not released; it is not assigned either, and D-T5 now names what would assign it.
+- **GE-M4:** the substrate answers "value in force at t" as a hold record would, 4 µs at p95;
+  record 16's release stays the owner's decision on real data.
+- **GE-M5:** causal order names a skewed host 20% of the time at ≥ 5 ms, so rule E is
+  unchanged.
+- **GE-M6:** counting independent witnesses changes a conclusion but does not improve it, so
+  D-T10 is kept and witness counts stay a report.
+- **GE-M8:** MinHash recall@5 is 0.970 against embeddings' 0.898, so similarity is
+  model-independent by default.
+- **GE-M9:** six months evicted, exported, imported and merged with no record changed.
 
-**The sizing estimate's residual is German that carries the cause without the mark.**
-Technical German of compounds and two accented letters in 245 is still 28% under, and a text
-window is still filled by the format's count rather than the sizing estimate — open since the
-1.16 entry, and a question for a text the size of a Bible.
+**A ledger that grows one operation at a time.** OKO appends a unit and reads it at once, and
+at 6,000 units each commit took 43 ms and growing, because staging checked the batch against
+the whole store. AC-8 keeps the store's check as derived state and recomputes only what a
+batch can change, equal to the full check on every one of 11,659 batches verified. At 10⁵
+units a commit is 7.7 ms, of which 43% is the `fsync` and 41% the text library's range index,
+recorded and not acted on.
 
-**The Ollama text arm is the model's size.** A 3B model stages surface records whole over the
-fixture and answers nothing comparable over a window of verses with spans and quotes. A larger
-local model over the same corpus is one run, and H-10 closes or does not on it.
-
-**And what 1.14 left.** Questions still unread (the sixth set at 52 of 80), a subject by a
-name the store does not write, a saved query and a pinned traversal waiting on a store that
-does not exist yet, GE-T7 on a thousand real works, and the ones only people can close.
-None of it moved in 1.16, and none of it is planned for 1.17 until something measured needs it.
+**What 1.17 leaves open.** Everything SMYSL-3 asks of real data: GE-M1 on a cluster observed for
+seven days (I-1), the Zabbix fixtures (I-2), GE-M2 and GE-M5 on DeathStarBench, GE-M8 on
+GE-M7's corpus and RCAEval, and GE-M7 itself, the experiment the RFC calls the reason for all
+of this, which needs the Train-Ticket testbed and agent runs. OKO's own ledger, as opposed to
+`examples/oko_ledger`'s stand-in. The range index's tables, rewritten whole per append. And
+what 1.16 left — the cache's written share, the repair that a cut would do, the bound stated in
+tokens, the sizing residual on German, the Ollama arm's model size — and what 1.14 left before
+it, none of which moved in 1.17.
 
 ### SMYSL-3 begins: the format's reservations (TL-P1 step 1)
 
