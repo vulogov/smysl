@@ -121,7 +121,7 @@ pub fn read_version(path: &Path, line: &str) -> Result<BundBinaryInfo, BundError
     Ok(info)
 }
 
-fn on_path(name: &str) -> Option<PathBuf> {
+pub(crate) fn on_path(name: &str) -> Option<PathBuf> {
     // The bridge's one read of the environment: where to find the binary when none is given.
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)

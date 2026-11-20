@@ -140,8 +140,34 @@ no lock while it does (Bund2 `smysl/handle.rs:123-132`). Inside the snapshot, th
    - start a process other than itself.
 
    The mechanism is per platform. On macOS it is `sandbox-exec` with a generated profile. On
-   Linux it is user and network namespaces with Landlock, or `bwrap` when present. On a platform
-   without one, `Trust::Sandboxed` MUST fail with `SandboxUnavailable` before any process starts.
+   Linux it is `bwrap` with every namespace unshared. On a platform without one, or where the
+   tool is missing or cannot unshare its namespaces, `Trust::Sandboxed` MUST fail with
+   `SandboxUnavailable` before any process starts.
+
+   **As built (BQ-P3).**
+   - **macOS.** The profile is `(deny default)`, with these allowed back:
+     - exec of the `bund2` binary;
+     - reads of the binary, the snapshot directory, `/usr/lib`, `/System/Library`, `/dev/null`
+       and `/dev/urandom`;
+     - metadata reads;
+     - reads of `/` itself, without which `bund2` aborts at start. This shows the names at the
+       root and nothing under them;
+     - writes in the snapshot directory;
+     - `sysctl-read`.
+
+     A denied operation fails with `EPERM`. Bund2 reports this as `Operation not permitted`,
+     which the bridge returns as `PolicyViolation` (§8).
+   - **Linux.** `bwrap` binds read-only `/usr/lib`, `/usr/lib64`, `/lib`, `/lib64`,
+     `/etc/ld.so.cache` and the binary. It binds the snapshot directory read-write and adds a
+     fresh `/dev` and `/proc`. It also passes `--die-with-parent` and `--new-session`.
+     - There is no `/bin` and no shell to start.
+     - There is no network.
+     - A path outside the snapshot does not exist, so it fails with `ENOENT` rather than a
+       denial.
+   - **Linux without Landlock.** The crate is `#![forbid(unsafe_code)]`, and namespaces with
+     Landlock would need `pre_exec`. `bwrap` is the Linux mechanism, and a host without it, or
+     whose user namespaces are restricted, gets `SandboxUnavailable`. Ubuntu 24.04 restricts
+     them under AppArmor, so the CI job lifts the restriction.
 6. **`Trust::Trusted`** runs without the sandbox, with everything else in this section. It is for
    scripts written by the person running them. It MUST NOT be the default for anything a model
    wrote. The CLI requires `--trusted` to select it (§10).
@@ -158,6 +184,13 @@ contained only by §5.
    token naming a word of §6.1, §6.2 or §6.3.
 3. Under `WordPolicy::Allowlist`, the gate MUST also refuse any word not on the allowlist, and
    MUST refuse `smysl.open` outside the bridge's preamble.
+4. A bare word directly inside `[ … ]` is data: Bund2 reads it as a STRING and does not run it.
+   It is a clause's functor or atom, as in `[ intake W S ]`. The gate does not check it. A
+   pointer or a lambda inside a list is checked as everywhere else. BQ-P1's gate checked these
+   words, so it refused every KB script; BQ-P3 found and fixed this.
+
+   **Known limit.** A KB bridge lambda reads clause variables as words (`[ test { T C > } ]`).
+   The allowlist refuses those names, so such a script needs `WordPolicy::Denylist`.
 
 ### 6.1 Library writers and model words: always refused
 
@@ -314,8 +347,18 @@ pub fn eval_over_sq(store: &Store, sq: &str, script: &str, policy: &QueryPolicy)
 - `QueryPolicy` holds the draft's fields (`bund_binary`, `word_policy`, `max_script_bytes`,
   `max_nesting_depth`, `max_output_bytes`, `max_wall_ms`, `verify_uids`) and adds `trust: Trust`
   and `max_inferences: Option<u64>`. When `max_inferences` is set, the preamble applies
-  `kb.inferences` to every KB `smysl.kb` builds. That needs `smysl.kb` wrapped in the preamble,
-  and it lands in BQ-P3. Until then the wall clock is the only bound on a logic query. Each field
+  `kb.inferences` to every KB the script makes.
+
+  **As built (BQ-P3).** A preamble cannot wrap `smysl.kb`, because a lambda that shadows a
+  native word and calls it by name calls itself. So the bridge rewrites the script's text,
+  using the gate's token offsets:
+  - each `smysl.kb`, `kb!` and `kb.new` that runs where it stands is followed by
+    `<cap> kb.inferences`;
+  - each `kb.inferences` is preceded by `dup <cap> < { drop <cap> } if`, so a cap the script
+    sets is lowered to the policy's.
+
+  No line is added, so an error's line number is the script's. This is not a boundary, since
+  a script can edit a KB's map by hand. The wall clock remains the bound. Each field
   has a `with_*` builder, since the struct is `#[non_exhaustive]`.
 - `Trust` is `Sandboxed` (the default) or `Trusted`.
 - `QueryValue`, `BundQueryResult` and `BundError` are as in the draft. `BundError` adds
@@ -362,18 +405,18 @@ until BQ-P4, when it joins `PUBLISHED` with the release that first publishes it.
 |---|---|---|
 | **BQ-P1** spike and skeleton (**done**: findings in §7 and §8) | Against a local `bund2 --features smysl`: confirm the flags, that a script's stack is not dumped on stdout at exit (or the flag that stops it), the encoder's words (§7), and `bund2 words` → the lists of §6. Crate skeleton: `QueryPolicy`, the gate, `QueryValue`, the decoder, the error mapping. | The gate and the decoder unit-tested without `bund2`. The word lists regenerated and their diff against Appendix A recorded. |
 | **BQ-P2** snapshot and runner (**done**) | §4 and §5 for `Trust::Trusted`: snapshot from a store and from a library (a redb library included), env, bounded readers, wall clock, process-group kill, cleanup. | Tests gated on `BUND2_BIN`. A timeout leaves no child and no directory. A live library's bytes, hashed before and after, are unchanged. |
-| **BQ-P3** sandbox, determinism, and `max_inferences` | §5.5 on macOS and on Linux; `SandboxUnavailable` elsewhere. Determinism replay over 20 or more scripts, including `smysl.kb` with `kb.query` and the CLP(FD) and `kb.inferences` examples of `bund_examples/smysl_demo_full/demo.bund`, over equal stores written in shuffled record order. | Adversarial suite: `"system." "shell" + call, !`, `compile`, a `url` fetch, a file read outside the snapshot, `time.now`, an infinite loop. Each is stopped by the sandbox, the gate or the clock, and each is named in the result. |
+| **BQ-P3** sandbox, determinism, and `max_inferences` (**done**) | §5.5 on macOS and on Linux; `SandboxUnavailable` elsewhere. Determinism replay over 20 or more scripts, including `smysl.kb` with `kb.query` and the CLP(FD) and `kb.inferences` examples of `bund_examples/smysl_demo_full/demo.bund`, over equal stores written in shuffled record order. | Adversarial suite: `"system." "shell" + call, !`, `compile`, a `url` fetch, a file read outside the snapshot, `time.now`, an infinite loop. Each is stopped by the sandbox, the gate or the clock, and each is named in the result. |
 | **BQ-P4** CLI | `smysl bund` behind `bund`; `smysl-bund` joins `PUBLISHED`; the manual gains a section. | `cli-surface`, `doc-output` and the crate-features matrix cover it. Published with the release that ships it. |
 
 ## 13. Risks
 
 | Risk | Mitigation |
 |---|---|
-| The sandbox profile is wrong on a platform | BQ-P3's adversarial suite runs on that platform in CI. Each case asserts the operation was denied, not merely that the script failed. |
+| The sandbox profile is wrong on a platform | BQ-P3's adversarial suite runs on that platform in CI. Each case asserts the operation was denied, not merely that the script failed.<br><br>**As built.** The CI job `bund2-bridge` builds `bund2` at the pinned commit on Ubuntu and on macOS and runs the crate's tests with `SMYSL_BUND_REQUIRED`, which fails rather than skips when `bund2` or the sandbox is missing. The suite has two layers:<br>- **Through the gate** (`tests/run.rs`): each attack is refused with its word named, and the loop is stopped by the clock.<br>- **Past the gate** (`run::sandbox_tests`): each operation runs trusted and then sandboxed:<br>&nbsp;&nbsp;- a shell runs trusted and not sandboxed;<br>&nbsp;&nbsp;- a file outside is read trusted and not sandboxed;<br>&nbsp;&nbsp;- a file outside is written trusted and not sandboxed;<br>&nbsp;&nbsp;- a connection reaches a local listener trusted and not sandboxed. |
 | Bund2 adds an impure word | The gate is not the boundary (D-B2). The word-list diff of §6.3 is read before a new Bund2 version is admitted by `probe_bund_binary`. |
 | Bund2's pin moves past 1.15 | Nothing here depends on the pin. The snapshot is `smysl/1.0` and layout `smysl/library/2`, which 1.15 reads. A later reader reads more of it. |
 | A 1.17 record that a 1.15 reader does not know | Read as Unknown or as an opaque extension unit. 1.17's timeline schema decodes as Unknown in 1.15 (`smysl-core` 1.15 `cbor/envelope.rs:1010, 1030`). BQ-P2 tests a library holding `x.tel/v1` units. |
-| Process start cost | Accepted. Measured in BQ-P2 over F1 (21 records): 10.0 ms p50 a call, of which about 5 ms is the `bund2` process and the rest is writing the snapshot. Probing `bund2 --version` on every call made it 14.6 ms, so the probe is now cached per binary while its file is unchanged. Interactive queries stay with `sq/1`. |
+| Process start cost | Accepted. Measured in BQ-P2 over F1 (21 records): 10.0 ms p50 a call, of which about 5 ms is the `bund2` process and the rest is writing the snapshot. Probing `bund2 --version` on every call made it 14.6 ms, so the probe is now cached per binary while its file is unchanged. BQ-P3, macOS, release build: 11.8 ms p50 trusted and 15.0 ms sandboxed, so `sandbox-exec` adds about 3 ms. Interactive queries stay with `sq/1`. |
 
 ## 14. Open questions
 

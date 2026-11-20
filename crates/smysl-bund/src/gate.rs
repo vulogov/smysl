@@ -19,6 +19,18 @@ pub struct Named {
     pub word: String,
     /// Byte offset in the script.
     pub at: usize,
+    /// Written as a pointer, `` `word ``.
+    pub pointer: bool,
+    /// A bare word directly inside `[ … ]`. Bund2 reads it as a STRING and does not run it: it
+    /// is a clause's functor or atom, `[ intake W S ]`, not a call. The gate does not check it.
+    pub quoted: bool,
+}
+
+impl Named {
+    /// Whether the word is run where it stands: neither quoted nor a pointer.
+    pub fn is_call(&self) -> bool {
+        !self.quoted && !self.pointer
+    }
 }
 
 /// Read `script` and return the words it names, or refuse it.
@@ -30,7 +42,7 @@ pub fn check(script: &str, policy: &QueryPolicy) -> Result<Vec<Named>, BundError
         });
     }
     let named = scan(script, policy.max_nesting_depth)?;
-    for n in &named {
+    for n in named.iter().filter(|n| !n.quoted) {
         if let Some((_, _, why)) = words::refused(&n.word) {
             return Err(violation(n, why));
         }
@@ -145,6 +157,8 @@ pub fn scan(script: &str, max_depth: usize) -> Result<Vec<Named>, BundError> {
                 out.push(Named {
                     word,
                     at: at(start),
+                    pointer: true,
+                    quoted: false,
                 });
                 i = end;
             }
@@ -158,6 +172,8 @@ pub fn scan(script: &str, max_depth: usize) -> Result<Vec<Named>, BundError> {
                 out.push(Named {
                     word,
                     at: at(start),
+                    pointer: false,
+                    quoted: open.last().is_some_and(|(o, _)| *o == '['),
                 });
                 i = end.max(i + 1);
             }
@@ -167,6 +183,37 @@ pub fn scan(script: &str, max_depth: usize) -> Result<Vec<Named>, BundError> {
         return Err(syntax(o, &format!("`{c}` is never closed")));
     }
     Ok(out)
+}
+
+/// The words that make a KB. Each is followed by `cap kb.inferences` (§9).
+const KB_MAKERS: [&str; 3] = ["smysl.kb", "kb!", "kb.new"];
+
+/// `script` with `max_inferences` applied to every KB it makes, and to every cap it sets: each
+/// KB maker is followed by `<cap> kb.inferences`, and a cap the script sets above `cap` is
+/// lowered to it. Only the words in `named` (from [`check`]) that run where they stand are
+/// touched, and no line is added, so an error's line number is the script's.
+///
+/// It bounds what a script asks of a KB it made. A script can still edit a KB's map by hand,
+/// so it is not the boundary; the wall clock is.
+pub fn with_inference_cap(script: &str, named: &[Named], cap: u64) -> String {
+    let mut out = String::with_capacity(script.len());
+    let mut from = 0;
+    for n in named.iter().filter(|n| n.is_call()) {
+        let end = n.at + n.word.len();
+        if KB_MAKERS.contains(&n.word.as_str()) {
+            out.push_str(&script[from..end]);
+            out.push_str(&format!(" {cap} kb.inferences"));
+            from = end;
+        } else if n.word == "kb.inferences" || n.word == "kb.inferences." {
+            // `>` and `<` compare the top with the value under it: `n cap <` is `cap < n`.
+            out.push_str(&script[from..n.at]);
+            out.push_str(&format!("dup {cap} < {{ drop {cap} }} if "));
+            out.push_str(&n.word);
+            from = end;
+        }
+    }
+    out.push_str(&script[from..]);
+    out
 }
 
 #[cfg(test)]
@@ -199,6 +246,28 @@ mod tests {
     fn a_pointer_names_its_word() {
         assert_eq!(words_of("`system.shell !"), ["system.shell", "!"]);
         assert_eq!(refused_token("`sh"), Some("sh".into()));
+    }
+
+    #[test]
+    fn a_word_in_a_list_is_data_and_one_in_a_lambda_is_not() {
+        let p = QueryPolicy::default();
+        assert!(check(":k [ [ intake W S ] ] kb! var", &p).is_ok());
+        assert_eq!(refused_token("[ { sh } ]"), Some("sh".into()));
+        assert_eq!(refused_token("[ `sh ]"), Some("sh".into()));
+        assert_eq!(refused_token("( sh )"), Some("sh".into()));
+    }
+
+    #[test]
+    fn the_cap_follows_each_kb_and_lowers_each_cap() {
+        let s =
+            ":k [ [ kb.new ] ] kb! var\n:j kb.new 5000 kb.inferences var :lib var? \"q\" smysl.kb";
+        let named = check(s, &QueryPolicy::default()).unwrap();
+        assert_eq!(
+            with_inference_cap(s, &named, 100),
+            ":k [ [ kb.new ] ] kb! 100 kb.inferences var\n\
+             :j kb.new 100 kb.inferences 5000 dup 100 < { drop 100 } if kb.inferences var \
+             :lib var? \"q\" smysl.kb 100 kb.inferences"
+        );
     }
 
     #[test]

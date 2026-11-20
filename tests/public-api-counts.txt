@@ -41,4 +41,4 @@ smysl-lib        1651
 smysl-embed-candle 140
 smysl-tel        2467
 smysl-series     1089
-smysl-bund       525
+smysl-bund       532

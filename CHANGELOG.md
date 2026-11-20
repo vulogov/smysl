@@ -89,6 +89,48 @@ The captured output of a real run is in `tests/fixtures/`, so the decoder is tes
 `bund2`. With `BUND2_BIN` set, the probe runs against the binary as well. RFC §6 to §9 record
 the findings.
 
+### `smysl-bund` runs a script in the sandbox (SMYSL-4 BQ-P3)
+
+`Trust::Sandboxed`, the default, now runs on macOS and on Linux.
+
+- **macOS:** `sandbox-exec` with a deny-by-default profile generated for each call. The process
+  may run only the `bund2` binary, read the binary, its snapshot and the system libraries, and
+  write only in its snapshot. A denial comes back as `PolicyViolation`.
+- **Linux:** `bwrap`, with every namespace unshared. The process sees the system libraries, the
+  binary and its snapshot, so there is no shell, no network and no file outside to reach.
+- **Elsewhere,** or without the tool: `SandboxUnavailable`, as before.
+- **Cost:** about 3 ms more per call on macOS (15.0 ms p50, against 11.8 ms trusted).
+
+**`max_inferences` is applied.** Bund2 cannot wrap `smysl.kb` in the preamble, so the bridge
+rewrites the script instead. Each `smysl.kb`, `kb!` and `kb.new` is followed by
+`<cap> kb.inferences`, and a cap the script sets above the policy's is lowered to it. A runaway
+query stops with `InferenceCapReached`.
+
+**A gate defect from BQ-P1.** The gate checked the atoms inside a `[ … ]` list against the
+allowlist, so every KB script was refused: `[ spin ]` failed on `spin`. A bare word directly
+inside a list is now data, as it is to Bund2. A pointer or a lambda inside a list is still
+checked.
+
+**Determinism:** 24 scripts, run three times each, give the same answer every time. Each runs
+twice over F1 and once over F1 with its records reordered. The scripts cover:
+- `smysl.query`;
+- `smysl.kb` with `kb.query`, `kb.holds` and `kb.saturate`;
+- recursion, tabling, `findall`, `dif` and `kb.prove`;
+- the demo's CLP(FD) plan;
+- a capped runaway query, which fails the same way each time.
+
+**The adversarial suite** has two layers:
+- **Through the gate:** a call built at run time, `compile`, `url`, `file`, `time.now`, and a
+  shell inside a lambda inside a list. Each is refused with its word named. An infinite loop
+  is stopped by the clock.
+- **Past the gate:** a shell, a file read outside the snapshot, a file write outside it, and a
+  connection to a local listener. Each runs trusted and is shown not to happen sandboxed.
+
+**CI:** a new `bund2-bridge` job builds `bund2` at a pinned commit on Ubuntu and macOS and runs
+the crate's tests against it. With `SMYSL_BUND_REQUIRED` set, a missing `bund2` or sandbox fails
+the job instead of skipping. All of this passed locally on macOS and on Linux, in a container
+with `bwrap`.
+
 ### `smysl-bund` runs a script: the snapshot and the process (SMYSL-4 BQ-P2)
 
 `eval_store`, `eval_library` and `eval_over_sq` run a script under `Trust::Trusted`, and refuse

@@ -16,7 +16,9 @@
 //! - [`probe`]: what `bund2 --version` says about a binary.
 //! - [`snapshot`]: the library the process sees, written fresh in a private directory (§4).
 //! - [`run`]: the wrapper, the process, the wall clock; [`eval_store`], [`eval_library`] and
-//!   [`eval_over_sq`] (§5, §7). BQ-P2 runs `Trust::Trusted` only; the sandbox is BQ-P3.
+//!   [`eval_over_sq`] (§5, §7).
+//! - [`sandbox`]: the operating system's sandbox, `sandbox-exec` on macOS and `bwrap` on Linux
+//!   (§5.5). Elsewhere only `Trust::Trusted` runs.
 
 #![forbid(unsafe_code)]
 
@@ -26,6 +28,7 @@ pub mod gate;
 pub mod policy;
 pub mod probe;
 pub mod run;
+pub mod sandbox;
 pub mod snapshot;
 pub mod value;
 pub mod words;

@@ -15,6 +15,7 @@ use crate::decode;
 use crate::error::BundError;
 use crate::gate;
 use crate::policy::{QueryPolicy, Trust};
+use crate::sandbox;
 use crate::snapshot::Snapshot;
 use crate::value::QueryValue;
 
@@ -36,10 +37,9 @@ pub fn eval_store(
     script: &str,
     policy: &QueryPolicy,
 ) -> Result<BundQueryResult, BundError> {
-    gate::check(script, policy)?;
-    sandbox_available(policy)?;
+    let script = prepare(script, policy)?;
     let snap = Snapshot::of_store(store)?;
-    execute(&snap, None, script, store, policy)
+    execute(&snap, None, &script, store, policy)
 }
 
 /// Evaluate `script` over a snapshot of the library at `root`.
@@ -48,10 +48,9 @@ pub fn eval_library(
     script: &str,
     policy: &QueryPolicy,
 ) -> Result<BundQueryResult, BundError> {
-    gate::check(script, policy)?;
-    sandbox_available(policy)?;
+    let script = prepare(script, policy)?;
     let (snap, store) = Snapshot::of_library(root)?;
-    execute(&snap, None, script, &store, policy)
+    execute(&snap, None, &script, &store, policy)
 }
 
 /// Run `sq` over `store`, bind the uids it answers to `:seed` (a LIST of STRINGs, in the
@@ -62,11 +61,10 @@ pub fn eval_over_sq(
     script: &str,
     policy: &QueryPolicy,
 ) -> Result<BundQueryResult, BundError> {
-    gate::check(script, policy)?;
-    sandbox_available(policy)?;
+    let script = prepare(script, policy)?;
     let snap = Snapshot::of_store(store)?;
     let seed = run_sq(snap.root(), sq)?;
-    execute(&snap, Some(&seed), script, store, policy)
+    execute(&snap, Some(&seed), &script, store, policy)
 }
 
 /// `sq` over the snapshot, read as a library, so that a query reads as it does in `smysl q` and
@@ -97,14 +95,16 @@ fn run_sq(root: &Path, sq: &str) -> Result<Vec<Uid>, BundError> {
     Ok(answered.answer.uids())
 }
 
-/// §5.5: until BQ-P3, no platform has the sandbox.
-fn sandbox_available(policy: &QueryPolicy) -> Result<(), BundError> {
-    match policy.trust {
-        Trust::Trusted => Ok(()),
-        _ => Err(BundError::SandboxUnavailable {
-            platform: std::env::consts::OS.to_string(),
-        }),
+/// The gate, the inference cap, and the sandbox's presence: all before anything is written.
+fn prepare(script: &str, policy: &QueryPolicy) -> Result<String, BundError> {
+    let named = gate::check(script, policy)?;
+    if policy.trust == Trust::Sandboxed {
+        sandbox::available()?;
     }
+    Ok(match policy.max_inferences {
+        Some(cap) => gate::with_inference_cap(script, &named, cap),
+        None => script.to_string(),
+    })
 }
 
 /// The run's sentinel tag. It keeps the encoder's frame apart from what the script prints. It
@@ -179,7 +179,7 @@ fn execute(
     let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let value = decode::read_output(&stdout, &tag)?;
+    let value = decode::read_output(&stdout, &tag).map_err(|e| denial(e, policy.trust))?;
     if policy.verify_uids {
         if let Some(u) = value.uids().into_iter().find(|u| !source.contains_uid(u)) {
             return Err(BundError::NormalizationError {
@@ -198,12 +198,34 @@ fn execute(
     })
 }
 
+/// §8: under the sandbox, a failure whose text is the platform's denial was the sandbox's.
+fn denial(e: BundError, trust: Trust) -> BundError {
+    if trust != Trust::Sandboxed {
+        return e;
+    }
+    let text = match &e {
+        BundError::ScriptFailed { message }
+        | BundError::SmyslRefusal { message, .. }
+        | BundError::InvalidScriptOrArgs { message, .. } => message,
+        BundError::ProcessFailed { stderr, .. } => stderr,
+        _ => return e,
+    };
+    if sandbox::denied(text) {
+        BundError::PolicyViolation {
+            reason: format!("the sandbox denied it: {text}"),
+            token: None,
+        }
+    } else {
+        e
+    }
+}
+
 struct Output {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
 }
 
-/// §5.1 to §5.4: flags before the path, the environment cleared, bounded readers, the wall
+/// §5.1 to §5.5: the sandbox, flags before the path, the environment cleared, bounded readers, the wall
 /// clock, and the process group killed with the process.
 fn spawn_bounded(
     bin: &Path,
@@ -211,10 +233,8 @@ fn spawn_bounded(
     dir: &Path,
     policy: &QueryPolicy,
 ) -> Result<Output, BundError> {
-    let mut cmd = Command::new(bin);
-    cmd.args(["--report", "trace", "--nocolor"])
-        .arg(file)
-        .env_clear()
+    let mut cmd = sandbox::command(bin, file, dir, policy.trust)?;
+    cmd.env_clear()
         .env("LC_ALL", "C")
         .env("TZ", "UTC")
         .env("COLUMNS", "80")
@@ -317,4 +337,121 @@ fn kill(child: &mut Child) {
 /// The binary a call will run, for a caller that wants to say which before running it.
 pub fn binary_of(policy: &QueryPolicy) -> Result<PathBuf, BundError> {
     crate::probe::probe_bund_binary(policy.bund_binary.as_deref()).map(|i| i.path)
+}
+
+/// The sandbox itself, with the gate passed by: each case runs the operation trusted and then
+/// sandboxed, and asserts that the sandbox denied it, not merely that the script failed (§13).
+/// Every case needs `BUND2_BIN` and passes trivially without it.
+#[cfg(test)]
+mod sandbox_tests {
+    use super::*;
+
+    fn bin() -> Option<PathBuf> {
+        let b = std::env::var_os("BUND2_BIN").map(PathBuf::from);
+        let required = std::env::var_os("SMYSL_BUND_REQUIRED").is_some();
+        assert!(
+            b.is_some() || !required,
+            "SMYSL_BUND_REQUIRED and no BUND2_BIN"
+        );
+        assert!(
+            sandbox::available().is_ok() || !required,
+            "SMYSL_BUND_REQUIRED and no sandbox"
+        );
+        b
+    }
+
+    /// `script` as written, over an empty store, past the gate.
+    fn raw(script: &str, trust: Trust) -> Result<BundQueryResult, BundError> {
+        let policy = QueryPolicy::default()
+            .with_binary(bin().unwrap())
+            .with_trust(trust);
+        let store = Store::from_records(Vec::new());
+        let snap = Snapshot::of_store(&store)?;
+        execute(&snap, None, script, &store, &policy)
+    }
+
+    fn outside() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn denied(r: &Result<BundQueryResult, BundError>) -> bool {
+        matches!(r, Err(BundError::PolicyViolation { token: None, reason }) if reason.starts_with("the sandbox denied it"))
+    }
+
+    #[test]
+    fn a_shell_is_not_started() {
+        if bin().is_none() || sandbox::available().is_err() {
+            return;
+        }
+        let script = "\"echo started\" system.shell";
+        let trusted = raw(script, Trust::Trusted).unwrap();
+        assert_eq!(trusted.value, QueryValue::Text("started".into()));
+        let r = raw(script, Trust::Sandboxed);
+        assert!(r.is_err(), "{r:?}");
+        #[cfg(target_os = "macos")]
+        assert!(denied(&r), "{r:?}");
+    }
+
+    #[test]
+    fn a_file_outside_is_not_read() {
+        if bin().is_none() || sandbox::available().is_err() {
+            return;
+        }
+        let dir = outside();
+        let path = dir.path().canonicalize().unwrap().join("secret.txt");
+        std::fs::write(&path, "secret").unwrap();
+        let script = format!("\"{}\" file", path.display());
+        let trusted = raw(&script, Trust::Trusted).unwrap();
+        assert_eq!(trusted.value, QueryValue::Text("secret".into()));
+        let r = raw(&script, Trust::Sandboxed);
+        assert!(
+            !matches!(&r, Ok(v) if v.value == QueryValue::Text("secret".into())),
+            "{r:?}"
+        );
+    }
+
+    #[test]
+    fn a_file_outside_is_not_written() {
+        if bin().is_none() || sandbox::available().is_err() {
+            return;
+        }
+        let dir = outside();
+        let path = dir.path().canonicalize().unwrap().join("written.txt");
+        let script = format!("\"x\" \"{}\" file.write true", path.display());
+        raw(&script, Trust::Trusted).unwrap();
+        assert!(path.exists());
+        std::fs::remove_file(&path).unwrap();
+        let r = raw(&script, Trust::Sandboxed);
+        assert!(!path.exists(), "{r:?}");
+        // On Linux the path is not there to be denied: `bwrap` shows only the snapshot.
+        #[cfg(target_os = "macos")]
+        assert!(denied(&r), "{r:?}");
+        assert!(r.is_err(), "{r:?}");
+    }
+
+    #[test]
+    fn no_connection_is_made() {
+        if bin().is_none() || sandbox::available().is_err() {
+            return;
+        }
+        let reached = |trust: Trust| {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let _ = raw(&format!("\"http://127.0.0.1:{port}/\" url"), trust);
+            listener.accept().is_ok()
+        };
+        assert!(reached(Trust::Trusted), "the case does not connect at all");
+        assert!(!reached(Trust::Sandboxed));
+    }
+
+    #[test]
+    fn a_query_runs_inside() {
+        if bin().is_none() || sandbox::available().is_err() {
+            return;
+        }
+        let r = raw(":lib var? smysl.status", Trust::Sandboxed).unwrap();
+        assert!(matches!(r.value, QueryValue::Map(_)), "{:?}", r.value);
+    }
 }
