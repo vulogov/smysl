@@ -167,16 +167,29 @@ fn the_kept_check_agrees_with_the_full_check_on_every_fixture() {
     let all = fixtures();
     let opts = CheckOptions::default();
     let mut rng = Rng(8);
+    let mut paths = (0, 0);
+    let mut tally = |(i, t): (usize, usize)| {
+        paths.0 += i;
+        paths.1 += t;
+    };
     for (name, records) in &all {
         for _ in 0..8 {
-            deal(name, records, &mut rng, &opts);
+            tally(deal(name, records, &mut rng, &opts));
         }
     }
     // All of them at once: a store of many shapes, dealt the same way.
     let every: Vec<Record> = all.iter().flat_map(|(_, r)| r.iter().cloned()).collect();
     for _ in 0..12 {
-        deal("every fixture", &every, &mut rng, &opts);
+        tally(deal("every fixture", &every, &mut rng, &opts));
     }
+    // The contract would hold trivially if every batch fell back.
+    eprintln!("fixtures: {} of {} batches incremental", paths.0, paths.1);
+    assert!(
+        paths.0 * 3 >= paths.1,
+        "{} of {} batches incremental",
+        paths.0,
+        paths.1
+    );
 }
 
 #[test]
@@ -206,7 +219,9 @@ fn agent(n: usize) -> AgentId {
 }
 
 /// A store of kernel units with grounds, edges of every kernel kind (cycles included) and
-/// attestations at every rung. Later AC-8 steps grow it as each incremental path lands.
+/// attestations at every rung; bodies that name other units by `b3:` prefix, long and short
+/// enough to be ambiguous, so that a unit arriving later resolves or confuses an older body;
+/// and Views under two profiles, so that a batch can move the store's profile.
 fn generate(rng: &mut Rng, size: usize) -> Vec<Record> {
     let mut records = Vec::new();
     let mut uids: Vec<Uid> = Vec::new();
@@ -248,6 +263,39 @@ fn generate(rng: &mut Rng, size: usize) -> Vec<Record> {
             )));
         }
     }
+    // Bodies naming units by prefix: the closure pass resolves them against the whole store.
+    for _ in 0..size / 3 {
+        if uids.is_empty() {
+            break;
+        }
+        let named = uids[rng.below(uids.len())].to_string();
+        let keep = [5, 7, 12, 30, named.len()][rng.below(5)].min(named.len());
+        let body = format!(
+            "This rests on {} as the record shows. It says nothing more.",
+            &named[..keep]
+        );
+        let built = UnitCoreBuilder::new(
+            KernelType::Claim,
+            format!("a claim naming {}", rng.below(1000)),
+            Status::Speculative,
+        )
+        .body(body)
+        .build();
+        if let Ok(core) = built {
+            uids.push(canonical_uid(&core));
+            records.push(Record::Unit(core));
+        }
+    }
+    for i in 0..rng.below(3) {
+        let mut v = smysl_core::View::new(
+            smysl_core::ViewId::new(format!("v/g{i}")).unwrap(),
+            "generated",
+        );
+        if rng.chance(2) {
+            v = v.with_granularity(smysl_core::GranularityProfile::fine());
+        }
+        records.push(Record::View(v));
+    }
     let kinds = [
         RelKind::Rebuts,
         RelKind::Supersedes,
@@ -277,11 +325,19 @@ fn generate(rng: &mut Rng, size: usize) -> Vec<Record> {
 fn the_kept_check_agrees_with_the_full_check_on_generated_stores() {
     let opts = CheckOptions::default();
     let mut rng = Rng(17);
+    let (mut incremental, mut total) = (0, 0);
     for case in 0..60 {
         let size = 2 + rng.below(30);
         let records = generate(&mut rng, size);
         for _ in 0..3 {
-            deal(&format!("generated {case}"), &records, &mut rng, &opts);
+            let (i, t) = deal(&format!("generated {case}"), &records, &mut rng, &opts);
+            incremental += i;
+            total += t;
         }
     }
+    eprintln!("generated: {incremental} of {total} batches incremental");
+    assert!(
+        incremental * 4 >= total * 3,
+        "{incremental} of {total} batches incremental"
+    );
 }

@@ -1904,6 +1904,63 @@ repository.
 - **`examples/oko_ledger`** stages through `prepare_checked`, and with `--verify` it asserts the
   contract after every operation. The time `--verify` spends is not counted in the commit timings.
 
+### AC-8 step 2: the kept check, family by family
+
+`Checked::with_batch` now recomputes only what a batch can change. The passes still run over the
+whole store with the batch, so every lookup a rule makes (a ground, a `b3:` prefix, a cited
+payload) is answered as the full check answers it. What they iterate is narrowed to the units
+and records the batch can change. The kept report is spliced by rule family (RFC §17.1):
+
+- **Per unit:** recomputed for the dirty units. Those are the batch's units, units grounding on
+  one of them, the subjects of new attestations, the endpoints of new relations, and units whose
+  body has a `b3:` token that is a prefix of a new uid.
+- **Dangling references (`SMY-E060`):** dropped for a uid the batch adds, and added for one it
+  references that the store does not hold.
+- **Per record:** kept, with the batch's new records' findings added (`W432`, `W409`, `E612`).
+- **Aggregates:** `SMY-W013` gains the batch's undeclared kinds, `SMY-W614` is recounted for the
+  window keys that gain a digest, and `SMY-W111` is recomputed.
+- **Cycles:** `SMY-W062` is recomputed when a `causes` or `sequences` edge arrives.
+- **Rule E** is still recomputed over the whole store. That is step 3.
+
+The cache keeps small indexes beside the report, so a batch needs no walk of the store: who
+grounds on each uid, the `b3:` tokens in bodies, the views' distinct profiles, the window keys
+and their digests, the series with a `measured-by`, and the withdrawn relations.
+
+A batch falls back to the full check, and its `path` says why, when it:
+
+- carries a View whose profile the store has no view with;
+- carries a schema declaration the store does not hold;
+- carries an edge a withdrawal already names;
+- carries any record other than a unit, relation, attestation, label binding or View;
+- is checked under options other than the cache's.
+
+**What the passes gained.** Each pass gains a `run_scoped` beside `run`, which keeps its
+signature. `check` is unchanged in what it reports: every existing check test passes as before.
+`SMY-W609` and the other per-unit findings that a cache rebuilds are built by one shared function
+each, so the two paths cannot word them differently.
+
+**The harness:**
+
+- Every batch must match the full check, and at least a share of batches must take the
+  incremental path. Today 1,260 of 1,544 fixture batches and 492 of 572 generated batches are
+  incremental; the rest are the fallbacks above.
+- The generator now writes bodies that name other units by `b3:` prefix, some short enough to be
+  ambiguous, and Views under two profiles.
+- Seven mutations of the dirty-unit rules were tried, and each fails the harness: grounds,
+  attestations, relation endpoints, prefix tokens, dangling references, W614's recount and W609.
+
+**On OKO's path**, measured with `oko_ledger` over 1,000 investigations:
+
+| Late in the run (p50) | Step 1 | Step 2 |
+|---|---|---|
+| Staging | 30.4 ms | 14.6 ms |
+| Commit | 43.2 ms | 27.2 ms |
+
+6,896 of 6,898 batches took the incremental path; the other two were the first schema
+declaration and the first View. With `--verify`, all 1,032 operations of a 150-investigation
+run matched the full check. What still grows with the store is rule E, `Overlay::new` and the
+append's range index: steps 3 and 4.
+
 ---
 
 ## 1.16.0 — 2026-11-16

@@ -21,7 +21,15 @@ use smysl_core::{Op, Rung, Status};
 use smysl_graph::StoreRead;
 
 pub fn run(store: &(impl StoreRead + ?Sized), report: &mut Report) {
-    for (uid, unit) in store.units() {
+    run_scoped(store, super::Scope::All, report);
+}
+
+pub(crate) fn run_scoped(
+    store: &(impl StoreRead + ?Sized),
+    scope: super::Scope<'_>,
+    report: &mut Report,
+) {
+    for (uid, unit) in scope.units(store) {
         let status = unit.core.status;
         if unit.attestations.is_empty() {
             // Nothing was asserted about where this came from, so there is no ceiling to

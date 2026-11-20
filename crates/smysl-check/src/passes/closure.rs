@@ -37,7 +37,16 @@ const DANGLING_OPENERS: &[&str] = &[
 ];
 
 pub fn run(store: &(impl StoreRead + ?Sized), labels: &BTreeMap<Label, Uid>, report: &mut Report) {
-    for (uid, unit) in store.units() {
+    run_scoped(store, super::Scope::All, labels, report);
+}
+
+pub(crate) fn run_scoped(
+    store: &(impl StoreRead + ?Sized),
+    scope: super::Scope<'_>,
+    labels: &BTreeMap<Label, Uid>,
+    report: &mut Report,
+) {
+    for (uid, unit) in scope.units(store) {
         let declared: BTreeSet<Uid> = unit.core.references().copied().collect();
         body_closure(uid, &unit.core, &declared, labels, store, report);
         gist_self_containment(uid, &unit.core, report);
@@ -132,7 +141,7 @@ fn gist_self_containment(uid: &Uid, core: &UnitCore, report: &mut Report) {
 }
 
 /// Split prose into candidate reference tokens: `b3:` uids and `a/b` labels.
-fn tokenise(s: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn tokenise(s: &str) -> impl Iterator<Item = &str> {
     s.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, ':' | '/' | '-' | '_' | '.')))
         .filter(|t| t.contains('/') || t.starts_with("b3:"))
         .map(|t| t.trim_matches(|c| matches!(c, '.' | '-' | '_')))

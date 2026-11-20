@@ -19,7 +19,16 @@ pub fn run(
     granularity: &GranularityProfile,
     report: &mut Report,
 ) {
-    for (uid, unit) in store.units() {
+    run_scoped(store, super::Scope::All, granularity, report);
+}
+
+pub(crate) fn run_scoped(
+    store: &(impl StoreRead + ?Sized),
+    scope: super::Scope<'_>,
+    granularity: &GranularityProfile,
+    report: &mut Report,
+) {
+    for (uid, unit) in scope.units(store) {
         check_unit(uid, &unit.core, granularity, report);
     }
 }

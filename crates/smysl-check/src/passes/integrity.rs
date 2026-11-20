@@ -28,7 +28,7 @@ pub fn run(store: &(impl StoreRead + ?Sized), report: &mut Report) {
 /// A warning rather than an error, and one diagnostic rather than one per repeat: nothing is
 /// *wrong* with such a store — it means the same thing it always did — it is merely larger than
 /// it needs to be, and the fix is a command.
-fn repeated_records(store: &(impl StoreRead + ?Sized), report: &mut Report) {
+pub(crate) fn repeated_records(store: &(impl StoreRead + ?Sized), report: &mut Report) {
     let n = store.duplicate_records();
     if n > 0 {
         report.push(Diagnostic::new(Code::W111).with_message(format!(
@@ -104,7 +104,7 @@ fn support_cycles(g: &Adjacency, report: &mut Report) {
 }
 
 /// `SMY-W062` - a cycle in `causes` or `sequences`.
-fn causal_cycles(g: &Adjacency, report: &mut Report) {
+pub(crate) fn causal_cycles(g: &Adjacency, report: &mut Report) {
     let kinds = EdgeSet::of(
         [smysl_core::RelKind::Causes, smysl_core::RelKind::Sequences]
             .into_iter()
