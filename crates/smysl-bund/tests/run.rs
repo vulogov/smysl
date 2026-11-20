@@ -289,35 +289,41 @@ fn equal_stores_answer_equally_every_time() {
 #[test]
 fn a_loop_is_stopped_and_leaves_nothing() {
     let Some(bin) = bin() else { return };
+    // Tests run beside one another, so this script is one no other test writes, and only what
+    // runs it is looked for.
+    const MARK: &str = "// a_loop_is_stopped_and_leaves_nothing";
+    let script = format!("{MARK}\ntrue {{ true }} while");
     let policy = trusted(&bin).with_max_wall_ms(500);
     let started = std::time::Instant::now();
-    let r = eval_store(&f1(), "true { true } while", &policy);
+    let r = eval_store(&f1(), &script, &policy);
     assert!(
         matches!(r, Err(BundError::TimeoutExceeded { max_wall_ms: 500 })),
         "{r:?}"
     );
     assert!(started.elapsed().as_millis() < 3_000);
-    // Other tests run beside this one, so only this script's directory is looked for.
-    let left: Vec<_> = snapshots()
-        .into_iter()
-        .filter(|d| {
-            std::fs::read_to_string(d.join("query.bund"))
-                .is_ok_and(|s| s.contains("true { true } while"))
-        })
-        .collect();
+    let ours =
+        |d: &Path| std::fs::read_to_string(d.join("query.bund")).is_ok_and(|s| s.contains(MARK));
+    let left: Vec<_> = snapshots().into_iter().filter(|d| ours(d)).collect();
     assert!(
         left.is_empty(),
         "a snapshot directory outlived its call: {left:?}"
     );
+    // A process still running this script would still have its file: the directory is removed
+    // only after the process group is killed.
     let ps = std::process::Command::new("pgrep")
-        .args(["-f", "smysl-bund-.*/query.bund"])
+        .args(["-fl", "smysl-bund-.*/query.bund"])
         .output()
         .unwrap();
-    assert!(
-        ps.stdout.is_empty(),
-        "a bund2 outlived its call: {}",
-        String::from_utf8_lossy(&ps.stdout)
-    );
+    let alive: Vec<String> = String::from_utf8_lossy(&ps.stdout)
+        .lines()
+        .filter(|l| {
+            l.split_whitespace()
+                .filter(|w| w.ends_with("/query.bund"))
+                .any(|w| Path::new(w).parent().is_some_and(ours))
+        })
+        .map(str::to_string)
+        .collect();
+    assert!(alive.is_empty(), "a bund2 outlived its call: {alive:?}");
 }
 
 #[test]
