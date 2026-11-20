@@ -34,6 +34,28 @@ stated in tokens, the sizing residual on German, the Ollama arm's model size; qu
 unread, a subject by a name the store does not write, GE-T7 on a thousand real works, and the
 ones only people can close. None of it moved in 1.17.
 
+### RFC SMYSL-4: Bund2 programmable queries through a subprocess, amended before acceptance
+
+`Documentation/SMYSL-4_RFC/SMYSL-4_BUND2_BRIDGE.md` specifies `smysl-bund`. The crate will run
+a Bund2 script (RFC-0014's `smysl.*` words and RFC-0013's logic and CLP(FD)) over a disposable
+copy of a library, in a separate `bund2` process, and return a typed value. It never links
+Bund2, which pins every smysl crate at `=1.15.0`.
+
+The draft was checked against Bund2 `development/0.56.0` before anything was built. Three of its
+promises could not be kept by the means it chose:
+
+- **A word list is not a boundary.** Bund2 can build a word's name at run time and call it
+  (`"system." "shell" + call, !`), and its own register says so. The operating system is now the
+  boundary. Until a platform has the sandbox, only scripts declared trusted run there.
+- **Bund2 cannot write a string as JSON.** `json.from_value` refuses STRING, and every `smysl.*`
+  answer holds one, so the bridge appends its own encoder.
+- **A file copy of a library is not readable by Bund2's reader** when a shard is on redb. The
+  snapshot is written fresh, as CBOR logs.
+
+The crate takes the workspace version instead of `0.1.0`, which `verify-dep-versions.py`
+requires. Appendix A lists all eleven corrections, with file and line in both trees. Phases
+BQ-P1 to BQ-P4; nothing is built yet.
+
 ---
 
 ## 1.17.0 — 2026-11-19
