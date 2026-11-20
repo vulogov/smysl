@@ -1,0 +1,12 @@
+Error: SMYSL.GET: uid b3:x is not a uid
+   ╭─[ err.bund:2:18 ]
+   │
+ 2 │ :lib var? "b3:x" smysl.get
+   │                  ────┬────  
+   │                      ╰────── the step that failed began here
+   │ 
+   │ Note: on stack `main`
+───╯
+[BUND]  Content of the stack
+╭╮
+╰╯

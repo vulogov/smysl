@@ -168,9 +168,11 @@ contained only by §5.
 
 ### 6.2 Words that run code by a name not in the script: always refused
 
-`!`, `execute`, `execute.`, `!!`, `apply`, `lambda!`, `resolve`, `ptr`, `make.call`, `call,`,
-`register`, `alias`, `alias=`, `unregister`, `compile`, `bund.eval`, `bund.eval.`,
-`bund.eval-file`, `bund.eval-file.`, `use`, `use.`, `load`, `kb.call`, `kb.word`.
+`!`, `execute`, `execute.`, `!!`, `apply`, `lambda!`, `do`, `resolve`, `ptr`, `make.call`,
+`call,`, `register`, `alias`, `alias=`, `unalias`, `unregister`, `compile`, `bund.eval`,
+`bund.eval.`, `bund.eval-file`, `bund.eval-file.`, `use`, `use.`, `load`, `kb.call`, `kb.word`,
+`kb.consult*`. Also `?`, `conditional` and `query`: a conditional's `type` may be `csv` or
+`sqlite`, which read files, and the type is a STRING the script can build.
 
 Refusing these makes the gate useful, not sound. A KB bridge or the conditional `smysl` word
 still runs lambdas the script defines (Bund2 `smysl/query.rs:5-7`), and a lambda is ordinary code.
@@ -179,20 +181,24 @@ still runs lambdas the script defines (Bund2 `smysl/query.rs:5-7`), and a lambda
 
 - Shell and processes: `system.shell`, `sh`, `sh.`, `system.setproctitle`, `vm.spawn`, `exit`,
   `bund.exit`.
-- Files and fetching: `fs.*`, `rm`, `cp`, `mv`, `ls`, `ls.`, `cwd`, `filename`, `file`, `file.*`,
-  `url`, `url.*`, `io.textfile`, `csv`, `csv.`, `sqlite`, `stdin`, `stdin.`, `save`, `save.*`,
-  `load.*`, `bootstrap`, `debug.profile`.
+- Files and fetching: `fs.*`, `fs_is_file.`, `rm`, `cp`, `mv`, `ls`, `ls.`, `cwd`, `filename`,
+  `file`, `file.*`, `url`, `url.*`, `io.*`, `csv`, `csv.`, `sqlite`, `save`, `save.*`, `load.*`,
+  `bootstrap`, `debug.profile`.
 - Time, environment and host: `time.*`, `.timestamp`, `sleep`, `sleep.seconds`, `args`,
   `version`, `sysinfo.*`, `system.ip`, `system.ipv6`, `system.locale`, `debug.*`.
-- Terminal and channels: `input*`, `password`, `display`, `.display`, `io.banner`, `io.graph`,
-  `bund.prompt`, `console.*`, `send`, `send.`, `send.quick`, `recv`, `bus.data`, `log.*`.
+- Terminal and channels: `input*`, `password`, `display`, `io.banner`, `io.graph`,
+  `bund.prompt`, `console.*`, `spinner.*`, `send`, `send.`, `send.quick`, `recv`, `bus.*`,
+  `log.*`, and `json.path`, which prints as a side effect.
 - Randomness and anything seeded from it: `rng.*`, `math.random.*`, `math.securerandom.*`,
   `string.random.*`, `id.uuid`, `id.ulid`, `dist.sample*`, `generator*`, `sim.gillespie`,
   `popgen.wf*`; and `fmt`, which reads the locale.
 
-These lists are of Bund2 0.56.0 (Appendix A, item 7). BQ-P1 MUST regenerate them from
-`bund2 words` and record any word in neither the allowlist nor these lists. A new Bund2 release
-is admitted only after that diff is read.
+These lists are of Bund2 0.56.0 (Appendix A, item 7). Their authoritative form is
+`crates/smysl-bund/src/words.rs`, read in BQ-P1 against `bund2 words` of a 0.56.0 build
+(`crates/smysl-bund/words/bund2-0.56.0.txt`, 1,210 words). A test fails if a refused entry names
+a word that build does not have. So the list cannot refuse a misspelling while the real word
+stays allowed. Neither `stdin` nor a bare `call` exists in 0.56.0, though the first check named both. A
+new Bund2 release is admitted only after its `bund2 words` is diffed against that file and read.
 
 ### 6.4 The default allowlist
 
@@ -202,7 +208,9 @@ is admitted only after that diff is read.
 `kb.assert`, `kb.asserta`, `kb.retract`, `kb.merge`, `kb.clauses`, `kb.inferences`,
 `kb.askable`, `kb.table`, `kb.query`, `kb.once`, `kb.holds`, `kb.prove`, `kb.saturate`, and the
 CLP(FD) words. Also Bund2's stack, arithmetic, comparison, string, list, map and control words
-that touch nothing outside the VM. BQ-P1 enumerates these from `bund2 words`.
+that touch nothing outside the VM. In BQ-P1's form, the allowlist is every word of the 0.56.0
+listing that §6.1 to §6.3 do not refuse, less `smysl.open`. A word a later Bund2 adds is not on
+it.
 
 `smysl.write` renders a library as surface text onto the stack; it writes no file
 (`smysl/words.rs:394-408`). `smysl.measure` and `smysl.dossier` append nothing
@@ -216,28 +224,47 @@ The bridge writes `<tmp>/query.bund` as three parts:
    `eval_over_sq`, `:seed [ <uids> ] var`. A script reads them with `:lib var?` and `:seed var?`,
    Bund2's binding idiom (Bund2 `stdlib/src/check.rs:1496-1513`).
 2. **The script**, verbatim.
-3. **The encoder**, which takes the value on top of the stack and writes it to standard output
-   between two lines holding a sentinel. The sentinel is fresh for each call, and is drawn by the
-   bridge, never by the script. The encoding:
-   - MUST represent NODATA, BOOL, INTEGER, FLOAT, STRING, LIST and MAP, and refuse any other type
-     by name;
-   - MUST be unambiguous for any string content: length-prefixed, or escaped by a rule the
-     decoder inverts exactly;
-   - MUST write map keys in an order the decoder does not depend on, because the decoder sorts
-     them.
+3. **The encoder**: a line holding the opening sentinel, then `debug.display_stack`, then a
+   line holding the closing sentinel. The sentinel is fresh for each call, and is drawn by the
+   bridge, never by the script.
 
-   The encoder's exact words are chosen in BQ-P1 against `bund2 words`, since a Bund word that
-   tells a value's type and one that measures or escapes a string are what it needs.
+**Why `debug.display_stack` (decided in BQ-P1).** An encoder written in Bund cannot walk a map:
+Bund2 0.56.0 has no word that lists a map's keys, `convert.to_list` of a MAP is `[]`, and `loop`
+refuses one. `println` renders a string without quotes and a float lossily
+(`0.30000000000000004` prints as `0.30000000000000007`). `debug.display_stack` instead prints
+every stack value, bottom first, one row each, in Bund2's raw rendering
+(`bund2-value/src/lib.rs`, `render`):
+
+```text
+Value { id: "…", stamp: <ms>, dt: <type>, q: <float>, data: <data>, attr: [ … ], curr: <n>, tags: { … } }
+```
+
+`data` is `I64(n)`, `F64(f)`, `Bool(b)`, `Null`, `String("…")`, `List([ … ])` or
+`Map({"k": … })`. A string is Rust-escaped, so a row is one line whatever the string holds. A
+float is `{:?}`, which reads back to the same bits. The rows do not wrap: at `COLUMNS=80`, on a
+pipe, a 450-character row stays one line. `debug.display_stack` is refused to the script (§6.3);
+the encoder is not the script.
 
 The decoder:
 
-1. MUST take the text between the last pair of sentinel lines and ignore everything else the
-   script printed;
-2. MUST produce a `QueryValue`, with map keys in `BTreeMap` order and a STRING that parses as a
-   smysl uid (`b3:…`) returned as `QueryValue::Uid`;
-3. MUST, under `verify_uids`, fail with `NormalizationError` if a returned uid is not in the
+1. MUST take the last row between the last pair of sentinel lines, which is the top of the
+   stack, and ignore everything else the script printed;
+2. MUST read past `id`, `stamp`, `dt`, `q`, `attr`, `curr` and `tags`. They are Bund2's
+   bookkeeping, and `stamp` is a wall clock;
+3. MUST produce a `QueryValue`, with map keys in `BTreeMap` order and a STRING that parses as a
+   smysl uid (`b3:…`) returned as `QueryValue::Uid`. Any other `data`, a LAMBDA among them, is
+   refused by name;
+4. MUST, under `verify_uids`, fail with `NormalizationError` if a returned uid is not in the
    source store;
-4. MUST map a failure on standard error by its code (§8).
+5. MUST, when the sentinels are missing, read the failure from the `Error: <message>` line that
+   `--report trace` writes, and classify it (§8).
+
+**What a run looks like from outside (BQ-P1).**
+- A failing script exits 0. Bund2 sets an exit code only for `bund.exit` and for a failure to
+  start (`bund2 help script`), so the exit status says nothing about the answer.
+- The failure report goes to **standard output**, not standard error. The bridge runs with
+  `--report trace --nocolor`, under which it begins `Error: <message>`.
+- A script that ends normally prints nothing after itself; there is no stack dump to suppress.
 
 Two runs over equal stores with equal scripts MUST return equal `QueryValue`s. `elapsed_ms` and
 `warnings` are reported beside the value and are not part of that equality.
@@ -257,8 +284,15 @@ Two runs over equal stores with equal scripts MUST return equal `QueryValue`s. `
 | killed by the sandbox | `PolicyViolation`, with the denied operation when the platform names it |
 
 The codes and their meanings are RFC-0014 §S8 (`RFC-0014-smysl-corpora.md:1805-1817`) and
-RFC-0013 (`RFC-0013-logic-programming.md:876, 1083, 1091`). If a refusal carries no code, the
-bridge returns `ProcessFailed` with the exit status and the bounded standard error.
+RFC-0013 (`RFC-0013-logic-programming.md:876, 1083, 1091`).
+
+**The code is read from the text (BQ-P1).** Bund2 keeps the `SMnn` code inside the process
+(`stdlib/src/smysl/mod.rs`, `Refusal::for_word`). What it writes is `<WORD>: <text>`, where the
+text follows §S8's template for the code: `no SMYSL library at` is SM01, `SMYSL refused it:`
+SM02, `the query was refused:` SM04, `unknown <kind>:` SM05, and so on. The bridge recovers the
+code from the template. SM03's template is the catch-all `<what> <reason>`, so a `smysl.*`
+refusal matching no other template is SM03. An error from a word that is not `smysl.*` (an
+unknown word, a type error) is `ScriptFailed`.
 
 ## 9. The library API
 
@@ -277,8 +311,10 @@ pub fn eval_over_sq(store: &Store, sq: &str, script: &str, policy: &QueryPolicy)
   and `max_inferences: Option<u64>`. When `max_inferences` is set, the preamble applies
   `kb.inferences` to every KB `smysl.kb` builds.
 - `Trust` is `Sandboxed` (the default) or `Trusted`.
-- `QueryValue`, `BundQueryResult` and `BundError` are as in the draft, with `InferenceCapReached`
-  and `SandboxUnavailable` added to `BundError`. Every public type is `#[non_exhaustive]`.
+- `QueryValue`, `BundQueryResult` and `BundError` are as in the draft. `BundError` adds
+  `InferenceCapReached`, `SandboxUnavailable`, `ScriptFailed` (a Bund2 error that is not a
+  refusal) and `BinaryUnsupported` (a `bund2` older than 0.56.0, or a `--version` that cannot be
+  read). Every public type is `#[non_exhaustive]`.
 - Defaults: `max_script_bytes` 65,536; `max_nesting_depth` 32; `max_output_bytes` 1 MiB;
   `max_wall_ms` 2,000; `max_inferences` 1,000,000; `verify_uids` true;
   `word_policy` the allowlist of §6.4; `trust` `Sandboxed`.
@@ -317,7 +353,7 @@ until BQ-P4, when it joins `PUBLISHED` with the release that first publishes it.
 
 | Phase | Content | Exit criteria |
 |---|---|---|
-| **BQ-P1** spike and skeleton | Against a local `bund2 --features smysl`: confirm the flags, that a script's stack is not dumped on stdout at exit (or the flag that stops it), the encoder's words (§7), and `bund2 words` → the lists of §6. Crate skeleton: `QueryPolicy`, the gate, `QueryValue`, the decoder, the error mapping. | The gate and the decoder unit-tested without `bund2`. The word lists regenerated and their diff against Appendix A recorded. |
+| **BQ-P1** spike and skeleton (**done**: findings in §7 and §8) | Against a local `bund2 --features smysl`: confirm the flags, that a script's stack is not dumped on stdout at exit (or the flag that stops it), the encoder's words (§7), and `bund2 words` → the lists of §6. Crate skeleton: `QueryPolicy`, the gate, `QueryValue`, the decoder, the error mapping. | The gate and the decoder unit-tested without `bund2`. The word lists regenerated and their diff against Appendix A recorded. |
 | **BQ-P2** snapshot and runner | §4 and §5 for `Trust::Trusted`: snapshot from a store and from a library (a redb library included), env, bounded readers, wall clock, process-group kill, cleanup. | Tests gated on `BUND2_BIN`. A timeout leaves no child and no directory. A live library's bytes, hashed before and after, are unchanged. |
 | **BQ-P3** sandbox and determinism | §5.5 on macOS and on Linux; `SandboxUnavailable` elsewhere. Determinism replay over 20 or more scripts, including `smysl.kb` with `kb.query` and the CLP(FD) and `kb.inferences` examples of `bund_examples/smysl_demo_full/demo.bund`, over equal stores written in shuffled record order. | Adversarial suite: `"system." "shell" + call, !`, `compile`, a `url` fetch, a file read outside the snapshot, `time.now`, an infinite loop. Each is stopped by the sandbox, the gate or the clock, and each is named in the result. |
 | **BQ-P4** CLI | `smysl bund` behind `bund`; `smysl-bund` joins `PUBLISHED`; the manual gains a section. | `cli-surface`, `doc-output` and the crate-features matrix cover it. Published with the release that ships it. |
@@ -356,7 +392,7 @@ The draft (2026-11-20) was checked against smysl `fdd92ed` and Bund2 `developmen
 | 4 | `smysl-bund` at `0.1.0`, excluded from the 1.x API | `verify-dep-versions.py` requires the workspace version, and a CLI command makes it a dependency of the published facade | D-B7 |
 | 5 | `--noio` would stub only disk-reading words | It stubs 21 `smysl.*` words, every read-only one included (`smysl/words.rs:740-761`), and is not a sandbox | D-B3 |
 | 6 | The denylist names `uuid`, `ulid`, `eval`, `import`, `csv.*`, `sqlite.*` | No such words. Bund2 has `id.uuid`, `id.ulid`, `bund.eval`/`!!`, `csv`/`csv.`, `sqlite`. `file` and `url` exist as bare words. | §6.3 |
-| 7 | The denylist covers the impure words | It missed, among others: `sh`, `rm`, `cp`, `mv`, `ls`, `cwd`, `sleep`, `filename`, `stdin`, `save.*`, `load.*`, `bootstrap`, `time.*`, `args`, `exit`, `sysinfo.*`, `rng.*`, `dist.sample*`, `generator*`, `vm.spawn`, `send`, `recv`, `console.*`, `log.*`, `debug.*` (`stdlib/src/host.rs:2088-2172`, `world.rs:221-245`, `biomath/rng.rs`) | §6.3 |
+| 7 | The denylist covers the impure words | It missed, among others: `sh`, `rm`, `cp`, `mv`, `ls`, `cwd`, `sleep`, `filename`, `save.*`, `load.*`, `bootstrap`, `time.*`, `args`, `exit`, `sysinfo.*`, `rng.*`, `dist.sample*`, `generator*`, `vm.spawn`, `send`, `recv`, `console.*`, `log.*`, `debug.*` (`stdlib/src/host.rs:2088-2172`, `world.rs:221-245`, `biomath/rng.rs`) | §6.3 |
 | 8 | The demos open a library as `:lib "…" smysl.open var` | They create one: `:lib "mill" smysl.create var` (`bund_examples/smysl_demo/demo.bund:26`). Reading with `:lib var?` is right. `1000 kb.inferences` is in `smysl_demo_full/demo.bund:408`. | §7 keeps the idiom, and cites it correctly |
 | 9 | Read-only words are read-only | They are, for the library's records. But the 1.15 open they go through can unlink redacted objects, holding no lock. | §4 says why the snapshot makes this harmless |
 | 10 | Bund2 enforces termination | It has no step limit or timeout. `kb.inferences` caps KB solving only. | D-B6 |

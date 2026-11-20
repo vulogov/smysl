@@ -140,8 +140,9 @@ PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-re
 #
 # Empty from 1.10.0, which first published `smysl-text`, `smysl-query`, `smysl-measure`,
 # `smysl-lib` and `smysl-embed-candle`, until `smysl-tel` and `smysl-series` (RFC SMYSL-3) in 1.17,
-# which were published with 1.17.0 and joined PUBLISHED. Empty again from there.
-UNPUBLISHED :=
+# which were published with 1.17.0 and joined PUBLISHED. Empty again from there, until
+# `smysl-bund` (RFC SMYSL-4), which joins PUBLISHED with the release that ships BQ-P4.
+UNPUBLISHED := smysl-bund
 
 # The library crates behind the facade: everything published except the facade itself, plus
 # the ones not published yet. Their *surface* is watched from the first commit — `api-check`

@@ -2147,6 +2147,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "smysl-bund"
+version = "1.18.0"
+dependencies = [
+ "smysl-core",
+]
+
+[[package]]
 name = "smysl-check"
 version = "1.18.0"
 dependencies = [

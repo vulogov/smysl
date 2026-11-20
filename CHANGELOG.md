@@ -56,6 +56,39 @@ The crate takes the workspace version instead of `0.1.0`, which `verify-dep-vers
 requires. Appendix A lists all eleven corrections, with file and line in both trees. Phases
 BQ-P1 to BQ-P4; nothing is built yet.
 
+### `smysl-bund`: the word gate and the answer's decoder (SMYSL-4 BQ-P1)
+
+A new boundary crate, unpublished, that links no Bund2 crate. BQ-P1 is what can be decided
+before a script is run. The spike against a `bund2` 0.56.0 built with `--features smysl` settled
+the four things the RFC left open, and two of them went another way than it expected.
+
+- **The answer is read from `debug.display_stack`, not encoded by Bund code.** A Bund script
+  cannot walk a map: no word lists a map's keys, `convert.to_list` of a MAP is `[]`, and `loop`
+  refuses one. `println` drops a string's quotes and prints `0.30000000000000004` as
+  `0.30000000000000007`. `debug.display_stack` prints each stack value as one line of Bund2's
+  raw rendering: Rust-escaped strings, `{:?}` floats that read back to the same bits, and a type
+  on every node. It does not wrap on a pipe. `decode` parses that rendering. It reads past the
+  `stamp`, which is a wall clock, and refuses a LAMBDA or any other type by name.
+- **A refusal's code is read from its text.** Bund2 writes `<WORD>: <text>` and keeps the `SMnn`
+  code to itself. Each code's text follows RFC-0014 §S8's template, so `error::classify` recovers
+  the code from the template.
+- **A failing script exits 0, and reports on standard output.** The bridge runs
+  `--report trace --nocolor` and reads the `Error:` line when the sentinels are missing.
+- **The word lists are the build's own.** `words/bund2-0.56.0.txt` is `bund2 words`, 1,210
+  words. `words::REFUSED` holds 95 entries, each with its reason. A test fails if an entry names
+  a word the build does not have: the first check had named `stdin` and a bare `call`, and
+  neither exists. The default allowlist is the listing less the refused, so a word a later Bund2
+  adds is refused until it is read.
+- **The gate** tokenises a script as `bund2-syntax` does, and treats a `` `pointer `` as naming
+  its word. It also refuses an unterminated string or literal and an unbalanced bracket, which
+  would swallow the bridge's encoder.
+- **`probe::read_version`** reads `bund2 --version` and refuses a build without `smysl` or older
+  than 0.56.0.
+
+The captured output of a real run is in `tests/fixtures/`, so the decoder is tested without
+`bund2`. With `BUND2_BIN` set, the probe runs against the binary as well. RFC §6 to §9 record
+the findings.
+
 ---
 
 ## 1.17.0 — 2026-11-19

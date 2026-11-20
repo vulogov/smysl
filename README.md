@@ -496,6 +496,7 @@ crates/smysl-measure   text, graph, channel and dialogue measures; assessment
 crates/smysl-lib       library export, import and verify
 crates/smysl-tel       SMYSL-3 telemetry: readers, diff, evidence, detectors, investigations
 crates/smysl-series    SMYSL-3 series substrate: samples, window digests, chunks
+crates/smysl-bund      SMYSL-4 Bund2 bridge: word gate, answer decoder (not published yet)
 crates/smysl-tui       seven-pane terminal UI, with a live pack simulator
 crates/smysl-eval      evaluation harness E1-E9 (not published)
 examples/              simple_demo and information_theory
