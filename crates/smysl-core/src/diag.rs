@@ -180,7 +180,7 @@ macro_rules! registry {
 }
 
 registry! {
-    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure, Export, Schema, Store, Telemetry }
+    groups { Parse, Identity, Lod, Epistemics, Merge, PackRender, Extension, Provider, Library, Query, Measure, Export, Schema, Store, Telemetry, Information }
 
     // --- Parse and encoding ------------------------------------------------
     Parse => {
@@ -515,9 +515,9 @@ registry! {
     // registered; the rest arrive with what raises them.
     Telemetry => {
         E602 = "SMY-E602", Error, "A non-canonical dec: not two shortest integers, a trailing-zero mantissa, zero with an exponent, out of range, or -2^64";
-        E603 = "SMY-E603", Error, "A window unit's status or attestation is not the one rule TW gives its basis and fields";
-        E604 = "SMY-E604", Error, "Window evidence recomputed from the substrate does not match the unit";
-        W605 = "SMY-W605", Warn,  "Window evidence refers to samples the substrate does not hold (evicted or never received): not re-derivable";
+        E603 = "SMY-E603", Error, "An evidence unit's status or attestation is not the one rule TW or TI gives its basis and fields";
+        E604 = "SMY-E604", Error, "Evidence recomputed from the substrate does not match the unit";
+        W605 = "SMY-W605", Warn,  "Evidence refers to samples the substrate does not hold (evicted or never received): not re-derivable";
         W606 = "SMY-W606", Warn,  "A hypothesis's numeric quote does not verify (rule TQ); its effective status is at most speculative";
         E607 = "SMY-E607", Error, "A series or instrument unit carries what its identity forbids: time, grounds, or another source";
         W608 = "SMY-W608", Warn,  "A declared keyed array could not be keyed (missing, non-scalar or repeated key); diffed as one json leaf";
@@ -526,10 +526,21 @@ registry! {
         E611 = "SMY-E611", Error, "A record 6 of a detection kind that is derived and never written (6 or 7)";
         E612 = "SMY-E612", Error, "A writer emitted a reserved number: source key 7 or record 16";
         W613 = "SMY-W613", Warn,  "A number outside dec's range, kept as its token (vtype text)";
-        W614 = "SMY-W614", Warn,  "The windows of one window key disagree: several sample sets, each window true of its own";
+        W614 = "SMY-W614", Warn,  "The evidence units of one evidence key disagree: several sample sets, each unit true of its own";
         W615 = "SMY-W615", Warn,  "Two samples at one series, instrument and instant, with different values or flags; both are kept";
         W616 = "SMY-W616", Warn,  "An integer window sum outside dec's range; the sum is omitted";
         W617 = "SMY-W617", Warn,  "Two spans with one trace and span id in one stream, with different contents; both are kept";
+    }
+
+    // 1.18, SMYSL-5 TI-P0: the range `SMY-E7xx`/`W7xx` is information measures over telemetry
+    // (D-I11), in a sixteenth group appended last for the reason the blocks above give. All four
+    // of §9's codes are registered with the schema revision that names what they refuse, as the
+    // RFC's TI-P0 lists them; `tel info` (TI-P1) and `tel-evidence` (TI-P4) raise them.
+    Information => {
+        E701 = "SMY-E701", Error, "A statistic was asked of a series whose tel:kind does not admit it: a counter read as value, a state without width:1, or a kind not admitted";
+        E702 = "SMY-E702", Error, "An information recipe is not admitted: a binning the statistic refuses, an unknown or out-of-range parameter, a value holding ? & or =, or a missing step, bins or ref";
+        W703 = "SMY-W703", Warn,  "A statistic was not run: fewer than min_n symbols, or coverage below cover, at the one lag or at any lag of a scan; no unit is written";
+        W704 = "SMY-W704", Warn,  "An info unit's recipe names a version this build does not have; it is kept and not recomputed";
     }
 }
 
@@ -1064,9 +1075,15 @@ mod tests {
     /// 170 with `SMY-W606` in TL-P6 step 2: a numeric quote that does not verify (rule TQ).
     /// 171 with `SMY-W609` in TL-P7 step 1: a series with no origin instrument.
     /// 172 with `SMY-W617` in TL-P9 step 2: one span id held twice with different contents.
+    ///
+    /// 176 with `SMY-E701`, `SMY-E702`, `SMY-W703` and `SMY-W704` in 1.18 (SMYSL-5 TI-P0), in a
+    /// sixteenth group, `Information`: a series or a recipe a statistic refuses, a statistic not
+    /// run, and a recipe version this build does not have. The same step words `SMY-E603`,
+    /// `E604`, `W605` and `W614` for evidence in general, keeping each code's meaning: TL-P9
+    /// extended them to spans and templates and SMYSL-5 extends them to `x.tel/info`.
     #[test]
     fn the_registry_is_the_size_it_is_meant_to_be() {
-        assert_eq!(Code::ALL.len(), 172);
+        assert_eq!(Code::ALL.len(), 176);
     }
 
     #[test]
@@ -1077,7 +1094,7 @@ mod tests {
                 "group {g} has no codes"
             );
         }
-        assert_eq!(Group::ALL.len(), 15);
+        assert_eq!(Group::ALL.len(), 16);
     }
 
     #[test]

@@ -59,6 +59,12 @@
 //!
 //! `make ge-m6` runs it with the defaults.
 
+// Simulated input, not a stored number: the generators draw Box–Muller normals and exponential
+// gaps with the platform's `ln` and `exp`, as they did before `clippy.toml` (SMYSL-5 D-I4)
+// reached this crate. Routing them through `libm` would move every simulated sample and every
+// result recorded from them.
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::BTreeMap;
 
 use smysl_core::schemas::tel;

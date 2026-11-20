@@ -35,6 +35,10 @@ prost = { workspace = true, optional = true }
 # `getrandom`, and the crate's purity scan still bans every unseeded generator by name.
 rand_chacha = { version = "0.9", default-features = false }
 rand_core   = { version = "0.9", default-features = false }
+# The logarithms of the information measures (RFC SMYSL-5 §6, D-I4), through `info::num` and
+# nowhere else: `clippy.toml` refuses the `f64` methods. The workspace's pin, which is
+# `smysl-measure`'s, so one logarithm is computed one way. Default features off: no `arch`.
+libm = { workspace = true }
 
 [dev-dependencies]
 # `tests/prom_fixture.rs` records the fixture into the redb backend as well as memory: the

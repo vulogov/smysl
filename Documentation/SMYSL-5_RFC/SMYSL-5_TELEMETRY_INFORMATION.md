@@ -1,8 +1,8 @@
 # RFC SMYSL-5 — information measures over telemetry
 
 **Author:** Vladimir Ulogov
-**Status:** first draft, amended after review (R1, 2026-11-20). Nothing in it is built, and no
-number in it is measured. Every threshold is a proposal until the experiment that owns it has
+**Status:** first draft, amended after review (R1, 2026-11-20). TI-P0 is built; no statistic is,
+and no number in it is measured. Every threshold is a proposal until the experiment that owns it has
 run (§17).
 **Target version:** not fixed. Phases are named (TI-P0 to TI-P5), not numbered by release.
 **Evidence baseline:** `dev/1.18.0` at `3e57160` ("SMYSL-4 BQ-P4"). Every code pointer below
@@ -484,7 +484,7 @@ it is SMYSL-2's example. A telemetry example over `fixtures/tel/detect/` is TI-P
 
 | Phase | Content | Exit criteria |
 |---|---|---|
-| **TI-P0** prerequisites | `libm` as a workspace pin; `info::num`; the exact decimal operations §5 needs (§12); `x.tel/v1` revision 2 with `x.tel/info` registered; §9's codes, and the four extended codes reworded; the format spec's §5.2 list | the three ports round-trip a fixture holding an `x.tel/info` unit, byte for byte; purity passes |
+| **TI-P0** prerequisites (**done**, 1.18) | `libm` as a workspace pin; `info::num`; the exact decimal operations §5 needs (§12); `x.tel/v1` revision 2 with `x.tel/info` registered; §9's codes, and the four extended codes reworded; the format spec's §5.2 list | the three ports round-trip a fixture holding an `x.tel/info` unit, byte for byte; purity passes |
 | **TI-P1** symbols and one series | grid, `of`, the four binnings, ordinal patterns; `ent/1`, `perm/1`; `tel info`; the info test in `measure-platforms` | `fixtures/tel/info/` uids stable on the four CI platforms; **GE-I1** harness runs; **GE-I2 (a)** |
 | **TI-P2** two series and two windows | `mi/1` with lag, scan and surrogates; `jsd/1` | **GE-I1** over them; **GE-I2 (b)**; scan cost measured |
 | **TI-P3** logs | `tent/1` | **GE-I4** run |
@@ -546,6 +546,9 @@ needs (3 §1, I-1).
   rule N want it handled another way? TL-P9 added two types before the schema's first release,
   so this is the first addition after one. To be settled in TI-P0 against `smysl schema`'s
   naming check.
+  **Decided in TI-P0: a revision.** `tel::decl_at(1)` and `tel::decl()` (revision 2) pass
+  `SchemaSet::check_rule_n` as a pair, since revision 2 only appends a type and its keys. A
+  store keeps both declarations, and `fixtures/wire/F16-telemetry-info.cbor` holds them.
 - **OQ-I4.** Should an info unit ground on the exact `x.tel/window` of its key when one exists,
   rather than on the series? The shared digest already links them, and grounding on the series
   is what segments and anomalies do.

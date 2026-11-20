@@ -30,8 +30,13 @@ use crate::types::{RelKind, SchemaDecl, SourceKind, SourceRef, Status, UnitCore,
 /// The schema's own id.
 pub const ID: &str = "x.tel/v1";
 
-/// The revision this build declares.
-pub const VERSION: u32 = 1;
+/// The revision this build declares. Revision 2 (RFC SMYSL-5 §3, TI-P0) adds [`INFO`] and its
+/// payload keys and changes the meaning of nothing in revision 1, which A-12 rule N admits.
+pub const VERSION: u32 = 2;
+
+/// How many of [`TYPES`] each revision declares: revision 1 the first nineteen, revision 2 all
+/// twenty. A revision only ever appends, so a revision's types are a prefix of the list.
+const TYPES_AT: &[(u32, usize)] = &[(1, 19), (2, 20)];
 
 // ---------------------------------------------------------------------------
 // Unit types (§4.1)
@@ -75,8 +80,12 @@ pub const ACTION: &str = "x.tel/action";
 pub const SPAN: &str = "x.tel/span";
 /// Template evidence: one Drain template over a window of a log stream (§9.7, TL-P9).
 pub const LOG_TEMPLATE: &str = "x.tel/log-template";
+/// A statistic of a symbolised sample set: an entropy, a mutual information, a divergence
+/// (RFC SMYSL-5 §3). Revision 2.
+pub const INFO: &str = "x.tel/info";
 
-/// The nineteen types, in §4.1's order: seventeen, and the two TL-P9 added.
+/// The twenty types, in §4.1's order: seventeen, the two TL-P9 added, and the one revision 2
+/// added (RFC SMYSL-5).
 pub const TYPES: &[&str] = &[
     SERIES,
     SERIES_META,
@@ -97,6 +106,7 @@ pub const TYPES: &[&str] = &[
     ACTION,
     SPAN,
     LOG_TEMPLATE,
+    INFO,
 ];
 
 // ---------------------------------------------------------------------------
@@ -135,6 +145,13 @@ pub const RELATIONS: &[&str] = &[
 // ---------------------------------------------------------------------------
 // Enumerations (§4.3). All open: a value this build does not know is preserved.
 // ---------------------------------------------------------------------------
+
+/// `tel:stat` of an `x.tel/info` unit (RFC SMYSL-5 §3). `te`, transfer entropy, is reserved
+/// (§10) and is not here: until GE-I5 releases it no writer emits it, and a reader preserves
+/// one as it does any value this build does not know.
+pub const STATS: &[&str] = &["entropy", "perm-entropy", "mi", "jsd", "template-entropy"];
+/// Reserved `tel:stat` values: named so that no later statistic takes the name.
+pub const RESERVED_STATS: &[&str] = &["te"];
 
 pub const SCHEMES: &[&str] = &[
     "otel",
@@ -239,6 +256,7 @@ const INT: FieldType = FieldType::Int;
 const UID: FieldType = FieldType::Uid;
 const DEC: FieldType = FieldType::Dec;
 const DECS: FieldType = FieldType::List(&FieldType::Dec);
+const INTS: FieldType = FieldType::List(&FieldType::Int);
 
 const FROM_MS: Field = f("tel:from_ms", INT);
 const TO_MS: Field = f("tel:to_ms", INT);
@@ -409,6 +427,42 @@ pub const TYPE_DEFS: &[TypeDef] = &[
         ],
         optional: &[],
     },
+    // RFC SMYSL-5 §3. Some optional keys are required by `tel:stat` or by the recipe: `with`,
+    // `with_instrument`, `with_digest` and `lag` for `mi`; `ref_from_ms`, `ref_to_ms` and
+    // `ref_digest` for `jsd` and any `baseline` binning; `lags` and `values` for a scan. A
+    // condition a flat table cannot state, so it is stated here and checked under rule TI.
+    TypeDef {
+        ty: INFO,
+        required: &[
+            e("tel:stat", STATS),
+            OF_SERIES_UID,
+            f("tel:instrument", UID),
+            FROM_MS,
+            TO_MS,
+            RECIPE,
+            f("tel:n", INT),
+            f("tel:value", DEC),
+            DIGEST,
+        ],
+        optional: &[
+            f("tel:k", INT),
+            f("tel:mm", DEC),
+            f("tel:missing", INT),
+            f("tel:with", UID),
+            f("tel:with_instrument", UID),
+            f("tel:with_digest", FieldType::Bytes32),
+            f("tel:k_with", INT),
+            f("tel:ref_from_ms", INT),
+            f("tel:ref_to_ms", INT),
+            f("tel:ref_digest", FieldType::Bytes32),
+            f("tel:bias", DEC),
+            f("tel:lags", INTS),
+            f("tel:values", DECS),
+            f("tel:lag", INT),
+            f("tel:null_b", INT),
+            f("tel:null_ge", INT),
+        ],
+    },
 ];
 
 /// The table entry for a unit type, if `x.tel/v1` declares it.
@@ -416,7 +470,7 @@ pub fn type_def(ty: &str) -> Option<&'static TypeDef> {
     TYPE_DEFS.iter().find(|d| d.ty == ty)
 }
 
-/// Whether this schema id is one of the nineteen types.
+/// Whether this schema id is one of the twenty types.
 pub fn declares(id: &SchemaId) -> bool {
     TYPES.contains(&id.as_str())
 }
@@ -424,8 +478,16 @@ pub fn declares(id: &SchemaId) -> bool {
 /// The declaration, as a record a store can hold. `payload_shape` is absent until A-7, as
 /// `x.text/v1`'s is; infallible for the reason [`super::text::decl`] is.
 pub fn decl() -> SchemaDecl {
-    let mut d = SchemaDecl::new(SchemaId::Extension(ID.to_string()), VERSION);
-    d.types = TYPES
+    decl_at(VERSION).expect("this build declares its own revision")
+}
+
+/// The declaration of one revision, as that revision's build wrote it; `None` for a revision
+/// this build does not know. A store written before revision 2 holds revision 1's, and a
+/// later write adds the current one beside it, so the store holds the schema's history.
+pub fn decl_at(version: u32) -> Option<SchemaDecl> {
+    let (_, n) = TYPES_AT.iter().find(|(v, _)| *v == version)?;
+    let mut d = SchemaDecl::new(SchemaId::Extension(ID.to_string()), version);
+    d.types = TYPES[..*n]
         .iter()
         .map(|t| SchemaId::Extension((*t).to_string()))
         .collect();
@@ -433,7 +495,7 @@ pub fn decl() -> SchemaDecl {
         .iter()
         .map(|r| RelKind::Extension((*r).to_string()))
         .collect();
-    d
+    Some(d)
 }
 
 // ---------------------------------------------------------------------------
@@ -1895,8 +1957,8 @@ mod tests {
     }
 
     #[test]
-    fn nineteen_types_and_eight_relations_all_well_formed() {
-        assert_eq!(TYPES.len(), 19);
+    fn twenty_types_and_eight_relations_all_well_formed() {
+        assert_eq!(TYPES.len(), 20);
         assert_eq!(RELATIONS.len(), 8);
         assert!(SchemaId::parse(ID).is_ok());
         for t in TYPES {
@@ -1907,6 +1969,37 @@ mod tests {
             let k = RelKind::parse(r).expect("a well-formed kind");
             assert!(matches!(k, RelKind::Extension(_)), "{r}");
         }
+    }
+
+    #[test]
+    fn revision_two_adds_info_and_keeps_revision_one() {
+        let one = decl_at(1).expect("revision 1");
+        assert_eq!((one.version, one.types.len()), (1, 19));
+        assert!(!one.types.iter().any(|t| t.as_str() == INFO));
+        let two = decl_at(2).expect("revision 2");
+        assert_eq!(two, decl());
+        assert_eq!(two.types[..19], one.types[..]);
+        assert_eq!(two.types.last().map(SchemaId::as_str), Some(INFO));
+        assert_eq!(two.relations, one.relations);
+        assert!(decl_at(0).is_none() && decl_at(3).is_none());
+
+        // A store a 1.17 build wrote holds revision 1; a later write adds revision 2 beside it.
+        // Rule N reads the pair as a history that only added.
+        let mut report = crate::diag::Report::new();
+        let set = crate::schema::SchemaSet::from_decls([&one, &two], &mut report);
+        let id = SchemaId::parse(ID).unwrap();
+        assert_eq!(set.check_rule_n(&id, &mut report), 0, "{report:?}");
+        assert!(report.iter().all(|d| !d.is_error()), "{report:?}");
+        assert_eq!(set.current(&id).map(|r| r.version), Some(2));
+    }
+
+    #[test]
+    fn te_is_reserved_and_not_written() {
+        assert!(!STATS.contains(&"te"));
+        assert!(RESERVED_STATS.contains(&"te"));
+        let stat = type_def(INFO).unwrap().field("tel:stat").unwrap();
+        assert!(!stat.admits_literally("te"));
+        assert!(stat.admits_literally("mi"));
     }
 
     #[test]

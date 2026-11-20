@@ -2344,6 +2344,7 @@ dependencies = [
 name = "smysl-tel"
 version = "1.18.0"
 dependencies = [
+ "libm",
  "prost",
  "rand_chacha",
  "rand_core",

@@ -1472,6 +1472,10 @@ reporting structure only; it carries no weight on the wire.
     ([`SMY-W615`], [warning], [Two samples at one series, instrument and instant, with different values or flags. The substrate is a set of samples, so both are kept and both enter every window digest over that instant. A data error at the source, reported by `tel read`. From 1.17.]),
     ([`SMY-W616`], [warning], [The exact sum of an integer window is outside `dec`'s range. The window's `sum` is omitted rather than rounded, and every other field stands. From 1.17.]),
     ([`SMY-W617`], [warning], [One stream holds two spans with the same trace and span id whose contents differ: two exports disagree about one span. Both are kept, both materialise as `x.tel/span` units, and each is a parent of the other's children. `tel trace` reports it. From 1.17.]),
+    ([`SMY-E701`], [error], [A statistic was asked of a series whose `tel:kind` does not admit it (RFC SMYSL-5 §5.2): a `counter` read as `value` rather than `increase`, a `state` without `width:1` bins, or a kind not admitted at all (`histogram`, `summary`, `text`, `span`, `log`, `event`). From 1.18; raised by `tel info` from TI-P1.]),
+    ([`SMY-E702`], [error], [An information recipe is not admitted: a binning the statistic refuses (`rank` for an entropy or a divergence), an unknown parameter, one out of range, a value holding `?`, `&` or `=`, or a missing `step`, `bins` or `ref`. From 1.18; raised by `tel info` from TI-P1.]),
+    ([`SMY-W703`], [warning], [A statistic was not run: fewer than `min_n` symbols, or a share of grid points below `cover`, at the one lag or at any lag of a scan. No unit is written, and the report names the window and the lag. From 1.18; raised by `tel info` from TI-P1.]),
+    ([`SMY-W704`], [warning], [An `x.tel/info` unit's recipe names a version this build does not have. The unit is kept and is not recomputed; said once per recipe id. From 1.18; raised by `tel check` from TI-P4.]),
   ),
 )
 

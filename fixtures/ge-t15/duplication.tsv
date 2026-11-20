@@ -121,6 +121,11 @@ wire-f15-telemetry	by-expression	9	9	1.000
 wire-f15-telemetry	by-query	9	9	1.000
 wire-f15-telemetry	by-time	16	9	1.778
 wire-f15-telemetry	single	9	9	1.000
+wire-f16-telemetry-info	by-collection	10	10	1.000
+wire-f16-telemetry-info	by-expression	10	10	1.000
+wire-f16-telemetry-info	by-query	10	10	1.000
+wire-f16-telemetry-info	by-time	14	10	1.400
+wire-f16-telemetry-info	single	10	10	1.000
 wire-f4-qa	by-collection	22	22	1.000
 wire-f4-qa	by-expression	22	22	1.000
 wire-f4-qa	by-query	62	22	2.818

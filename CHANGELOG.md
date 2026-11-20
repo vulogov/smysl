@@ -34,6 +34,48 @@ stated in tokens, the sizing residual on German, the Ollama arm's model size; qu
 unread, a subject by a name the store does not write, GE-T7 on a thousand real works, and the
 ones only people can close. None of it moved in 1.17.
 
+### `x.tel/v1` revision 2, and what every information measure needs (SMYSL-5 TI-P0)
+
+RFC SMYSL-5 (`Documentation/SMYSL-5_RFC/SMYSL-5_TELEMETRY_INFORMATION.md`) adds information
+measures over telemetry: entropies, mutual information and divergences of a symbolised sample
+set, each stated as evidence. Its draft was reviewed against `3e57160` and amended before any
+code (R1): a stale sample ends the value in force, series are admitted by `tel:kind`, results are
+stored to six places so rule TQ can verify a quote, and seven more. TI-P0 lays the ground; no
+statistic is computed yet.
+
+- **`x.tel/v1` is at revision 2.** It adds one type, `x.tel/info`, and its twenty-one payload
+  keys, and changes the meaning of nothing in revision 1. `tel::decl_at(1)` still gives the
+  declaration a 1.17 build wrote, and a 1.18 write to such a store adds revision 2's beside it;
+  rule N (`smysl schema check`) reads the pair as a history that only added, which settles
+  SMYSL-5 OQ-I3. The `tel:stat` value `te`, transfer entropy, is reserved: no writer emits it.
+- **C-Tel-Read covers it with no new code.** `fixtures/wire/F16-telemetry-info.cbor` holds both
+  declarations and two info units with every key between them, a list of negative integers
+  among them. Python, JavaScript and Go round-trip it byte for byte. F15 and the C-Tel-Check
+  fixtures stay revision-1 stores, byte for byte as before.
+- **Four codes, a sixteenth group.** `SMY-E701` (a series kind the statistic does not admit),
+  `SMY-E702` (a recipe not admitted), `SMY-W703` (not run: too few symbols or too little
+  coverage) and `SMY-W704` (a recipe version this build lacks), in a group `Information`. The
+  registry is 176. `SMY-E603`, `E604`, `W605` and `W614` are reworded for evidence in general:
+  all four still said "window" after TL-P9 extended them to spans and templates.
+- **One `libm`.** The pin `=0.2.16` moves to the workspace and `smysl-tel` takes it beside
+  `smysl-measure`, so one logarithm is computed one way in both. `smysl-tel` gains a
+  `clippy.toml` that refuses the `f64` transcendentals; the GE-M2, M5 and M6 simulators are
+  exempt by name, so their samples do not move.
+- **`smysl_tel::info::num`**: `ln` and `log2` through `libm`, the left-fold sum, and §6.0's
+  storage: a negative statistic clamped to zero, then six places, half to even on the binary64's
+  exact value (`0.0078125` is `0.007812`).
+- **Exact decimals in one place.** The window sum's big decimal moves out of `evidence.rs` into a
+  crate module `exact` with `numeric_cmp`, and gains what §5's symbols need: subtraction at any
+  scale, numeric order, and `floor(x / w)` exact to `i64`. `scrape::numeric_cmp` stays where it
+  was public, as a re-export. Window summaries are unchanged: GE-M3's pins and the window cases
+  pass as before.
+
+### RFC SMYSL-5: information measures over telemetry, reviewed before code
+
+The draft names six phases (TI-P0 to TI-P5) and five experiments (GE-I1 to GE-I5), and ships no
+detector and no causal statistic: transfer entropy is reserved behind GE-I5. The R1 review
+amendment is recorded in its header, each change in the section it changes.
+
 ### RFC SMYSL-4: Bund2 programmable queries through a subprocess, amended before acceptance
 
 `Documentation/SMYSL-4_RFC/SMYSL-4_BUND2_BRIDGE.md` specifies `smysl-bund`. The crate will run

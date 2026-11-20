@@ -163,7 +163,9 @@ struct Case {
 impl Case {
     fn new() -> Case {
         Case {
-            records: vec![Record::SchemaDecl(tel::decl())],
+            // A store a revision-1 build wrote: C-Tel-Check is pinned on these bytes, and
+            // revision 2 (SMYSL-5) changes nothing a revision-1 store holds.
+            records: vec![Record::SchemaDecl(tel::decl_at(1).expect("revision 1"))],
             labels: BTreeMap::new(),
             series_keys: BTreeMap::new(),
         }

@@ -42,6 +42,11 @@ smysl-bund     = { path = "crates/smysl-bund",     version = "1.18.0" }
 # `pure` keeps the C SIMD backend out of the build: zero C in the core path (§13).
 blake3                = { version = "1", default-features = false, features = ["std", "pure"] }
 unicode-normalization = "0.1"
+# Every transcendental a stored number depends on, in `smysl-measure` and in `smysl-tel`'s
+# information measures (RFC SMYSL-5 D-I4). One pin for both, so that the two crates cannot
+# compute one logarithm two ways: an upgrade that moves a result is a new recipe version, never
+# a silent one. `arch` intrinsics off with the default features.
+libm                  = { version = "=0.2.16", default-features = false }
 deser-hjson           = "2"
 clap                  = { version = "4", features = ["derive"] }
 ratatui               = "0.29"
