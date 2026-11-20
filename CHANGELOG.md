@@ -7,6 +7,35 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.18.0
+
+What 1.17 leaves open, by what it blocks rather than the order it is easiest. 1.17 built SMYSL-3
+to its last phase and decided six of its experiments on simulated data, saying so in each; what
+a simulation cannot decide is where 1.18 starts.
+
+**GE-M7 is the reason for all of this, and it has not run.** It needs the Train-Ticket
+testbed (D-T12) and agent runs, arms (a) to (d). Until it runs, §11's design of investigations
+is untested against an agent, and rule TQ's catch rate is a property of `examples/oko_ledger`'s
+planted quotes rather than of a model's.
+
+**The real-data runs.** GE-M1 on a cluster observed for seven days (I-1), the Zabbix fixtures
+(I-2), GE-M2 and GE-M5 on DeathStarBench at production-like load, GE-M8 on GE-M7's corpus and
+RCAEval. Each simulated verdict names the run on real data that could overturn it.
+
+**OKO's own ledger.** `examples/oko_ledger` runs smysl's side through the library API; OKO
+writing a rotation ledger is TL-P6's criterion, and it is OKO's code.
+
+**The range index's tables.** At 10⁵ units, 41% of a commit is the text library's range index,
+rewritten whole per append. An O(log n) structure is a change to `smysl-text`, recorded in RFC
+SMYSL-3 §17.1 and not planned until a ledger that size needs it.
+
+**And what 1.16 and 1.14 left.** The cache's written share, the repair a cut would do, the bound
+stated in tokens, the sizing residual on German, the Ollama arm's model size; questions still
+unread, a subject by a name the store does not write, GE-T7 on a thousand real works, and the
+ones only people can close. None of it moved in 1.17.
+
+---
+
 ## 1.17.0 — 2026-11-19
 
 SMYSL-3, smysl for telemetry study and research, built from its format phase to its last:
