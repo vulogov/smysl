@@ -2049,6 +2049,38 @@ the rule are caught.
 The commit no longer grows with the ledger: almost all of it is the append's `fsync`, which is
 per commit and constant. Step 5 measures at 10⁴ and 10⁵ units.
 
+### AC-8 step 5: measured at 10⁴ and 10⁵ units
+
+`oko_ledger` at §24's two sizes, p50 over the first and last tenth of the run:
+
+| Ledger | Operations | Staging | Commit | Run |
+|---|---|---|---|---|
+| 10⁴ units (1,700 investigations), `--verify` | 11,661 | 0.05 → 0.10 ms | 3.3 → 4.5 ms | 498 s, most of it the oracle |
+| 10⁵ units (17,000 investigations) | 116,224 | 0.15 → 0.63 ms | 4.0 → 7.7 ms | 789 s |
+
+- **Correctness:** with `--verify`, all 11,659 batches the kept check took at 10⁴ units equal
+  the full check.
+- **Fallbacks:** two batches at either size were checked in full, the first schema declaration
+  and the first View.
+- **At the end of the 10⁵ run:** the library reopens in 1.5 s (99,241 units, 166,199 relations,
+  71 MB), and its full `check` finds each of the 6,806 fabricated quotes and nothing else.
+- **Against the trend before AC-8:** 43 ms per commit at 6 × 10³ units, which RFC §17.1 put at
+  several hundred milliseconds by 10⁵.
+
+**What still grows**, from a profile of the 10⁵ run's last commits:
+
+| Where | Share | Why |
+|---|---|---|
+| The append's `fsync` | 43 % | per commit, constant |
+| The range index's tables | 41 % | rewritten whole on every append (`Ranges::spliced` rebuilds the row vector and its segment tree; the `observed` table likewise), so O(rows) in copies |
+| Staging | 8 % | the kept report's clone and splice, O(findings), here 6,806 W606 |
+
+The range index is the text library's, and making its tables O(log n) per append needs a
+different structure, so it is left out of AC-8 and recorded in RFC §17.1.
+
+The manual's chapter on telemetry has a new section, "A ledger that grows one operation at a
+time", with `prepare_checked`, `Checked` and these numbers. **AC-8 is complete.**
+
 ---
 
 ## 1.16.0 — 2026-11-16

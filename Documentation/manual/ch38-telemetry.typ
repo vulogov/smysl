@@ -458,6 +458,52 @@ also counts the two failure modes an investigation can be measured by:
 it. `close` closes the investigation. `thread --derive timeline` lays the ledger out as a
 timeline (Chapter 18).
 
+#section("A ledger that grows one operation at a time")
+
+A rotation's ledger is written as it happens: open, consult, probe, hypothesise, act, close, each
+committed alone and read back at once. Staging checks each operation against everything already
+in the store, and until 1.17 that meant running every check pass over the whole
+ledger every time. The cost grew with the ledger: 5.8 ms per commit at the start of a rotation,
+43 ms by its six-thousandth unit.
+
+A program that appends this way keeps the store's check and stages against it:
+
+```rust
+let mut checked = Checked::new(lib.store(), &CheckOptions::default());
+// for each operation:
+let mut staged = stage::prepare_checked(
+    lib.store(), &checked, units, relations, labels, schemas, &attest, extra,
+);
+let batch = staged.checked.take().expect("prepare_checked checks");
+lib.append_records(&staged.records())?;
+checked.advance(batch);
+```
+
+`prepare_checked` checks what will be committed: the batch's units and relations, their
+attestations, and `extra`, the records the caller commits with them (an investigation's View,
+say). Its report is the one the full check of the store with those records would give, exactly.
+It reaches it by recomputing only what the batch can change: the units it adds and those that
+rest on them, the subjects of its attestations, the ends of its edges, rule E over the components
+its units are tied into. A batch that changes something global (a new schema declaration, a View
+under a profile the store has not seen, a withdrawal, a manifest) is checked in full, and the
+batch report says why. `advance` is the caller's word that exactly those records were appended.
+
+`examples/oko_ledger` writes a rotation this way, and `make oko-ledger` runs it. With
+`--verify` it also checks every operation in full and stops if the two reports differ; at
+10#super[4] units, all 11,659 operations agreed. Commit times, at the median, over the first and
+the last tenth of a run:
+
+#table(
+  columns: 4,
+  [*Ledger*], [*Staging*], [*Commit*], [*Run*],
+  [6 × 10#super[3] units, full check (1.16)], [1.4 → 30.4 ms], [5.8 → 43.2 ms], [167 s],
+  [6 × 10#super[3] units, kept check], [0.10 → 0.21 ms], [3.9 → 4.0 ms], [28 s],
+  [10#super[5] units, kept check], [0.15 → 0.63 ms], [4.0 → 7.7 ms], [789 s],
+)
+
+Most of what is left is the append's `fsync`, which every commit pays once. The check of a
+batch still looks up what it needs in the store, but no longer walks the whole of it.
+
 #section("Instruments: what measured a series")
 
 A series is what is measured. An *instrument* is a thing on the way from where it was measured

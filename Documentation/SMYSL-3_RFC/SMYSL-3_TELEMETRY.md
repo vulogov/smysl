@@ -829,7 +829,7 @@ TL-P0.
 | Rule E without the text library | **AC-4**, `smysl-time` | The time engine is in `smysl-text/src/time/` (3.1 k lines), and `check` reaches it through an optional dependency on `smysl-text`. Telemetry needs rule E and nothing else from text. |
 | Queries over a paged store | **AC-1**, `Env` over `&AnyStore` | `query::plan::Env` holds `&Store`, so `sq`, dossiers and measures load everything into memory. A telemetry library is the first that will not fit. |
 | A series port | **AC-10**, `Env::series: Option<&dyn SeriesSource>` | Stages that need the substrate are refused by name without it, as `~sem` is without `semantic` |
-| A live ledger | **AC-8**, incremental derived state; **AC-9**, concurrent readers | OKO appends one unit at a time and reads immediately. At the baseline the next read rebuilds the adjacency in O(store), and a second process waits 2 s for redb's lock. |
+| A live ledger | **AC-8**, incremental derived state (**done in 1.17**, §17.1); **AC-9**, concurrent readers | OKO appends one unit at a time and reads immediately. At the baseline the next read rebuilds the adjacency in O(store), and a second process waits 2 s for redb's lock. |
 
 Also part of TL-P0:
 
@@ -929,6 +929,15 @@ entries, each merged with the base's entry for its key; the merged layer is buil
 a caller that asks for the layer itself. `SMY-W062` is recomputed only when a new causal edge
 closes a cycle or points at a node on or upstream of one. What remains of the commit is the
 append's `fsync`.
+
+**Measured at §24's sizes (step 5).** At 10⁴ units, 11,661 operations with `--verify`: every
+batch the kept check took equals the full check; commit 3.3 → 4.5 ms. At 10⁵ units, 116,224
+operations: staging 0.15 → 0.63 ms, commit 4.0 → 7.7 ms, against the several hundred
+milliseconds the trend before AC-8 gave. Of the late commits at 10⁵, 43 % is the `fsync`, 41 %
+the range index's tables, which `axis_on_append` and `observed_on_append` rewrite whole on every
+append (a sorted row vector and a segment tree, O(rows) in copies), and 8 % staging, which
+splices a report of O(findings). The range index's tables are the text library's derived state
+and need another structure to grow by less than their size; that is left open, outside AC-8.
 
 ## 18. Crates
 
