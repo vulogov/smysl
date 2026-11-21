@@ -79,8 +79,9 @@ pub(crate) fn edges(reference: &[Option<BigDec>], k: u32) -> Vec<BigDec> {
         .collect()
 }
 
-/// Symbols of `seq` under `bins`. `edges` are `baseline`'s, from [`edges`]; `Rank` is not a
-/// binning of one series alone and gives none here.
+/// Symbols of `seq` under `bins`. `edges` are `baseline`'s, from [`edges`]; `Rank` is taken over
+/// the points a pairing keeps ([`dense`], [`ranks`]), not over one series alone, and gives none
+/// here.
 pub(crate) fn symbols(seq: &[Option<BigDec>], bins: &Bins, edges: &[BigDec]) -> Vec<Option<i64>> {
     match bins {
         Bins::Width(w) => seq
@@ -107,6 +108,36 @@ pub(crate) fn symbols(seq: &[Option<BigDec>], bins: &Bins, edges: &[BigDec]) -> 
             .collect(),
         Bins::Rank(_) => vec![None; seq.len()],
     }
+}
+
+/// Each present value's place among the distinct present values of `seq`, ascending: an exact
+/// stand-in for the value that keeps its order, so that `rank:k` can be taken over any subset
+/// of points by comparing integers (§5.3). `None` where `seq` is.
+pub(crate) fn dense(seq: &[Option<BigDec>]) -> Vec<Option<i64>> {
+    let mut sorted: Vec<&BigDec> = seq.iter().flatten().collect();
+    sorted.sort_by(|a, b| a.cmp_value(b));
+    sorted.dedup_by(|a, b| a.cmp_value(b) == Ordering::Equal);
+    seq.iter()
+        .map(|x| {
+            let x = x.as_ref()?;
+            Some(sorted.partition_point(|e| e.cmp_value(x) == Ordering::Less) as i64)
+        })
+        .collect()
+}
+
+/// `rank:k` over a set of values given by their dense keys (§5.3): `floor(k · L(x) / n)`, `L(x)`
+/// the number of the set's values strictly less than `x` and `n` the set's size. Tied values
+/// share a symbol.
+pub fn ranks(keys: &[i64], k: u32) -> Vec<i64> {
+    let mut sorted = keys.to_vec();
+    sorted.sort_unstable();
+    let n = keys.len() as u64;
+    keys.iter()
+        .map(|x| {
+            let below = sorted.partition_point(|e| e < x) as u64;
+            (u64::from(k) * below / n) as i64
+        })
+        .collect()
 }
 
 /// The ordinal pattern at each grid index (§5.4): the order of the `m` values at
@@ -211,6 +242,25 @@ mod tests {
             symbols(&s, &Bins::Diff, &[]),
             [None, Some(1), Some(0), Some(-1), None, None]
         );
+    }
+
+    #[test]
+    fn ranks_are_taken_over_the_set_and_ties_share_a_symbol() {
+        let s = seq(&[
+            Some("5"),
+            None,
+            Some("1.5"),
+            Some("5.0"),
+            Some("-2"),
+            Some("9"),
+        ]);
+        let d = dense(&s);
+        assert_eq!(d, [Some(2), None, Some(1), Some(2), Some(0), Some(3)]);
+        let keys: Vec<i64> = d.iter().flatten().copied().collect();
+        // n = 5; L = 2, 1, 2, 0, 4; floor(4L/5) = 1, 0, 1, 0, 3.
+        assert_eq!(ranks(&keys, 4), [1, 0, 1, 0, 3]);
+        // A subset is ranked on its own: (5, 9) gives 0 and 2 at k = 4.
+        assert_eq!(ranks(&[2, 3], 4), [0, 2]);
     }
 
     #[test]

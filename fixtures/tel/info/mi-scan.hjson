@@ -1,0 +1,2 @@
+// A scan of eleven lags with 50 surrogates: the follower peaks at -3, the driver at 0.
+{ stat: mi/1, step: 60000, bins: "rank:4", lag: "-5..5", null: 50, seed: 7 }

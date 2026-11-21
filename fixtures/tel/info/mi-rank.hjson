@@ -1,0 +1,2 @@
+// Each series against info_driver at lag 0, quartile ranks taken over the pairs.
+{ stat: mi/1, step: 60000, bins: "rank:4" }

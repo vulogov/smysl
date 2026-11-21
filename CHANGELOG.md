@@ -34,6 +34,38 @@ stated in tokens, the sizing residual on German, the Ollama arm's model size; qu
 unread, a subject by a name the store does not write, GE-T7 on a thousand real works, and the
 ones only people can close. None of it moved in 1.17.
 
+### `smysl tel info`: mutual information between series, and divergence between windows (SMYSL-5 TI-P2)
+
+The two statistics that compare: `mi/1` between two series at a lag, with a scan over lags and
+seeded surrogates for chance, and `jsd/1` between a window and a reference window of one series.
+
+```hjson
+{ stat: mi/1, step: 60000, bins: "rank:4", lag: "-10..10", null: 200, seed: 7 }
+{ stat: jsd/1, step: 60000, bins: "baseline:4", ref: "1768550400000-1768557600000" }
+```
+
+- **`mi/1`** (§6.3): `tel info RECIPE --series S… --with S2` pairs each series at `t` with the
+  second at `t + lag·step`. The plug-in value is stored with its bias term beside it, never
+  subtracted. `rank:K` bins rank each side over the pairs kept, so the value is unchanged by any
+  monotone rescaling. A **scan** (`lag: "-L..L"`, L ≤ 64) is one unit holding the whole curve;
+  its value is the curve's maximum, and every lag must meet `min_n` and `cover` on its own.
+- **Surrogates** (`null: B`, B ≤ 1000): the second series rotated over the whole grid by
+  offsets drawn from ChaCha20, keyed by the recipe and `seed`. `null_ge` of `null_b` says how
+  many did as well; a scan's surrogates are maximised over the same lags.
+- **`jsd/1`** (§6.2): the Jensen–Shannon divergence of the window from `ref`, in bits, under
+  width, baseline or diff bins, with the mixture's entropy computed over integer weights.
+- **Refused:** `baseline` bins in `mi/1`, which would read two reference windows that one unit
+  cannot carry the digests of, and `rank` in `jsd/1` (`SMY-E702`). RFC amendment R3 records
+  these and five other points settled while building.
+- **GE-I1** grows to thirteen recipes over eight series, three of them new: a driver, a series
+  following it three minutes late, which `mi/1` finds at lag −3, and a series whose spread
+  doubles, which `jsd/1` separates from the steady ones.
+- **GE-I2 (b)**, simulated (`examples/ge_i2b.rs`): on independent AR(1) pairs up to φ = 0.99,
+  surrogates flag 5.5 % to 10.0 % of runs at 0.05, never over the 10 % stop condition, so
+  circular shifts stand as the null (D-I7). The φ = 0.99 scan sits at the limit. The stored
+  `bias` is the i.i.d. term and understates an autocorrelated pair's bias.
+- **Cost:** a scan of 21 lags with 200 surrogates over a day of minutes is about 0.2 s.
+
 ### `smysl tel info`: the entropy of a series, and of its ordinal patterns (SMYSL-5 TI-P1)
 
 The first two information measures, end to end. A recipe names the statistic and every

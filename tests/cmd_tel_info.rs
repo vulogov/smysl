@@ -1,9 +1,10 @@
-//! `smysl tel info` (RFC SMYSL-5 §13, TI-P1), against the binary, over the GE-M3 samples read
+//! `smysl tel info` (RFC SMYSL-5 §13, TI-P1, TI-P2), against the binary, over the GE-M3 samples read
 //! as one OTLP/JSON export.
 //!
 //! - A statistic prints its unit without `--yes` and writes nothing; with it, it commits.
 //! - A second run into a fresh library gives the same uids: replay, end to end.
 //! - A recipe that is not admitted is exit 2; a statistic not run is reported, exit 0.
+//! - `mi/1` reads `--with` and commits one edge to each series; `jsd/1` reads its `ref`.
 
 #![cfg(all(feature = "cli", feature = "tel"))]
 
@@ -76,6 +77,15 @@ fn library(name: &str) -> PathBuf {
         (
             "rank.hjson",
             r#"{ stat: ent/1, step: 60000, bins: "rank:4" }"#,
+        ),
+        (
+            "mi.hjson",
+            r#"{ stat: mi/1, step: 60000, bins: "rank:4", lag: "-2..2", null: 10, seed: 3 }"#,
+        ),
+        (
+            "jsd.hjson",
+            r#"{ stat: jsd/1, step: 60000, bins: diff, ref: "1768550400000-1768554000000",
+                 min_n: 50 }"#,
         ),
     ] {
         std::fs::write(dir.join(file), text).unwrap();
@@ -161,4 +171,36 @@ fn a_recipe_not_admitted_is_usage_and_a_statistic_not_run_is_reported() {
     assert_eq!(o.status.code(), Some(2), "no --during");
     let o = info(&dir, "ent.hjson", &["--yes"]);
     assert_eq!(o.status.code(), Some(2), "--yes without --at");
+}
+
+#[test]
+fn a_pair_reads_with_and_a_divergence_reads_its_reference() {
+    let dir = library("pairs");
+    let latency = series("latency");
+    let o = info(&dir, "mi.hjson", &["--with", &latency]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let text = out(&o);
+    assert!(text.contains(r#" ~ {"attributes""#), "{text}");
+    assert!(text.contains("surrogates at least as high"), "{text}");
+    assert!(text.contains("by lag -2:"), "{text}");
+    assert_eq!(uids(&o).len(), 2, "{text}");
+    // Two units: cpu with latency, and latency with itself, grounded on one series.
+    let o = info(
+        &dir,
+        "mi.hjson",
+        &["--with", &latency, "--at", "1768564800000", "--yes"],
+    );
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(out(&o).contains("2 record(s) committed"), "{}", out(&o));
+
+    let o = info(&dir, "jsd.hjson", &[]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert_eq!(uids(&o).len(), 2, "{}", out(&o));
+
+    // --with belongs to mi/1, and mi/1 needs it.
+    let o = info(&dir, "ent.hjson", &["--with", &latency]);
+    assert_eq!(o.status.code(), Some(2), "{}", out(&o));
+    let o = info(&dir, "mi.hjson", &[]);
+    assert_eq!(o.status.code(), Some(2), "{}", out(&o));
+    assert!(err(&o).contains("--with"), "{}", err(&o));
 }

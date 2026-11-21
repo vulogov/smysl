@@ -1,0 +1,2 @@
+// The six hours against their first two, one unit wide.
+{ stat: jsd/1, step: 60000, bins: "width:1", ref: "1768550400000-1768557600000", min_n: 100 }

@@ -1,0 +1,2 @@
+// Half-unit bins at one lag, three minutes behind the driver.
+{ stat: mi/1, step: 60000, bins: "width:0.5", lag: -3, min_n: 300 }

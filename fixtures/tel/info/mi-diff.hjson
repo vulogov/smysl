@@ -1,0 +1,2 @@
+// Up, flat or down against the driver's, with 20 surrogates.
+{ stat: mi/1, step: 60000, bins: diff, min_n: 300, null: 20, seed: 1 }

@@ -1030,17 +1030,19 @@ tel        --noprogress
 tel        --qs
 tel        --json
 tel        --series
-tel        --during
 tel        --quiet
-tel        --trigger
+tel        --with
 tel        --verbose
-tel        --as
+tel        --with-instrument
 tel        --backend
 tel        [possible values: memory, redb]
-tel        --rotation
+tel        --during
 tel        --shard
-tel        --explains
+tel        --trigger
+tel        --as
 tel        --seed-check
+tel        --rotation
+tel        --explains
 tel        --target
 tel        --ground
 tel        --quote

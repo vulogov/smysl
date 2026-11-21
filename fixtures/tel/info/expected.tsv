@@ -1,38 +1,108 @@
 # RFC SMYSL-5 GE-I1 / C-Tel-Info: every recipe over fixtures/tel/info/, by uid.
 # Written by crates/smysl-tel/tests/info_cases.rs; SMYSL_BLESS=1 rewrites it.
-# case	series	uid or `refused`	value	mm	n	k	missing, or the refusal
+# case	series	uid or `refused`	value	n	k	missing	the rest, or the refusal
+# the rest: mm (ent, perm); lag, bias, k_with, null_ge/null_b and the curve (mi)
+ent-width	info_driver	b3:xckq5fyhwek4skahudp7nxbky5ensbeihiiwmyhpixykug3a5ypa	2.183227	360	7	0	mm=2.195249
+ent-width	info_follower	b3:cvr2ttvw2eig6quvuuuwau6ah5bxb33d36pv25vz3ktqg2hil5ha	2.18733	360	7	0	mm=2.199353
 ent-width	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
-ent-width	info_noise	b3:jsmlwpnxspzldqoijh3o77sq7mefilfagcytgw5tgaoduwwzowqa	3.308954	3.328392	334	10	26
-ent-width	info_osc	b3:4p6hfdiyka6e7d3iylnz2c4lvaegn5on7xcw4cpykozvg5pxyrka	2.522055	2.532074	360	6	0
+ent-width	info_noise	b3:jsmlwpnxspzldqoijh3o77sq7mefilfagcytgw5tgaoduwwzowqa	3.308954	334	10	26	mm=3.328392
+ent-width	info_osc	b3:4p6hfdiyka6e7d3iylnz2c4lvaegn5on7xcw4cpykozvg5pxyrka	2.522055	360	6	0	mm=2.532074
 ent-width	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
-ent-width	info_state	b3:lbenzpbda65zzerrc2x56lx2axihsxazbniz675vqiajyksacsuq	1.579823	1.58383	360	3	0
+ent-width	info_shift	b3:c5ebnqdqthh34ijae37vfvk7ej4q6vqblob5udwqvjkmq3gdi4ja	2.906514	360	8	0	mm=2.92054
+ent-width	info_state	b3:lbenzpbda65zzerrc2x56lx2axihsxazbniz675vqiajyksacsuq	1.579823	360	3	0	mm=1.58383
+ent-baseline	info_driver	b3:q26xjjxrdci2jppzxbpubf2kxxy2ofqyu7d44rumpvitcha7st3q	1.907923	360	4	0	mm=1.913934
+ent-baseline	info_follower	b3:wgazfvbv3cgfgyxvnyol25m3sxvliltqpvsp7tdxupgdef43u2sq	1.906648	360	4	0	mm=1.912659
 ent-baseline	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
-ent-baseline	info_noise	b3:l6alplvzwz2lzxjtf5xv73kaqhc7mt2ntgkh7e54fb5yvuu5rvua	1.916095	1.922574	334	4	26
-ent-baseline	info_osc	b3:kpr44hjcxlnyu7phi7ikrns6d4laukereebqdlhkf2fhoxyil3ea	1.959148	1.965159	360	4	0
+ent-baseline	info_noise	b3:l6alplvzwz2lzxjtf5xv73kaqhc7mt2ntgkh7e54fb5yvuu5rvua	1.916095	334	4	26	mm=1.922574
+ent-baseline	info_osc	b3:kpr44hjcxlnyu7phi7ikrns6d4laukereebqdlhkf2fhoxyil3ea	1.959148	360	4	0	mm=1.965159
 ent-baseline	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
-ent-baseline	info_state	b3:46ks7alu33634on2j225sl3yyxrevl3bzni5il2sj6meqml4xuga	0.931563	0.933567	360	2	0
+ent-baseline	info_shift	b3:ngca3rrtkaxxekejf5dg4ueouorrbbzx3lrgqcndorjtplux3yma	1.829651	360	4	0	mm=1.835663
+ent-baseline	info_state	b3:46ks7alu33634on2j225sl3yyxrevl3bzni5il2sj6meqml4xuga	0.931563	360	2	0	mm=0.933567
+ent-diff	info_driver	b3:lkmulqhg25fnvmvmmtpmtcp5lb7bwmxp6l2cluaxxddneyufqrxq	0.99753	359	2	1	mm=0.99954
+ent-diff	info_follower	b3:pvbkmiuuijoaw7gttxdcnq7fc333ngsr4qgmn4z4kgkwcxmlpgwa	0.999323	359	2	1	mm=1.001332
 ent-diff	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
-ent-diff	info_noise	b3:owvhe3sw4jc6nhbrpvnlgzalfvtjnkoqk7hpoveccflg5nnltfhq	0.999993	1.002173	331	2	29
-ent-diff	info_osc	b3:4fwzgj6wjt6rbvryoe3fmrsws55td3tss6wwjq5oi6vpglx4ubyq	0.999994	1.002004	359	2	1
+ent-diff	info_noise	b3:owvhe3sw4jc6nhbrpvnlgzalfvtjnkoqk7hpoveccflg5nnltfhq	0.999993	331	2	29	mm=1.002173
+ent-diff	info_osc	b3:4fwzgj6wjt6rbvryoe3fmrsws55td3tss6wwjq5oi6vpglx4ubyq	0.999994	359	2	1	mm=1.002004
 ent-diff	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
-ent-diff	info_state	b3:o5b7kh7m4ejhbgkirlqejmga2kvqrs4erazweysm62f5whns5p2q	0.593118	0.597137	359	3	1
+ent-diff	info_shift	b3:d4clos6cch3lhlt4en3nsf56nua4nokn7hidcoeb3pnefsor4s2q	0.999994	359	2	1	mm=1.002004
+ent-diff	info_state	b3:o5b7kh7m4ejhbgkirlqejmga2kvqrs4erazweysm62f5whns5p2q	0.593118	359	3	1	mm=0.597137
+ent-increase	info_driver	refused	SMY-W703	169 of 360 points give a symbol, under cover 4/5
+ent-increase	info_follower	refused	SMY-W703	174 of 360 points give a symbol, under cover 4/5
 ent-increase	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
-ent-increase	info_noise	refused	SMY-W703	165 of 360 grid points give a symbol, under cover 4/5
-ent-increase	info_osc	refused	SMY-W703	179 of 360 grid points give a symbol, under cover 4/5
-ent-increase	info_requests	b3:7de32fzi6ub5z2ij765ary2fcviaimeenpgbqb4tcbv7cgmg6rda	1.983946	1.98999	358	4	2
-ent-increase	info_state	b3:d2lnxvjhohairfg2hzyvrsfstarezuawkv5l7ygvzmsmn4dimyba	0	0	340	1	20
+ent-increase	info_noise	refused	SMY-W703	165 of 360 points give a symbol, under cover 4/5
+ent-increase	info_osc	refused	SMY-W703	179 of 360 points give a symbol, under cover 4/5
+ent-increase	info_requests	b3:7de32fzi6ub5z2ij765ary2fcviaimeenpgbqb4tcbv7cgmg6rda	1.983946	358	4	2	mm=1.98999
+ent-increase	info_shift	refused	SMY-W703	180 of 360 points give a symbol, under cover 4/5
+ent-increase	info_state	b3:d2lnxvjhohairfg2hzyvrsfstarezuawkv5l7ygvzmsmn4dimyba	0	340	1	20	mm=0
+perm-3	info_driver	b3:2vrtrhr47ffpijcwjq4twem365h5yohqxhm4puwp3henddmi277q	2.517008	358	6	2	mm=2.527082
+perm-3	info_follower	b3:wxtmqc2vtr7zhmf3thmy2lxzlvzqb7plnafho3txhe6rk2vrwona	2.539946	358	6	2	mm=2.550021
 perm-3	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
-perm-3	info_noise	b3:wqd7kshgxwv2nt7a63v5i5axiarv6syavriceiiq364hkpabqlqa	2.58394	2.594936	328	6	32
-perm-3	info_osc	b3:byna4krrhs3wi5xsn5m5tq2ysga3a2adngo2ixh3cmijwb3g5tiq	1.652153	1.658198	358	4	2
+perm-3	info_noise	b3:wqd7kshgxwv2nt7a63v5i5axiarv6syavriceiiq364hkpabqlqa	2.58394	328	6	32	mm=2.594936
+perm-3	info_osc	b3:byna4krrhs3wi5xsn5m5tq2ysga3a2adngo2ixh3cmijwb3g5tiq	1.652153	358	4	2	mm=1.658198
 perm-3	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
-perm-3	info_state	b3:6lnlylse5hkmxl6gc4vsgbbirdnq3feitromfz65ekjis2d4crra	0.6313	0.639359	358	5	2
+perm-3	info_shift	b3:wgcszwzx6th6mlevh3ml23f4fykdim6m5usqetnuks3sek4dsbjq	2.584646	358	6	2	mm=2.594721
+perm-3	info_state	b3:6lnlylse5hkmxl6gc4vsgbbirdnq3feitromfz65ekjis2d4crra	0.6313	358	5	2	mm=0.639359
+perm-4-tau2	info_driver	b3:jaor64iju2nfh25tfsht2eaevqn3satkdxpy7cbt5vuluzrfjp7a	4.322799	354	24	6	mm=4.369666
+perm-4-tau2	info_follower	b3:tq54bbsv6wclii32gebanbatdqppi65psdywkgkey5l6ukr5pexq	4.324311	354	24	6	mm=4.371179
 perm-4-tau2	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
-perm-4-tau2	info_noise	b3:4cyjmdh6wsv2vl75vewhf7glhw7ewuycop6risxnwm7pskomsoiq	4.527248	4.579751	316	24	44
-perm-4-tau2	info_osc	b3:nqbtszvjrb5fqsicxiwyzsiuepukrr3cyvi73pf6aw5p4z2nfnra	3.195231	3.21357	354	10	6
+perm-4-tau2	info_noise	b3:4cyjmdh6wsv2vl75vewhf7glhw7ewuycop6risxnwm7pskomsoiq	4.527248	316	24	44	mm=4.579751
+perm-4-tau2	info_osc	b3:nqbtszvjrb5fqsicxiwyzsiuepukrr3cyvi73pf6aw5p4z2nfnra	3.195231	354	10	6	mm=3.21357
 perm-4-tau2	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
-perm-4-tau2	info_state	b3:g55tsfwz5u6yw5qc36q3tflbvdny3v2rkunxigkpevbwypwlypxq	1.564934	1.585311	354	11	6
+perm-4-tau2	info_shift	b3:mqxvdu3imxympaxb254yg3hplsdpx5qg6tg4ggooazuks3gljvfq	4.551291	354	24	6	mm=4.598158
+perm-4-tau2	info_state	b3:g55tsfwz5u6yw5qc36q3tflbvdny3v2rkunxigkpevbwypwlypxq	1.564934	354	11	6	mm=1.585311
+ent-strict	info_driver	b3:5ymudhgpqg2wgpc4kk5sbcl74sz5py5ekfyl4fjib2zjggby763q	2.183227	360	7	0	mm=2.195249
+ent-strict	info_follower	b3:auprdv4mfsocuxbbngavtpcznag4dsht2bjwjpa22reldmkfm77a	2.18733	360	7	0	mm=2.199353
 ent-strict	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
-ent-strict	info_noise	refused	SMY-W703	334 of 360 grid points give a symbol, under cover 1/1
-ent-strict	info_osc	b3:jskxg3tg6kov7j3l5x7aog5dic4pr2hfwxuojx3mzscukqjbvieq	2.522055	2.532074	360	6	0
+ent-strict	info_noise	refused	SMY-W703	334 of 360 points give a symbol, under cover 1/1
+ent-strict	info_osc	b3:jskxg3tg6kov7j3l5x7aog5dic4pr2hfwxuojx3mzscukqjbvieq	2.522055	360	6	0	mm=2.532074
 ent-strict	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
-ent-strict	info_state	b3:rhvffdgq45mj7cxg6lckfr4efeml3k72s3ge2epx4ca6jnlo664a	1.579823	1.58383	360	3	0
+ent-strict	info_shift	b3:fhhdvhkpacilasjkgiijifwb7w36z7omvsxwxd6opjmg4rnlfqkq	2.906514	360	8	0	mm=2.92054
+ent-strict	info_state	b3:rhvffdgq45mj7cxg6lckfr4efeml3k72s3ge2epx4ca6jnlo664a	1.579823	360	3	0	mm=1.58383
+mi-rank	info_driver	b3:izep7wkcwhc7l2mvfwyc2dw2d4jzb7ndvqvarfrdbcbc5c2spy5q	2	360	4	0	lag=0 bias=0.018034 k_with=4
+mi-rank	info_follower	b3:zudr6ttltv3oln5cpbyo7zj2y7hapwwrznhkchzhaqgh6ijhpzvq	0.212929	360	4	0	lag=0 bias=0.018034 k_with=4
+mi-rank	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+mi-rank	info_noise	b3:3jb46cimmbhgyfnjszsqt5mxoyo3dyot7qojku7jaespztmsinwq	0.013261	334	4	26	lag=0 bias=0.019438 k_with=4
+mi-rank	info_osc	b3:fyzqe567qdslpxkk5honvb7c6gbeku7w6uwub2gck3cr6tukopma	0.016237	360	4	0	lag=0 bias=0.018034 k_with=4
+mi-rank	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+mi-rank	info_shift	b3:3gowntgs4v26mj2ut4k63flcubidc4brau7blnnrdai7ts4ncphq	0.018032	360	4	0	lag=0 bias=0.018034 k_with=4
+mi-rank	info_state	b3:f6z2z57c3audo3lxechkzg3zvg5hjujrn5v2cglrhlpgzepwklpa	0.015968	360	3	0	lag=0 bias=0.012022 k_with=4
+mi-scan	info_driver	b3:kekgqwg3nkps34nxygbdgymmdoxizl6rtav7gxcamnfq7qbvcc7q	2	360	4	0	lag=0 bias=0.018034 k_with=4 null=0/50 values=0.064237,0.129037,0.224593,0.379763,0.626744,2,0.626744,0.379763,0.224593,0.129037,0.064237
+mi-scan	info_follower	b3:svpayubiq6lwudcdodnf5egwjqgzg5vrsm5xm7zfsfuewdw3t6ya	1.495574	357	4	0	lag=-3 bias=0.018185 k_with=4 null=0/50 values=0.364274,0.603189,1.495574,0.627136,0.362775,0.212929,0.14133,0.07106,0.061079,0.045353,0.035961
+mi-scan	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+mi-scan	info_noise	b3:fslh33xyqzdx4lbkqsayyxkipswzxx3qvlxbvp442bs5adtdzomq	0.05783	332	4	25	lag=-3 bias=0.019555 k_with=4 null=0/50 values=0.017582,0.017696,0.05783,0.018229,0.017996,0.013261,0.009996,0.035011,0.020967,0.009505,0.011175
+mi-scan	info_osc	b3:223ks4ykku2fkykbwgi4zviey7wnrwa3ntkysxwh355ahpieje4a	0.038588	355	4	0	lag=5 bias=0.018288 k_with=4 null=2/50 values=0.019521,0.006672,0.009778,0.011781,0.017092,0.016237,0.009865,0.007671,0.005004,0.01532,0.038588
+mi-scan	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+mi-scan	info_shift	b3:i343wtzt76n5n2dacdbbsqdzia4ruhtjja2h3j6ltyjnspqrukzq	0.033892	355	4	0	lag=-5 bias=0.018288 k_with=4 null=32/50 values=0.033892,0.025009,0.009092,0.026527,0.011056,0.018032,0.008524,0.011425,0.023923,0.024721,0.011093
+mi-scan	info_state	b3:bcdebcdv7catqhfzmr7p27pvejjb7ycbouc3yj7lfvxg3e4ejvwq	0.052168	355	3	0	lag=-5 bias=0.012192 k_with=4 null=23/50 values=0.052168,0.043655,0.033625,0.02584,0.016648,0.015968,0.010861,0.018246,0.028796,0.028055,0.023853
+mi-width-lag	info_driver	b3:xt4lvum3cpybyekq4vmbzg5vjhmgtkpu4vmn2jde6a3wvtpqlimq	0.436499	357	12	0	lag=-3 bias=0.24449 k_with=12
+mi-width-lag	info_follower	b3:rp2ssbd3ndsarv7vu7575znpxa524vpkvla7faz7i76fhq6bmtla	2.243936	357	12	0	lag=-3 bias=0.24449 k_with=12
+mi-width-lag	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+mi-width-lag	info_noise	b3:cjrq2jujllw3qwrqqitrjydbcwb5uaojzwgf4hl2ttyt2vatloeq	0.483406	332	20	25	lag=-3 bias=0.454101 k_with=12
+mi-width-lag	info_osc	b3:2hsuunczppc5ookyf7xlbarvogaqvfxqatfxrb76fnfzili6ufoa	0.10139	357	7	0	lag=-3 bias=0.133358 k_with=12
+mi-width-lag	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+mi-width-lag	info_shift	b3:lsh3sfgussucg4v4v25ezlejifjxg2ni5pa2emjsklvwgfbgeewq	0.331801	357	16	0	lag=-3 bias=0.333396 k_with=12
+mi-width-lag	info_state	b3:se2miio2l4mfe2pre5c3mf4a5zfzu4xmaofxwktsdpnpp7kcvita	0.07023	357	3	0	lag=-3 bias=0.044453 k_with=12
+mi-diff	info_driver	b3:xxzmnkj5zghhluhebdf2oftu6kd4qkknnax7sf3lhitikhhrxnqa	0.99753	359	2	1	lag=0 bias=0.002009 k_with=2 null=0/20
+mi-diff	info_follower	b3:74brcq6shj7gzbgtp4xhoeom2aevk5fmzwmmwi763m5m4df5l52a	0.003145	359	2	1	lag=0 bias=0.002009 k_with=2 null=6/20
+mi-diff	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+mi-diff	info_noise	b3:nx4mijgno7q6qv26rlmf4l2vczq3n7burfcyytjdq44t32hbdcla	0.002899	331	2	29	lag=0 bias=0.002179 k_with=2 null=7/20
+mi-diff	info_osc	b3:qiipdzfjdkv6eti6vypuudoon3ctsy2dyx5rrt7acy3scy7vqk4a	0.001635	359	2	1	lag=0 bias=0.002009 k_with=2 null=9/20
+mi-diff	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+mi-diff	info_shift	b3:bu67ukuaxunyugqjmhtcj4nrcjkym4ew4r4gureovuijps7dupca	0.00408	359	2	1	lag=0 bias=0.002009 k_with=2 null=6/20
+mi-diff	info_state	b3:4zjxaw5gqdmjdgll7qfipjaihxiobuygmoijexxkrqoz2z6pqdsa	0.000851	359	3	1	lag=0 bias=0.004019 k_with=2 null=14/20
+jsd-width	info_driver	b3:3dsitgmainxvwn7decihspbowd3bqb2qaunimpcwz74ggniq5kvq	0.010151	120	7	0	
+jsd-width	info_follower	b3:4ctpzpfwdjpdjuupuquzaztxo6g3kwsblbxc6rq4yuqkb2uov46a	0.012708	120	7	0	
+jsd-width	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+jsd-width	info_noise	b3:kp4zx5epotkb76igwvw3sufs7jntvc7oo4yfjvoh6m7tuayqpe6a	0.007527	119	10	26	
+jsd-width	info_osc	b3:hczespl63feh7mscrs2yq3w2xecapzsgqaicodxwijjyzsrgj64a	0	120	6	0	
+jsd-width	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+jsd-width	info_shift	b3:mujrnkfin3rraxbngwgb3sxzgvrs3acl5ly2sz7ga5ovvjxdjzxq	0.194237	120	8	0	
+jsd-width	info_state	b3:dhbchnduxfwhd6kr6dg56bdoi4dec3r6kwt7uwl5a27bbsbfvpvq	0.02578	120	3	0	
+jsd-baseline	info_driver	b3:6rkqvieagbzizidgucyx6qoeu2tq5nqbfq76xd6pnndad6pf3i4a	0.004964	120	4	0	
+jsd-baseline	info_follower	b3:jcmvtprzk54nhtasi2kd62nhr2sstbssly6abzfpj6drac7w5c6a	0.00704	120	4	0	
+jsd-baseline	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+jsd-baseline	info_noise	b3:2vnujykxkftskulxl2n4koen5y7feahvihtnbqxes6hwvyesv5xa	0.000467	119	4	26	
+jsd-baseline	info_osc	b3:nzxsfgz3vhnltbr4caa5hg4byhjwrzynkif5ggi2bxv7za26t2ja	0	120	4	0	
+jsd-baseline	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+jsd-baseline	info_shift	b3:o4tvkqdy3atrt5l7vbdcz56c3rlbeaa63gkr5ig7klnsgwnm7dga	0.036367	120	4	0	
+jsd-baseline	info_state	b3:zey3ugwr5hice446sigpmq2e5ksf2h4moji7hazl4ufbofbcx6xq	0.02578	120	3	0	

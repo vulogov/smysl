@@ -1,6 +1,7 @@
-//! RFC SMYSL-5 GE-I1 and C-Tel-Info (TI-P1): can every statistic be replayed?
+//! RFC SMYSL-5 GE-I1 and C-Tel-Info (TI-P1, TI-P2): can every statistic be replayed?
 //!
-//! Every recipe in `fixtures/tel/info/` over every series of its `series.tsv`, **twice** in one
+//! Every recipe in `fixtures/tel/info/` over every series of its `series.tsv` (a pair recipe
+//! against `info_driver`, every series as its first), **twice** in one
 //! process and compared byte for byte, and every outcome pinned in `expected.tsv`: the unit's
 //! uid and the numbers it states, or the refusal's code. The file was written on aarch64 macOS;
 //! CI runs this test on x86_64 Linux (glibc and musl), x86_64 Windows and aarch64 macOS, so a
@@ -16,7 +17,7 @@ use std::path::{Path, PathBuf};
 use smysl_core::schemas::tel;
 use smysl_core::{canonical_uid, to_cbor_seq, Decimal, Record, Uid};
 use smysl_series::{MemBackend, Sample, SeriesInfo, Substrate};
-use smysl_tel::info::{run_on, Outcome, Spec};
+use smysl_tel::info::{run_on, Outcome, Spec, With};
 
 const FROM: u64 = 1_768_550_400_000;
 const TO: u64 = FROM + 360 * 60_000;
@@ -29,7 +30,16 @@ const RECIPES: &[&str] = &[
     "perm-3",
     "perm-4-tau2",
     "ent-strict",
+    "mi-rank",
+    "mi-scan",
+    "mi-width-lag",
+    "mi-diff",
+    "jsd-width",
+    "jsd-baseline",
 ];
+
+/// The second series of every pair recipe.
+const WITH: &str = "info_driver";
 
 fn dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/tel/info")
@@ -74,12 +84,22 @@ fn spec(name: &str) -> Spec {
 
 fn run_all() -> Vec<(&'static str, Vec<Outcome>)> {
     let (sub, series) = substrate();
+    let driver = series
+        .iter()
+        .copied()
+        .find(|s| sub.row(s).unwrap().unwrap().key == WITH)
+        .unwrap();
     RECIPES
         .iter()
         .map(|name| {
+            let spec = spec(name);
+            let with = spec.pairs().then_some(With {
+                series: driver,
+                instrument: None,
+            });
             (
                 *name,
-                run_on(&spec(name), &sub, &series, None, FROM, TO).unwrap(),
+                run_on(&spec, &sub, &series, None, with, FROM, TO).unwrap(),
             )
         })
         .collect()
@@ -89,22 +109,45 @@ fn report(runs: &[(&str, Vec<Outcome>)]) -> String {
     let mut out = String::from(
         "# RFC SMYSL-5 GE-I1 / C-Tel-Info: every recipe over fixtures/tel/info/, by uid.\n\
          # Written by crates/smysl-tel/tests/info_cases.rs; SMYSL_BLESS=1 rewrites it.\n\
-         # case\tseries\tuid or `refused`\tvalue\tmm\tn\tk\tmissing, or the refusal\n",
+         # case\tseries\tuid or `refused`\tvalue\tn\tk\tmissing\tthe rest, or the refusal\n\
+         # the rest: mm (ent, perm); lag, bias, k_with, null_ge/null_b and the curve (mi)\n",
     );
     for (name, outcomes) in runs {
         for o in outcomes {
             match &o.result {
-                Ok(c) => writeln!(
-                    out,
-                    "{name}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                    o.key,
-                    canonical_uid(&c.unit).canonical(),
-                    c.value,
-                    c.mm,
-                    c.n,
-                    c.k,
-                    c.missing
-                ),
+                Ok(c) => {
+                    let mut rest = Vec::new();
+                    if let Some(mm) = &c.mm {
+                        rest.push(format!("mm={mm}"));
+                    }
+                    if let Some(lag) = c.lag {
+                        rest.push(format!("lag={lag}"));
+                    }
+                    if let Some(b) = &c.bias {
+                        rest.push(format!("bias={b}"));
+                    }
+                    if let Some(k) = c.k_with {
+                        rest.push(format!("k_with={k}"));
+                    }
+                    if let Some((ge, b)) = c.null {
+                        rest.push(format!("null={ge}/{b}"));
+                    }
+                    if !c.values.is_empty() {
+                        let v: Vec<String> = c.values.iter().map(|(_, v)| v.to_string()).collect();
+                        rest.push(format!("values={}", v.join(",")));
+                    }
+                    writeln!(
+                        out,
+                        "{name}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                        o.key,
+                        canonical_uid(&c.unit).canonical(),
+                        c.value,
+                        c.n,
+                        c.k,
+                        c.missing,
+                        rest.join(" ")
+                    )
+                }
                 Err(r) => writeln!(out, "{name}\t{}\trefused\t{}\t{}", o.key, r.code, r.message),
             }
             .unwrap();
@@ -120,10 +163,8 @@ fn bytes(runs: &[(&str, Vec<Outcome>)]) -> Vec<u8> {
         .flat_map(|(_, os)| os.iter())
         .filter_map(|o| o.result.as_ref().ok())
         .flat_map(|c| {
-            [
-                Record::Unit(c.unit.clone()),
-                Record::Relation(c.relation.clone()),
-            ]
+            std::iter::once(Record::Unit(c.unit.clone()))
+                .chain(c.relations.iter().cloned().map(Record::Relation))
         })
         .collect();
     to_cbor_seq(&records)
@@ -170,6 +211,53 @@ fn the_refusals_are_the_ones_the_fixture_plants() {
     // Ranks are refused before any series is read.
     let rank = std::fs::read_to_string(dir().join("ent-rank.hjson")).unwrap();
     assert_eq!(Spec::parse(&rank).unwrap_err().code.as_str(), "SMY-E702");
+    // So are baseline bins over two series (R3-1).
+    let base = std::fs::read_to_string(dir().join("mi-baseline.hjson")).unwrap();
+    assert_eq!(Spec::parse(&base).unwrap_err().code.as_str(), "SMY-E702");
+    // A pair statistic refuses a counter's level on either side, as one series does.
+    assert_eq!(code("mi-rank", "info_requests"), Some("SMY-E701"));
+    // The noise's gap leaves 336 of 360 pairs, enough under 4/5; its cover holds at every lag.
+    assert_eq!(code("mi-scan", "info_noise"), None);
+}
+
+/// What the pair and window statistics are built to show.
+#[test]
+fn the_follower_peaks_three_minutes_behind_and_the_shift_diverges() {
+    let runs = run_all();
+    let got = |case: &str, key: &str| {
+        let (_, os) = runs.iter().find(|(n, _)| *n == case).unwrap();
+        os.iter()
+            .find(|o| o.key == key)
+            .unwrap()
+            .result
+            .clone()
+            .unwrap()
+    };
+    let f = got("mi-scan", "info_follower");
+    assert_eq!(
+        f.lag,
+        Some(-3),
+        "the follower is the driver three minutes late"
+    );
+    assert_eq!(f.values.len(), 11);
+    assert_eq!(
+        f.null,
+        Some((0, 50)),
+        "no rotation does as well as the true alignment"
+    );
+    assert_eq!(got("mi-scan", "info_driver").lag, Some(0));
+    // An unrelated series is matched by chance alignments.
+    let n = got("mi-scan", "info_osc");
+    assert!(n.null.unwrap().0 > 0, "{:?}", n.null);
+    // The shifted series differs from its first two hours far more than the noise does.
+    let shift = got("jsd-width", "info_shift").value.to_string();
+    let osc = got("jsd-width", "info_osc").value.to_string();
+    assert!(
+        shift.parse::<f64>().unwrap() > 10.0 * osc.parse::<f64>().unwrap().max(1e-3),
+        "shift {shift}, osc {osc}"
+    );
+    // A unit over two series grounds on both, with an edge to each.
+    assert_eq!(f.relations.len(), 2);
 }
 
 /// A sample the window does not hold changes the digest and so the unit; one outside it does
@@ -183,7 +271,7 @@ fn only_the_windows_samples_enter_the_unit() {
         .find(|s| sub.row(s).unwrap().unwrap().key == "info_osc")
         .unwrap();
     let s = spec("ent-width");
-    let a = run_on(&s, &sub, &[osc], None, FROM, FROM + 300 * 60_000).unwrap();
+    let a = run_on(&s, &sub, &[osc], None, None, FROM, FROM + 300 * 60_000).unwrap();
     let mut sub2 = sub;
     let inst = sub2.instruments(&osc).unwrap()[0];
     let row = sub2.row(&osc).unwrap().unwrap();
@@ -194,7 +282,7 @@ fn only_the_windows_samples_enter_the_unit() {
     };
     let late = Sample::new(TO + 60_000, None, Decimal::from_i64(99), 0).unwrap();
     sub2.add(&osc, &inst, &info, &[late]).unwrap();
-    let b = run_on(&s, &sub2, &[osc], None, FROM, FROM + 300 * 60_000).unwrap();
+    let b = run_on(&s, &sub2, &[osc], None, None, FROM, FROM + 300 * 60_000).unwrap();
     let uid = |o: &[Outcome]| canonical_uid(&o[0].result.as_ref().unwrap().unit);
     assert_eq!(uid(&a), uid(&b));
 }

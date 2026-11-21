@@ -2686,13 +2686,25 @@ fn cli() -> Command {
                         .long("series")
                         .value_name("SERIES")
                         .action(ArgAction::Append)
-                        .help("detect: a series to run over (uid or `<scheme>:<key>`); repeatable"),
+                        .help("detect, info: a series to run over (uid or `<scheme>:<key>`); repeatable"),
+                )
+                .arg(
+                    Arg::new("with")
+                        .long("with")
+                        .value_name("SERIES")
+                        .help("info mi/1: the second series (uid or `<scheme>:<key>`)"),
+                )
+                .arg(
+                    Arg::new("with-instrument")
+                        .long("with-instrument")
+                        .value_name("I")
+                        .help("info mi/1: the instrument uid to read --with from"),
                 )
                 .arg(
                     Arg::new("during")
                         .long("during")
                         .value_name("FROM-TO")
-                        .help("detect: the window, epoch ms, [FROM, TO)"),
+                        .help("detect, info: the window, epoch ms, [FROM, TO)"),
                 )
                 .arg(
                     Arg::new("trigger")
@@ -16101,22 +16113,24 @@ impl smysl::Attesting for DetectAttest {
     }
 }
 
-/// `smysl tel info RECIPE --series S… --during FROM-TO -s LIB [--instrument I] [--at MS --yes]`:
-/// an information measure over each series (RFC SMYSL-5 §13, TI-P1).
+/// `smysl tel info RECIPE --series S… [--with S2] --during FROM-TO -s LIB [--instrument I]
+/// [--with-instrument I2] [--at MS --yes]`: an information measure over each series (RFC
+/// SMYSL-5 §13, TI-P1, TI-P2).
 ///
 /// `RECIPE` is an HJSON file naming the statistic and its parameters
-/// (`smysl::tel::info::Spec`): `ent/1` or `perm/1` in this build. Each `--series` is read in
-/// `--during`, once per instrument it has samples from or for `--instrument` alone, and gives
-/// an `x.tel/info` unit or a refusal, each printed. Without `--yes` nothing is written; with it
-/// the units are committed with their `x.tel/of-series` edges, attested by rule TI
-/// (`Op::Transformed` at `Rung::Computed`), at `--at`. A recipe that is not admitted is
-/// `SMY-E702` and exit 2; a series refused (`SMY-E701`) or not run (`SMY-W703`) is reported and
-/// the rest go on.
+/// (`smysl::tel::info::Spec`): `ent/1`, `perm/1`, `jsd/1` or `mi/1` in this build. Each
+/// `--series` is read in `--during`, once per instrument it has samples from or for
+/// `--instrument` alone, and gives an `x.tel/info` unit or a refusal, each printed. `mi/1` pairs
+/// each with `--with`, once per instrument of it or for `--with-instrument` alone. Without
+/// `--yes` nothing is written; with it the units are committed with their `x.tel/of-series`
+/// edges, attested by rule TI (`Op::Transformed` at `Rung::Computed`), at `--at`. A recipe that
+/// is not admitted, or `--with` missing from `mi/1` or given to another statistic, is exit 2; a
+/// series refused (`SMY-E701`) or not run (`SMY-W703`) is reported and the rest go on.
 #[cfg(feature = "tel")]
 fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
     use smysl::series::redb::RedbBackend;
     use smysl::series::Substrate;
-    use smysl::tel::info::{run_on, Spec};
+    use smysl::tel::info::{run_on, Spec, With};
     use smysl::text::library::Library;
 
     let (Some(recipe_path), None) = (args.first(), args.get(1)) else {
@@ -16162,13 +16176,55 @@ fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
         );
         return ExitCode::Usage;
     }
-    let instrument = match m.get_one::<String>("instrument").map(|t| t.parse::<Uid>()) {
-        Some(Ok(u)) => Some(u),
+    let instrument_arg = |name: &str| match m.get_one::<String>(name).map(|t| t.parse::<Uid>()) {
+        Some(Ok(u)) => Ok(Some(u)),
         Some(Err(_)) => {
-            eprintln!("smysl tel info: --instrument takes an instrument uid");
+            eprintln!("smysl tel info: --{name} takes an instrument uid");
+            Err(ExitCode::Usage)
+        }
+        None => Ok(None),
+    };
+    let instrument = match instrument_arg("instrument") {
+        Ok(i) => i,
+        Err(code) => return code,
+    };
+    let with_instrument = match instrument_arg("with-instrument") {
+        Ok(i) => i,
+        Err(code) => return code,
+    };
+    let with = match (
+        m.get_one::<String>("with").map(|s| tel_series_arg(s)),
+        spec.pairs(),
+    ) {
+        (Some(Ok(series)), true) => Some(With {
+            series,
+            instrument: with_instrument,
+        }),
+        (Some(Err(e)), _) => {
+            eprintln!("smysl tel info: --with {e}");
             return ExitCode::Usage;
         }
-        None => None,
+        (None, true) => {
+            eprintln!(
+                "smysl tel info: {} reads two series: name the second with --with",
+                spec.id()
+            );
+            return ExitCode::Usage;
+        }
+        (Some(Ok(_)), false) => {
+            eprintln!(
+                "smysl tel info: {} reads one series; --with is mi/1's",
+                spec.id()
+            );
+            return ExitCode::Usage;
+        }
+        (None, false) => {
+            if with_instrument.is_some() {
+                eprintln!("smysl tel info: --with-instrument goes with --with");
+                return ExitCode::Usage;
+            }
+            None
+        }
     };
     let yes = m.get_flag("yes");
     let Some(&at) = m.get_one::<u64>("at").or(if yes { None } else { Some(&0) }) else {
@@ -16189,8 +16245,17 @@ fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
     }
     let outcomes = match RedbBackend::open(&path)
         .map_err(|e| format!("{}: {e}", path.display()))
-        .and_then(|b| run_on(&spec, &Substrate::new(b), &series, instrument, from, to))
-    {
+        .and_then(|b| {
+            run_on(
+                &spec,
+                &Substrate::new(b),
+                &series,
+                instrument,
+                with,
+                from,
+                to,
+            )
+        }) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("smysl tel info: {e}");
@@ -16202,26 +16267,59 @@ fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
     for o in &outcomes {
         match &o.result {
             Ok(c) => {
+                let pair = o
+                    .with
+                    .as_ref()
+                    .map(|(k, _)| format!(" ~ {k}"))
+                    .unwrap_or_default();
                 println!(
-                    "{:<17} {}  {} {}",
+                    "{:<17} {}  {} {}{pair}",
                     smysl::schemas::tel::INFO,
                     smysl::canonical_uid(&c.unit).canonical(),
                     spec.stat_name(),
                     o.key
                 );
-                let missing = if c.missing > 0 {
-                    format!(", {} grid point(s) missing", c.missing)
-                } else {
-                    String::new()
-                };
-                println!(
-                    "    value {} bits, Miller-Madow {}, n {}, k {}{missing}",
-                    c.value, c.mm, c.n, c.k
-                );
+                let mut line = format!("    value {} bits", c.value);
+                if let Some(mm) = &c.mm {
+                    line += &format!(", Miller-Madow {mm}");
+                }
+                if let Some(lag) = c.lag {
+                    line += &format!(", at lag {lag}");
+                }
+                if let Some(bias) = &c.bias {
+                    line += &format!(", bias {bias}");
+                }
+                line += &format!(", n {}, k {}", c.n, c.k);
+                if let Some(k) = c.k_with {
+                    line += &format!(", k_with {k}");
+                }
+                if let Some((ge, b)) = c.null {
+                    line += &format!(", {ge} of {b} surrogates at least as high");
+                }
+                if c.missing > 0 {
+                    line += &format!(", {} point(s) missing", c.missing);
+                }
+                println!("{line}");
+                if !c.values.is_empty() {
+                    let curve: Vec<String> =
+                        c.values.iter().map(|(l, v)| format!("{l}:{v}")).collect();
+                    println!("    by lag {}", curve.join(" "));
+                }
                 units.push(c.unit.clone());
-                relations.push(c.relation.clone());
+                relations.extend(c.relations.iter().cloned());
             }
-            Err(r) => println!("refused           {} {}: {r}", o.key, o.instrument.short()),
+            Err(r) => {
+                let pair = o
+                    .with
+                    .as_ref()
+                    .map(|(k, i)| format!(" ~ {k} {}", i.short()))
+                    .unwrap_or_default();
+                println!(
+                    "refused           {} {}{pair}: {r}",
+                    o.key,
+                    o.instrument.short()
+                )
+            }
         }
     }
     println!(

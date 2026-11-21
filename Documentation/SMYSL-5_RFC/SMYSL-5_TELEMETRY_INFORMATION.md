@@ -1,8 +1,9 @@
 # RFC SMYSL-5 — information measures over telemetry
 
 **Author:** Vladimir Ulogov
-**Status:** first draft, amended after review (R1, 2026-11-20). TI-P0 is built; no statistic is,
-and no number in it is measured. Every threshold is a proposal until the experiment that owns it has
+**Status:** first draft, amended after review (R1, 2026-11-20) and while building (R2, R3).
+TI-P0 to TI-P2 are built: `ent/1`, `perm/1`, `mi/1` and `jsd/1`. GE-I1 and GE-I2 have run on
+simulated data (§15); every other threshold is a proposal until the experiment that owns it has
 run (§17).
 **Target version:** not fixed. Phases are named (TI-P0 to TI-P5), not numbered by release.
 **Evidence baseline:** `dev/1.18.0` at `3e57160` ("SMYSL-4 BQ-P4"). Every code pointer below
@@ -21,6 +22,7 @@ Part A.
 |---|---|---|
 | R1 | 2026-11-20 | Review against `3e57160`. **R1-1** a stale or no-value sample ends the value in force (§5.1). **R1-2** admission is by the series' `tel:kind`, not a class, and every kind is placed (§5.2, D-I12). **R1-3** a statistic is stored rounded to six places so rule TQ can verify a quote of it (§6, D-I13). **R1-4** a recipe value never holds `?`, `&` or `=`; `tent/1` names Drain's recipe by hash (§4). **R1-5** one observed symbol is exactly 0 and a negative result is clamped to 0 (§6). **R1-6** surrogates rotate over the whole grid and pair by grid position (§6.3). **R1-7** every lag of a scan meets `min_n`, and the maximum is taken on stored values (§6.3). **R1-8** `SMY-E603` and `SMY-E604` are reworded when they extend (§9). **R1-9** recipe ids are bare, as detectors' are (D-I14). **R1-10** the CLI synopsis, the four-platform CI step and TQ's work in TI-P4 are corrected to the tree (§12–§14). |
 | R2 | 2026-11-20 | Found while building TI-P1. **R2-1** admission is by the leaf class the substrate records for a series (`SeriesRow::class`), which every reader writes, and not by `tel:kind`, which the schema allows and no reader writes: R1-2 read the schema and not the readers, and the draft's "class" was right. `state` is not a class, so its row goes. **R2-2** `diff` reads the sequence `of` produces, so under `of=increase` it is the sign of the increase's change. |
+| R3 | 2026-11-21 | Found while building TI-P2. **R3-1** `mi/1` refuses `baseline` bins: they would read a reference window of each series, and `x.tel/info` has one `ref_digest`, so rule TI could not be met (§5.3). **R3-2** `guard` is a share of the grid length `G`, as §6.3 always said, not of `n` (§4). **R3-3** `mi/1`'s `cover` at lag `ℓ` is over the `G − |ℓ|` points where a pair can form, and `missing` counts those where none did; otherwise a long lag alone would fail it (§6.3). **R3-4** a scan's `n`, `k`, `k_with`, `bias` and `missing` are those at `lag` (§6.3). **R3-5** a scan's surrogate counts toward `null_ge` only when every lag meets `min_n` (§6.3). **R3-6** `jsd/1`'s `k` and `missing` are the window's, `cover` applies to each window, and `H(M)` is a plug-in over integer weights, so no probability is formed (§6.2). |
 
 ---
 
@@ -196,7 +198,7 @@ is refused (`SMY-E702`). Every value in the table below meets that by its gramma
 | `ref` | `jsd/1`, and with `baseline` bins | `<from_ms>-<to_ms>` | none: required |
 | `cover` | all but `tent/1` | the least share of grid points that must give a symbol, as `<a>/<b>` | `4/5` |
 | `min_n` | all | the least `n` | §6, per statistic |
-| `null`, `seed`, `guard` | `mi/1` | surrogates B, their seed, the least shift as `<a>/<b>` of `n` | 0, 0, `1/10` |
+| `null`, `seed`, `guard` | `mi/1` | surrogates B (0 to 1000), their seed, the least shift as `<a>/<b>` of the grid length `G`, at most `1/2` (R3-2) | 0, 0, `1/10` |
 | `templates` | `tent/1` | the Drain recipe whose templates are read (3 §21), as the lowercase hex of `BLAKE3` over its recipe text: Drain's text holds `?`, `&` and `=` | the hash of Drain's shipped recipe |
 
 A statistic that cannot be given is **not a unit**. A window with too few symbols, too little
@@ -247,7 +249,7 @@ Every step in this section is exact. It compares `dec` values, subtracts them, d
 |---|---|---|
 | `width:w` | `floor(x / w)`, an integer; `w > 0` | `ent/1`, `mi/1`, `jsd/1` |
 | `rank:k` | `floor(k · L(x) / n)`, where `L(x)` is the number of values in the window strictly less than `x` and `n` the number present. Tied values share a symbol. | `mi/1` only |
-| `baseline:k` | the number of edges strictly less than `x`. The edges are the reference window's values at sorted positions `ceil(i · m / k) − 1`, `i = 1 … k − 1`, `m` the number present there. | `ent/1`, `mi/1`, `jsd/1` |
+| `baseline:k` | the number of edges strictly less than `x`. The edges are the reference window's values at sorted positions `ceil(i · m / k) − 1`, `i = 1 … k − 1`, `m` the number present there. | `ent/1`, `jsd/1`. Not `mi/1` (R3-1): two series would need two reference digests. |
 | `diff` | the sign of `x` at `t` minus `x` at `t − step`, `x` the sequence `of` produces (R2-2): −1, 0 or 1; missing when either is missing | `ent/1`, `mi/1`, `jsd/1` |
 
 - `rank:k` makes every marginal near uniform by construction, so an entropy under it is
@@ -300,7 +302,10 @@ one binning, with `baseline` edges from `ref`.
 - `P` and `Q` are the two windows' symbol distributions and `M` their equal mixture.
 - `value = H(M) − ½·H(P) − ½·H(Q)`, each `H` as §6.1's plug-in. It lies in `[0, 1]` in exact
   arithmetic, and §6.0's clamp keeps the stored value there.
-- `n` is the smaller window's count, and `min_n` (default 200) applies to each.
+- `n` is the smaller window's count, and `min_n` (default 200) and `cover` apply to each.
+  `k` and `missing` are the window's (R3-6).
+- `H(M)` is computed without forming a probability: `M(s) = (c_P(s)·N_Q + c_Q(s)·N_P) /
+  (2·N_P·N_Q)`, so `H(M)` is §6.1's plug-in over the integer weights `c_P(s)·N_Q + c_Q(s)·N_P`.
 - `rank` bins are refused: ranks within each window would make the two distributions equal.
 
 ### 6.3 `mi/1`
@@ -313,9 +318,12 @@ symbol of `with` at `t + ℓ·step`), for every `t` where both exist. A positive
 - `bias = (K_a − 1)(K_b − 1) / (2 · N · ln 2)`. It is stored and not subtracted: a reader who
   wants the corrected value has both numbers, and a stored difference would hide a negative one.
 - `min_n` defaults to `5 · k²` for `rank:k`, and 500 otherwise.
+- **Cover** at lag `ℓ` is over the `G − |ℓ|` grid points where a pair can form, and `missing`
+  counts those that formed none (R3-3).
 - **A scan** (`lag=-L..L`, `L ≤ 64`) computes the value at each lag. `values` holds them,
   stored as §6.0 says; `value` is their maximum, compared on the stored values; `n` is the
-  count at `lag`. Every lag MUST meet `min_n` and `cover` on its own pairs. If any lag does
+  count at `lag`, and `k`, `k_with`, `bias` and `missing` are those at `lag` too (R3-4). Every
+  lag MUST meet `min_n` and `cover` on its own pairs. If any lag does
   not, the whole scan is refused (`SMY-W703`) and the report names the lag (R1-7), so a curve
   never holds a value computed from fewer pairs than its recipe admits.
 - **Surrogates** (`null=B`, `B ≤ 1000`). Let `G` be the window's grid length. The second
@@ -325,7 +333,8 @@ symbol of `with` at `t + ℓ·step`), for every `t` where both exist. A positive
   Pairs are then formed by grid position at the lag, exactly as for `value`, over the indices
   where both are present (R1-6). The statistic is recomputed: at the one lag, or at every lag
   of the scan and then maximised, each stored as §6.0 says before it is compared. A rotation
-  whose pairs fall below `min_n` counts toward `null_b` and not toward `null_ge`. `null_ge` is
+  whose pairs fall below `min_n`, at any lag of a scan (R3-5), counts toward `null_b` and not
+  toward `null_ge`. `null_ge` is
   the number of the `B` whose stored statistic is at least `value`.
 - **Offsets** are drawn by rejection from ChaCha20 keyed by
   `BLAKE3("smysl/tel-info/1\0" ‖ recipe ‖ seed)`, the seed as eight little-endian bytes, as
@@ -455,7 +464,8 @@ smysl-tel/src/info/
   `dec`. GE-I1 pins the cases near a rounding boundary.
 - **Cost.** One statistic is O(N log N) in the grid length. A scan with surrogates is
   O(B · L · N): 200 surrogates over 21 lags of a day at one-minute steps is about 6 million
-  pair counts. TI-P2 measures it.
+  pair counts. **Measured at TI-P2** (`examples/ge_i2b.rs`, aarch64 macOS, release): that unit
+  takes 170 to 185 ms under `rank:4` and 195 to 215 ms under `width:0.25` over two runs.
 
 ## 13. CLI
 
@@ -472,6 +482,9 @@ needs `--at`, the attestation clock, as it does for `tel detect`.
 - The recipe file is HJSON, as a detector's: `{ stat: mi/1, step: 60000, bins: "rank:4",
   lag: "-10..10", null: 200 }`.
 - Units are staged without `--yes` and committed with it, as `tel detect` does.
+- `mi/1` pairs each `--series` with `--with`, once per instrument of each, or for
+  `--instrument` and `--with-instrument` alone. `--with` given to a statistic of one series, or
+  missing from `mi/1`, is exit 2.
 - The report prints each value with its `n`, its bias or Miller–Madow term, and `null_ge` of
   `null_b`, and lists every refusal.
 - `--seed-check`, a global flag at the baseline, computes twice and compares payload bytes.
@@ -490,7 +503,7 @@ it is SMYSL-2's example. A telemetry example over `fixtures/tel/detect/` is TI-P
 |---|---|---|
 | **TI-P0** prerequisites (**done**, 1.18) | `libm` as a workspace pin; `info::num`; the exact decimal operations §5 needs (§12); `x.tel/v1` revision 2 with `x.tel/info` registered; §9's codes, and the four extended codes reworded; the format spec's §5.2 list | the three ports round-trip a fixture holding an `x.tel/info` unit, byte for byte; purity passes |
 | **TI-P1** symbols and one series (**done**, 1.18) | grid, `of`, the four binnings, ordinal patterns; `ent/1`, `perm/1`; `tel info`; the info test in `measure-platforms` | `fixtures/tel/info/` uids stable on the four CI platforms; **GE-I1** harness runs; **GE-I2 (a)** |
-| **TI-P2** two series and two windows | `mi/1` with lag, scan and surrogates; `jsd/1` | **GE-I1** over them; **GE-I2 (b)**; scan cost measured |
+| **TI-P2** two series and two windows (**done**, 1.18) | `mi/1` with lag, scan and surrogates; `jsd/1` | **GE-I1** over them; **GE-I2 (b)**; scan cost measured |
 | **TI-P3** logs | `tent/1` | **GE-I4** run |
 | **TI-P4** check and investigations | rule TI in `check`; `tel-evidence` recomputation; the info key in `SMY-W614`'s incremental state; tests of TQ over info fields (no TQ code changes, §8); the dossier's evidence section; the manual section and the example | the `oko_ledger` example quotes an info value and a planted wrong quote is caught; **GE-I3** run |
 | **TI-P5** transfer entropy | `te/1`, only if released | **GE-I5** decides |
@@ -510,13 +523,26 @@ otherwise, and each report says so.
 | **GE-I4** | Is template entropy a property of the logs, or of Drain? | One simulated log stream, normal and faulty. Compute `tent/1` over windows whose boundaries are shifted by a tenth of their length. | `tent/1` | If shifting a boundary moves the value more than the median difference between normal and faulty windows, `tent/1` does not ship and TI-P3 closes with that result. |
 | **GE-I5** | Does transfer entropy name the right direction? | Simulated pairs with a known direction and delay; pairs with a common driver and no direct effect; pairs with none. | §10 | Released only if the direction is right in at least 90 % of driven pairs **and** a direction is asserted, at `null_ge / null_b ≤ 0.05`, in at most 10 % of common-driver pairs. Otherwise `te` stays reserved, and the result is recorded. |
 
-**GE-I1, as of TI-P1.** The harness is `crates/smysl-tel/tests/info_cases.rs`: seven recipes
-(`ent/1` under width, baseline, diff and increase; `perm/1` at m = 3 and at m = 4, τ = 2; a
-strict cover) over the five series of `fixtures/tel/info/`, twice in one process and compared
-byte for byte, with every unit's uid and numbers, and every refusal's code, pinned in
-`expected.tsv` (written on aarch64 macOS). The `measure-platforms` CI job runs it on x86_64
-Linux (glibc and musl), aarch64 macOS and x86_64 Windows. `mi/1`, `jsd/1` and `tent/1` join it
-in their phases.
+**GE-I1, as of TI-P2.** The harness is `crates/smysl-tel/tests/info_cases.rs`: thirteen
+recipes over the eight series of `fixtures/tel/info/`, twice in one process and compared byte
+for byte, with every unit's uid and numbers, and every refusal's code, pinned in `expected.tsv`
+(written on aarch64 macOS). TI-P1's seven are `ent/1` under width, baseline, diff and increase,
+`perm/1` at m = 3 and at m = 4, τ = 2, and a strict cover; TI-P2 adds `mi/1` against
+`info_driver` at lag 0 under `rank:4`, a scan of `-5..5` with 50 surrogates, one lag of −3
+under `width:0.5`, and `diff` with 20 surrogates, and `jsd/1` under width and baseline bins
+against the first two hours. The `measure-platforms` CI job runs it on x86_64 Linux (glibc and
+musl), aarch64 macOS and x86_64 Windows, and TI-P1's seven passed there unchanged (run
+44892919657). `tent/1` joins it in TI-P3.
+
+What the fixture shows, and one thing it was not built to: `info_follower`, the driver three
+minutes late, peaks at lag −3 with 1.495574 bits and no surrogate as high; `info_shift`'s
+divergence from its first two hours is 0.194237 bits under `width:1`, against 0.0 to 0.026 for
+the steady series. `info_noise`, generated independently of the driver, also peaks at −3, at
+0.05783 bits with 0 of 50 surrogates as high. A Python reimplementation of §5.3 and §6.3 gives
+the same eleven values to the digit, and the two generators' raw streams show no dependence at
+any lag over 2·10⁵ draws, so it is a chance alignment: 300 further rotations all fall below it,
+p < 1/300 for one pair and one of six pairs in the fixture. `null_ge` counts chance for one
+test; it does not correct for running several, which is the second risk of §17.
 
 **GE-I2 (a), run at TI-P1 on simulated data** (`cargo run --release -p smysl-tel --example
 ge_i2`, 200 runs a cell, seed 7). The mean Miller–Madow value against the truth:
@@ -532,6 +558,33 @@ at worst 0.81 % (m = 3, n = 60), under the 5 % stop condition, so **every defaul
 stands**. The plug-in value alone is up to 4.2 % low at n = 200 (K = 64), which is why `mm` is
 stored. The criterion is the mean over runs; the spread of one run is not what it judges.
 Ordinal patterns of m ≥ 5 are far off below 10·m!, which is why that default scales with m!.
+
+**GE-I2 (b), run at TI-P2 on simulated data** (`cargo run --release -p smysl-tel --example
+ge_i2b`, 1440 one-minute points, 200 runs a cell, seed 7). Every number goes through
+`info::compute`.
+
+*Independent AR(1) pairs, `rank:4`, 100 surrogates: the share of runs with `null_ge / null_b ≤
+0.05`.* Exact exchangeability would give 6/101 ≈ 5.9 %.
+
+| φ | lag 0 | scan `-5..5` |
+|---|---|---|
+| 0 | 7.0 % | 6.0 % |
+| 0.5 | 7.0 % | 6.5 % |
+| 0.9 | 8.5 % | 5.5 % |
+| 0.99 | 7.0 % | 10.0 % |
+
+No cell is over 10 %, so **D-I7 stands** and TI-P2 ships with circular-shift surrogates. The
+φ = 0.99 scan is at the limit, not under it, which is where a near-unit-root pair puts it: a
+day of minutes holds few independent stretches of such a series, and each rotation is one of
+them. A recipe over series that slow should not read a scan's `null_ge` at face value.
+
+*Correlated pairs at lag 0, mean stored `value` against the Gaussian bound −½·log₂(1 − ρ²).*
+The true binned value is under the bound, as binning requires; the plug-in `value` is over it
+in the two cells ρ = 0.3, `rank:8` (0.0848 and 0.1006 against 0.0680), which is its upward bias
+at 64 cells. `value − bias` is under the bound in eleven of twelve cells; the twelfth is
+φ = 0.9, ρ = 0.3, `rank:8` (0.1006 − 0.0245 > 0.0680). `bias` is the i.i.d. term, and an autocorrelated pair's bias is larger: the stored
+`bias` understates it, which is what the surrogates, keeping each series' autocorrelation, are
+for. This is reported, not a stop condition.
 
 **Order.** GE-I1 and GE-I2 first: they are cheap and decide the defaults. GE-I3 is the one that
 says whether the work was worth doing. The real-data runs wait on the cluster GE-M1 still

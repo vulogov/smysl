@@ -1,0 +1,2 @@
+// The same, in the first two hours' quartiles.
+{ stat: jsd/1, step: 60000, bins: "baseline:4", ref: "1768550400000-1768557600000", min_n: 100 }

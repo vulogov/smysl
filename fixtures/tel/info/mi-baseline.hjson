@@ -1,0 +1,2 @@
+// Baseline bins over two series would read two reference windows: refused (SMY-E702, R3-1).
+{ stat: mi/1, step: 60000, bins: "baseline:4", ref: "1768550400000-1768557600000" }
