@@ -1,7 +1,8 @@
-//! RFC SMYSL-5 GE-I1 and C-Tel-Info (TI-P1, TI-P2): can every statistic be replayed?
+//! RFC SMYSL-5 GE-I1 and C-Tel-Info (TI-P1 to TI-P3): can every statistic be replayed?
 //!
 //! Every recipe in `fixtures/tel/info/` over every series of its `series.tsv` (a pair recipe
-//! against `info_driver`, every series as its first), **twice** in one
+//! against `info_driver`, every series as its first), and `tent/1` over the log stream of
+//! `journal.json` in three windows, **twice** in one
 //! process and compared byte for byte, and every outcome pinned in `expected.tsv`: the unit's
 //! uid and the numbers it states, or the refusal's code. The file was written on aarch64 macOS;
 //! CI runs this test on x86_64 Linux (glibc and musl), x86_64 Windows and aarch64 macOS, so a
@@ -17,7 +18,8 @@ use std::path::{Path, PathBuf};
 use smysl_core::schemas::tel;
 use smysl_core::{canonical_uid, to_cbor_seq, Decimal, Record, Uid};
 use smysl_series::{MemBackend, Sample, SeriesInfo, Substrate};
-use smysl_tel::info::{run_on, Outcome, Spec, With};
+use smysl_tel::info::{logs, run_on, Outcome, Spec, With};
+use smysl_tel::readers::journald;
 
 const FROM: u64 = 1_768_550_400_000;
 const TO: u64 = FROM + 360 * 60_000;
@@ -44,6 +46,31 @@ const WITH: &str = "info_driver";
 fn dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/tel/info")
 }
+
+/// The fixture's log stream added to `sub`: its uid and the stream's series unit.
+fn journal(sub: &mut Substrate<MemBackend>) -> Uid {
+    let text = std::fs::read_to_string(dir().join("journal.json")).unwrap();
+    let entries = journald::read(&text).unwrap();
+    let r = smysl_tel::logs::record_journald(&entries, "collector", "journald:h1").unwrap();
+    assert_eq!(r.streams.len(), 1);
+    let st = &r.streams[0];
+    sub.add_events(
+        &st.uid,
+        &r.inst,
+        &st.info,
+        &st.events,
+        &smysl_tel::trace::tag,
+    )
+    .unwrap();
+    st.uid
+}
+
+/// `tent/1`'s windows: the six hours, the four before the timeouts start, the two after.
+const TENT_WINDOWS: &[(&str, u64, u64)] = &[
+    ("tent", FROM, TO),
+    ("tent-normal", FROM, FROM + 240 * 60_000),
+    ("tent-faulty", FROM + 240 * 60_000, TO),
+];
 
 fn substrate() -> (Substrate<MemBackend>, Vec<Uid>) {
     let text = std::fs::read_to_string(dir().join("series.tsv")).unwrap();
@@ -89,7 +116,7 @@ fn run_all() -> Vec<(&'static str, Vec<Outcome>)> {
         .copied()
         .find(|s| sub.row(s).unwrap().unwrap().key == WITH)
         .unwrap();
-    RECIPES
+    let mut out: Vec<(&'static str, Vec<Outcome>)> = RECIPES
         .iter()
         .map(|name| {
             let spec = spec(name);
@@ -102,7 +129,31 @@ fn run_all() -> Vec<(&'static str, Vec<Outcome>)> {
                 run_on(&spec, &sub, &series, None, with, FROM, TO).unwrap(),
             )
         })
-        .collect()
+        .collect();
+    out.extend(run_tent(&sub, &series));
+    out
+}
+
+/// `tent/1` over the journal in each window, and over one metric series (refused); then a
+/// recipe naming another Drain's templates, which none are stored of.
+fn run_tent(sub: &Substrate<MemBackend>, series: &[Uid]) -> Vec<(&'static str, Vec<Outcome>)> {
+    let mut sub = sub.clone();
+    let stream = journal(&mut sub);
+    let osc = series
+        .iter()
+        .copied()
+        .find(|s| sub.row(s).unwrap().unwrap().key == "info_osc")
+        .unwrap();
+    let mut out: Vec<(&'static str, Vec<Outcome>)> = TENT_WINDOWS
+        .iter()
+        .map(|(name, from, to)| {
+            let r = logs::run_on(&spec("tent"), &sub, [], &[stream, osc], None, *from, *to);
+            (*name, r.unwrap().outcomes)
+        })
+        .collect();
+    let other = logs::run_on(&spec("tent-other"), &sub, [], &[stream], None, FROM, TO);
+    out.push(("tent-other", other.unwrap().outcomes));
+    out
 }
 
 fn report(runs: &[(&str, Vec<Outcome>)]) -> String {
@@ -211,6 +262,12 @@ fn the_refusals_are_the_ones_the_fixture_plants() {
     // Ranks are refused before any series is read.
     let rank = std::fs::read_to_string(dir().join("ent-rank.hjson")).unwrap();
     assert_eq!(Spec::parse(&rank).unwrap_err().code.as_str(), "SMY-E702");
+    // tent/1 reads a log stream, not a metric series; and only the shipped Drain is run.
+    assert_eq!(code("tent", "info_osc"), Some("SMY-E701"));
+    assert_eq!(
+        code("tent-other", r#"{"host":"h1","unit":"cart.service"}"#),
+        Some("SMY-W703")
+    );
     // So are baseline bins over two series (R3-1).
     let base = std::fs::read_to_string(dir().join("mi-baseline.hjson")).unwrap();
     assert_eq!(Spec::parse(&base).unwrap_err().code.as_str(), "SMY-E702");
@@ -285,4 +342,33 @@ fn only_the_windows_samples_enter_the_unit() {
     let b = run_on(&s, &sub2, &[osc], None, None, FROM, FROM + 300 * 60_000).unwrap();
     let uid = |o: &[Outcome]| canonical_uid(&o[0].result.as_ref().unwrap().unit);
     assert_eq!(uid(&a), uid(&b));
+}
+
+/// §6.4: a template entropy is a function of its template units. Recomputed from them alone,
+/// with the events gone from the substrate, it is the same unit; and the timeouts of the last
+/// two hours raise it.
+#[test]
+fn a_template_entropy_is_its_templates_and_outlives_the_events() {
+    let (base, _) = substrate();
+    let mut sub = base.clone();
+    let stream = journal(&mut sub);
+    let tent = spec("tent");
+    let first = logs::run_on(&tent, &sub, [], &[stream], None, FROM, TO).unwrap();
+    assert!(!first.materialised.is_empty());
+    let units: Vec<_> = first.materialised.iter().map(|t| t.unit()).collect();
+    // The events are gone: only the template units are read, and nothing is materialised.
+    let again = logs::run_on(&tent, &base, &units, &[stream], None, FROM, TO).unwrap();
+    assert!(again.materialised.is_empty());
+    let uid = |r: &logs::Run| canonical_uid(&r.outcomes[0].result.as_ref().unwrap().unit);
+    assert_eq!(uid(&first), uid(&again));
+
+    let value = |from, to| {
+        let r = logs::run_on(&tent, &sub, [], &[stream], None, from, to).unwrap();
+        let c = r.outcomes[0].result.clone().unwrap();
+        (c.value.to_string().parse::<f64>().unwrap(), c.k)
+    };
+    let (normal, k_normal) = value(FROM, FROM + 240 * 60_000);
+    let (faulty, k_faulty) = value(FROM + 240 * 60_000, TO);
+    assert!(faulty > normal, "faulty {faulty}, normal {normal}");
+    assert!(k_faulty > k_normal, "a timeout template appears");
 }

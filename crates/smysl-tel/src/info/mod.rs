@@ -6,8 +6,8 @@
 //! is stored rounded to six places (§6.0), so that a quote of it can be verified by rule TQ.
 //!
 //! The statistics of one series are `ent/1` and `perm/1` ([`entropy`]); of two windows of one
-//! series, `jsd/1` ([`jsd`]); of two series, `mi/1` with its lag scan and surrogates ([`mi`]).
-//! `tent/1` is TI-P3's, and a recipe naming it is refused until then.
+//! series, `jsd/1` ([`jsd`]); of two series, `mi/1` with its lag scan and surrogates ([`mi`]);
+//! and of a log stream's templates, `tent/1` ([`logs`]), which reads units and not samples.
 //!
 //! **A statistic that cannot be given is not a unit** (§4): a series whose class does not admit
 //! it (`SMY-E701`), a recipe that is not admitted (`SMY-E702`), or a window with too few symbols
@@ -32,6 +32,7 @@ use crate::exact::{numeric_cmp, BigDec};
 pub mod entropy;
 pub mod grid;
 pub mod jsd;
+pub mod logs;
 pub mod mi;
 pub mod num;
 pub mod symbols;
@@ -48,10 +49,10 @@ pub const PERM: &str = "perm/1";
 pub const MI: &str = "mi/1";
 /// `jsd/1`: the Jensen–Shannon divergence between a window and a reference window (§6.2).
 pub const JSD: &str = "jsd/1";
-/// The recipes later phases build, refused by name until they do.
-const LATER: &[(&str, &str)] = &[("tent/1", "TI-P3")];
+/// `tent/1`: the plug-in entropy of a log stream's templates (§6.4).
+pub const TENT: &str = "tent/1";
 /// What a refusal of an unknown statistic lists.
-const BUILT: &str = "ent/1, perm/1, mi/1 or jsd/1";
+const BUILT: &str = "ent/1, perm/1, mi/1, jsd/1 or tent/1";
 
 /// Why a statistic was not given (§9): a diagnostic code and what it says.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +105,9 @@ pub enum Stat {
     },
     /// `jsd/1`, over `bins` (`width`, `baseline` or `diff`), against `reference`, `[from, to)`.
     Jsd { bins: Bins, reference: (u64, u64) },
+    /// `tent/1`, over the templates of the Drain recipe whose text hashes to `templates`
+    /// (lowercase hex of `BLAKE3`).
+    Tent { templates: String },
 }
 
 /// A recipe (§4): a statistic and every parameter it was computed under.
@@ -147,11 +151,6 @@ impl Spec {
                 )))
             }
         };
-        if let Some((_, phase)) = LATER.iter().find(|(r, _)| *r == id) {
-            return Err(Refusal::recipe(format!(
-                "`{id}` is RFC SMYSL-5's and arrives in {phase}; this build has {BUILT}"
-            )));
-        }
         let known: &[&str] = match id {
             ENT => &["step", "hold", "of", "bins", "cover", "min_n", "ref"],
             PERM => &["step", "hold", "of", "m", "tau", "cover", "min_n"],
@@ -159,6 +158,7 @@ impl Spec {
                 "step", "hold", "of", "bins", "lag", "cover", "min_n", "null", "seed", "guard",
             ],
             JSD => &["step", "hold", "of", "bins", "ref", "cover", "min_n"],
+            TENT => &["templates", "min_n"],
             "te/1" => {
                 return Err(Refusal::recipe(
                     "`te/1` is reserved behind GE-I5 (RFC SMYSL-5 §10)",
@@ -221,6 +221,33 @@ impl Spec {
             }
             Ok(b)
         };
+        if id == TENT {
+            let templates = match text("templates")? {
+                None => logs::shipped(),
+                Some(h)
+                    if h.len() == 64
+                        && h.bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) =>
+                {
+                    h.to_string()
+                }
+                Some(h) => {
+                    return Err(Refusal::recipe(format!(
+                        "`templates: {h}` is the lowercase hex of BLAKE3 over a Drain recipe's \
+                         text, 64 digits"
+                    )))
+                }
+            };
+            // A grid's parameters mean nothing to templates: tent/1 states only its own.
+            return Ok(Spec {
+                stat: Stat::Tent { templates },
+                step: 0,
+                hold: 0,
+                of: Of::Value,
+                cover: (1, 1),
+                min_n: int("min_n")?.unwrap_or(100),
+            });
+        }
         let step = int("step")?.ok_or_else(|| {
             Refusal::recipe("a recipe states its `step`, the grid step in ms: it has no default")
         })?;
@@ -329,6 +356,7 @@ impl Spec {
                     ..
                 } => 5 * u64::from(*k) * u64::from(*k),
                 Stat::Mi { .. } => 500,
+                Stat::Tent { .. } => 100,
             },
         };
         Ok(Spec {
@@ -348,6 +376,7 @@ impl Spec {
             Stat::Perm { .. } => PERM,
             Stat::Mi { .. } => MI,
             Stat::Jsd { .. } => JSD,
+            Stat::Tent { .. } => TENT,
         }
     }
 
@@ -358,7 +387,13 @@ impl Spec {
             Stat::Perm { .. } => "perm-entropy",
             Stat::Mi { .. } => "mi",
             Stat::Jsd { .. } => "jsd",
+            Stat::Tent { .. } => "template-entropy",
         }
+    }
+
+    /// Whether the statistic reads a log stream's templates (`tent/1`), through [`logs::run_on`].
+    pub fn templates(&self) -> bool {
+        matches!(self.stat, Stat::Tent { .. })
     }
 
     /// Whether the statistic reads a second series, `with` (`mi/1`).
@@ -377,6 +412,11 @@ impl Spec {
 
     /// The recipe, every parameter written, defaults included (§4): the unit's `tel:recipe`.
     pub fn recipe(&self) -> Recipe {
+        if let Stat::Tent { templates } = &self.stat {
+            return Recipe::new(TENT)
+                .with("min_n", self.min_n)
+                .with("templates", templates);
+        }
         let r = Recipe::new(self.id())
             .with("step", self.step)
             .with("hold", self.hold)
@@ -406,6 +446,7 @@ impl Spec {
                 .with("seed", seed)
                 .with("guard", format!("{}/{}", guard.0, guard.1)),
             Stat::Jsd { bins, reference } => window(r.with("bins", bins.text()), *reference),
+            Stat::Tent { .. } => unreachable!("written above"),
         }
     }
 }
@@ -596,6 +637,9 @@ pub fn compute(
                 .ok_or_else(|| Refusal::recipe("jsd/1 needs the reference window's samples"))?;
             compute_jsd(spec, bins, stream, read, r)
         }
+        Stat::Tent { .. } => Err(Refusal::recipe(
+            "tent/1 reads a log stream's templates, not samples: info::logs::run_on runs it",
+        )),
         _ => compute_one(spec, stream, read, reference),
     }
 }
@@ -1022,6 +1066,9 @@ pub fn run_on<B: Backend>(
     from_ms: u64,
     to_ms: u64,
 ) -> Result<Vec<Outcome>, String> {
+    if spec.templates() {
+        return Err("tent/1 reads templates: info::logs::run_on runs it".to_string());
+    }
     let with = match (spec.pairs(), with) {
         (true, Some(w)) => Some(w),
         (true, None) => {
@@ -1205,6 +1252,8 @@ mod tests {
             r#"{ stat: jsd/1, step: 1000, bins: "rank:4", ref: "0-10" }"#,
             r#"{ stat: jsd/1, step: 1000, bins: diff, ref: "0-10", m: 3 }"#,
             r#"{ stat: tent/1, step: 1000 }"#,
+            r#"{ stat: tent/1, templates: "ABC" }"#,
+            r#"{ stat: tent/1, min_n: 0 }"#,
             r#"{ stat: te/1, step: 1000 }"#,
             r#"{ stat: ent/2, step: 1000 }"#,
             r#"{ step: 1000 }"#,

@@ -1,0 +1,2 @@
+// Another Drain recipe's templates: none are stored and this build runs only its own (SMY-W703).
+{ stat: tent/1, templates: "0000000000000000000000000000000000000000000000000000000000000000" }

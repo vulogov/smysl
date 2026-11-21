@@ -106,3 +106,10 @@ jsd-baseline	info_osc	b3:nzxsfgz3vhnltbr4caa5hg4byhjwrzynkif5ggi2bxv7za26t2ja	0	
 jsd-baseline	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
 jsd-baseline	info_shift	b3:o4tvkqdy3atrt5l7vbdcz56c3rlbeaa63gkr5ig7klnsgwnm7dga	0.036367	120	4	0	
 jsd-baseline	info_state	b3:zey3ugwr5hice446sigpmq2e5ksf2h4moji7hazl4ufbofbcx6xq	0.02578	120	3	0	
+tent	{"host":"h1","unit":"cart.service"}	b3:ejlbamggdo5aloqtp557rj2raa42htkubwkzr5lwevrodajxxbhq	2.067189	1800	5	0	mm=2.068792
+tent	info_osc	refused	SMY-E701	tent/1 reads a log stream's templates, and this is a `gauge` series
+tent-normal	{"host":"h1","unit":"cart.service"}	b3:uumzeub4aba6qgilu6vfc43b3qdgadfmatrgz6c4se23ox2qhtra	1.828088	1200	4	0	mm=1.829892
+tent-normal	info_osc	refused	SMY-E701	tent/1 reads a log stream's templates, and this is a `gauge` series
+tent-faulty	{"host":"h1","unit":"cart.service"}	b3:powwnh3on5lxoja2cceoe55y6om5nrhlbcn5nvpkbuk5uplri4nq	2.201365	600	5	0	mm=2.206174
+tent-faulty	info_osc	refused	SMY-E701	tent/1 reads a log stream's templates, and this is a `gauge` series
+tent-other	{"host":"h1","unit":"cart.service"}	refused	SMY-W703	the store holds no template of recipe 0000000000000000000000000000000000000000000000000000000000000000 for this window, and this build materialises only tel/drain/1?depth=4&sim=0.4&children=100&masks=uuid,ip,hex,num

@@ -204,3 +204,55 @@ fn a_pair_reads_with_and_a_divergence_reads_its_reference() {
     assert_eq!(o.status.code(), Some(2), "{}", out(&o));
     assert!(err(&o).contains("--with"), "{}", err(&o));
 }
+
+/// `tent/1` (TI-P3): the first run materialises the window's templates and commits them with
+/// the statistic; the second reads them from the store and gives the same unit.
+#[test]
+fn a_template_entropy_commits_its_templates_and_then_reads_them() {
+    let dir = scratch("tent");
+    let j0 = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/tel/journald/j0.json");
+    let o = run(
+        &dir,
+        &[
+            "tel",
+            "read",
+            "journald/1",
+            j0.to_str().unwrap(),
+            "--instrument",
+            "journald:h1",
+            "--at",
+            "1768557700000",
+            "-s",
+            "lib",
+            "--yes",
+        ],
+    );
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    std::fs::write(dir.join("tent.hjson"), "{ stat: tent/1, min_n: 5 }").unwrap();
+    let cart = r#"journald:{"host":"h1","unit":"cart.service"}"#;
+    let tent = |extra: &[&str]| {
+        let mut args = vec![
+            "tel",
+            "info",
+            "tent.hjson",
+            "--series",
+            cart,
+            "--during",
+            "1768557600000-1768557660000",
+            "-s",
+            "lib",
+        ];
+        args.extend_from_slice(extra);
+        run(&dir, &args)
+    };
+    let first = tent(&["--at", "1768557700000", "--yes"]);
+    assert_eq!(first.status.code(), Some(0), "{}", err(&first));
+    let text = out(&first);
+    assert!(text.contains("template-entropy"), "{text}");
+    assert!(text.contains("template(s) materialised"), "{text}");
+    assert_eq!(uids(&first).len(), 1, "{text}");
+    let second = tent(&[]);
+    assert_eq!(second.status.code(), Some(0), "{}", err(&second));
+    assert!(!out(&second).contains("materialised"), "{}", out(&second));
+    assert_eq!(uids(&first), uids(&second));
+}

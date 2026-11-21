@@ -34,6 +34,34 @@ stated in tokens, the sizing residual on German, the Ollama arm's model size; qu
 unread, a subject by a name the store does not write, GE-T7 on a thousand real works, and the
 ones only people can close. None of it moved in 1.17.
 
+### `smysl tel info`: the entropy of a log stream's templates (SMYSL-5 TI-P3)
+
+`tent/1`, the last statistic of RFC SMYSL-5 short of transfer entropy: the entropy of a log
+stream's Drain templates over a window.
+
+```hjson
+{ stat: tent/1 }
+{ stat: tent/1, min_n: 50 }
+```
+
+- **It reads units, not events** (§6.4): the `x.tel/log-template` units of one stream,
+  instrument, window and Drain recipe that share a digest. So a template entropy stays
+  recomputable after the events are evicted, as long as its templates are kept; a test
+  recomputes one from its templates against a substrate holding no event, and gets the same uid.
+- **When the store holds no templates**, `tel info` runs Drain over the window's events, as
+  `tel templates` does, and `--yes` commits those templates first, with the stream's series
+  unit. A second run reads them from the store.
+- **The recipe names Drain by hash**: `templates` is the BLAKE3 of the Drain recipe's text,
+  defaulting to the shipped one. Another hash is read from the store only. A metric series is
+  `SMY-E701`.
+- **GE-I1** gains the generated `journal.json`: 1.83 bits over its first four hours and 2.20
+  over the last two, when a timeout template joins.
+- **GE-I4**, simulated (`examples/ge_i4.rs`): shifting a 30-minute window by three minutes moves
+  `tent/1` by about 0.013 bits, all of it sampling and none of it Drain, against about 0.55 bits
+  for a fault that adds error messages. A fault that only changes the mix moves it about as
+  little as sampling does, and fails the literal stop condition on 2 seeds of 20; `tent/1` ships
+  by the author's decision, recorded in RFC SMYSL-5 §15 (R4-4).
+
 ### `smysl tel info`: mutual information between series, and divergence between windows (SMYSL-5 TI-P2)
 
 The two statistics that compare: `mi/1` between two series at a lag, with a scan over lags and

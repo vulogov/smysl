@@ -16115,13 +16115,15 @@ impl smysl::Attesting for DetectAttest {
 
 /// `smysl tel info RECIPE --series S… [--with S2] --during FROM-TO -s LIB [--instrument I]
 /// [--with-instrument I2] [--at MS --yes]`: an information measure over each series (RFC
-/// SMYSL-5 §13, TI-P1, TI-P2).
+/// SMYSL-5 §13, TI-P1 to TI-P3).
 ///
 /// `RECIPE` is an HJSON file naming the statistic and its parameters
-/// (`smysl::tel::info::Spec`): `ent/1`, `perm/1`, `jsd/1` or `mi/1` in this build. Each
+/// (`smysl::tel::info::Spec`): `ent/1`, `perm/1`, `jsd/1`, `mi/1` or `tent/1`. Each
 /// `--series` is read in `--during`, once per instrument it has samples from or for
 /// `--instrument` alone, and gives an `x.tel/info` unit or a refusal, each printed. `mi/1` pairs
-/// each with `--with`, once per instrument of it or for `--with-instrument` alone. Without
+/// each with `--with`, once per instrument of it or for `--with-instrument` alone. `tent/1`
+/// reads each `--series` as a log stream: its template units from the library, or, when there
+/// are none, Drain over its events, whose templates `--yes` commits first. Without
 /// `--yes` nothing is written; with it the units are committed with their `x.tel/of-series`
 /// edges, attested by rule TI (`Op::Transformed` at `Rung::Computed`), at `--at`. A recipe that
 /// is not admitted, or `--with` missing from `mi/1` or given to another statistic, is exit 2; a
@@ -16236,26 +16238,73 @@ fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
         Err(code) => return code,
     };
     let path = tel_series_path(&root);
-    if !path.exists() {
+    // tent/1 reads template units, and needs the substrate only to materialise them.
+    if !path.exists() && !spec.templates() {
         eprintln!(
             "smysl tel info: {} has no series substrate; `tel read --yes` writes one",
             root.display()
         );
         return ExitCode::Failure;
     }
-    let outcomes = match RedbBackend::open(&path)
-        .map_err(|e| format!("{}: {e}", path.display()))
-        .and_then(|b| {
-            run_on(
-                &spec,
-                &Substrate::new(b),
-                &series,
-                instrument,
-                with,
-                from,
-                to,
-            )
-        }) {
+    let mut library = if Library::is_library(&root) {
+        match Library::open(&root) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                eprintln!("smysl tel info: {}: {e}", root.display());
+                return ExitCode::Failure;
+            }
+        }
+    } else {
+        None
+    };
+    let run = if spec.templates() {
+        use smysl::series::MemBackend;
+        use smysl::tel::info::logs;
+        let stored: Vec<&smysl::UnitCore> = library
+            .as_ref()
+            .map(|l| {
+                StoreRead::units(l.store())
+                    .map(|(_, c)| &c.core)
+                    .filter(|u| u.schema.as_str() == smysl::schemas::tel::LOG_TEMPLATE)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let r = if path.exists() {
+            RedbBackend::open(&path)
+                .map_err(|e| format!("{}: {e}", path.display()))
+                .and_then(|b| {
+                    logs::run_on(
+                        &spec,
+                        &Substrate::new(b),
+                        stored,
+                        &series,
+                        instrument,
+                        from,
+                        to,
+                    )
+                })
+        } else {
+            let empty = Substrate::new(MemBackend::default());
+            logs::run_on(&spec, &empty, stored, &series, instrument, from, to)
+        };
+        r.map(|r| (r.outcomes, r.materialised))
+    } else {
+        RedbBackend::open(&path)
+            .map_err(|e| format!("{}: {e}", path.display()))
+            .and_then(|b| {
+                run_on(
+                    &spec,
+                    &Substrate::new(b),
+                    &series,
+                    instrument,
+                    with,
+                    from,
+                    to,
+                )
+            })
+            .map(|o| (o, Vec::new()))
+    };
+    let (outcomes, materialised) = match run {
         Ok(o) => o,
         Err(e) => {
             eprintln!("smysl tel info: {e}");
@@ -16330,17 +16379,47 @@ fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
     if units.is_empty() {
         return ExitCode::Success;
     }
-    let library = if Library::is_library(&root) {
-        match Library::open(&root) {
-            Ok(l) => Some(l),
-            Err(e) => {
-                eprintln!("smysl tel info: {}: {e}", root.display());
-                return ExitCode::Failure;
+    if !materialised.is_empty() {
+        // tent/1 read templates the store did not hold: they are its input, and are committed
+        // first, as `tel templates` commits them (RFC SMYSL-5 §6.4).
+        println!(
+            "{} template(s) materialised from the window's events, which the store did not hold",
+            materialised.len()
+        );
+        if yes {
+            let streams: std::collections::BTreeMap<_, _> = materialised
+                .iter()
+                .filter_map(|t| {
+                    Some((
+                        t.stream,
+                        smysl::schemas::tel::series(&t.scheme, &t.key).ok()?,
+                    ))
+                })
+                .collect();
+            let template_units: Vec<smysl::UnitCore> =
+                materialised.iter().map(|t| t.unit()).collect();
+            drop(library);
+            let code = tel_commit_evidence(
+                "info",
+                &root,
+                streams.into_values().collect(),
+                Vec::new(),
+                &template_units,
+                at,
+                &format!("tel templates {}", smysl::tel::drain::RECIPE),
+            );
+            if code != ExitCode::Success {
+                return code;
             }
+            library = match Library::open(&root) {
+                Ok(l) => Some(l),
+                Err(e) => {
+                    eprintln!("smysl tel info: {}: {e}", root.display());
+                    return ExitCode::Failure;
+                }
+            };
         }
-    } else {
-        None
-    };
+    }
     let agent = match AgentId::new("tool:smysl-tel") {
         Ok(a) => a,
         Err(e) => {
