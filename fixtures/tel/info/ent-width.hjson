@@ -1,0 +1,2 @@
+// The entropy of each series' value, binned one unit wide.
+{ stat: ent/1, step: 60000, bins: "width:1" }

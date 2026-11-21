@@ -537,7 +537,7 @@ registry! {
     // of §9's codes are registered with the schema revision that names what they refuse, as the
     // RFC's TI-P0 lists them; `tel info` (TI-P1) and `tel-evidence` (TI-P4) raise them.
     Information => {
-        E701 = "SMY-E701", Error, "A statistic was asked of a series whose tel:kind does not admit it: a counter read as value, a state without width:1, or a kind not admitted";
+        E701 = "SMY-E701", Error, "A statistic was asked of a series whose class does not admit it: a counter read as value, or a class not admitted";
         E702 = "SMY-E702", Error, "An information recipe is not admitted: a binning the statistic refuses, an unknown or out-of-range parameter, a value holding ? & or =, or a missing step, bins or ref";
         W703 = "SMY-W703", Warn,  "A statistic was not run: fewer than min_n symbols, or coverage below cover, at the one lag or at any lag of a scan; no unit is written";
         W704 = "SMY-W704", Warn,  "An info unit's recipe names a version this build does not have; it is kept and not recomputed";

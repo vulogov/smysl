@@ -2599,14 +2599,16 @@ fn cli() -> Command {
                             "trace",
                             "templates",
                             "similar",
+                            "info",
                             "profile",
                         ])
                         .help(
                             "read exports with a reader into a library, the value in force at \
                              an instant, materialise window evidence, recompute it, run a \
                              detector, evict old substrate, materialise a trace's spans or a \
-                             log window's templates, rank episodes like one, or check a profile \
-                             and print its hash",
+                             log window's templates, rank episodes like one, compute an \
+                             information measure (SMYSL-5), or check a profile and print its \
+                             hash",
                         ),
                 )
                 .arg(
@@ -2620,7 +2622,7 @@ fn cli() -> Command {
                              cloudevents/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
                              `detect RECIPE`; `investigate open|consult|hypothesis|probe|action|\
                              close|show …`; `declare instrument|measured-by|via|same-quantity …`; `witnesses SERIES`; \
-                             `evict --older-than DUR`; `trace TRACE-ID`; `templates STREAM FROM TO`; `similar EPISODE`; `profile check FILE|NAME`",
+                             `evict --older-than DUR`; `trace TRACE-ID`; `templates STREAM FROM TO`; `similar EPISODE`; `info RECIPE`; `profile check FILE|NAME`",
                         ),
                 )
                 .arg(
@@ -14106,6 +14108,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "trace" => tel_trace(m, global, &args),
         "templates" => tel_templates(m, global, &args),
         "similar" => tel_similar(m, global, &args),
+        "info" => tel_info(m, global, &args),
         "read" => tel_read(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
@@ -16096,6 +16099,213 @@ impl smysl::Attesting for DetectAttest {
             None => a,
         }
     }
+}
+
+/// `smysl tel info RECIPE --series S… --during FROM-TO -s LIB [--instrument I] [--at MS --yes]`:
+/// an information measure over each series (RFC SMYSL-5 §13, TI-P1).
+///
+/// `RECIPE` is an HJSON file naming the statistic and its parameters
+/// (`smysl::tel::info::Spec`): `ent/1` or `perm/1` in this build. Each `--series` is read in
+/// `--during`, once per instrument it has samples from or for `--instrument` alone, and gives
+/// an `x.tel/info` unit or a refusal, each printed. Without `--yes` nothing is written; with it
+/// the units are committed with their `x.tel/of-series` edges, attested by rule TI
+/// (`Op::Transformed` at `Rung::Computed`), at `--at`. A recipe that is not admitted is
+/// `SMY-E702` and exit 2; a series refused (`SMY-E701`) or not run (`SMY-W703`) is reported and
+/// the rest go on.
+#[cfg(feature = "tel")]
+fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::Substrate;
+    use smysl::tel::info::{run_on, Spec};
+    use smysl::text::library::Library;
+
+    let (Some(recipe_path), None) = (args.first(), args.get(1)) else {
+        eprintln!("smysl tel info: `RECIPE`, an HJSON information recipe");
+        return ExitCode::Usage;
+    };
+    let recipe_text = match std::fs::read_to_string(recipe_path.as_str()) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("smysl tel info: {recipe_path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let spec = match Spec::parse(&recipe_text) {
+        Ok(s) => s,
+        Err(r) => {
+            eprintln!("smysl tel info: {recipe_path}: {r}");
+            return ExitCode::Usage;
+        }
+    };
+    let Some((from, to)) = m.get_one::<String>("during").and_then(|d| {
+        d.split_once('-')
+            .and_then(|(a, b)| Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?)))
+            .filter(|(a, b)| a < b)
+    }) else {
+        eprintln!("smysl tel info: --during FROM-TO, epoch ms, FROM < TO");
+        return ExitCode::Usage;
+    };
+    let mut series = Vec::new();
+    for s in m.get_many::<String>("series").into_iter().flatten() {
+        match tel_series_arg(s) {
+            Ok(u) => series.push(u),
+            Err(e) => {
+                eprintln!("smysl tel info: --series {e}");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if series.is_empty() {
+        eprintln!(
+            "smysl tel info: {} runs over --series, at least one",
+            spec.id()
+        );
+        return ExitCode::Usage;
+    }
+    let instrument = match m.get_one::<String>("instrument").map(|t| t.parse::<Uid>()) {
+        Some(Ok(u)) => Some(u),
+        Some(Err(_)) => {
+            eprintln!("smysl tel info: --instrument takes an instrument uid");
+            return ExitCode::Usage;
+        }
+        None => None,
+    };
+    let yes = m.get_flag("yes");
+    let Some(&at) = m.get_one::<u64>("at").or(if yes { None } else { Some(&0) }) else {
+        eprintln!("smysl tel info: --yes needs --at, the attestation clock");
+        return ExitCode::Usage;
+    };
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let path = tel_series_path(&root);
+    if !path.exists() {
+        eprintln!(
+            "smysl tel info: {} has no series substrate; `tel read --yes` writes one",
+            root.display()
+        );
+        return ExitCode::Failure;
+    }
+    let outcomes = match RedbBackend::open(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))
+        .and_then(|b| run_on(&spec, &Substrate::new(b), &series, instrument, from, to))
+    {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("smysl tel info: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let recipe = spec.recipe().text();
+    let (mut units, mut relations) = (Vec::new(), Vec::new());
+    for o in &outcomes {
+        match &o.result {
+            Ok(c) => {
+                println!(
+                    "{:<17} {}  {} {}",
+                    smysl::schemas::tel::INFO,
+                    smysl::canonical_uid(&c.unit).canonical(),
+                    spec.stat_name(),
+                    o.key
+                );
+                let missing = if c.missing > 0 {
+                    format!(", {} grid point(s) missing", c.missing)
+                } else {
+                    String::new()
+                };
+                println!(
+                    "    value {} bits, Miller-Madow {}, n {}, k {}{missing}",
+                    c.value, c.mm, c.n, c.k
+                );
+                units.push(c.unit.clone());
+                relations.push(c.relation.clone());
+            }
+            Err(r) => println!("refused           {} {}: {r}", o.key, o.instrument.short()),
+        }
+    }
+    println!(
+        "info      {recipe}: {} unit(s), {} refused",
+        units.len(),
+        outcomes.len() - units.len()
+    );
+    if units.is_empty() {
+        return ExitCode::Success;
+    }
+    let library = if Library::is_library(&root) {
+        match Library::open(&root) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                eprintln!("smysl tel info: {}: {e}", root.display());
+                return ExitCode::Failure;
+            }
+        }
+    } else {
+        None
+    };
+    let agent = match AgentId::new("tool:smysl-tel") {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl tel info: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let hash = smysl::hash_bytes(format!("{recipe}\n{from}-{to}").as_bytes());
+    // Rule TI: an info unit is transformed at the computed rung, as a detector's output is.
+    let attest = DetectAttest(
+        smysl::stage::Attest::new(
+            agent.clone(),
+            smysl::Rung::Computed,
+            smysl::Hlc::new(at, 0, agent),
+        )
+        .with_recipe(hash, hash),
+    );
+    let empty = Store::new();
+    let staged = smysl::stage::prepare_attested(
+        library.as_ref().map_or(&empty, |l| l.store()),
+        units,
+        relations,
+        std::collections::BTreeMap::new(),
+        vec![smysl::schemas::tel::decl()],
+        &attest,
+    );
+    if staged.has_errors() {
+        eprintln!("smysl tel info: the batch did not check clean");
+        for d in &staged.report.diagnostics {
+            eprintln!("  {d}");
+        }
+        return ExitCode::Failure;
+    }
+    let n = staged.len();
+    if !yes {
+        // An info unit has no surface form (its digests are bytes), so, as with a window, there
+        // is nothing to stage for review: the uid printed is the uid `--yes` commits.
+        println!("{n} record(s) checked; nothing was written - run again with --yes --at MS to commit them");
+        return ExitCode::Success;
+    }
+    let mut library = match library {
+        Some(l) => l,
+        None => match Library::create(&root) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("smysl tel info: {}: {e}", root.display());
+                return ExitCode::Failure;
+            }
+        },
+    };
+    let _locks = match smysl::text::lock::acquire_all(&root, &library.shards(), "tel info") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel info: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    if let Err(e) = library.append_records(&staged.records()) {
+        eprintln!("smysl tel info: {e}");
+        return ExitCode::Failure;
+    }
+    println!("{n} record(s) committed");
+    ExitCode::Success
 }
 
 /// `smysl tel detect RECIPE --series S… --during FROM-TO -s LIB [--trigger UID] [--at MS --yes]`:

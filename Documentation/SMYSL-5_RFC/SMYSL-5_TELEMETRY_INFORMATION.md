@@ -20,6 +20,7 @@ Part A.
 | Rev | Date | Change |
 |---|---|---|
 | R1 | 2026-11-20 | Review against `3e57160`. **R1-1** a stale or no-value sample ends the value in force (§5.1). **R1-2** admission is by the series' `tel:kind`, not a class, and every kind is placed (§5.2, D-I12). **R1-3** a statistic is stored rounded to six places so rule TQ can verify a quote of it (§6, D-I13). **R1-4** a recipe value never holds `?`, `&` or `=`; `tent/1` names Drain's recipe by hash (§4). **R1-5** one observed symbol is exactly 0 and a negative result is clamped to 0 (§6). **R1-6** surrogates rotate over the whole grid and pair by grid position (§6.3). **R1-7** every lag of a scan meets `min_n`, and the maximum is taken on stored values (§6.3). **R1-8** `SMY-E603` and `SMY-E604` are reworded when they extend (§9). **R1-9** recipe ids are bare, as detectors' are (D-I14). **R1-10** the CLI synopsis, the four-platform CI step and TQ's work in TI-P4 are corrected to the tree (§12–§14). |
+| R2 | 2026-11-20 | Found while building TI-P1. **R2-1** admission is by the leaf class the substrate records for a series (`SeriesRow::class`), which every reader writes, and not by `tel:kind`, which the schema allows and no reader writes: R1-2 read the schema and not the readers, and the draft's "class" was right. `state` is not a class, so its row goes. **R2-2** `diff` reads the sequence `of` produces, so under `of=increase` it is the sign of the increase's change. |
 
 ---
 
@@ -90,7 +91,7 @@ Each names the option it chose, so that a later reversal is a recorded change.
 | D-I9 | Causal statistics | **Transfer entropy reserved**, behind GE-I5. No recipe in this RFC writes a hypothesis. | Shipping transfer entropy and a ranking with the first cut | 3 §21 lists causal discovery as "not planned" because its edges rest on assumptions that do not reliably hold. A common driver makes transfer entropy point between two series that do not affect each other. |
 | D-I10 | CLI | **A new action, `smysl tel info`.** | Running these through `tel detect` | A detector finds something and these describe something. The recipes share a file format and nothing else, and `detect`'s report counts "units found". |
 | D-I11 | Name | **SMYSL-5.** Phases TI-P0 to TI-P5, experiments GE-I1 to GE-I5, diagnostics `SMY-E7xx` / `SMY-W7xx`. | — | The 7xx range is unused at the baseline. |
-| D-I12 (R1) | Which series are admitted | **By `tel:kind`** (§5.2): `gauge` and an absent kind as `value`; `counter` only as `increase`; `state` only with `width:1`; every other kind refused. | Admitting by `tel:class` | The draft named a class. `tel:class` is a field of `x.tel/change`; a series carries `tel:kind`, and it is optional. |
+| D-I12 (R1, R2) | Which series are admitted | **By the substrate's leaf class** (§5.2, R2-1): `gauge`, or none, as `value` or `increase`; `counter` only as `increase`; every other class refused. | Admitting by `tel:kind` (R1-2) | Every reader records a series' leaf class (3 §4.3) in its substrate row when it first sees it: OTLP's monotonic sum is `counter`, its gauge and non-monotonic sum `gauge`, its histograms and summaries `histogram`. `tel:kind` is an optional field of `x.tel/series` that no reader writes, so admitting by it would admit every counter as a level. |
 | D-I13 (R1) | How a statistic is stored | **Rounded to six decimal places, half to even**, after the clamp of §6, then written as a `dec` by 3 §5.3. `bias` and `mm` likewise. | The shortest binary64 spelling (`Decimal::from_f64`); requiring quotes to give it in full | Rule TQ verifies by equality of canonical text: `0.90` does not verify `0.9`. A 16-digit value cannot be quoted by a person. Six places is below every threshold §15 can act on, and a last-bit `libm` difference moves a stored value only when it crosses a rounding boundary, which GE-I1 sees. |
 | D-I14 (R1) | Recipe ids | **Bare, as detectors' are**: `ent/1`, `perm/1`, `mi/1`, `jsd/1`, `tent/1`, `te/1`. | `tel/`-prefixed, as Drain's `tel/drain/1` | A statistic's recipe shares the detectors' file format and `Recipe` type, and is read beside them. The unit's type already says which family it is. |
 
@@ -226,16 +227,19 @@ Every step in this section is exact. It compares `dec` values, subtracts them, d
 - `increase`: the value at `t` minus the value at `t − step`, exactly. It is missing when either
   is missing, when the difference is negative, or when a sample with flag 2 (reset) lies in
   `(t − step, t]`.
-- Admission is by the series' `tel:kind` (D-I12, R1-2):
+- Admission is by the leaf class (3 §4.3) the substrate records for the series, `SeriesRow::class`
+  (D-I12, R2-1):
 
-  | `tel:kind` | Admitted |
+  | class | Admitted |
   |---|---|
-  | `gauge`, or no kind | as `value` or `increase` |
+  | `gauge`, or none (a series first seen as a stale marker) | as `value` or `increase` |
   | `counter` | as `increase` only. The level of a counter is the time since it started, which is not what anyone means to measure. |
-  | `state` | with `bins=width:1` only, which makes each state code its own symbol |
-  | `histogram`, `summary`, `text`, `span`, `log`, `event` | no. A statistic of their samples is not a statistic of what they measure (`tent/1` reads a log stream's templates, not its samples). |
+  | `histogram`, `config`, `identity`, `membership`, `event`, `log` | no. A statistic of their samples is not a statistic of what they measure (`tent/1` reads a log stream's templates, not its samples). |
 
-  A series read against this table is refused with `SMY-E701`.
+  A series read against this table is refused with `SMY-E701`. A state, a code held as a gauge,
+  is read with `bins=width:1`, which makes each code its own symbol.
+- `increase` of a gauge is missing wherever the gauge falls, by the rule above. It is meant for
+  counters; `diff` is the binning that reads a gauge's direction.
 
 ### 5.3 Binnings
 
@@ -244,7 +248,7 @@ Every step in this section is exact. It compares `dec` values, subtracts them, d
 | `width:w` | `floor(x / w)`, an integer; `w > 0` | `ent/1`, `mi/1`, `jsd/1` |
 | `rank:k` | `floor(k · L(x) / n)`, where `L(x)` is the number of values in the window strictly less than `x` and `n` the number present. Tied values share a symbol. | `mi/1` only |
 | `baseline:k` | the number of edges strictly less than `x`. The edges are the reference window's values at sorted positions `ceil(i · m / k) − 1`, `i = 1 … k − 1`, `m` the number present there. | `ent/1`, `mi/1`, `jsd/1` |
-| `diff` | the sign of the value at `t` minus the value at `t − step`: −1, 0 or 1; missing as `increase` is | `ent/1`, `mi/1`, `jsd/1` |
+| `diff` | the sign of `x` at `t` minus `x` at `t − step`, `x` the sequence `of` produces (R2-2): −1, 0 or 1; missing when either is missing | `ent/1`, `mi/1`, `jsd/1` |
 
 - `rank:k` makes every marginal near uniform by construction, so an entropy under it is
   `log₂ k` whatever the series does, and it is refused there (`SMY-E702`). It is the right
@@ -373,7 +377,7 @@ The entropy of a log stream's templates over a window.
 
 | Code | Meaning |
 |---|---|
-| `SMY-E701` | a statistic was asked of a series whose `tel:kind` does not admit it (§5.2): a `counter` read as `value`, a `state` without `width:1`, or a kind that is not admitted at all |
+| `SMY-E701` | a statistic was asked of a series whose class does not admit it (§5.2): a `counter` read as `value`, or a class that is not admitted at all |
 | `SMY-E702` | a recipe is not admitted: a binning the statistic refuses, an unknown parameter, a parameter out of range, a value holding `?`, `&` or `=`, a missing `step`, `bins` or `ref` |
 | `SMY-W703` | not run: fewer than `min_n` symbols, or coverage below `cover`, at the one lag or at any lag of a scan. No unit is written. |
 | `SMY-W704` | an info unit's recipe names a version this build does not have; it is kept and not recomputed |
@@ -485,7 +489,7 @@ it is SMYSL-2's example. A telemetry example over `fixtures/tel/detect/` is TI-P
 | Phase | Content | Exit criteria |
 |---|---|---|
 | **TI-P0** prerequisites (**done**, 1.18) | `libm` as a workspace pin; `info::num`; the exact decimal operations §5 needs (§12); `x.tel/v1` revision 2 with `x.tel/info` registered; §9's codes, and the four extended codes reworded; the format spec's §5.2 list | the three ports round-trip a fixture holding an `x.tel/info` unit, byte for byte; purity passes |
-| **TI-P1** symbols and one series | grid, `of`, the four binnings, ordinal patterns; `ent/1`, `perm/1`; `tel info`; the info test in `measure-platforms` | `fixtures/tel/info/` uids stable on the four CI platforms; **GE-I1** harness runs; **GE-I2 (a)** |
+| **TI-P1** symbols and one series (**done**, 1.18) | grid, `of`, the four binnings, ordinal patterns; `ent/1`, `perm/1`; `tel info`; the info test in `measure-platforms` | `fixtures/tel/info/` uids stable on the four CI platforms; **GE-I1** harness runs; **GE-I2 (a)** |
 | **TI-P2** two series and two windows | `mi/1` with lag, scan and surrogates; `jsd/1` | **GE-I1** over them; **GE-I2 (b)**; scan cost measured |
 | **TI-P3** logs | `tent/1` | **GE-I4** run |
 | **TI-P4** check and investigations | rule TI in `check`; `tel-evidence` recomputation; the info key in `SMY-W614`'s incremental state; tests of TQ over info fields (no TQ code changes, §8); the dossier's evidence section; the manual section and the example | the `oko_ledger` example quotes an info value and a planted wrong quote is caught; **GE-I3** run |
@@ -505,6 +509,29 @@ otherwise, and each report says so.
 | **GE-I3** | Does this find anything the shipped detectors miss? | GE-M6's simulated faults, extended with three kinds no level detector sees: a variance change at constant median, a change from noise to oscillation, and two series that decouple. Arms: CUSUM, PELT and MAD as shipped; `jsd/1` and `perm/1` against a reference window; `mi/1` before and after. Also on RCAEval (CC BY 4.0), labelled real. | whether these are worth an investigator's attention | If no statistic separates faulty from normal windows on any of the three kinds at the false-alarm rate MAD has on the same data, the statistics stay as described here, a tool for study, and no later RFC proposes a detector from them. |
 | **GE-I4** | Is template entropy a property of the logs, or of Drain? | One simulated log stream, normal and faulty. Compute `tent/1` over windows whose boundaries are shifted by a tenth of their length. | `tent/1` | If shifting a boundary moves the value more than the median difference between normal and faulty windows, `tent/1` does not ship and TI-P3 closes with that result. |
 | **GE-I5** | Does transfer entropy name the right direction? | Simulated pairs with a known direction and delay; pairs with a common driver and no direct effect; pairs with none. | §10 | Released only if the direction is right in at least 90 % of driven pairs **and** a direction is asserted, at `null_ge / null_b ≤ 0.05`, in at most 10 % of common-driver pairs. Otherwise `te` stays reserved, and the result is recorded. |
+
+**GE-I1, as of TI-P1.** The harness is `crates/smysl-tel/tests/info_cases.rs`: seven recipes
+(`ent/1` under width, baseline, diff and increase; `perm/1` at m = 3 and at m = 4, τ = 2; a
+strict cover) over the five series of `fixtures/tel/info/`, twice in one process and compared
+byte for byte, with every unit's uid and numbers, and every refusal's code, pinned in
+`expected.tsv` (written on aarch64 macOS). The `measure-platforms` CI job runs it on x86_64
+Linux (glibc and musl), aarch64 macOS and x86_64 Windows. `mi/1`, `jsd/1` and `tent/1` join it
+in their phases.
+
+**GE-I2 (a), run at TI-P1 on simulated data** (`cargo run --release -p smysl-tel --example
+ge_i2`, 200 runs a cell, seed 7). The mean Miller–Madow value against the truth:
+
+| Source | n = 100 | n = 200 | n = 1000 | n = 10⁵ |
+|---|---|---|---|---|
+| uniform, K = 2 / 16 / 64 | −0.07 / −0.14 / −2.83 % | 0.05 / 0.04 / −0.59 % | 0.00 / 0.00 / 0.00 % | 0.00 % |
+| geometric K = 8; Zipf K = 16 | −0.31; −0.59 % | −0.71; −0.37 % | 0.06; −0.04 % | 0.03; 0.00 % |
+| ordinal patterns, m = 3 / 5 / 7 | 0.35 / −6.71 / −40.36 % | 0.18 / −1.80 / −32.42 % | 0.04 / 0.01 / −15.18 % | 0.00 % |
+
+At the defaults, `ent/1`'s 200 is at worst 0.71 % off (geometric, K = 8) and `perm/1`'s 10·m!
+at worst 0.81 % (m = 3, n = 60), under the 5 % stop condition, so **every default holds and §6.1
+stands**. The plug-in value alone is up to 4.2 % low at n = 200 (K = 64), which is why `mm` is
+stored. The criterion is the mean over runs; the spread of one run is not what it judges.
+Ordinal patterns of m ≥ 5 are far off below 10·m!, which is why that default scales with m!.
 
 **Order.** GE-I1 and GE-I2 first: they are cheap and decide the defaults. GE-I3 is the one that
 says whether the work was worth doing. The real-data runs wait on the cluster GE-M1 still

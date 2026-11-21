@@ -1,0 +1,2 @@
+// Every grid point must give a symbol: the noise's gap refuses it (SMY-W703).
+{ stat: ent/1, step: 60000, bins: "width:1", cover: "1/1" }

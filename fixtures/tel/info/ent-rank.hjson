@@ -1,0 +1,2 @@
+// Ranks make an entropy log2 k whatever the series does: refused (SMY-E702).
+{ stat: ent/1, step: 60000, bins: "rank:4" }

@@ -244,12 +244,9 @@ fn cmp_mag(a: &[u8], b: &[u8]) -> Ordering {
 /// The longest quotient [`BigDec::floor_div`] attempts, in digits of its dividend after scaling:
 /// past it the quotient is beyond `i64` whatever the divisor, since a `dec` mantissa is under
 /// 2⁶⁴ < 10²⁰.
-#[allow(dead_code)] // SMYSL-5 TI-P1's symbols are the first caller; the allow goes with it.
 const FLOOR_DIV_DIGITS: usize = 40;
 
-// What SMYSL-5 §5 needs, laid down in TI-P0 with its tests. Nothing outside the tests calls it
-// until TI-P1's grid and binnings do, and the allow goes then.
-#[allow(dead_code)]
+// What SMYSL-5 §5 needs: `info::grid` and `info::symbols` call it.
 impl BigDec {
     /// `v`, exactly.
     pub(crate) fn from_dec(v: &Decimal) -> BigDec {

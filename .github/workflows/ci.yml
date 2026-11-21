@@ -356,6 +356,11 @@ jobs:
       # macOS; a detector or sketch whose bytes differ here is off the pure path until fixed.
       - name: GE-M3 and the sketch pins on ${{ matrix.target }}
         run: cargo test -p smysl-tel --test ge_m3 --test window_cases --target ${{ matrix.target }}
+      # GE-I1 (RFC SMYSL-5 §15, TI-P1): every information statistic over fixtures/tel/info/,
+      # twice and pinned by uid in expected.tsv, written on aarch64 macOS. A statistic whose bytes
+      # differ on a target stays off until fixed. The libm pin is what this checks.
+      - name: GE-I1, the information pins on ${{ matrix.target }}
+        run: cargo test -p smysl-tel --test info_cases --target ${{ matrix.target }}
 
   # Proposition classes (SMYSL-2.3 A-12.4), which is normative for the same reason the tables
   # above are checked: the number of classes is the number of propositions, and every corpus

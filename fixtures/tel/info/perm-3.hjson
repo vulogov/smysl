@@ -1,0 +1,2 @@
+// Ordinal patterns of three consecutive minutes.
+{ stat: perm/1, step: 60000, m: 3 }

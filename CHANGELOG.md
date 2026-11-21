@@ -34,6 +34,42 @@ stated in tokens, the sizing residual on German, the Ollama arm's model size; qu
 unread, a subject by a name the store does not write, GE-T7 on a thousand real works, and the
 ones only people can close. None of it moved in 1.17.
 
+### `smysl tel info`: the entropy of a series, and of its ordinal patterns (SMYSL-5 TI-P1)
+
+The first two information measures, end to end. A recipe names the statistic and every
+parameter; `tel info RECIPE --series S… --during FROM-TO` reads each series' samples on an
+explicit grid, symbolises them in exact decimal arithmetic, and states the result as an
+`x.tel/info` unit, or says why it will not.
+
+```hjson
+{ stat: ent/1, step: 60000, bins: "width:1" }
+{ stat: ent/1, step: 60000, bins: "baseline:4", ref: "1768550400000-1768554000000" }
+{ stat: perm/1, step: 60000, m: 4, tau: 2 }
+```
+
+- **The grid** (§5.1): the multiples of `step` in the window, each taking the last sample in
+  `(t − hold, t]`; a stale or no-value sample ends the value before it. `of: increase` is a
+  counter's rise over one step, missing across a reset.
+- **Binnings** (§5.3): `width:W` (an exact floor), `baseline:K` (quantile edges from a reference
+  window), `diff` (up, flat or down). `rank:K` is refused for an entropy, since it makes every
+  entropy log₂ K. **Ordinal patterns** (§5.4) of `m` values `tau` steps apart, ties in time order.
+- **`ent/1` and `perm/1`** (§6.1): the plug-in entropy over counts in symbol order and its
+  Miller–Madow value, stored to six places. One symbol is exactly 0.
+- **Refusals** are reported, not written: a counter read as a level or a histogram
+  (`SMY-E701`), a recipe not admitted (`SMY-E702`, exit 2), too few symbols or too little
+  coverage (`SMY-W703`). Admission is by the class the reader recorded in the substrate.
+- **An info unit has no surface form**, like a window: without `--yes` it is printed and
+  checked and nothing is written; with `--yes --at MS` it is committed with its `x.tel/of-series`
+  edge, attested by rule TI.
+- **GE-I1's harness** (`crates/smysl-tel/tests/info_cases.rs`): seven recipes over the five series
+  of `fixtures/tel/info/`, twice and compared, every outcome pinned by uid; CI runs it on the four
+  `measure-platforms` targets.
+- **GE-I2 (a)**, simulated (`examples/ge_i2.rs`): at the default `min_n` the Miller–Madow value is
+  at worst 0.81 % from the true entropy, against a 5 % stop condition, for i.i.d. sources over 2
+  to 64 symbols and ordinal patterns of white noise at m = 3 to 7. Every default holds.
+- **RFC SMYSL-5 R2**: R1-2 admitted series by `tel:kind`, which no reader writes; the draft's
+  "class" was right, and admission is by the substrate's class again (R2-1).
+
 ### `x.tel/v1` revision 2, and what every information measure needs (SMYSL-5 TI-P0)
 
 RFC SMYSL-5 (`Documentation/SMYSL-5_RFC/SMYSL-5_TELEMETRY_INFORMATION.md`) adds information
@@ -52,7 +88,7 @@ statistic is computed yet.
   declarations and two info units with every key between them, a list of negative integers
   among them. Python, JavaScript and Go round-trip it byte for byte. F15 and the C-Tel-Check
   fixtures stay revision-1 stores, byte for byte as before.
-- **Four codes, a sixteenth group.** `SMY-E701` (a series kind the statistic does not admit),
+- **Four codes, a sixteenth group.** `SMY-E701` (a series class the statistic does not admit),
   `SMY-E702` (a recipe not admitted), `SMY-W703` (not run: too few symbols or too little
   coverage) and `SMY-W704` (a recipe version this build lacks), in a group `Information`. The
   registry is 176. `SMY-E603`, `E604`, `W605` and `W614` are reworded for evidence in general:

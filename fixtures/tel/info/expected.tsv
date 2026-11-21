@@ -1,0 +1,38 @@
+# RFC SMYSL-5 GE-I1 / C-Tel-Info: every recipe over fixtures/tel/info/, by uid.
+# Written by crates/smysl-tel/tests/info_cases.rs; SMYSL_BLESS=1 rewrites it.
+# case	series	uid or `refused`	value	mm	n	k	missing, or the refusal
+ent-width	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+ent-width	info_noise	b3:jsmlwpnxspzldqoijh3o77sq7mefilfagcytgw5tgaoduwwzowqa	3.308954	3.328392	334	10	26
+ent-width	info_osc	b3:4p6hfdiyka6e7d3iylnz2c4lvaegn5on7xcw4cpykozvg5pxyrka	2.522055	2.532074	360	6	0
+ent-width	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+ent-width	info_state	b3:lbenzpbda65zzerrc2x56lx2axihsxazbniz675vqiajyksacsuq	1.579823	1.58383	360	3	0
+ent-baseline	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+ent-baseline	info_noise	b3:l6alplvzwz2lzxjtf5xv73kaqhc7mt2ntgkh7e54fb5yvuu5rvua	1.916095	1.922574	334	4	26
+ent-baseline	info_osc	b3:kpr44hjcxlnyu7phi7ikrns6d4laukereebqdlhkf2fhoxyil3ea	1.959148	1.965159	360	4	0
+ent-baseline	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+ent-baseline	info_state	b3:46ks7alu33634on2j225sl3yyxrevl3bzni5il2sj6meqml4xuga	0.931563	0.933567	360	2	0
+ent-diff	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+ent-diff	info_noise	b3:owvhe3sw4jc6nhbrpvnlgzalfvtjnkoqk7hpoveccflg5nnltfhq	0.999993	1.002173	331	2	29
+ent-diff	info_osc	b3:4fwzgj6wjt6rbvryoe3fmrsws55td3tss6wwjq5oi6vpglx4ubyq	0.999994	1.002004	359	2	1
+ent-diff	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+ent-diff	info_state	b3:o5b7kh7m4ejhbgkirlqejmga2kvqrs4erazweysm62f5whns5p2q	0.593118	0.597137	359	3	1
+ent-increase	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+ent-increase	info_noise	refused	SMY-W703	165 of 360 grid points give a symbol, under cover 4/5
+ent-increase	info_osc	refused	SMY-W703	179 of 360 grid points give a symbol, under cover 4/5
+ent-increase	info_requests	b3:7de32fzi6ub5z2ij765ary2fcviaimeenpgbqb4tcbv7cgmg6rda	1.983946	1.98999	358	4	2
+ent-increase	info_state	b3:d2lnxvjhohairfg2hzyvrsfstarezuawkv5l7ygvzmsmn4dimyba	0	0	340	1	20
+perm-3	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+perm-3	info_noise	b3:wqd7kshgxwv2nt7a63v5i5axiarv6syavriceiiq364hkpabqlqa	2.58394	2.594936	328	6	32
+perm-3	info_osc	b3:byna4krrhs3wi5xsn5m5tq2ysga3a2adngo2ixh3cmijwb3g5tiq	1.652153	1.658198	358	4	2
+perm-3	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+perm-3	info_state	b3:6lnlylse5hkmxl6gc4vsgbbirdnq3feitromfz65ekjis2d4crra	0.6313	0.639359	358	5	2
+perm-4-tau2	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+perm-4-tau2	info_noise	b3:4cyjmdh6wsv2vl75vewhf7glhw7ewuycop6risxnwm7pskomsoiq	4.527248	4.579751	316	24	44
+perm-4-tau2	info_osc	b3:nqbtszvjrb5fqsicxiwyzsiuepukrr3cyvi73pf6aw5p4z2nfnra	3.195231	3.21357	354	10	6
+perm-4-tau2	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+perm-4-tau2	info_state	b3:g55tsfwz5u6yw5qc36q3tflbvdny3v2rkunxigkpevbwypwlypxq	1.564934	1.585311	354	11	6
+ent-strict	info_hist	refused	SMY-E701	a series of class `histogram` is not read by a statistic: gauge or counter
+ent-strict	info_noise	refused	SMY-W703	334 of 360 grid points give a symbol, under cover 1/1
+ent-strict	info_osc	b3:jskxg3tg6kov7j3l5x7aog5dic4pr2hfwxuojx3mzscukqjbvieq	2.522055	2.532074	360	6	0
+ent-strict	info_requests	refused	SMY-E701	a counter's level is the time since it started; read it with `of: increase`
+ent-strict	info_state	b3:rhvffdgq45mj7cxg6lckfr4efeml3k72s3ge2epx4ca6jnlo664a	1.579823	1.58383	360	3	0
