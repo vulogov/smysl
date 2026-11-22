@@ -34,6 +34,14 @@ stated in tokens, the sizing residual on German, the Ollama arm's model size; qu
 unread, a subject by a name the store does not write, GE-T7 on a thousand real works, and the
 ones only people can close. None of it moved in 1.17.
 
+### Transfer entropy is not released (SMYSL-5 TI-P5)
+
+GE-I5 (`crates/smysl-tel/examples/ge_i5.rs`, simulated, 300 pairs of each kind, five seeds)
+asked whether transfer entropy names the right direction. It named the true direction of every
+driven pair, and a direction in 88 to 92 % of pairs that share a driver and do not affect each
+other, against a bound of 10 %. So `te/1` stays reserved (RFC SMYSL-5 §10, §15), nothing is
+added to the library, and `tel info` refuses `te/1` saying so (`SMY-E702`).
+
 ### Statistics in `check` and investigations (SMYSL-5 TI-P4)
 
 An `x.tel/info` statistic is now evidence as a window is: checked, recomputed, quoted and listed.

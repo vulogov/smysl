@@ -1,9 +1,10 @@
 # RFC SMYSL-5 — information measures over telemetry
 
 **Author:** Vladimir Ulogov
-**Status:** first draft, amended after review (R1, 2026-11-20) and while building (R2 to R5).
+**Status:** first draft, amended after review (R1, 2026-11-20) and while building (R2 to R6).
 TI-P0 to TI-P4 are built: `ent/1`, `perm/1`, `mi/1`, `jsd/1` and `tent/1`, rule TI in `check`,
-and their recomputation. GE-I1 to GE-I4 have run on simulated data (§15); GE-I3's run on
+and their recomputation. TI-P5 closed with GE-I5's result: transfer entropy is not released,
+and `te` stays reserved (§10). GE-I1 to GE-I5 have run on simulated data (§15); GE-I3's run on
 RCAEval, and every other real-data run, is still owed, and every other threshold is a proposal
 until the experiment that owns it has run (§17).
 **Target version:** not fixed. Phases are named (TI-P0 to TI-P5), not numbered by release.
@@ -25,6 +26,7 @@ Part A.
 | R2 | 2026-11-20 | Found while building TI-P1. **R2-1** admission is by the leaf class the substrate records for a series (`SeriesRow::class`), which every reader writes, and not by `tel:kind`, which the schema allows and no reader writes: R1-2 read the schema and not the readers, and the draft's "class" was right. `state` is not a class, so its row goes. **R2-2** `diff` reads the sequence `of` produces, so under `of=increase` it is the sign of the increase's change. |
 | R3 | 2026-11-21 | Found while building TI-P2. **R3-1** `mi/1` refuses `baseline` bins: they would read a reference window of each series, and `x.tel/info` has one `ref_digest`, so rule TI could not be met (§5.3). **R3-2** `guard` is a share of the grid length `G`, as §6.3 always said, not of `n` (§4). **R3-3** `mi/1`'s `cover` at lag `ℓ` is over the `G − |ℓ|` points where a pair can form, and `missing` counts those where none did; otherwise a long lag alone would fail it (§6.3). **R3-4** a scan's `n`, `k`, `k_with`, `bias` and `missing` are those at `lag` (§6.3). **R3-5** a scan's surrogate counts toward `null_ge` only when every lag meets `min_n` (§6.3). **R3-6** `jsd/1`'s `k` and `missing` are the window's, `cover` applies to each window, and `H(M)` is a plug-in over integer weights, so no probability is formed (§6.2). |
 | R4 | 2026-11-21 | Found while building TI-P3. **R4-1** one window's template units that carry different digests (late events) are separate inputs, and give one `tent/1` unit each, as windows of one key do (§6.4). **R4-2** a metric series given to `tent/1` is `SMY-E701`; a `templates` hash other than the shipped Drain's, with no such templates in the store, is `SMY-W703`, since this build runs one Drain (§6.4). **R4-3** templates `tel info` materialises are committed before the statistic, with their stream's series unit, attested as `tel templates` attests them (§6.4). **R4-4** GE-I4's stop condition failed on 2 of 20 seeds, for a fault that barely moves the entropy, while Drain's share of every boundary move was zero; `tent/1` ships by the author's decision, and the result is recorded in §15. |
+| R6 | 2026-11-22 | TI-P5. **R6-1** GE-I5's reading of its stop condition, fixed before the run, and its result: `te/1` is not released, and TI-P5 closes with no code beyond the experiment (§10, §15). |
 | R5 | 2026-11-21 | Found while building TI-P4. **R5-1** two info units of one key disagree (`SMY-W614`) when they read different sample sets: their `digest`, `with_digest` and `ref_digest` together (§3). **R5-2** recomputation reads a stored recipe text back into a recipe, and one this build would write otherwise, a parameter respelled or missing, is `SMY-E604`, since recomputing it would compute something else; `SMY-W704` is a recipe id this build does not have (§7). **R5-3** rule TI's checks of the fields: `mi` carries `with`, `with_instrument`, `with_digest` and `lag`; a statistic of one series names no second; `jsd` names a reference window; a reference window carries `ref_from_ms`, `ref_to_ms` and `ref_digest` together; a scan's `lags` and `values` are of one length (§3). **R5-4** a `template-entropy` unit is recomputed from the store's templates of its stream, instrument, window and recipe hash; with none, from the events, for the shipped Drain only; with neither, it is `SMY-W605` (§7). **R5-5** the dossier lists the statistics among the evidence an investigation consulted or grounds on, and its open questions include those not re-derivable (§8). **R5-6** GE-I3's reading of its stop condition, fixed before the run, and its result (§15). |
 
 ---
@@ -416,7 +418,8 @@ beside them.
 
 ## 10. Reserved: transfer entropy
 
-`stat: te` is reserved. Until GE-I5 releases it, a writer MUST NOT emit it. A reader preserves
+`stat: te` is reserved. Until GE-I5 releases it, a writer MUST NOT emit it. GE-I5 has run, and
+did not (§15): a common driver makes it name a direction in about nine pairs of ten. A reader preserves
 one under rule X, as it does any unknown enum value.
 
 If it is released, `te/1` is the plug-in transfer entropy from `series` to `with` with history
@@ -514,7 +517,7 @@ it is SMYSL-2's example. A telemetry example over `fixtures/tel/detect/` is TI-P
 | **TI-P2** two series and two windows (**done**, 1.18) | `mi/1` with lag, scan and surrogates; `jsd/1` | **GE-I1** over them; **GE-I2 (b)**; scan cost measured |
 | **TI-P3** logs (**done**, 1.18) | `tent/1` | **GE-I4** run |
 | **TI-P4** check and investigations (**done**, 1.18) | rule TI in `check`; `tel-evidence` recomputation; the info key in `SMY-W614`'s incremental state; tests of TQ over info fields (no TQ code changes, §8); the dossier's evidence section; the manual section and the example | the `oko_ledger` example quotes an info value and a planted wrong quote is caught; **GE-I3** run |
-| **TI-P5** transfer entropy | `te/1`, only if released | **GE-I5** decides |
+| **TI-P5** transfer entropy (**closed**, 1.18: not released) | `te/1`, only if released | **GE-I5** decides: it did not release it |
 
 TI-P3 needs TI-P1 and not TI-P2. GE-I3 needs TI-P2.
 
@@ -673,6 +676,38 @@ A detector's column is at its own false-alarm rate on normal incidents: MAD's ab
   `perm/1`'s value on normal windows and, as GE-I2 (b) found, weakens what surrogates say. The
   run on RCAEval (CC BY 4.0, labelled real incidents) is what would test that, and it is still
   owed: its data is not on this machine.
+
+**GE-I5, run at TI-P5 on simulated data** (`cargo run --release -p smysl-tel --example
+ge_i5`, 300 pairs of each kind, seeds 1 to 5). The estimator is §10's, written in the example
+and not in the library: the plug-in transfer entropy with history length 1 over `rank:4`
+symbols, scanned over source lags 1 to 5 and maximised, with 200 surrogates rotating the
+source by §6.3's offsets. A pair is a day of one-minute AR(1) points (φ = 0.5): **driven**, the
+target reading the source at a delay of 1 to 5 minutes with coupling 0.3 to 0.8, the pair's
+order drawn; **common driver**, one AR(1) driving both at delays of 0 to 5 minutes and neither
+affecting the other; **none**, independent. The reading was fixed before the run: each way is
+significant at `null_ge / null_b ≤ 0.05`; a direction is asserted when one way is, or both are,
+then the larger; a driven pair is right when the asserted direction is the true one.
+
+| | seed 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| driven: right | 100 % | 100 % | 100 % | 100 % | 100 % |
+| common driver: a direction asserted | 90.7 % | 88.0 % | 91.0 % | 92.3 % | 90.0 % |
+| of those with equal delays | 55.1 % | 47.4 % | 62.3 % | 64.0 % | 50.0 % |
+| none: a direction asserted | 12.0 % | 10.3 % | 11.3 % | 10.3 % | 13.7 % |
+
+- **`te/1` is not released.** It names the true direction of every driven pair, at every delay,
+  and none the wrong way; and it names a direction in about nine common-driver pairs of ten,
+  against a bound of one. `te` stays reserved, and TI-P5 closes with this result and no code
+  in the library.
+- **The reading does not decide it.** Both ways are significant in 6.0 to 9.7 % of
+  common-driver pairs; read as no direction, 80.3 to 85.0 % still assert one.
+- **What makes it fail is the confound D-I9 named.** The series the driver reaches first
+  carries the driver's past, so its past predicts the other's future, and history length 1
+  cannot condition that away. Equal delays halve the rate and do not remove it: each series'
+  own noise makes one the better proxy. Conditioning on a third series, or on longer histories,
+  is a different statistic, causal discovery's, which 3 §21 and §16 leave out.
+- Independent pairs assert a direction in 10.3 to 13.7 %: two ways each held to 0.05, each the
+  maximum of a scan, as GE-I2 (b) found for `mi/1`'s scans.
 
 **Order.** GE-I1 and GE-I2 first: they are cheap and decide the defaults. GE-I3 is the one that
 says whether the work was worth doing. The real-data runs wait on the cluster GE-M1 still

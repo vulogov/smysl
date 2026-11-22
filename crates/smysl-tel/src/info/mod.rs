@@ -152,25 +152,26 @@ impl Spec {
                 )))
             }
         };
-        let known: &[&str] = match id {
-            ENT => &["step", "hold", "of", "bins", "cover", "min_n", "ref"],
-            PERM => &["step", "hold", "of", "m", "tau", "cover", "min_n"],
-            MI => &[
-                "step", "hold", "of", "bins", "lag", "cover", "min_n", "null", "seed", "guard",
-            ],
-            JSD => &["step", "hold", "of", "bins", "ref", "cover", "min_n"],
-            TENT => &["templates", "min_n"],
-            "te/1" => {
-                return Err(Refusal::recipe(
-                    "`te/1` is reserved behind GE-I5 (RFC SMYSL-5 §10)",
-                ))
-            }
-            other => {
-                return Err(Refusal::recipe(format!(
-                    "`{other}` is not a statistic: {BUILT}"
-                )))
-            }
-        };
+        let known: &[&str] =
+            match id {
+                ENT => &["step", "hold", "of", "bins", "cover", "min_n", "ref"],
+                PERM => &["step", "hold", "of", "m", "tau", "cover", "min_n"],
+                MI => &[
+                    "step", "hold", "of", "bins", "lag", "cover", "min_n", "null", "seed", "guard",
+                ],
+                JSD => &["step", "hold", "of", "bins", "ref", "cover", "min_n"],
+                TENT => &["templates", "min_n"],
+                "te/1" => return Err(Refusal::recipe(
+                    "`te/1` is reserved: GE-I5 did not release it, since a common driver makes it \
+                     name a direction between series that do not affect each other \
+                     (RFC SMYSL-5 §10, §15)",
+                )),
+                other => {
+                    return Err(Refusal::recipe(format!(
+                        "`{other}` is not a statistic: {BUILT}"
+                    )))
+                }
+            };
         for (k, _) in o.iter() {
             if k.value != "stat" && !known.contains(&k.value.as_str()) {
                 return Err(Refusal::recipe(format!(

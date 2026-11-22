@@ -851,6 +851,12 @@ info      mi/1?bins=rank:4&cover=4/5&guard=1/10&hold=60000&lag=-5..5&min_n=80&nu
 ```
 ]
 
+*Which way?* A mutual information has no direction. Transfer entropy has one, and it was
+tried and not released. GE-I5 simulated pairs where one series drives the other, and pairs
+that one hidden series drives together. Transfer entropy named the right direction in every
+driven pair. It also named a direction in about nine of ten pairs with a common driver, where
+there is none to name. So `te/1` stays reserved, and `tel info` refuses it.
+
 A window with too few values for its recipe is refused (`SMY-W703`) and writes nothing. A
 counter read as a level, or a log stream read as a metric, is `SMY-E701`.
 
