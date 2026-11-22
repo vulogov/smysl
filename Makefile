@@ -113,8 +113,9 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # red job saying nothing about the API. 0.10.0 and 0.12.0 were never published and never will
 # be; everything in them shipped in the release after.
 # 1.12.0, 1.13.0 and 1.14.0 were cut and never published; 1.15.0 reached the registry on
-# 2026-11-14, 1.16.0 on 2026-11-16 and 1.17.0 on 2026-11-19, so the baseline moves with each.
-BASELINE  := 1.17.0
+# 2026-11-14, 1.16.0 on 2026-11-16, 1.17.0 on 2026-11-19 and 1.18.0 on 2026-11-22, so the baseline
+# moves with each.
+BASELINE  := 1.18.0
 # The baseline is taken from **this repository's tag**, not from the registry index, and that
 # is a reproducibility fix rather than a preference. `--baseline-version` resolves the version
 # through `index.crates.io` on every run even when the rustdoc for it is already cached, so a
@@ -132,7 +133,7 @@ BASELINE_REV := v$(BASELINE)
 PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-render \
              smysl-retrieve smysl-embed smysl-provider smysl-ingest smysl-tui smysl \
              smysl-text smysl-query smysl-measure smysl-lib smysl-embed-candle \
-             smysl-tel smysl-series
+             smysl-tel smysl-series smysl-bund
 
 # Crates that exist here but are not on crates.io yet, so `semver` has no baseline to fetch
 # for them and would report "version not found in registry" — a red job saying nothing. They
@@ -140,10 +141,9 @@ PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-re
 #
 # Empty from 1.10.0, which first published `smysl-text`, `smysl-query`, `smysl-measure`,
 # `smysl-lib` and `smysl-embed-candle`, until `smysl-tel` and `smysl-series` (RFC SMYSL-3) in 1.17,
-# which were published with 1.17.0 and joined PUBLISHED. Empty again from there, until
-# `smysl-bund` (RFC SMYSL-4), whose last phase, BQ-P4, is built: it joins PUBLISHED at the
-# baseline commit of the release that publishes it, between `smysl-series` and `smysl`.
-UNPUBLISHED := smysl-bund
+# which were published with 1.17.0 and joined PUBLISHED, and `smysl-bund` (RFC SMYSL-4), published
+# with 1.18.0. Empty again from there.
+UNPUBLISHED :=
 
 # The library crates behind the facade: everything published except the facade itself, plus
 # the ones not published yet. Their *surface* is watched from the first commit — `api-check`
