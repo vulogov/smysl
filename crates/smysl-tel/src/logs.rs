@@ -260,19 +260,22 @@ pub fn materialise<B: Backend>(
         .collect())
 }
 
-/// The fields of a template payload [`verify`] reads.
-struct Fields {
-    stream: Uid,
-    inst: Uid,
-    from: u64,
-    to: u64,
-    recipe: String,
-    template: String,
-    count: u64,
-    digest: [u8; 32],
+/// The fields of an `x.tel/log-template` payload: what [`verify`] recomputes and `tent/1`
+/// counts (RFC SMYSL-5 §6.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateFields {
+    pub stream: Uid,
+    pub inst: Uid,
+    pub from: u64,
+    pub to: u64,
+    pub recipe: String,
+    pub template: String,
+    pub count: u64,
+    pub digest: [u8; 32],
 }
 
-fn fields(payload: &[u8]) -> Option<Fields> {
+/// Read a template payload; `None` when it is not one.
+pub fn template_fields(payload: &[u8]) -> Option<TemplateFields> {
     use smysl_core::cbor::reader::Dec;
     let mut d = Dec::new(payload);
     let n = d.map_head().ok()?;
@@ -292,7 +295,7 @@ fn fields(payload: &[u8]) -> Option<Fields> {
             }
         }
     }
-    Some(Fields {
+    Some(TemplateFields {
         stream: f.0?,
         inst: f.1?,
         from: f.2?,
@@ -322,7 +325,7 @@ pub fn verify<'a, B: Backend>(
             continue;
         }
         let uid = canonical_uid(unit);
-        let Some(f) = unit.payload.as_deref().and_then(fields) else {
+        let Some(f) = unit.payload.as_deref().and_then(template_fields) else {
             continue;
         };
         if f.recipe != drain::RECIPE {

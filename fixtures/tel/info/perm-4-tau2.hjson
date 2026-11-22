@@ -1,0 +1,2 @@
+// Patterns of four values two minutes apart.
+{ stat: perm/1, step: 60000, m: 4, tau: 2 }

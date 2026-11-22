@@ -73,8 +73,9 @@ and all:
     ([`text`], [`dep:smysl-text`, `dep:smysl-measure`, `dep:smysl-lib`, `dep:getrandom`, `smysl-check/text` and `smysl-ingest?/text` — the library layer of RFC SMYSL-2.4: a catalogue, an object store, locators, structures, and the reader registry, reached as `smysl::text`, the measures of RFC SMYSL-2.6 over it, reached as `smysl::measure`, and import and export of RFC SMYSL-2.7, reached as `smysl::lib`. The records themselves (`Manifest`, `PartText`, `PartReading`) need no feature: they are the format, and the envelope decodes them in any build. `getrandom` is here and not in `smysl-text` for one reason: `text add --pseudonymise` needs thirty-two random bytes for `secrets/pseudonym.key`, and the pure tier has no randomness source in its default tree — so the library layer knows where a key lives and what shape it has, and the facade mints one. It costs no crate: `ureq`'s TLS stack already links it. The fourth entry turns on the `Time` pass of rule E in `smysl-check`, whose engine — calendar arithmetic and the extent of an EDTF value — is in `smysl-text`: `verify` reports pass 13 as not run in a build without this feature, rather than reporting nothing and leaving the silence to be read either way. The fifth entry is weak — the `?` — and turns on text ingest's windowing and span attachment, which need a reading and a part's bytes, *only in a build that already has `ingest`*: a build asking for a library should not acquire an ingest crate to get one.]),
     ([`tel`], [`dep:smysl-tel`, `dep:smysl-series`, `smysl-series/store-redb`, `smysl-tel/reader-otlp`, `text` and `stage` — RFC SMYSL-3's telemetry layer, reached as `smysl::tel` and `smysl::series`: exact JSON, canonical leaf values, profiles, the canonical diff, the object readers (`k8s/1`, `zabbix/1`) and series readers (`prom/1`, `otlp/1`, `otlp-json/1`, Zabbix history), the snapshot recorder, the series substrate on redb, and `smysl tel` (Chapter 38). `text` for the library its snapshots are kept in, `stage` for staging what they say, the redb backend because a substrate that forgot its samples at exit would answer nothing, and nothing that talks to a provider: a reader reads files. From 1.17.]),
     ([`lang-detect`], [`text` and `smysl-text/detect` — language identification, which is 57 crates and 14.4 MB of compiled-in `lingua` models. Deliberately outside `cli` as well as outside `default`: nothing in the CLI guesses a language, because a manifest's language is part of its identity and a fallback that only some builds had would make the same file get two different manifest ids.]),
-    ([`substrate-redb`], [`text` and `smysl-text/substrate-redb` — the substrate index's backing store (RFC SMYSL-2.4 §3.8). A build with it writes the `postings` table to `index/substrate.redb` and leaves it out of the sidecar; `find --library` scores it there, a term at a time, instead of holding it resident — the document lengths excepted, which a view does read into memory, because a scorer asks for one per posting and they are 36 bytes a unit against a postings list's 1.1 KB. Off by default because that list is what costs: 176 MiB of sidecar at 155k units, 7 GB at a million. Measured on that corpus the store is slightly the faster of the two end to end, with 143 MB no longer resident, and it pays for it in a file 1.8 times the sidecar's size and an index write an order of magnitude dearer. A library small enough not to notice any of that should not link a database. A build without it says so by name when it meets a library whose postings are in that file, rather than reporting them as not built. Since 1.10.]),
-    ([`store-redb`], [`smysl-graph/store-redb` and `smysl-text?/store-redb` — the unit store on disk, and a library's primary shards (TX-P13d) (RFC SMYSL-2.8 §3.5): `smysl::redb::RedbStore`, a store every operation takes like the in-memory one, whose cores stay in the CBOR log and are read from it by offset when asked for. In memory it keeps a 40-byte header a unit, the relations and the other judgements, the adjacency, and a cache of cores it has read — 32 MiB by default, those of claims and relation endpoints kept for good. Index mode only: the log is the authority, the store is rebuilt from it whenever it does not describe it (`SMY-W501`), and deleting `.smysl/store/<name>.redb` loses nothing. On a 155k-unit store `check` peaks at 165 MB against 474 MB in memory, and takes 2.1 s against 175 ms, since every scan decodes the cores it reads. A store another process has open is waited for and then read from the log (`SMY-W504`), because redb 2.6 locks the file for every open; in one process, readers and the writer share it. `smysl::redb::RedbShard` is the writer: it holds `.smysl/store/<name>.lock` (`SMY-E445` names it to a second writer) and writes the log, synced, before the store. The CLI takes `--backend redb`, and `reindex --backend redb [--verify]` builds or checks the store. Since 1.10.]),
+    ([`substrate-redb`], [`text` and `smysl-text/substrate-redb` — the substrate index's backing store (RFC SMYSL-2.4 §3.8). A build with it writes the `postings` table to `index/substrate.redb` and leaves it out of the sidecar; `find --library` scores it there, a term at a time, instead of holding it resident — the document lengths excepted, which a view does read into memory, because a scorer asks for one per posting and they are 36 bytes a unit against a postings list's 1.1 KB. Off by default because that list is what costs: 176 MiB of sidecar at 155k units, 7 GB at a million. Measured on that corpus the store is slightly the faster of the two end to end, with 143 MB no longer resident, and it pays for it in a file 1.8 times the sidecar's size and an index write an order of magnitude dearer. A library small enough not to notice any of that should not link a database. A build without it says so by name when it meets a library whose postings are in that file, rather than reporting them as not built. Since 1.10. With `bund`, `smysl bund` also reads a library whose shards are primary on redb (from 1.18).]),
+    ([`store-redb`], [`smysl-graph/store-redb`, `smysl-text?/store-redb` and `smysl-bund?/store-redb` — the unit store on disk, and a library's primary shards (TX-P13d) (RFC SMYSL-2.8 §3.5): `smysl::redb::RedbStore`, a store every operation takes like the in-memory one, whose cores stay in the CBOR log and are read from it by offset when asked for. In memory it keeps a 40-byte header a unit, the relations and the other judgements, the adjacency, and a cache of cores it has read — 32 MiB by default, those of claims and relation endpoints kept for good. Index mode only: the log is the authority, the store is rebuilt from it whenever it does not describe it (`SMY-W501`), and deleting `.smysl/store/<name>.redb` loses nothing. On a 155k-unit store `check` peaks at 165 MB against 474 MB in memory, and takes 2.1 s against 175 ms, since every scan decodes the cores it reads. A store another process has open is waited for and then read from the log (`SMY-W504`), because redb 2.6 locks the file for every open; in one process, readers and the writer share it. `smysl::redb::RedbShard` is the writer: it holds `.smysl/store/<name>.lock` (`SMY-E445` names it to a second writer) and writes the log, synced, before the store. The CLI takes `--backend redb`, and `reindex --backend redb [--verify]` builds or checks the store. Since 1.10.]),
+    ([`bund`], [`dep:smysl-bund`, `text` and `cli` — RFC SMYSL-4's Bund2 bridge, reached as `smysl::bund`, and `smysl bund` (Chapter 39). Off by default, like `tui`: the command needs a program this build does not ship, `bund2` built with `--features smysl`. It links no Bund2 crate. From 1.18.]),
     ([`tui`], [`dep:smysl-tui`, and `cli` (the TUI is reached through the same binary, so it pulls the parser in too).]),
     ([`semantic`], [`dep:smysl-embed` — static embeddings (S0, Model2Vec) behind `find --engine semantic|hybrid`, from a model directory the operator supplies, and since 1.10 behind `smysl q --engine-model DIR`: `~sem`, `~hybrid`, `near("…", t)` and `lang:any`, the embedding bridge, each making the plan model-dependent, so `--seed-check` refuses it (`SMY-E416`); a saved query records the model's hash, and a rerun under another says so (`SMY-W467`). No network, and since 1.10 no C or C++.]),
     ([`semantic-candle`], [`semantic` and `dep:smysl-embed-candle` — transformer embeddings (S1, RFC SMYSL-2.5 §3.14): multilingual encoders on candle 0.9, on the CPU. `smysl::CandleEncoder` loads `config.json`, `tokenizer.json` and `model.safetensors` from a directory — a BERT (`multilingual-e5-small`) or an XLM-R (`-base`, `bge-m3`) — with `Pooling::Mean` (the e5 prefixes) or `Pooling::Cls`; `smysl::CandleSemantic` indexes a store's gists behind `Retriever`; `smysl::VectorCache` keeps the vectors in `<store>.vec-<hash12>` and ignores one written under another model hash (`SMY-W476`). Each text is encoded alone, so a vector is a function of its text and the model, and a cached one is the encoder's to the bit; nothing is claimed across machines. `smysl q --candle-model DIR` binds it for `~sem`, `~hybrid`, `near(…)` and `lang:any`, the pooling read from the directory's `1_Pooling/config.json`. No C (`cargo xtask check-native`). Since 1.10.]),
@@ -104,9 +105,9 @@ faith. Building the facade crate's own library target with every feature off:
 
 #screen(caption: "$ cargo tree --no-default-features -p smysl")[
 ```
-smysl v1.17.0
-├── smysl-check v1.17.0
-│   ├── smysl-core v1.17.0
+smysl v1.18.0
+├── smysl-check v1.18.0
+│   ├── smysl-core v1.18.0
 │   │   ├── blake3 v1.8.5
 │   │   │   ├── arrayref v0.3.9
 │   │   │   ├── arrayvec v0.7.8
@@ -119,32 +120,32 @@ smysl v1.17.0
 │   │   └── unicode-normalization v0.1.25
 │   │       └── tinyvec v1.12.0
 │   │           └── tinyvec_macros v0.1.1
-│   └── smysl-graph v1.17.0
-│       └── smysl-core v1.17.0 (*)
-├── smysl-core v1.17.0 (*)
-├── smysl-graph v1.17.0 (*)
-├── smysl-pack v1.17.0
-│   ├── smysl-core v1.17.0 (*)
-│   └── smysl-graph v1.17.0 (*)
-├── smysl-query v1.17.0
-│   ├── smysl-core v1.17.0 (*)
-│   ├── smysl-graph v1.17.0 (*)
-│   ├── smysl-pack v1.17.0 (*)
-│   ├── smysl-retrieve v1.17.0
+│   └── smysl-graph v1.18.0
+│       └── smysl-core v1.18.0 (*)
+├── smysl-core v1.18.0 (*)
+├── smysl-graph v1.18.0 (*)
+├── smysl-pack v1.18.0
+│   ├── smysl-core v1.18.0 (*)
+│   └── smysl-graph v1.18.0 (*)
+├── smysl-query v1.18.0
+│   ├── smysl-core v1.18.0 (*)
+│   ├── smysl-graph v1.18.0 (*)
+│   ├── smysl-pack v1.18.0 (*)
+│   ├── smysl-retrieve v1.18.0
 │   │   ├── bm25 v2.3.2
 │   │   │   └── fxhash v0.2.1
 │   │   │       └── byteorder v1.5.0
-│   │   ├── smysl-core v1.17.0 (*)
-│   │   └── smysl-graph v1.17.0 (*)
+│   │   ├── smysl-core v1.18.0 (*)
+│   │   └── smysl-graph v1.18.0 (*)
 │   └── unicode-normalization v0.1.25 (*)
-├── smysl-render v1.17.0
-│   ├── smysl-core v1.17.0 (*)
-│   ├── smysl-graph v1.17.0 (*)
-│   └── smysl-thread v1.17.0
-│       ├── smysl-core v1.17.0 (*)
-│       └── smysl-graph v1.17.0 (*)
-├── smysl-retrieve v1.17.0 (*)
-└── smysl-thread v1.17.0 (*)
+├── smysl-render v1.18.0
+│   ├── smysl-core v1.18.0 (*)
+│   ├── smysl-graph v1.18.0 (*)
+│   └── smysl-thread v1.18.0
+│       ├── smysl-core v1.18.0 (*)
+│       └── smysl-graph v1.18.0 (*)
+├── smysl-retrieve v1.18.0 (*)
+└── smysl-thread v1.18.0 (*)
 [dev-dependencies]
 └── serde_json v1.0.151
     ├── itoa v1.0.18

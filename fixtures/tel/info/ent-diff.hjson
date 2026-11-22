@@ -1,0 +1,2 @@
+// Up, flat or down, minute to minute.
+{ stat: ent/1, step: 60000, bins: diff }

@@ -23,7 +23,9 @@ exactly as written, converted from a binary64 as ECMA-262's `Number::toString` w
 the one way §5.3 allows — all checked against `fixtures/tel/dec/cases.json`, whose binary64 cases
 a JavaScript engine wrote. The preservation half needs no new code: `fixtures/wire/F15-telemetry.cbor`
 holds `x.tel/v1` units, relations and a payload with a 32-byte digest, and it round-trips byte for
-byte like every other wire fixture. The mantissa can need 65 bits, sign and a full `uint64`, so it
+byte like every other wire fixture. `fixtures/wire/F16-telemetry-info.cbor` does the same for
+revision 2 (1.18, RFC SMYSL-5): both declarations, and two `x.tel/info` units holding every key
+the type defines, a list of negative integers among them. The mantissa can need 65 bits, sign and a full `uint64`, so it
 is held as an `int`.
 
 **The library records, as of 1.10.0.** Records 14 (manifest), 15 (part text) and 18 (part

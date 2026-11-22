@@ -16,8 +16,10 @@
 //! | Zabbix 6/7/8 demo source | `fixtures/tel/zabbix/`'s `trend.get` export, handed to `zabbix/1` |
 //!
 //! **What it writes.** The Zabbix trends first: series, their metas, the server and the agents,
-//! lineage, and the `cited` platform windows (rule TW). Then `--investigations` incidents, each
-//! one ledger operation at a time, as OKO appends them:
+//! lineage, and the `cited` platform windows (rule TW). Then two statistics (RFC SMYSL-5,
+//! TI-P4) over GE-I1's driver and follower (`fixtures/tel/info/`): an entropy, and a lag scan
+//! of their mutual information with 50 surrogates, `derived` as rule TI asks. Then
+//! `--investigations` incidents, each one ledger operation at a time, as OKO appends them:
 //!
 //! - open (a person or a model agent), and its view;
 //! - consult two to five windows;
@@ -27,6 +29,11 @@
 //!   value would; rule TQ caps it at `speculative`;
 //! - sometimes an action, confirmed by a human when the agent was a model;
 //! - close.
+//!
+//! The first investigation also consults the two statistics, and writes a hypothesis quoting
+//! the entropy's `value`, the scan's `null_ge` and an element of its `values` at their stored
+//! six places, which verifies, and one quoting the entropy to two places, as a model that
+//! rounds would: a planted wrong quote, which rule TQ must catch as it catches the others.
 //!
 //! **What it measures.** AC-8 is on OKO's critical path (§24): OKO appends one record batch and
 //! reads at once. Each operation is timed as a commit (stage, check, append) and the read that
@@ -322,6 +329,41 @@ fn main() {
         evidence.len()
     );
 
+    // Two statistics (RFC SMYSL-5): their series and instruments, then the units, by rule TI.
+    let st = statistics();
+    let tool = AgentId::new("tool:smysl-tel").unwrap();
+    let by = |op, rung| By {
+        agent: tool.clone(),
+        op,
+        rung,
+        now: Hlc::new(T0, 0, tool.clone()),
+        tw: BTreeMap::new(),
+    };
+    ledger.commit(
+        &by(Op::Imported, Rung::Document),
+        st.entities.clone(),
+        st.lineage.clone(),
+        Vec::new(),
+    );
+    ledger.commit(
+        &by(Op::Transformed, Rung::Computed),
+        st.units.clone(),
+        st.relations.clone(),
+        Vec::new(),
+    );
+    let field = |u: Uid, f: &str, i: Option<usize>| {
+        let c = st.units.iter().find(|c| canonical_uid(c) == u).unwrap();
+        tel::quoted_value(c.payload.as_deref().unwrap(), f, i).expect("a stored field")
+    };
+    let entropy = field(st.entropy, "value", None);
+    println!(
+        "tel info  ent/1 {entropy} bits; mi/1 over -5..5, {} at lag {}, null {} of {}: committed",
+        field(st.scan, "value", None),
+        field(st.scan, "lag", None),
+        field(st.scan, "null_ge", None),
+        field(st.scan, "null_b", None)
+    );
+
     let humans = ["alice", "bob", "chen", "dana"];
     let model = AgentId::new("model:ollama/qwen2.5-7b-845dbda0ea48").unwrap();
     let mut r = Rng(a.seed);
@@ -375,6 +417,50 @@ fn main() {
             .map(|(w, _)| inv::consulted(i, *w))
             .collect();
         ledger.commit(&authored(tick()), Vec::new(), edges, Vec::new());
+
+        // The first investigation reads the statistics too, and quotes them: rightly, and then
+        // rounded to two places, which the entropy does not hold.
+        if n == 0 {
+            let edges = [st.entropy, st.scan]
+                .iter()
+                .map(|u| inv::consulted(i, *u))
+                .collect();
+            ledger.commit(&authored(tick()), Vec::new(), edges, Vec::new());
+            let rounded = format!("{:.2}", entropy.parse::<f64>().unwrap());
+            assert_ne!(rounded, entropy, "the entropy has more than two places");
+            for (claim, quotes) in [
+                (
+                    "the follower carries the driver three minutes late",
+                    vec![
+                        format!("{}#value={entropy}", st.entropy.canonical()),
+                        format!(
+                            "{}#null_ge={}",
+                            st.scan.canonical(),
+                            field(st.scan, "null_ge", None)
+                        ),
+                        format!(
+                            "{}#values[2]={}",
+                            st.scan.canonical(),
+                            field(st.scan, "values", Some(2))
+                        ),
+                    ],
+                ),
+                (
+                    "the follower's entropy is low",
+                    vec![format!("{}#value={rounded}", st.entropy.canonical())],
+                ),
+            ] {
+                let u = inv::hypothesis(claim, &quotes, None, vec![st.entropy, st.scan]);
+                let hu = canonical_uid(&u);
+                ledger.commit(
+                    &authored(tick()),
+                    vec![u],
+                    vec![inv::during(hu, i)],
+                    Vec::new(),
+                );
+            }
+            fabricated += 1;
+        }
 
         // Probe.
         for p in 0..r.between(1, 2) {
@@ -553,6 +639,85 @@ fn main() {
         }
     );
     std::process::exit(if ok { 0 } else { 1 });
+}
+
+/// GE-I1's driver and follower in a substrate of their own, with their instruments and lineage,
+/// and two statistics over the two hours before `T0`: the follower's `ent/1`, and its `mi/1`
+/// scan against the driver.
+struct Statistics {
+    entities: Vec<UnitCore>,
+    lineage: Vec<Relation>,
+    units: Vec<UnitCore>,
+    relations: Vec<Relation>,
+    entropy: Uid,
+    scan: Uid,
+}
+
+fn statistics() -> Statistics {
+    use smysl::series::{MemBackend, Sample, SeriesInfo, Substrate};
+    use smysl::tel::info::{run_on, Spec, With};
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/tel/info/series.tsv");
+    let text = std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+    let exporter = tel::instrument("exporter", "prom-target:ge-i1/sim:9100").unwrap();
+    let scraper = tel::instrument("scraper", "prom-scrape:ge-i1/sim:9100").unwrap();
+    let (origin, inst) = (canonical_uid(&exporter), canonical_uid(&scraper));
+    let mut sub = Substrate::new(MemBackend::default());
+    let mut entities = vec![exporter, scraper];
+    let mut lineage = vec![tel::via(origin, inst)];
+    let mut uid = BTreeMap::new();
+    for key in ["info_driver", "info_follower"] {
+        let rows: Vec<Vec<&str>> = text
+            .lines()
+            .map(|l| l.split('\t').collect::<Vec<_>>())
+            .filter(|f| f[0] == key)
+            .collect();
+        let samples: Vec<Sample> = rows
+            .iter()
+            .map(|f| {
+                let v = smysl::Decimal::parse_token(f[3]).unwrap();
+                Sample::new(f[2].parse().unwrap(), None, v, f[4].parse().unwrap()).unwrap()
+            })
+            .collect();
+        let s = tel::series("prom", key).unwrap();
+        let su = canonical_uid(&s);
+        let info = SeriesInfo {
+            scheme: "prom".into(),
+            key: key.into(),
+            class: rows[0][1].into(),
+        };
+        sub.add(&su, &inst, &info, &samples).unwrap();
+        lineage.push(tel::measured_by(su, origin));
+        entities.push(s);
+        uid.insert(key, su);
+    }
+    let (from, to) = (T0 - 120 * MIN, T0);
+    let run = |recipe: &str, with: Option<With>| {
+        let spec = Spec::parse(recipe).expect("a recipe");
+        let o = run_on(&spec, &sub, &[uid["info_follower"]], None, with, from, to).unwrap();
+        o.into_iter().next().unwrap().result.expect("a statistic")
+    };
+    let ent = run(
+        r#"{ stat: ent/1, step: 60000, bins: "width:1", min_n: 100 }"#,
+        None,
+    );
+    let mi = run(
+        r#"{ stat: mi/1, step: 60000, bins: "rank:4", lag: "-5..5", null: 50, seed: 7 }"#,
+        Some(With {
+            series: uid["info_driver"],
+            instrument: None,
+        }),
+    );
+    let (entropy, scan) = (canonical_uid(&ent.unit), canonical_uid(&mi.unit));
+    let mut relations = ent.relations;
+    relations.extend(mi.relations);
+    Statistics {
+        entities,
+        lineage,
+        units: vec![ent.unit, mi.unit],
+        relations,
+        entropy,
+        scan,
+    }
 }
 
 fn walk(p: &Path) -> u64 {

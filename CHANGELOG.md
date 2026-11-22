@@ -7,6 +7,394 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.18.0 — 2026-11-22
+
+Two RFCs, each built to its last phase: SMYSL-4, which runs Bund2 scripts over a library, and
+SMYSL-5, information measures over telemetry. The kernel did not change. `x.tel/v1` moves to
+revision 2 to register `x.tel/info`, an extension schema a 1.0 reader skips, and `smysl/1.0`
+holds. One new crate, `smysl-bund`, is published for the first time, behind the facade's `bund`
+feature. The registry is 176.
+
+**Programmable queries, in another process (SMYSL-4, BQ-P1 to BQ-P4).** `smysl bund` runs a Bund2
+script, with its `smysl.*` words, logic and CLP(FD), over a disposable snapshot of a store or a
+library and returns a typed value. It never links Bund2. A word list was not a boundary, since
+Bund2 can build a word's name at run time, so the operating system is: a sandbox on macOS and
+Linux, tested in CI by an adversarial suite that runs each attack trusted and then sandboxed.
+Scripts replay to the same value over equal stores written in different orders, and a timeout
+leaves no process and no directory behind. A call costs about 12 ms trusted and 15 ms sandboxed.
+
+**Information measures (SMYSL-5, TI-P0 to TI-P5).** `smysl tel info` states a statistic as an
+`x.tel/info` unit, with a recipe that names every parameter and a digest of the samples it read:
+
+- **`ent/1` and `perm/1`**: the entropy of a series and of its ordinal patterns, over an explicit
+  grid in exact decimal arithmetic, so a value is the same on four platforms in CI.
+- **`mi/1` and `jsd/1`**: mutual information between two series, with lag scans and
+  circular-shift surrogates, and divergence between a window and a reference.
+- **`tent/1`**: the entropy of a log stream's Drain templates.
+- **Checked like any evidence.** Rule TI holds each unit to its shape (`SMY-E603`), `tel check`
+  recomputes each statistic from its recipe (`SMY-E604`, `SMY-W605`), and rule TQ catches a
+  wrong quote of one.
+
+**What the experiments decided, on simulated data.** Each ran with its stop condition stated
+first:
+
+- **GE-I2:** the Miller–Madow value is at worst 0.81 % from the true entropy, against 5 %, and
+  circular shifts flag at most 10.0 % of independent AR(1) pairs, so every default holds.
+- **GE-I3:** held to MAD's false-alarm rate, `mi/1` flags every pair that decouples, and
+  `perm/1` about 92 % of an oscillation, against PELT's 56 %. The statistics see what the level
+  detectors miss, and a later RFC may propose a detector from them.
+- **GE-I4:** `tent/1` moves 0.55 bits for a fault that adds error messages, against 0.013 bits
+  of sampling, but a fault that only changes the mix moves it about as little as sampling does.
+  It ships by the author's decision, recorded in RFC SMYSL-5 §15.
+- **GE-I5:** transfer entropy named a direction in 88 to 92 % of pairs that only share a
+  driver, against a bound of 10 %, so `te/1` is not released.
+
+**What 1.18 leaves open.** Everything 1.17 left. GE-M7 on agents, which needs the Train-Ticket
+testbed. The real-data runs: GE-M1 on a cluster observed for seven days (I-1), the Zabbix
+fixtures (I-2), GE-M2 and GE-M5 on DeathStarBench, GE-M8 on GE-M7's corpus, and now GE-I3 on
+RCAEval's real incidents. OKO's own ledger. The range index's tables. What 1.16 and 1.14 left.
+None of it moved in 1.18.
+
+### Transfer entropy is not released (SMYSL-5 TI-P5)
+
+GE-I5 (`crates/smysl-tel/examples/ge_i5.rs`, simulated, 300 pairs of each kind, five seeds)
+asked whether transfer entropy names the right direction. It named the true direction of every
+driven pair, and a direction in 88 to 92 % of pairs that share a driver and do not affect each
+other, against a bound of 10 %. So `te/1` stays reserved (RFC SMYSL-5 §10, §15), nothing is
+added to the library, and `tel info` refuses `te/1` saying so (`SMY-E702`).
+
+### Statistics in `check` and investigations (SMYSL-5 TI-P4)
+
+An `x.tel/info` statistic is now evidence as a window is: checked, recomputed, quoted and listed.
+
+- **Rule TI in `check`** (§3): a statistic is `derived`, attested as transformed at the computed
+  rung, and carries the digest of every sample set it read: `with_digest` for `mi`,
+  `ref_digest` wherever a reference window is named. Otherwise `SMY-E603`. Units of one info key
+  over different sample sets are `SMY-W614`, in the full check and in the kept one (AC-8).
+- **Recomputation** (§7): `tel check` recomputes each statistic from the substrate by its stored
+  recipe, through the code that wrote it. Another unit is `SMY-E604`, naming the fields that
+  differ; samples gone are `SMY-W605` and nothing worse; a recipe id this build does not have is
+  one `SMY-W704`. A template entropy recomputes from its template units, so it outlives its
+  log records. The summary line counts statistics apart from windows.
+- **Quotes** (§8): rule TQ verifies a quote of `value`, `mm`, `bias`, `n`, `k`, `null_ge`,
+  `null_b` or `values[i]` at the stored six places. `fixtures/tel/check/` gains an `info` case
+  for C-Tel-Check: rule TI, the info key and TQ over a statistic's fields.
+- **The dossier**: `tel investigate show` lists the statistics among the evidence, with value,
+  `n` and surrogates, and its gaps include those not re-derivable.
+- **Examples**: `oko_ledger` commits two statistics, and its first investigation quotes them
+  rightly and once rounded to two places, which rule TQ catches. `examples/tel_info` runs the
+  measures over GE-M3's series and recomputes them.
+- **GE-I3**, simulated (`crates/smysl-tel/examples/ge_i3.rs`, 400 incidents a kind, ten seeds).
+  Held to MAD's false-alarm rate, `mi/1` flags every pair that decouples, which no shipped
+  detector sees; `perm/1` flags about 92 % of noise turned oscillation, against PELT's 56 % and
+  MAD's none; `jsd/1` flags 95 % of a variance change that MAD already flags in full. So the
+  stop condition does not hold: the statistics see what level detectors miss, and a later RFC
+  may propose a detector from them. `tent/1` does not see a permuted log mix, as GE-I4
+  predicted. The run on RCAEval's real incidents is still owed.
+
+### `smysl tel info`: the entropy of a log stream's templates (SMYSL-5 TI-P3)
+
+`tent/1`, the last statistic of RFC SMYSL-5 short of transfer entropy: the entropy of a log
+stream's Drain templates over a window.
+
+```hjson
+{ stat: tent/1 }
+{ stat: tent/1, min_n: 50 }
+```
+
+- **It reads units, not events** (§6.4): the `x.tel/log-template` units of one stream,
+  instrument, window and Drain recipe that share a digest. So a template entropy stays
+  recomputable after the events are evicted, as long as its templates are kept; a test
+  recomputes one from its templates against a substrate holding no event, and gets the same uid.
+- **When the store holds no templates**, `tel info` runs Drain over the window's events, as
+  `tel templates` does, and `--yes` commits those templates first, with the stream's series
+  unit. A second run reads them from the store.
+- **The recipe names Drain by hash**: `templates` is the BLAKE3 of the Drain recipe's text,
+  defaulting to the shipped one. Another hash is read from the store only. A metric series is
+  `SMY-E701`.
+- **GE-I1** gains the generated `journal.json`: 1.83 bits over its first four hours and 2.20
+  over the last two, when a timeout template joins.
+- **GE-I4**, simulated (`examples/ge_i4.rs`): shifting a 30-minute window by three minutes moves
+  `tent/1` by about 0.013 bits, all of it sampling and none of it Drain, against about 0.55 bits
+  for a fault that adds error messages. A fault that only changes the mix moves it about as
+  little as sampling does, and fails the literal stop condition on 2 seeds of 20; `tent/1` ships
+  by the author's decision, recorded in RFC SMYSL-5 §15 (R4-4).
+
+### `smysl tel info`: mutual information between series, and divergence between windows (SMYSL-5 TI-P2)
+
+The two statistics that compare: `mi/1` between two series at a lag, with a scan over lags and
+seeded surrogates for chance, and `jsd/1` between a window and a reference window of one series.
+
+```hjson
+{ stat: mi/1, step: 60000, bins: "rank:4", lag: "-10..10", null: 200, seed: 7 }
+{ stat: jsd/1, step: 60000, bins: "baseline:4", ref: "1768550400000-1768557600000" }
+```
+
+- **`mi/1`** (§6.3): `tel info RECIPE --series S… --with S2` pairs each series at `t` with the
+  second at `t + lag·step`. The plug-in value is stored with its bias term beside it, never
+  subtracted. `rank:K` bins rank each side over the pairs kept, so the value is unchanged by any
+  monotone rescaling. A **scan** (`lag: "-L..L"`, L ≤ 64) is one unit holding the whole curve;
+  its value is the curve's maximum, and every lag must meet `min_n` and `cover` on its own.
+- **Surrogates** (`null: B`, B ≤ 1000): the second series rotated over the whole grid by
+  offsets drawn from ChaCha20, keyed by the recipe and `seed`. `null_ge` of `null_b` says how
+  many did as well; a scan's surrogates are maximised over the same lags.
+- **`jsd/1`** (§6.2): the Jensen–Shannon divergence of the window from `ref`, in bits, under
+  width, baseline or diff bins, with the mixture's entropy computed over integer weights.
+- **Refused:** `baseline` bins in `mi/1`, which would read two reference windows that one unit
+  cannot carry the digests of, and `rank` in `jsd/1` (`SMY-E702`). RFC amendment R3 records
+  these and five other points settled while building.
+- **GE-I1** grows to thirteen recipes over eight series, three of them new: a driver, a series
+  following it three minutes late, which `mi/1` finds at lag −3, and a series whose spread
+  doubles, which `jsd/1` separates from the steady ones.
+- **GE-I2 (b)**, simulated (`examples/ge_i2b.rs`): on independent AR(1) pairs up to φ = 0.99,
+  surrogates flag 5.5 % to 10.0 % of runs at 0.05, never over the 10 % stop condition, so
+  circular shifts stand as the null (D-I7). The φ = 0.99 scan sits at the limit. The stored
+  `bias` is the i.i.d. term and understates an autocorrelated pair's bias.
+- **Cost:** a scan of 21 lags with 200 surrogates over a day of minutes is about 0.2 s.
+
+### `smysl tel info`: the entropy of a series, and of its ordinal patterns (SMYSL-5 TI-P1)
+
+The first two information measures, end to end. A recipe names the statistic and every
+parameter; `tel info RECIPE --series S… --during FROM-TO` reads each series' samples on an
+explicit grid, symbolises them in exact decimal arithmetic, and states the result as an
+`x.tel/info` unit, or says why it will not.
+
+```hjson
+{ stat: ent/1, step: 60000, bins: "width:1" }
+{ stat: ent/1, step: 60000, bins: "baseline:4", ref: "1768550400000-1768554000000" }
+{ stat: perm/1, step: 60000, m: 4, tau: 2 }
+```
+
+- **The grid** (§5.1): the multiples of `step` in the window, each taking the last sample in
+  `(t − hold, t]`; a stale or no-value sample ends the value before it. `of: increase` is a
+  counter's rise over one step, missing across a reset.
+- **Binnings** (§5.3): `width:W` (an exact floor), `baseline:K` (quantile edges from a reference
+  window), `diff` (up, flat or down). `rank:K` is refused for an entropy, since it makes every
+  entropy log₂ K. **Ordinal patterns** (§5.4) of `m` values `tau` steps apart, ties in time order.
+- **`ent/1` and `perm/1`** (§6.1): the plug-in entropy over counts in symbol order and its
+  Miller–Madow value, stored to six places. One symbol is exactly 0.
+- **Refusals** are reported, not written: a counter read as a level or a histogram
+  (`SMY-E701`), a recipe not admitted (`SMY-E702`, exit 2), too few symbols or too little
+  coverage (`SMY-W703`). Admission is by the class the reader recorded in the substrate.
+- **An info unit has no surface form**, like a window: without `--yes` it is printed and
+  checked and nothing is written; with `--yes --at MS` it is committed with its `x.tel/of-series`
+  edge, attested by rule TI.
+- **GE-I1's harness** (`crates/smysl-tel/tests/info_cases.rs`): seven recipes over the five series
+  of `fixtures/tel/info/`, twice and compared, every outcome pinned by uid; CI runs it on the four
+  `measure-platforms` targets.
+- **GE-I2 (a)**, simulated (`examples/ge_i2.rs`): at the default `min_n` the Miller–Madow value is
+  at worst 0.81 % from the true entropy, against a 5 % stop condition, for i.i.d. sources over 2
+  to 64 symbols and ordinal patterns of white noise at m = 3 to 7. Every default holds.
+- **RFC SMYSL-5 R2**: R1-2 admitted series by `tel:kind`, which no reader writes; the draft's
+  "class" was right, and admission is by the substrate's class again (R2-1).
+
+### `x.tel/v1` revision 2, and what every information measure needs (SMYSL-5 TI-P0)
+
+RFC SMYSL-5 (`Documentation/SMYSL-5_RFC/SMYSL-5_TELEMETRY_INFORMATION.md`) adds information
+measures over telemetry: entropies, mutual information and divergences of a symbolised sample
+set, each stated as evidence. Its draft was reviewed against `3e57160` and amended before any
+code (R1): a stale sample ends the value in force, series are admitted by `tel:kind`, results are
+stored to six places so rule TQ can verify a quote, and seven more. TI-P0 lays the ground; no
+statistic is computed yet.
+
+- **`x.tel/v1` is at revision 2.** It adds one type, `x.tel/info`, and its twenty-one payload
+  keys, and changes the meaning of nothing in revision 1. `tel::decl_at(1)` still gives the
+  declaration a 1.17 build wrote, and a 1.18 write to such a store adds revision 2's beside it;
+  rule N (`smysl schema check`) reads the pair as a history that only added, which settles
+  SMYSL-5 OQ-I3. The `tel:stat` value `te`, transfer entropy, is reserved: no writer emits it.
+- **C-Tel-Read covers it with no new code.** `fixtures/wire/F16-telemetry-info.cbor` holds both
+  declarations and two info units with every key between them, a list of negative integers
+  among them. Python, JavaScript and Go round-trip it byte for byte. F15 and the C-Tel-Check
+  fixtures stay revision-1 stores, byte for byte as before.
+- **Four codes, a sixteenth group.** `SMY-E701` (a series class the statistic does not admit),
+  `SMY-E702` (a recipe not admitted), `SMY-W703` (not run: too few symbols or too little
+  coverage) and `SMY-W704` (a recipe version this build lacks), in a group `Information`. The
+  registry is 176. `SMY-E603`, `E604`, `W605` and `W614` are reworded for evidence in general:
+  all four still said "window" after TL-P9 extended them to spans and templates.
+- **One `libm`.** The pin `=0.2.16` moves to the workspace and `smysl-tel` takes it beside
+  `smysl-measure`, so one logarithm is computed one way in both. `smysl-tel` gains a
+  `clippy.toml` that refuses the `f64` transcendentals; the GE-M2, M5 and M6 simulators are
+  exempt by name, so their samples do not move.
+- **`smysl_tel::info::num`**: `ln` and `log2` through `libm`, the left-fold sum, and §6.0's
+  storage: a negative statistic clamped to zero, then six places, half to even on the binary64's
+  exact value (`0.0078125` is `0.007812`).
+- **Exact decimals in one place.** The window sum's big decimal moves out of `evidence.rs` into a
+  crate module `exact` with `numeric_cmp`, and gains what §5's symbols need: subtraction at any
+  scale, numeric order, and `floor(x / w)` exact to `i64`. `scrape::numeric_cmp` stays where it
+  was public, as a re-export. Window summaries are unchanged: GE-M3's pins and the window cases
+  pass as before.
+
+### RFC SMYSL-5: information measures over telemetry, reviewed before code
+
+The draft names six phases (TI-P0 to TI-P5) and five experiments (GE-I1 to GE-I5), and ships no
+detector and no causal statistic: transfer entropy is reserved behind GE-I5. The R1 review
+amendment is recorded in its header, each change in the section it changes.
+
+### RFC SMYSL-4: Bund2 programmable queries through a subprocess, amended before acceptance
+
+`Documentation/SMYSL-4_RFC/SMYSL-4_BUND2_BRIDGE.md` specifies `smysl-bund`. The crate will run
+a Bund2 script (RFC-0014's `smysl.*` words and RFC-0013's logic and CLP(FD)) over a disposable
+copy of a library, in a separate `bund2` process, and return a typed value. It never links
+Bund2, which pins every smysl crate at `=1.15.0`.
+
+The draft was checked against Bund2 `development/0.56.0` before anything was built. Three of its
+promises could not be kept by the means it chose:
+
+- **A word list is not a boundary.** Bund2 can build a word's name at run time and call it
+  (`"system." "shell" + call, !`), and its own register says so. The operating system is now the
+  boundary. Until a platform has the sandbox, only scripts declared trusted run there.
+- **Bund2 cannot write a string as JSON.** `json.from_value` refuses STRING, and every `smysl.*`
+  answer holds one, so the bridge appends its own encoder.
+- **A file copy of a library is not readable by Bund2's reader** when a shard is on redb. The
+  snapshot is written fresh, as CBOR logs.
+
+The crate takes the workspace version instead of `0.1.0`, which `verify-dep-versions.py`
+requires. Appendix A lists all eleven corrections, with file and line in both trees. Phases
+BQ-P1 to BQ-P4; nothing is built yet.
+
+### `smysl-bund`: the word gate and the answer's decoder (SMYSL-4 BQ-P1)
+
+A new boundary crate, unpublished, that links no Bund2 crate. BQ-P1 is what can be decided
+before a script is run. The spike against a `bund2` 0.56.0 built with `--features smysl` settled
+the four things the RFC left open, and two of them went another way than it expected.
+
+- **The answer is read from `debug.display_stack`, not encoded by Bund code.** A Bund script
+  cannot walk a map: no word lists a map's keys, `convert.to_list` of a MAP is `[]`, and `loop`
+  refuses one. `println` drops a string's quotes and prints `0.30000000000000004` as
+  `0.30000000000000007`. `debug.display_stack` prints each stack value as one line of Bund2's
+  raw rendering: Rust-escaped strings, `{:?}` floats that read back to the same bits, and a type
+  on every node. It does not wrap on a pipe. `decode` parses that rendering. It reads past the
+  `stamp`, which is a wall clock, and refuses a LAMBDA or any other type by name.
+- **A refusal's code is read from its text.** Bund2 writes `<WORD>: <text>` and keeps the `SMnn`
+  code to itself. Each code's text follows RFC-0014 §S8's template, so `error::classify` recovers
+  the code from the template.
+- **A failing script exits 0, and reports on standard output.** The bridge runs
+  `--report trace --nocolor` and reads the `Error:` line when the sentinels are missing.
+- **The word lists are the build's own.** `words/bund2-0.56.0.txt` is `bund2 words`, 1,210
+  words. `words::REFUSED` holds 95 entries, each with its reason. A test fails if an entry names
+  a word the build does not have: the first check had named `stdin` and a bare `call`, and
+  neither exists. The default allowlist is the listing less the refused, so a word a later Bund2
+  adds is refused until it is read.
+- **The gate** tokenises a script as `bund2-syntax` does, and treats a `` `pointer `` as naming
+  its word. It also refuses an unterminated string or literal and an unbalanced bracket, which
+  would swallow the bridge's encoder.
+- **`probe::read_version`** reads `bund2 --version` and refuses a build without `smysl` or older
+  than 0.56.0.
+
+The captured output of a real run is in `tests/fixtures/`, so the decoder is tested without
+`bund2`. With `BUND2_BIN` set, the probe runs against the binary as well. RFC §6 to §9 record
+the findings.
+
+### `smysl bund`: Bund2 scripts from the command line (SMYSL-4 BQ-P4)
+
+RFC SMYSL-4 is complete. Behind the new `bund` feature, off by default, `smysl bund` runs a
+Bund2 script over a store or a library and prints the value it leaves:
+
+```
+smysl bund -s fixtures/corpus/F1-incident.smy \
+  --eval ':lib var? "from library" smysl.kb [ [ unit U claim S ] [ gist U G ] ] kb.query'
+```
+
+- **Input.** `-s` takes a store file or a library root. `--script FILE` or `--eval SCRIPT`
+  gives the script, and `--sq QUERY` seeds it with an `sq/1` answer as `:seed`.
+- **Output.** Indented text, or JSON with `--json`. Both are deterministic: map keys sorted,
+  uids canonical. `QueryValue` gains `to_json` and `Display` for this.
+- **The sandbox** is used unless `--trusted`. On a platform without it the command refuses
+  instead.
+- **The other flags:** `--probe` says which `bund2` would run, what it was built with, and
+  whether the sandbox is there. `--timeout-ms`, `--max-inferences` and `--bund2 PATH` set the
+  limits and the binary.
+- **Exit status:** 2 for a script refused before it runs, 1 for a failure once it has
+  started.
+- **The facade** re-exports the crate as `smysl::bund` under `bund`.
+- **Without the feature,** the command is still listed, and says which feature it needs.
+- **The manual** gains Part XII, chapter 39.
+
+Two open questions are decided in the RFC:
+- **OQ-B2:** `--trusted` is the only way to run unsandboxed, and no command that has a model
+  write a script hands that script to the bridge.
+- **OQ-B1:** the snapshot always carries the part texts.
+
+`smysl-bund` will be published with the release, and joins `PUBLISHED` at that release's
+baseline commit. CI:
+- a test-matrix row builds `--no-default-features --features bund`;
+- `bund2-bridge` runs the command's tests (`tests/cmd_bund.rs`) against `bund2`;
+- `crate-features` covers the crate.
+
+### `smysl-bund` runs a script in the sandbox (SMYSL-4 BQ-P3)
+
+`Trust::Sandboxed`, the default, now runs on macOS and on Linux.
+
+- **macOS:** `sandbox-exec` with a deny-by-default profile generated for each call. The process
+  may run only the `bund2` binary, read the binary, its snapshot and the system libraries, and
+  write only in its snapshot. A denial comes back as `PolicyViolation`.
+- **Linux:** `bwrap`, with every namespace unshared. The process sees the system libraries, the
+  binary and its snapshot, so there is no shell, no network and no file outside to reach.
+- **Elsewhere,** or without the tool: `SandboxUnavailable`, as before.
+- **Cost:** about 3 ms more per call on macOS (15.0 ms p50, against 11.8 ms trusted).
+
+**`max_inferences` is applied.** Bund2 cannot wrap `smysl.kb` in the preamble, so the bridge
+rewrites the script instead. Each `smysl.kb`, `kb!` and `kb.new` is followed by
+`<cap> kb.inferences`, and a cap the script sets above the policy's is lowered to it. A runaway
+query stops with `InferenceCapReached`.
+
+**A gate defect from BQ-P1.** The gate checked the atoms inside a `[ … ]` list against the
+allowlist, so every KB script was refused: `[ spin ]` failed on `spin`. A bare word directly
+inside a list is now data, as it is to Bund2. A pointer or a lambda inside a list is still
+checked.
+
+**Determinism:** 24 scripts, run three times each, give the same answer every time. Each runs
+twice over F1 and once over F1 with its records reordered. The scripts cover:
+- `smysl.query`;
+- `smysl.kb` with `kb.query`, `kb.holds` and `kb.saturate`;
+- recursion, tabling, `findall`, `dif` and `kb.prove`;
+- the demo's CLP(FD) plan;
+- a capped runaway query, which fails the same way each time.
+
+**The adversarial suite** has two layers:
+- **Through the gate:** a call built at run time, `compile`, `url`, `file`, `time.now`, and a
+  shell inside a lambda inside a list. Each is refused with its word named. An infinite loop
+  is stopped by the clock.
+- **Past the gate:** a shell, a file read outside the snapshot, a file write outside it, and a
+  connection to a local listener. Each runs trusted and is shown not to happen sandboxed.
+
+**CI:** a new `bund2-bridge` job builds `bund2` at a pinned commit on Ubuntu and macOS and runs
+the crate's tests against it. With `SMYSL_BUND_REQUIRED` set, a missing `bund2` or sandbox fails
+the job instead of skipping. All of this passed locally on macOS and on Linux, in a container
+with `bwrap`.
+
+### `smysl-bund` runs a script: the snapshot and the process (SMYSL-4 BQ-P2)
+
+`eval_store`, `eval_library` and `eval_over_sq` run a script under `Trust::Trusted`, and refuse
+`Trust::Sandboxed` with `SandboxUnavailable` until BQ-P3 builds the sandbox.
+
+- **The snapshot is written, not copied** (§4). A store's records go into a fresh library in a
+  private `tempfile` directory. A library is opened with this release's reader and written the
+  same way, with its part texts and readings copied. A library whose shards are primary on redb,
+  which `bund2`'s smysl 1.15 refuses with `SM02`, reads through the snapshot's CBOR logs (the
+  `store-redb` feature, tested). The live library's bytes are hashed before and after a call, and
+  are unchanged.
+- **The process** gets flags before the script's path, a cleared environment (`LC_ALL=C`,
+  `TZ=UTC`, `COLUMNS=80`, `NO_COLOR=1`, `HOME` and `TMPDIR` inside the snapshot), and a process
+  group of its own. Two threads read stdout and stderr up to `max_output_bytes`. At
+  `max_wall_ms`, or past the output bound, the group is killed. A `true { true } while` stops at
+  500 ms and leaves no process and no directory behind.
+- **`eval_over_sq`** runs `sq` over the snapshot as a library (`LibraryScope`), so a query reads
+  as it does in `smysl q` and in Bund2's `smysl.query`. Its answer is bound to `:seed`.
+- **Two defects found by the first run.** Uids were written into the preamble with `Display`,
+  which is the 26-character short form, and `Uid::parse` refuses it. They are now written in
+  their canonical form. And an empty answer is `:seed list var`, since Bund2 cannot parse `[ ]`.
+- **What a call costs:** 10.0 ms p50 over F1, of which about 5 ms is the `bund2` process.
+  Probing `bund2 --version` on every call made it 14.6 ms, so the probe is cached per binary
+  while its file is unchanged.
+- `QueryPolicy` gains `with_*` builders, since it is `#[non_exhaustive]`.
+
+`max_inferences` is not applied yet. It needs `smysl.kb` wrapped in the preamble, which moves to
+BQ-P3, and the field's doc says so. Ten tests run against a real `bund2` when `BUND2_BIN` is set,
+and pass trivially without it; `cost` is ignored and prints the numbers above.
+
+---
+
 ## 1.17.0 — 2026-11-19
 
 SMYSL-3, smysl for telemetry study and research, built from its format phase to its last:

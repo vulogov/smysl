@@ -190,6 +190,8 @@ const PURE_CRATES: &[&str] = &[
     // function of JSON text and a profile. The readers that need more arrive behind features,
     // as `smysl-text`'s do. `CRATE_SYMBOLS` adds the RFC's PRNG ban (H-7) for it now rather
     // than at TL-P0, because a list obeyed from the start is a list nobody has to argue with.
+    // SMYSL-5 TI-P0 adds `libm` with default features off, the workspace's pin and
+    // `smysl-measure`'s, which brings none of `NEVER`.
     "smysl-tel",
     // The series substrate (RFC SMYSL-3 §19, TL-P3 step 1). Pure, with redb behind
     // `store-redb` as `smysl-graph`'s store is: a window's digest is a function of its

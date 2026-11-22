@@ -140,8 +140,10 @@ PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-re
 #
 # Empty from 1.10.0, which first published `smysl-text`, `smysl-query`, `smysl-measure`,
 # `smysl-lib` and `smysl-embed-candle`, until `smysl-tel` and `smysl-series` (RFC SMYSL-3) in 1.17,
-# which were published with 1.17.0 and joined PUBLISHED. Empty again from there.
-UNPUBLISHED :=
+# which were published with 1.17.0 and joined PUBLISHED. Empty again from there, until
+# `smysl-bund` (RFC SMYSL-4), whose last phase, BQ-P4, is built: it joins PUBLISHED at the
+# baseline commit of the release that publishes it, between `smysl-series` and `smysl`.
+UNPUBLISHED := smysl-bund
 
 # The library crates behind the facade: everything published except the facade itself, plus
 # the ones not published yet. Their *surface* is watched from the first commit — `api-check`
@@ -155,7 +157,7 @@ LIBRARIES := $(filter-out smysl,$(PUBLISHED)) $(UNPUBLISHED)
 # absence as if it were the intent.
 COMMAND_NAMES := fmt check pack merge diff trace view bundle thread salience find retract \
                  withdraw resolve review commit render import relink compact ingest attest providers \
-                 usage reindex ui text date same-as link summarise q ask measure assess lib schema migrate tel
+                 usage reindex ui text date same-as link summarise q ask measure assess lib schema migrate tel bund
 
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 
@@ -326,7 +328,7 @@ test-matrix: ## Every feature combination CI builds
 		RUSTFLAGS="-D warnings" $(CARGO) test --workspace $$args; \
 	done
 
-FEATURED := smysl-graph smysl-provider smysl-ingest smysl-render smysl-pack smysl-text smysl-series smysl-tel
+FEATURED := smysl-graph smysl-provider smysl-ingest smysl-render smysl-pack smysl-text smysl-series smysl-tel smysl-bund
 
 crate-features: ## Each crate with features, alone, at its defaults and with none
 	@set -e; for c in $(FEATURED); do \

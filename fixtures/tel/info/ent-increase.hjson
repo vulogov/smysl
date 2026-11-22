@@ -1,0 +1,2 @@
+// A counter's increase per minute, five wide; a gauge's too.
+{ stat: ent/1, step: 60000, of: increase, bins: "width:5" }

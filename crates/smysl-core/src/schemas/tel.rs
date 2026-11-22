@@ -30,8 +30,13 @@ use crate::types::{RelKind, SchemaDecl, SourceKind, SourceRef, Status, UnitCore,
 /// The schema's own id.
 pub const ID: &str = "x.tel/v1";
 
-/// The revision this build declares.
-pub const VERSION: u32 = 1;
+/// The revision this build declares. Revision 2 (RFC SMYSL-5 §3, TI-P0) adds [`INFO`] and its
+/// payload keys and changes the meaning of nothing in revision 1, which A-12 rule N admits.
+pub const VERSION: u32 = 2;
+
+/// How many of [`TYPES`] each revision declares: revision 1 the first nineteen, revision 2 all
+/// twenty. A revision only ever appends, so a revision's types are a prefix of the list.
+const TYPES_AT: &[(u32, usize)] = &[(1, 19), (2, 20)];
 
 // ---------------------------------------------------------------------------
 // Unit types (§4.1)
@@ -75,8 +80,12 @@ pub const ACTION: &str = "x.tel/action";
 pub const SPAN: &str = "x.tel/span";
 /// Template evidence: one Drain template over a window of a log stream (§9.7, TL-P9).
 pub const LOG_TEMPLATE: &str = "x.tel/log-template";
+/// A statistic of a symbolised sample set: an entropy, a mutual information, a divergence
+/// (RFC SMYSL-5 §3). Revision 2.
+pub const INFO: &str = "x.tel/info";
 
-/// The nineteen types, in §4.1's order: seventeen, and the two TL-P9 added.
+/// The twenty types, in §4.1's order: seventeen, the two TL-P9 added, and the one revision 2
+/// added (RFC SMYSL-5).
 pub const TYPES: &[&str] = &[
     SERIES,
     SERIES_META,
@@ -97,6 +106,7 @@ pub const TYPES: &[&str] = &[
     ACTION,
     SPAN,
     LOG_TEMPLATE,
+    INFO,
 ];
 
 // ---------------------------------------------------------------------------
@@ -135,6 +145,13 @@ pub const RELATIONS: &[&str] = &[
 // ---------------------------------------------------------------------------
 // Enumerations (§4.3). All open: a value this build does not know is preserved.
 // ---------------------------------------------------------------------------
+
+/// `tel:stat` of an `x.tel/info` unit (RFC SMYSL-5 §3). `te`, transfer entropy, is reserved
+/// (§10) and is not here: until GE-I5 releases it no writer emits it, and a reader preserves
+/// one as it does any value this build does not know.
+pub const STATS: &[&str] = &["entropy", "perm-entropy", "mi", "jsd", "template-entropy"];
+/// Reserved `tel:stat` values: named so that no later statistic takes the name.
+pub const RESERVED_STATS: &[&str] = &["te"];
 
 pub const SCHEMES: &[&str] = &[
     "otel",
@@ -239,6 +256,7 @@ const INT: FieldType = FieldType::Int;
 const UID: FieldType = FieldType::Uid;
 const DEC: FieldType = FieldType::Dec;
 const DECS: FieldType = FieldType::List(&FieldType::Dec);
+const INTS: FieldType = FieldType::List(&FieldType::Int);
 
 const FROM_MS: Field = f("tel:from_ms", INT);
 const TO_MS: Field = f("tel:to_ms", INT);
@@ -409,6 +427,42 @@ pub const TYPE_DEFS: &[TypeDef] = &[
         ],
         optional: &[],
     },
+    // RFC SMYSL-5 §3. Some optional keys are required by `tel:stat` or by the recipe: `with`,
+    // `with_instrument`, `with_digest` and `lag` for `mi`; `ref_from_ms`, `ref_to_ms` and
+    // `ref_digest` for `jsd` and any `baseline` binning; `lags` and `values` for a scan. A
+    // condition a flat table cannot state, so it is stated here and checked under rule TI.
+    TypeDef {
+        ty: INFO,
+        required: &[
+            e("tel:stat", STATS),
+            OF_SERIES_UID,
+            f("tel:instrument", UID),
+            FROM_MS,
+            TO_MS,
+            RECIPE,
+            f("tel:n", INT),
+            f("tel:value", DEC),
+            DIGEST,
+        ],
+        optional: &[
+            f("tel:k", INT),
+            f("tel:mm", DEC),
+            f("tel:missing", INT),
+            f("tel:with", UID),
+            f("tel:with_instrument", UID),
+            f("tel:with_digest", FieldType::Bytes32),
+            f("tel:k_with", INT),
+            f("tel:ref_from_ms", INT),
+            f("tel:ref_to_ms", INT),
+            f("tel:ref_digest", FieldType::Bytes32),
+            f("tel:bias", DEC),
+            f("tel:lags", INTS),
+            f("tel:values", DECS),
+            f("tel:lag", INT),
+            f("tel:null_b", INT),
+            f("tel:null_ge", INT),
+        ],
+    },
 ];
 
 /// The table entry for a unit type, if `x.tel/v1` declares it.
@@ -416,7 +470,7 @@ pub fn type_def(ty: &str) -> Option<&'static TypeDef> {
     TYPE_DEFS.iter().find(|d| d.ty == ty)
 }
 
-/// Whether this schema id is one of the nineteen types.
+/// Whether this schema id is one of the twenty types.
 pub fn declares(id: &SchemaId) -> bool {
     TYPES.contains(&id.as_str())
 }
@@ -424,8 +478,16 @@ pub fn declares(id: &SchemaId) -> bool {
 /// The declaration, as a record a store can hold. `payload_shape` is absent until A-7, as
 /// `x.text/v1`'s is; infallible for the reason [`super::text::decl`] is.
 pub fn decl() -> SchemaDecl {
-    let mut d = SchemaDecl::new(SchemaId::Extension(ID.to_string()), VERSION);
-    d.types = TYPES
+    decl_at(VERSION).expect("this build declares its own revision")
+}
+
+/// The declaration of one revision, as that revision's build wrote it; `None` for a revision
+/// this build does not know. A store written before revision 2 holds revision 1's, and a
+/// later write adds the current one beside it, so the store holds the schema's history.
+pub fn decl_at(version: u32) -> Option<SchemaDecl> {
+    let (_, n) = TYPES_AT.iter().find(|(v, _)| *v == version)?;
+    let mut d = SchemaDecl::new(SchemaId::Extension(ID.to_string()), version);
+    d.types = TYPES[..*n]
         .iter()
         .map(|t| SchemaId::Extension((*t).to_string()))
         .collect();
@@ -433,7 +495,7 @@ pub fn decl() -> SchemaDecl {
         .iter()
         .map(|r| RelKind::Extension((*r).to_string()))
         .collect();
-    d
+    Some(d)
 }
 
 // ---------------------------------------------------------------------------
@@ -877,6 +939,158 @@ pub fn rule_tw_violations(unit: &UnitCore, attestations: &[crate::Attestation]) 
         if a.op != op || a.rung != rung {
             out.push(format!(
                 "attested {:?} at {:?} by {}; rule TW asks {op:?} at {rung:?}",
+                a.op, a.rung, a.agent
+            ));
+        }
+    }
+    out
+}
+
+/// What an `x.tel/info` payload says (RFC SMYSL-5 §3), read from its CBOR: the fields rule TI,
+/// the info key and recomputation need. Other fields are skipped, as rule X asks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InfoFields {
+    pub stat: Option<String>,
+    pub series: Option<String>,
+    pub instrument: Option<String>,
+    pub from_ms: Option<u64>,
+    pub to_ms: Option<u64>,
+    pub recipe: Option<String>,
+    pub n: Option<u64>,
+    pub digest: Option<[u8; 32]>,
+    pub with: Option<String>,
+    pub with_instrument: Option<String>,
+    pub with_digest: Option<[u8; 32]>,
+    pub ref_from_ms: Option<u64>,
+    pub ref_to_ms: Option<u64>,
+    pub ref_digest: Option<[u8; 32]>,
+    pub lag: Option<i64>,
+    /// `tel:lags` and `tel:values`: how many elements each holds.
+    pub lags: Option<usize>,
+    pub values: Option<usize>,
+}
+
+/// Read an info payload. `Err` names what is malformed.
+pub fn info_fields(payload: &[u8]) -> Result<InfoFields, String> {
+    use crate::cbor::major;
+    use crate::cbor::reader::Dec;
+    let mut d = Dec::new(payload);
+    let n = d.map_head().map_err(|e| format!("not a map: {e}"))?;
+    let mut f = InfoFields::default();
+    for _ in 0..n {
+        let key = d
+            .text()
+            .map_err(|e| format!("a key that is not text: {e}"))?;
+        let what = |e: crate::error::CodecError| format!("`{key}`: {e}");
+        let digest = |d: &mut Dec<'_>| -> Result<[u8; 32], String> {
+            if d.peek_major().map_err(what)? != major::BYTES {
+                return Err(format!("`{key}` is not a byte string"));
+            }
+            let b = d.bytes().map_err(what)?;
+            b.try_into()
+                .map_err(|_| format!("`{key}` is {} bytes, not 32", b.len()))
+        };
+        match key {
+            "tel:stat" => f.stat = Some(d.text().map_err(what)?.to_string()),
+            "tel:series" => f.series = Some(d.text().map_err(what)?.to_string()),
+            "tel:instrument" => f.instrument = Some(d.text().map_err(what)?.to_string()),
+            "tel:recipe" => f.recipe = Some(d.text().map_err(what)?.to_string()),
+            "tel:with" => f.with = Some(d.text().map_err(what)?.to_string()),
+            "tel:with_instrument" => f.with_instrument = Some(d.text().map_err(what)?.to_string()),
+            "tel:from_ms" => f.from_ms = Some(d.uint().map_err(what)?),
+            "tel:to_ms" => f.to_ms = Some(d.uint().map_err(what)?),
+            "tel:ref_from_ms" => f.ref_from_ms = Some(d.uint().map_err(what)?),
+            "tel:ref_to_ms" => f.ref_to_ms = Some(d.uint().map_err(what)?),
+            "tel:n" => f.n = Some(d.uint().map_err(what)?),
+            "tel:lag" => f.lag = Some(d.int().map_err(what)?),
+            "tel:digest" => f.digest = Some(digest(&mut d)?),
+            "tel:with_digest" => f.with_digest = Some(digest(&mut d)?),
+            "tel:ref_digest" => f.ref_digest = Some(digest(&mut d)?),
+            "tel:lags" | "tel:values" => {
+                let len = d.array_head().map_err(what)?;
+                for _ in 0..len {
+                    d.skip_item().map_err(what)?;
+                }
+                if key == "tel:lags" {
+                    f.lags = Some(len);
+                } else {
+                    f.values = Some(len);
+                }
+            }
+            _ => {
+                d.skip_item().map_err(what)?;
+            }
+        }
+    }
+    if !d.is_done() {
+        return Err("bytes after the map".into());
+    }
+    Ok(f)
+}
+
+/// How an `x.tel/info` unit, with these attestations, breaks rule TI (RFC SMYSL-5 §3,
+/// `SMY-E603`); empty when it does not. Any other type, nothing.
+///
+/// `derived`, attested `Op::Transformed` at `Rung::Computed`, and carrying the digest of every
+/// sample set it read: `digest` always, `with_digest` for `mi` (with `with` and
+/// `with_instrument`), `ref_digest` wherever a reference window is named. Whether its numbers
+/// are the function of those sets is recomputation's (`SMY-E604`), not this.
+pub fn rule_ti_violations(unit: &UnitCore, attestations: &[crate::Attestation]) -> Vec<String> {
+    use crate::{Op, Rung};
+    if unit.schema.as_str() != INFO {
+        return Vec::new();
+    }
+    let Some(payload) = unit.payload.as_deref() else {
+        return vec!["it has no payload".into()];
+    };
+    let f = match info_fields(payload) {
+        Ok(f) => f,
+        Err(e) => return vec![format!("its payload is not an info unit's: {e}")],
+    };
+    let mut out = Vec::new();
+    if unit.status != Status::Derived {
+        out.push(format!(
+            "a statistic is derived, not {}",
+            unit.status.as_str()
+        ));
+    }
+    if f.digest.is_none() {
+        out.push("it has no digest of the samples it read".into());
+    }
+    let stat = f.stat.as_deref().unwrap_or("");
+    if stat == "mi" {
+        for (present, what) in [
+            (f.with.is_some(), "with"),
+            (f.with_instrument.is_some(), "with_instrument"),
+            (f.with_digest.is_some(), "with_digest"),
+            (f.lag.is_some(), "lag"),
+        ] {
+            if !present {
+                out.push(format!("an mi unit has no `{what}`"));
+            }
+        }
+    } else if f.with_digest.is_some() || f.with.is_some() {
+        out.push(format!(
+            "a `{stat}` unit reads one series, and names a second"
+        ));
+    }
+    let named = f.ref_from_ms.is_some() || f.ref_to_ms.is_some();
+    if stat == "jsd" && !named {
+        out.push("a jsd unit names no reference window".into());
+    }
+    if named && (f.ref_from_ms.is_none() || f.ref_to_ms.is_none() || f.ref_digest.is_none()) {
+        out.push("its reference window lacks `ref_from_ms`, `ref_to_ms` or `ref_digest`".into());
+    }
+    if !named && f.ref_digest.is_some() {
+        out.push("it carries a `ref_digest` and names no reference window".into());
+    }
+    if f.lags != f.values {
+        out.push("a scan's `lags` and `values` differ in length, or one is absent".into());
+    }
+    for a in attestations {
+        if a.op != Op::Transformed || a.rung != Rung::Computed {
+            out.push(format!(
+                "attested {:?} at {:?} by {}; rule TI asks Transformed at Computed",
                 a.op, a.rung, a.agent
             ));
         }
@@ -1894,9 +2108,100 @@ mod tests {
         assert!(v.iter().any(|m| m.contains("is derived")), "{v:?}");
     }
 
+    /// Rule TI (RFC SMYSL-5 §3, TI-P4): a statistic is derived, transformed at the computed rung,
+    /// and carries the digest of every sample set it read.
     #[test]
-    fn nineteen_types_and_eight_relations_all_well_formed() {
-        assert_eq!(TYPES.len(), 19);
+    fn rule_ti_asks_each_sample_sets_digest() {
+        use crate::cbor::{major, writer::Enc};
+        use crate::{AgentId, Attestation, Hlc, Op, Rung};
+        // Fields in key order; a digest is 32 bytes of 7.
+        fn unit(status: Status, fields: &[(&str, &str)]) -> UnitCore {
+            let mut fs: Vec<(&str, &str)> = fields.to_vec();
+            fs.sort();
+            let mut e = Enc::new();
+            e.head(major::MAP, fs.len() as u64);
+            for (k, v) in fs {
+                e.text(k);
+                match v {
+                    "#" => e.bytes(&[7; 32]),
+                    "0" => e.uint(0),
+                    _ => e.text(v),
+                }
+            }
+            UnitCoreBuilder::new(SchemaId::Extension(INFO.to_string()), "g", status)
+                .source(SourceRef::new(SourceKind::Metric, "series:prom:x"))
+                .grounds(vec![crate::Uid::from_bytes([1; 32])])
+                .payload(e.into_bytes())
+                .build()
+                .unwrap()
+        }
+        let att = |u: &UnitCore, op, rung| {
+            let a = AgentId::new("tool:smysl-tel").unwrap();
+            Attestation::new(
+                crate::canonical_uid(u),
+                a.clone(),
+                op,
+                rung,
+                Hlc::new(1, 0, a),
+            )
+        };
+        let ent = unit(
+            Status::Derived,
+            &[("tel:stat", "entropy"), ("tel:digest", "#")],
+        );
+        let ok = att(&ent, Op::Transformed, Rung::Computed);
+        assert!(rule_ti_violations(&ent, &[ok]).is_empty());
+        let wrong = att(&ent, Op::Imported, Rung::Computed);
+        assert_eq!(rule_ti_violations(&ent, &[wrong]).len(), 1);
+        let measured = unit(
+            Status::Measured,
+            &[("tel:stat", "entropy"), ("tel:digest", "#")],
+        );
+        assert_eq!(rule_ti_violations(&measured, &[]).len(), 1);
+        let bare = unit(Status::Derived, &[("tel:stat", "entropy")]);
+        let v = rule_ti_violations(&bare, &[]);
+        assert!(v.iter().any(|m| m.contains("no digest")), "{v:?}");
+
+        let mi = |with_digest: bool| {
+            let mut f = vec![
+                ("tel:stat", "mi"),
+                ("tel:digest", "#"),
+                ("tel:with", "b3:x"),
+                ("tel:with_instrument", "b3:y"),
+                ("tel:lag", "0"),
+            ];
+            if with_digest {
+                f.push(("tel:with_digest", "#"));
+            }
+            unit(Status::Derived, &f)
+        };
+        assert!(rule_ti_violations(&mi(true), &[]).is_empty());
+        let v = rule_ti_violations(&mi(false), &[]);
+        assert!(v.iter().any(|m| m.contains("with_digest")), "{v:?}");
+        let jsd = unit(Status::Derived, &[("tel:stat", "jsd"), ("tel:digest", "#")]);
+        assert_eq!(rule_ti_violations(&jsd, &[]).len(), 1);
+        let jsd = unit(
+            Status::Derived,
+            &[
+                ("tel:stat", "jsd"),
+                ("tel:digest", "#"),
+                ("tel:ref_from_ms", "0"),
+                ("tel:ref_to_ms", "0"),
+            ],
+        );
+        let v = rule_ti_violations(&jsd, &[]);
+        assert!(v.iter().any(|m| m.contains("ref_digest")), "{v:?}");
+        // Another type is not rule TI's.
+        assert!(rule_ti_violations(&tel_series(), &[]).is_empty());
+    }
+
+    fn tel_series() -> UnitCore {
+        series("prom", "up").unwrap()
+    }
+
+    #[test]
+    fn twenty_types_and_eight_relations_all_well_formed() {
+        assert_eq!(TYPES.len(), 20);
         assert_eq!(RELATIONS.len(), 8);
         assert!(SchemaId::parse(ID).is_ok());
         for t in TYPES {
@@ -1907,6 +2212,37 @@ mod tests {
             let k = RelKind::parse(r).expect("a well-formed kind");
             assert!(matches!(k, RelKind::Extension(_)), "{r}");
         }
+    }
+
+    #[test]
+    fn revision_two_adds_info_and_keeps_revision_one() {
+        let one = decl_at(1).expect("revision 1");
+        assert_eq!((one.version, one.types.len()), (1, 19));
+        assert!(!one.types.iter().any(|t| t.as_str() == INFO));
+        let two = decl_at(2).expect("revision 2");
+        assert_eq!(two, decl());
+        assert_eq!(two.types[..19], one.types[..]);
+        assert_eq!(two.types.last().map(SchemaId::as_str), Some(INFO));
+        assert_eq!(two.relations, one.relations);
+        assert!(decl_at(0).is_none() && decl_at(3).is_none());
+
+        // A store a 1.17 build wrote holds revision 1; a later write adds revision 2 beside it.
+        // Rule N reads the pair as a history that only added.
+        let mut report = crate::diag::Report::new();
+        let set = crate::schema::SchemaSet::from_decls([&one, &two], &mut report);
+        let id = SchemaId::parse(ID).unwrap();
+        assert_eq!(set.check_rule_n(&id, &mut report), 0, "{report:?}");
+        assert!(report.iter().all(|d| !d.is_error()), "{report:?}");
+        assert_eq!(set.current(&id).map(|r| r.version), Some(2));
+    }
+
+    #[test]
+    fn te_is_reserved_and_not_written() {
+        assert!(!STATS.contains(&"te"));
+        assert!(RESERVED_STATS.contains(&"te"));
+        let stat = type_def(INFO).unwrap().field("tel:stat").unwrap();
+        assert!(!stat.admits_literally("te"));
+        assert!(stat.admits_literally("mi"));
     }
 
     #[test]

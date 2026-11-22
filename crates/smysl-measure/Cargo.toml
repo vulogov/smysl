@@ -38,8 +38,9 @@ smysl-pack = { workspace = true }
 # Every transcendental a result depends on goes through `libm`, never the platform's: glibc's
 # `ln` and this crate disagree in the last bit for 2% of inputs (SMYSL-2.6 §2.9), and a last bit
 # is enough to move a fixed-point payload number. Pinned exactly, with `arch` intrinsics off,
-# because an upgrade that changes one result is a new measure version, never a silent one.
-libm = { version = "=0.2.16", default-features = false }
+# because an upgrade that changes one result is a new measure version, never a silent one. The
+# pin is the workspace's since SMYSL-5, shared with `smysl-tel`.
+libm = { workspace = true }
 # The bootstrap generator (§3.5). `rand_core` without `os_rng` brings no `getrandom`, so this
 # crate has no way to draw an unseeded number — which is the property, not a side effect.
 rand_chacha = { version = "0.9", default-features = false }

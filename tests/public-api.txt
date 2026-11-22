@@ -288,6 +288,7 @@ pub use smysl::attest
 pub use smysl::attest
 pub use smysl::build_ir
 pub use smysl::build_provider
+pub use smysl::bund
 pub use smysl::canonical_uid
 pub use smysl::ceiling
 pub use smysl::check

@@ -24,6 +24,8 @@ pub mod detect;
 pub mod diff;
 pub mod drain;
 pub mod evidence;
+pub(crate) mod exact;
+pub mod info;
 pub mod instruments;
 pub mod investigate;
 pub mod jcs;

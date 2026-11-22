@@ -794,10 +794,103 @@ model reading a description of the same units. So similarity does not depend on 
 The simulated incidents name things by the same identifiers each time, which favours sets.
 Renamed series and alerts in other words are what real incident data would test.
 
+#section("Information measures (1.18)")
+
+A detector says *where* a series changed. An information measure says how much a window's
+values are spread out, how far two windows' distributions are apart, or how much one series
+tells about another. RFC SMYSL-5 adds five, each stated as an `x.tel/info` unit, `derived`,
+from a recipe like a detector's:
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Recipe], [`tel:stat`], [Says]),
+    ([`ent/1`], [`entropy`], [How spread out a window's binned values are, in bits.]),
+    ([`perm/1`], [`perm-entropy`], [How varied the order of successive values is: noise is near log#sub[2] m!, a constant 0.]),
+    ([`jsd/1`], [`jsd`], [How far a window's distribution is from a reference window's: 0 when they are one, 1 bit at most.]),
+    ([`mi/1`], [`mi`], [How much one series tells about another at a lag, or the best of a scan of lags, with surrogates to say whether chance would do as well.]),
+    ([`tent/1`], [`template-entropy`], [How spread out a log stream's templates are over a window.]),
+  ),
+)
+
+A series is first put on a grid of one value per `step`, and its values are binned into
+symbols, all in exact decimal arithmetic. Only the final sum over counts uses floating point,
+through one pinned maths library, and the result is stored at six places. So `tel info` gives
+the same unit on every machine, which GE-I1 checks on the four CI platforms.
+
+Over GE-M3's series, the last two hours of cpu are far from the first two, binned at the first
+two hours' quartiles, and latency's are not:
+
+#screen(caption: "$ smysl tel info jsd.hjson --series 'otel:{…ge_m3_cpu…}' --series 'otel:{…ge_m3_latency…}' --during 1768557600000-1768564800000 -s lib --at 1768564800000 --yes")[
+```
+x.tel/info        b3:uzewadeticaiijqgvpdg2ozygzxbhhfysb54grrbaio2ffjepevq  jsd {…ge_m3_cpu…}
+    value 0.284594 bits, n 120, k 4
+x.tel/info        b3:4vhizgivrwzfqgny3nf2cuc6rpxvmcp2ap25kwarlcpipvegg5aa  jsd {…ge_m3_latency…}
+    value 0.012115 bits, n 120, k 4
+info      jsd/1?bins=baseline:4&cover=4/5&hold=60000&min_n=100&of=value&ref=1768550400000-…: 2 unit(s), 0 refused
+2 record(s) committed
+```
+]
+
+The recipe text the unit stores writes every parameter, the defaults included, so it says
+exactly what was computed. Here the file was
+`{ stat: jsd/1, step: 60000, bins: "baseline:4", ref: "1768550400000-1768557600000", min_n: 100 }`.
+
+A mutual information is easy to over-read. Two series of plain noise share some, by chance,
+and more the more symbols there are. So `mi/1` stores a bias term beside its value, and with
+`null: B` it rotates the second series by `B` seeded offsets and counts how many did as well.
+cpu and latency are independent here, and the scan says so:
+
+#screen(caption: "$ smysl tel info mi.hjson --series 'otel:{…ge_m3_cpu…}' --with 'otel:{…ge_m3_latency…}' --during 1768550400000-1768564800000 -s lib --at 1768564800000 --yes")[
+```
+x.tel/info        b3:zjwwj5yjj7eqbtch6dvn7tak3iii5e5dxlogw5apl2xakwomwiuq  mi {…ge_m3_cpu…} ~ {…ge_m3_latency…}
+    value 0.050135 bits, at lag -1, bias 0.027164, n 239, k 4, k_with 4, 114 of 200 surrogates at least as high
+    by lag -5:0.022187 -4:0.018284 -3:0.038701 -2:0.042784 -1:0.050135 0:0.020149 1:0.02754 …
+info      mi/1?bins=rank:4&cover=4/5&guard=1/10&hold=60000&lag=-5..5&min_n=80&null=200&of=value&seed=7&step=60000: 1 unit(s), 0 refused
+1 record(s) committed
+```
+]
+
+*Which way?* A mutual information has no direction. Transfer entropy has one, and it was
+tried and not released. GE-I5 simulated pairs where one series drives the other, and pairs
+that one hidden series drives together. Transfer entropy named the right direction in every
+driven pair. It also named a direction in about nine of ten pairs with a common driver, where
+there is none to name. So `te/1` stays reserved, and `tel info` refuses it.
+
+A window with too few values for its recipe is refused (`SMY-W703`) and writes nothing. A
+counter read as a level, or a log stream read as a metric, is `SMY-E701`.
+
+*Rule TI.* A statistic is `derived`, attested as transformed at the computed rung, and carries
+the digest of every sample set it read: its window's, the second series' for `mi/1`, the
+reference window's for `jsd/1`. `tel check` holds each statistic to the rule (`SMY-E603`) and
+recomputes it from the substrate, as it does windows:
+
+#screen(caption: "$ smysl tel check -s lib")[
+```
+checked   0 window(s) and 3 statistic(s): 0 error(s), 0 warning(s); 0 rival explanation(s), 0 witness conflict(s)
+```
+]
+
+A sample that arrives late, inside a statistic's window, makes it `SMY-E604` on its digest. It
+is still true of the samples it read, and a second unit over the new set stands beside it;
+units of one key over different sample sets are `SMY-W614`. Once the samples are evicted, a
+statistic is `SMY-W605` and nothing worse. A template entropy is recomputed from its template
+units, so it outlives its log records for as long as its templates are kept.
+
+*Quoting a statistic.* A hypothesis may quote a statistic's `value`, `mm`, `bias`, `n`, `k`,
+`null_ge` or `null_b`, or one lag's value as `values[i]`, and rule TQ verifies the quote against
+the unit. A quote gives the stored six places: `…#value=0.284594` verifies, and `…#value=0.28`
+is `SMY-W606`. The dossier that `tel investigate show` prints lists each statistic among the
+evidence with its value, its `n`, and its surrogates.
+
+`cargo run --features tel --example tel_info` runs all of this over GE-M3's four series,
+and `make oko-ledger` quotes two statistics in a rotation's ledger, once rightly and once
+rounded.
+
 #callout(label: "Not yet")[
   This part covers object snapshots, the series substrate, window evidence, detectors,
   investigations, instrument lineage, witness counting, witness conflicts, eviction, exchanging
-  the substrate, traces, logs and similar episodes. The RFC's experiments on real data are
+  the substrate, traces, logs, similar episodes and information measures. The RFC's experiments on real data are
   still to run. So are:
   - ConfigMaps, whose values a profile cannot yet hide;
   - a generic JSON object profile;

@@ -4,7 +4,7 @@ exclude  = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
-version      = "1.17.0"
+version      = "1.18.0"
 edition      = "2021"
 # The floor the nine pure-path crates actually build at, measured rather than declared:
 # `blake3` pulls `constant_time_eq` 0.4.2, whose manifest is edition 2024, so a Cargo older
@@ -19,28 +19,34 @@ authors      = ["Vladimir Ulogov"]
 repository   = "https://github.com/vulogov/smysl"
 
 [workspace.dependencies]
-smysl-core     = { path = "crates/smysl-core",     version = "1.17.0" }
-smysl-graph    = { path = "crates/smysl-graph",    version = "1.17.0" }
-smysl-check    = { path = "crates/smysl-check",    version = "1.17.0" }
-smysl-pack     = { path = "crates/smysl-pack",     version = "1.17.0" }
-smysl-thread   = { path = "crates/smysl-thread",   version = "1.17.0" }
-smysl-render   = { path = "crates/smysl-render",   version = "1.17.0" }
-smysl-retrieve = { path = "crates/smysl-retrieve", version = "1.17.0" }
-smysl-embed    = { path = "crates/smysl-embed",    version = "1.17.0" }
-smysl-embed-candle = { path = "crates/smysl-embed-candle", version = "1.17.0" }
-smysl-provider = { path = "crates/smysl-provider", version = "1.17.0" }
-smysl-ingest   = { path = "crates/smysl-ingest",   version = "1.17.0", default-features = false }
-smysl-tui      = { path = "crates/smysl-tui",      version = "1.17.0" }
-smysl-text     = { path = "crates/smysl-text",     version = "1.17.0" }
-smysl-query    = { path = "crates/smysl-query",    version = "1.17.0" }
-smysl-measure  = { path = "crates/smysl-measure",  version = "1.17.0" }
-smysl-lib      = { path = "crates/smysl-lib",      version = "1.17.0" }
-smysl-tel      = { path = "crates/smysl-tel",      version = "1.17.0" }
-smysl-series   = { path = "crates/smysl-series",   version = "1.17.0" }
+smysl-core     = { path = "crates/smysl-core",     version = "1.18.0" }
+smysl-graph    = { path = "crates/smysl-graph",    version = "1.18.0" }
+smysl-check    = { path = "crates/smysl-check",    version = "1.18.0" }
+smysl-pack     = { path = "crates/smysl-pack",     version = "1.18.0" }
+smysl-thread   = { path = "crates/smysl-thread",   version = "1.18.0" }
+smysl-render   = { path = "crates/smysl-render",   version = "1.18.0" }
+smysl-retrieve = { path = "crates/smysl-retrieve", version = "1.18.0" }
+smysl-embed    = { path = "crates/smysl-embed",    version = "1.18.0" }
+smysl-embed-candle = { path = "crates/smysl-embed-candle", version = "1.18.0" }
+smysl-provider = { path = "crates/smysl-provider", version = "1.18.0" }
+smysl-ingest   = { path = "crates/smysl-ingest",   version = "1.18.0", default-features = false }
+smysl-tui      = { path = "crates/smysl-tui",      version = "1.18.0" }
+smysl-text     = { path = "crates/smysl-text",     version = "1.18.0" }
+smysl-query    = { path = "crates/smysl-query",    version = "1.18.0" }
+smysl-measure  = { path = "crates/smysl-measure",  version = "1.18.0" }
+smysl-lib      = { path = "crates/smysl-lib",      version = "1.18.0" }
+smysl-tel      = { path = "crates/smysl-tel",      version = "1.18.0" }
+smysl-series   = { path = "crates/smysl-series",   version = "1.18.0" }
+smysl-bund     = { path = "crates/smysl-bund",     version = "1.18.0" }
 
 # `pure` keeps the C SIMD backend out of the build: zero C in the core path (§13).
 blake3                = { version = "1", default-features = false, features = ["std", "pure"] }
 unicode-normalization = "0.1"
+# Every transcendental a stored number depends on, in `smysl-measure` and in `smysl-tel`'s
+# information measures (RFC SMYSL-5 D-I4). One pin for both, so that the two crates cannot
+# compute one logarithm two ways: an upgrade that moves a result is a new recipe version, never
+# a silent one. `arch` intrinsics off with the default features.
+libm                  = { version = "=0.2.16", default-features = false }
 deser-hjson           = "2"
 clap                  = { version = "4", features = ["derive"] }
 ratatui               = "0.29"
@@ -182,6 +188,11 @@ required-features = ["cli", "ingest"]
 name              = "oko_ledger"
 required-features = ["tel"]
 
+# RFC SMYSL-5 (TI-P4): information measures over GE-M3's series, and their recomputation.
+[[example]]
+name              = "tel_info"
+required-features = ["tel"]
+
 # GE-M9 (RFC SMYSL-3 §14, rule TL): six months, evicted, exported, imported and merged with a
 # peer that kept them. `make ge-m9`.
 [[example]]
@@ -257,6 +268,12 @@ lang-detect = ["text", "smysl-text/detect"]
 # force at t". `redb` is pinned for both, so this adds a feature of a crate already pinned, and
 # `prost` for `otlp/1`.
 tel       = ["dep:smysl-tel", "dep:smysl-series", "smysl-series/store-redb", "smysl-tel/reader-otlp", "text", "stage"]
+# The Bund2 bridge (RFC SMYSL-4): `smysl::bund` and `smysl bund`. Off by default, and out of
+# `cli`, for the reason `tui` is out of the default: it is a command that needs a program this
+# build does not ship, `bund2` built with `--features smysl`, and in a sandbox only where the
+# platform has one. `text`, because a script reads a library, and the bridge writes its
+# snapshot as one.
+bund      = ["dep:smysl-bund", "text", "cli"]
 # The substrate index's backing store (SMYSL-2.4 §3.8). Off by default, and the default is the
 # decision rather than an oversight: it puts `redb` in the tree of a binary that runs perfectly
 # well without it, and what it buys shows up on a corpus large enough for 1.1 KB a unit to
@@ -266,7 +283,7 @@ tel       = ["dep:smysl-tel", "dep:smysl-series", "smysl-series/store-redb", "sm
 substrate-redb = ["text", "smysl-text/substrate-redb"]
 # The unit store on disk (SMYSL-2.8 §3.5): `smysl::redb::RedbStore`, a `StoreRead` whose cores
 # stay in the log until asked for. Off by default for the reason `substrate-redb` is.
-store-redb = ["smysl-graph/store-redb", "smysl-text?/store-redb"]
+store-redb = ["smysl-graph/store-redb", "smysl-text?/store-redb", "smysl-bund?/store-redb"]
 tui       = ["dep:smysl-tui", "cli"]
 # Semantic retrieval. Off by default: it needs a model file the operator supplies, and a
 # build that cannot use one should not pay for `tokenizers` in its dependency tree.
@@ -320,6 +337,8 @@ smysl-lib      = { workspace = true, optional = true }
 smysl-tel      = { workspace = true, optional = true }
 # The series substrate (RFC SMYSL-3 §19), for `tel read`'s series readers and `tel at`.
 smysl-series   = { workspace = true, optional = true }
+# The Bund2 bridge (RFC SMYSL-4), for `smysl bund`. It links no Bund2 crate: it runs `bund2`.
+smysl-bund     = { workspace = true, optional = true }
 smysl-thread   = { workspace = true }
 smysl-render   = { workspace = true }
 smysl-provider = { workspace = true, optional = true }

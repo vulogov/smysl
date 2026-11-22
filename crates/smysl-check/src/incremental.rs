@@ -48,7 +48,7 @@ use smysl_core::diag::{Code, Diagnostic, Report, Subject};
 use smysl_core::{GranularityProfile, Record, RelKind, Uid, UidPrefix};
 use smysl_graph::{Overlay, StoreRead};
 
-use crate::passes::extension::{w609, w614, window_key, WindowKey};
+use crate::passes::extension::{evidence_key, w609, w614, EvidenceKey};
 use crate::passes::{self, Scope};
 use crate::{check, CheckOptions, Pass};
 
@@ -138,8 +138,8 @@ struct Derived {
     grounded_by: BTreeMap<Uid, BTreeSet<Uid>>,
     /// The `b3:` tokens in unit bodies, with the unit whose body holds each.
     tokens: Vec<(UidPrefix, Uid)>,
-    /// `SMY-W614`'s window keys and their digests.
-    windows: BTreeMap<WindowKey, BTreeSet<[u8; 32]>>,
+    /// `SMY-W614`'s window and info keys, and the sample sets of each.
+    windows: BTreeMap<EvidenceKey, BTreeSet<[u8; 32]>>,
     /// Units with an `x.tel/measured-by` from them, withdrawn ones included (`SMY-W609`).
     measured: BTreeSet<Uid>,
     /// Relations a withdrawal names.
@@ -227,7 +227,7 @@ impl Derived {
                 }
             }
         }
-        if let Some((key, digest)) = window_key(core) {
+        if let Some((key, digest)) = evidence_key(core) {
             self.windows.entry(key).or_default().insert(digest);
         }
     }
@@ -672,10 +672,10 @@ impl Checked {
 
     /// `SMY-W614`, recounted for the keys the batch adds a digest to.
     fn windows(&self, fresh: &[Record], out: &mut Report) {
-        let mut grown: BTreeMap<WindowKey, BTreeSet<[u8; 32]>> = BTreeMap::new();
+        let mut grown: BTreeMap<EvidenceKey, BTreeSet<[u8; 32]>> = BTreeMap::new();
         for r in fresh {
             if let Record::Unit(core) = r {
-                if let Some((key, digest)) = window_key(core) {
+                if let Some((key, digest)) = evidence_key(core) {
                     grown.entry(key).or_default().insert(digest);
                 }
             }

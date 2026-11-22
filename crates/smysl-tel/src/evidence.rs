@@ -30,8 +30,6 @@
 //! payload with a `dec` beyond `i64` already does: it is committed, exported and merged, and a
 //! surface rendering omits it and says so.
 
-use std::cmp::Ordering;
-
 use smysl_core::cbor::major;
 use smysl_core::cbor::writer::Enc;
 use smysl_core::schemas::tel;
@@ -40,6 +38,7 @@ use smysl_core::{
 };
 use smysl_series::{flags, Backend, Sample, Substrate};
 
+use crate::exact::BigDec;
 use crate::scrape::numeric_cmp;
 use crate::sketch::{Mapping, Sketch, SketchError};
 
@@ -127,203 +126,6 @@ pub fn summarize(samples: &[Sample]) -> Summary {
     }
     out.mean = Decimal::from_f64(exact.div_to_f64(out.count)).ok();
     out
-}
-
-// ---------------------------------------------------------------------------------------------
-// The exact sum
-// ---------------------------------------------------------------------------------------------
-
-/// A signed decimal `± digits × 10^exp`, digits least significant first.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct BigDec {
-    negative: bool,
-    digits: Vec<u8>,
-    exp: i32,
-}
-
-impl BigDec {
-    /// The exact sum of `values`.
-    fn sum(values: &[Decimal]) -> BigDec {
-        let exp = values
-            .iter()
-            .map(|v| i32::from(v.exponent()))
-            .min()
-            .unwrap_or(0);
-        // Most windows fit 128 bits: a counter, a gauge with two decimals. Checked, so the first
-        // overflow falls through to the digits, and the result is the same either way.
-        let fast = values.iter().try_fold(0i128, |acc, v| {
-            let mut m = v.mantissa();
-            for _ in 0..(i32::from(v.exponent()) - exp) {
-                m = m.checked_mul(10)?;
-            }
-            acc.checked_add(m)
-        });
-        if let Some(total) = fast {
-            let mut digits = Vec::new();
-            let mut m = total.unsigned_abs();
-            while m > 0 {
-                digits.push((m % 10) as u8);
-                m /= 10;
-            }
-            return BigDec {
-                negative: total < 0,
-                digits,
-                exp,
-            };
-        }
-        let mut acc = BigDec {
-            negative: false,
-            digits: Vec::new(),
-            exp,
-        };
-        for v in values {
-            let shift = (i32::from(v.exponent()) - exp) as usize;
-            let mut digits = vec![0u8; shift];
-            let mut m = v.mantissa().unsigned_abs();
-            while m > 0 {
-                digits.push((m % 10) as u8);
-                m /= 10;
-            }
-            acc.add(v.mantissa() < 0, &digits);
-        }
-        acc.trim();
-        acc
-    }
-
-    fn add(&mut self, negative: bool, digits: &[u8]) {
-        if self.negative == negative || self.digits.is_empty() {
-            if self.digits.is_empty() {
-                self.negative = negative;
-            }
-            let mut carry = 0u8;
-            let n = self.digits.len().max(digits.len());
-            self.digits.resize(n, 0);
-            for (i, slot) in self.digits.iter_mut().enumerate() {
-                let d = *slot + digits.get(i).copied().unwrap_or(0) + carry;
-                *slot = d % 10;
-                carry = d / 10;
-            }
-            if carry > 0 {
-                self.digits.push(carry);
-            }
-        } else {
-            // Opposite signs: the larger magnitude minus the smaller, with its sign.
-            let (big, small, sign) = match cmp_mag(&self.digits, digits) {
-                Ordering::Less => (digits.to_vec(), self.digits.clone(), negative),
-                _ => (self.digits.clone(), digits.to_vec(), self.negative),
-            };
-            let mut out = big;
-            let mut borrow = 0i8;
-            for (i, slot) in out.iter_mut().enumerate() {
-                let mut d = *slot as i8 - small.get(i).copied().unwrap_or(0) as i8 - borrow;
-                borrow = 0;
-                if d < 0 {
-                    d += 10;
-                    borrow = 1;
-                }
-                *slot = d as u8;
-            }
-            self.digits = out;
-            self.negative = sign;
-        }
-        self.trim();
-    }
-
-    /// Drop leading zeros; zero is non-negative.
-    fn trim(&mut self) {
-        while self.digits.last() == Some(&0) {
-            self.digits.pop();
-        }
-        if self.digits.is_empty() {
-            self.negative = false;
-        }
-    }
-
-    /// The digits, most significant first, as text; `"0"` for zero.
-    fn text(&self) -> String {
-        if self.digits.is_empty() {
-            return "0".into();
-        }
-        self.digits
-            .iter()
-            .rev()
-            .map(|d| (b'0' + d) as char)
-            .collect()
-    }
-
-    /// As a `dec`, if it is one (§5.2's range).
-    fn to_dec(&self) -> Option<Decimal> {
-        if self.digits.is_empty() {
-            return Some(Decimal::ZERO);
-        }
-        let zeros = self.digits.iter().take_while(|d| **d == 0).count();
-        let m: i128 = self.digits[zeros..]
-            .iter()
-            .rev()
-            .try_fold(0i128, |m, d| m.checked_mul(10)?.checked_add(i128::from(*d)))?;
-        let m = if self.negative { -m } else { m };
-        Decimal::new(m, i64::from(self.exp) + zeros as i64).ok()
-    }
-
-    /// Rounded once to binary64, half to even.
-    fn to_f64(&self) -> f64 {
-        let sign = if self.negative { "-" } else { "" };
-        format!("{sign}{}e{}", self.text(), self.exp)
-            .parse()
-            .unwrap_or(f64::NAN)
-    }
-
-    /// `self / n`, rounded once to binary64, half to even: the quotient to 800 significant
-    /// digits and a sticky digit (see the module comment). `NaN` for `n = 0`.
-    fn div_to_f64(&self, n: u64) -> f64 {
-        if n == 0 {
-            return f64::NAN;
-        }
-        const SIGNIFICANT: usize = 800;
-        let n = u128::from(n);
-        let mut quotient = String::new();
-        let mut rem: u128 = 0;
-        let mut significant = 0usize;
-        let mut frac = 0i64;
-        let mut digits = self.digits.iter().rev().copied().peekable();
-        loop {
-            let (d, integer) = match digits.next() {
-                Some(d) => (d, true),
-                None if rem == 0 || significant >= SIGNIFICANT => break,
-                None => (0, false),
-            };
-            if !integer {
-                frac += 1;
-            }
-            rem = rem * 10 + u128::from(d);
-            let q = (rem / n) as u8;
-            rem %= n;
-            if q != 0 || significant > 0 {
-                quotient.push((b'0' + q) as char);
-                significant += 1;
-            } else if !integer {
-                quotient.push('0');
-            }
-        }
-        if rem != 0 {
-            quotient.push('1');
-            frac += 1;
-        }
-        if quotient.is_empty() {
-            quotient.push('0');
-        }
-        let sign = if self.negative { "-" } else { "" };
-        format!("{sign}{quotient}e{}", i64::from(self.exp) - frac)
-            .parse()
-            .unwrap_or(f64::NAN)
-    }
-}
-
-fn cmp_mag(a: &[u8], b: &[u8]) -> Ordering {
-    let len = |d: &[u8]| d.len() - d.iter().rev().take_while(|x| **x == 0).count();
-    let (la, lb) = (len(a), len(b));
-    la.cmp(&lb)
-        .then_with(|| a[..la].iter().rev().cmp(b[..lb].iter().rev()))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -696,15 +498,20 @@ pub fn materialise_sketched<B: Backend>(
 /// is not recomputed; neither is reported.
 ///
 /// Span and template units (TL-P9, §9.8) are recomputed too, by [`crate::trace::verify`] and
-/// [`crate::logs::verify`].
+/// [`crate::logs::verify`], and info units (RFC SMYSL-5 §7) by [`crate::info::verify::verify`],
+/// `tent/1`'s from the template units among `windows`.
 pub fn verify<'a, B: Backend>(
     windows: impl IntoIterator<Item = &'a UnitCore>,
     substrate: &Substrate<B>,
 ) -> Vec<smysl_core::Diagnostic> {
     use smysl_core::{Code, Diagnostic};
     let mut out = Vec::new();
-    let (mut spans, mut templates) = (Vec::new(), Vec::new());
+    let (mut spans, mut templates, mut infos) = (Vec::new(), Vec::new(), Vec::new());
     for unit in windows {
+        if unit.schema.as_str() == tel::INFO {
+            infos.push(unit);
+            continue;
+        }
         if unit.schema.as_str() == tel::SPAN {
             spans.push(unit);
             continue;
@@ -800,6 +607,7 @@ pub fn verify<'a, B: Backend>(
         )));
     }
     out.extend(crate::trace::verify(spans, substrate));
+    out.extend(crate::info::verify::verify(infos, &templates, substrate));
     out.extend(crate::logs::verify(templates, substrate));
     out
 }

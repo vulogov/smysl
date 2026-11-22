@@ -1,0 +1,2 @@
+// Quartile bins from the first hour.
+{ stat: ent/1, step: 60000, bins: "baseline:4", ref: "1768550400000-1768554000000" }

@@ -1,0 +1,34 @@
+[package]
+name        = "smysl-bund"
+description = "smysl's Bund2 bridge (RFC SMYSL-4): programmable queries and logic over a library, run in a separate bund2 process"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+# Set on every published crate, as the others do, so a feature added later is documented.
+[package.metadata.docs.rs]
+all-features = true
+
+# A boundary crate (RFC SMYSL-4 §2): it starts a process and reads a clock, so it is not on
+# `xtask check-purity`'s pure list, and no pure crate may depend on it. It links no Bund2 crate
+# (D-B1): Bund2 is reached through the `bund2` binary and `smysl/1.0` only.
+[features]
+default = []
+# Read a library whose shards were migrated to redb (`lib migrate`). The snapshot itself is
+# always CBOR logs, since the `bund2` it is written for reads smysl 1.15 without redb (§4).
+store-redb = ["smysl-text/store-redb"]
+
+[dependencies]
+smysl-core  = { workspace = true }
+smysl-graph = { workspace = true }
+smysl-query = { workspace = true }
+smysl-text  = { workspace = true }
+# The snapshot's private directory, removed on every path out, a panic included (§4.1).
+tempfile = "3"
+
+[dev-dependencies]
+smysl-text = { workspace = true, features = ["reader-txt"] }
+tempfile = "3"

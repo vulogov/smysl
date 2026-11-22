@@ -968,12 +968,14 @@ declaration key 4 remains opaque CBOR that no implementation reads (§3.1).
 
 ### 5.2 `x.tel/v1` and `dec`
 
-`x.tel/v1`, revision 1, for telemetry study (RFC SMYSL-3 §4):
+`x.tel/v1`, revision 2, for telemetry study (RFC SMYSL-3 §4) and information measures over it
+(RFC SMYSL-5 §3):
 
 - **Types**: `x.tel/series`, `x.tel/series-meta`, `x.tel/instrument`, `x.tel/instrument-meta`,
   `x.tel/change`, `x.tel/recreate`, `x.tel/reset`, `x.tel/stale`, `x.tel/window`,
   `x.tel/segment`, `x.tel/anomaly`, `x.tel/alert`, `x.tel/episode`, `x.tel/hypothesis`,
-  `x.tel/investigation`, `x.tel/probe`, `x.tel/action`, `x.tel/span`, `x.tel/log-template`.
+  `x.tel/investigation`, `x.tel/probe`, `x.tel/action`, `x.tel/span`, `x.tel/log-template`,
+  `x.tel/info`.
 - **Relation kinds**: `x.tel/of-series`, `x.tel/via`, `x.tel/measured-by`,
   `x.tel/same-quantity`, `x.tel/during`, `x.tel/explains`, `x.tel/consulted`, `x.tel/precedes`.
 - **Payload keys**: `tel:scheme`, `tel:key`, `tel:name`, `tel:unit`, `tel:kind`, `tel:of`,
@@ -986,7 +988,18 @@ declaration key 4 remains opaque CBOR that no implementation reads (§3.1).
   `tel:label`, `tel:claim`, `tel:quotes`, `tel:target`, `tel:question`, `tel:opened_ms`,
   `tel:rotation`, `tel:closed_ms`, `tel:what`, `tel:output`, `tel:confirmed_by`, `tel:trace`,
   `tel:span_id`, `tel:start_ms`, `tel:end_ms`, `tel:parent`, `tel:span_kind`, `tel:status`,
-  `tel:service`, `tel:template`.
+  `tel:service`, `tel:template`, `tel:stat`, `tel:n`, `tel:value`, `tel:k`, `tel:mm`,
+  `tel:missing`, `tel:with`, `tel:with_instrument`, `tel:with_digest`, `tel:k_with`,
+  `tel:ref_from_ms`, `tel:ref_to_ms`, `tel:ref_digest`, `tel:bias`, `tel:lags`, `tel:values`,
+  `tel:lag`, `tel:null_b`, `tel:null_ge`.
+
+**Revisions.** Revision 1 (1.17) declared the first nineteen types. Revision 2 (1.18) adds
+`x.tel/info` and the keys from `tel:stat` on, and changes the meaning of nothing in revision 1,
+as A-12 rule N requires. A store a revision-1 build wrote holds revision 1's declaration, and a
+revision-2 build that writes to it adds revision 2's beside it; a revision-1 reader preserves an
+`x.tel/info` unit under rule X. `fixtures/wire/F16-telemetry-info.cbor` holds both declarations
+and two info units with every key between them. The `tel:stat` value `te` is reserved (RFC
+SMYSL-5 §10): a writer MUST NOT emit it, and a reader preserves it as any unknown enum value.
 
 The RFC names its fields without the `tel:` prefix. The prefix is this document's, as `text:` is
 `x.text/v1`'s, because a payload key that is a unit header word has no surface spelling.

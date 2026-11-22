@@ -435,6 +435,11 @@ pub use smysl_tel as tel;
 #[cfg(feature = "tel")]
 pub use smysl_series as series;
 
+/// The Bund2 bridge (RFC SMYSL-4): a Bund2 script over a snapshot of a store or a library, run
+/// in a separate `bund2` process, sandboxed where the platform allows. Behind `bund`.
+#[cfg(feature = "bund")]
+pub use smysl_bund as bund;
+
 /// The crate version, as a convenience for embedders recording provenance.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -592,8 +597,10 @@ mod tests {
         // `SMY-W615` and `SMY-W616` (TL-P4 step 1), window evidence and samples; 169 with
         // `SMY-E603`, `SMY-E604` and `SMY-W605` (step 3), rule TW and recomputation; 170 with
         // `SMY-W606` (TL-P6 step 2), rule TQ; 171 with `SMY-W609` (TL-P7 step 1), a series with
-        // no origin instrument; 172 with `SMY-W617` (TL-P9 step 2), one span id held twice.
-        assert_eq!(Code::ALL.len(), 172);
+        // no origin instrument; 172 with `SMY-W617` (TL-P9 step 2), one span id held twice;
+        // 176 with `SMY-E701`, `SMY-E702`, `SMY-W703` and `SMY-W704` (1.18, SMYSL-5 TI-P0),
+        // information measures over telemetry, in a sixteenth group.
+        assert_eq!(Code::ALL.len(), 176);
         assert_eq!(Code::E030.severity(), Severity::Error);
     }
 
@@ -654,7 +661,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "1.17.0");
+        assert_eq!(VERSION, "1.18.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

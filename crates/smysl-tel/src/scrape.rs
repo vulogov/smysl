@@ -410,33 +410,9 @@ fn seconds_to_ms(v: Decimal) -> Option<u64> {
     u64::try_from(m).ok()
 }
 
-/// Numeric order of two decimals, exactly: `Decimal`'s own `Ord` is not numeric.
-pub fn numeric_cmp(a: &Decimal, b: &Decimal) -> Ordering {
-    let sign = |d: &Decimal| d.mantissa().signum();
-    match sign(a).cmp(&sign(b)) {
-        Ordering::Equal => {}
-        o => return o,
-    }
-    if sign(a) == 0 {
-        return Ordering::Equal;
-    }
-    // Same sign: compare magnitudes by their leading digit's power, then digit by digit.
-    let mag = |d: &Decimal| {
-        let digits = d.mantissa().unsigned_abs().to_string();
-        let lead = i32::from(d.exponent()) + digits.len() as i32 - 1;
-        (lead, digits)
-    };
-    let ((la, da), (lb, db)) = (mag(a), mag(b));
-    let by_mag = la.cmp(&lb).then_with(|| {
-        let n = da.len().max(db.len());
-        format!("{da:0<n$}").cmp(&format!("{db:0<n$}"))
-    });
-    if sign(a) < 0 {
-        by_mag.reverse()
-    } else {
-        by_mag
-    }
-}
+/// Numeric order of two decimals, exactly. Lives in `exact` since SMYSL-5 TI-P0, which the
+/// information measures share with window summaries; re-exported here, where it has been public.
+pub use crate::exact::numeric_cmp;
 
 pub(crate) fn payload(entries: &[(&str, HValue)]) -> Vec<u8> {
     let span = smysl_core::Span::new(0, 0);

@@ -194,6 +194,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "schema",    about: "Show schema revisions; check the naming rule and lens totality", purity: Purity::Pure,  phase: "TX-P12" , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "migrate",   about: "Re-derive a schema's units under a newer revision; staged", purity: Purity::Pure,  phase: "TX-P12" , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "tel",       about: "Read telemetry into a library; the value in force at t; check a profile", purity: Purity::Pure,  phase: "TL-P2"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "bund",      about: "Run a Bund2 script over a store or a library, in a bund2 process", purity: Purity::Pure,  phase: "BQ-P4"  , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -2524,6 +2525,62 @@ fn cli() -> Command {
                         .help("Write into an output directory that is not empty (`export`)")
                         .action(ArgAction::SetTrue),
                 ),
+            "bund" => sub
+                .after_help(
+                    "Purity: pure. The script runs over a snapshot of the store in a separate \
+                     bund2 process, sandboxed unless --trusted (RFC SMYSL-4). Needs bund2 built \
+                     with `cargo build -p bund2-cli --features smysl`.",
+                )
+                .arg(
+                    Arg::new("probe")
+                        .long("probe")
+                        .help("Say which bund2 would run and what it was built with; run nothing")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("script")
+                        .long("script")
+                        .value_name("FILE")
+                        .help("The Bund2 script to run; it reads the store as `:lib var?`"),
+                )
+                .arg(
+                    Arg::new("eval")
+                        .long("eval")
+                        .value_name("SCRIPT")
+                        .help("The script, given inline"),
+                )
+                .arg(
+                    Arg::new("sq")
+                        .long("sq")
+                        .value_name("QUERY")
+                        .help("Run this sq/1 query first and bind its uids to `:seed`"),
+                )
+                .arg(
+                    Arg::new("trusted")
+                        .long("trusted")
+                        .help("Run without the sandbox; for a script you wrote yourself, never for one a model wrote")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("bund2")
+                        .long("bund2")
+                        .value_name("PATH")
+                        .help("The bund2 binary (default: bund2 on PATH)"),
+                )
+                .arg(
+                    Arg::new("timeout-ms")
+                        .long("timeout-ms")
+                        .value_name("MS")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("Stop the script after this many milliseconds (default 2000)"),
+                )
+                .arg(
+                    Arg::new("max-inferences")
+                        .long("max-inferences")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("Cap every KB the script makes at N inferences (default 1000000)"),
+                ),
             "tel" => sub
                 .arg(
                     Arg::new("action")
@@ -2542,14 +2599,16 @@ fn cli() -> Command {
                             "trace",
                             "templates",
                             "similar",
+                            "info",
                             "profile",
                         ])
                         .help(
                             "read exports with a reader into a library, the value in force at \
                              an instant, materialise window evidence, recompute it, run a \
                              detector, evict old substrate, materialise a trace's spans or a \
-                             log window's templates, rank episodes like one, or check a profile \
-                             and print its hash",
+                             log window's templates, rank episodes like one, compute an \
+                             information measure (SMYSL-5), or check a profile and print its \
+                             hash",
                         ),
                 )
                 .arg(
@@ -2563,7 +2622,7 @@ fn cli() -> Command {
                              cloudevents/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
                              `detect RECIPE`; `investigate open|consult|hypothesis|probe|action|\
                              close|show …`; `declare instrument|measured-by|via|same-quantity …`; `witnesses SERIES`; \
-                             `evict --older-than DUR`; `trace TRACE-ID`; `templates STREAM FROM TO`; `similar EPISODE`; `profile check FILE|NAME`",
+                             `evict --older-than DUR`; `trace TRACE-ID`; `templates STREAM FROM TO`; `similar EPISODE`; `info RECIPE`; `profile check FILE|NAME`",
                         ),
                 )
                 .arg(
@@ -2627,13 +2686,25 @@ fn cli() -> Command {
                         .long("series")
                         .value_name("SERIES")
                         .action(ArgAction::Append)
-                        .help("detect: a series to run over (uid or `<scheme>:<key>`); repeatable"),
+                        .help("detect, info: a series to run over (uid or `<scheme>:<key>`); repeatable"),
+                )
+                .arg(
+                    Arg::new("with")
+                        .long("with")
+                        .value_name("SERIES")
+                        .help("info mi/1: the second series (uid or `<scheme>:<key>`)"),
+                )
+                .arg(
+                    Arg::new("with-instrument")
+                        .long("with-instrument")
+                        .value_name("I")
+                        .help("info mi/1: the instrument uid to read --with from"),
                 )
                 .arg(
                     Arg::new("during")
                         .long("during")
                         .value_name("FROM-TO")
-                        .help("detect: the window, epoch ms, [FROM, TO)"),
+                        .help("detect, info: the window, epoch ms, [FROM, TO)"),
                 )
                 .arg(
                     Arg::new("trigger")
@@ -12655,6 +12726,139 @@ fn cmd_ui(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+// ---------------------------------------------------------------------------
+// `bund` — the Bund2 bridge (RFC SMYSL-4, BQ-P4)
+// ---------------------------------------------------------------------------
+
+/// `smysl bund`: a Bund2 script over a snapshot of `-s`, in a `bund2` process (RFC SMYSL-4 §10).
+///
+/// `--trusted` is the only way to `Trust::Trusted`, and only a person types it (OQ-B2): no
+/// command that has a model write a script hands that script here, so there is no model path
+/// to refuse.
+#[cfg(feature = "bund")]
+fn cmd_bund(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    use smysl::bund::{self, BundError, QueryPolicy, Trust};
+
+    let mut policy = QueryPolicy::default();
+    if let Some(b) = m.get_one::<String>("bund2") {
+        policy = policy.with_binary(b);
+    }
+    if m.get_flag("probe") {
+        return match bund::probe_bund_binary(policy.bund_binary.as_deref()) {
+            Ok(info) => {
+                let sandbox = match bund::sandbox::available() {
+                    Ok(()) => "available".to_string(),
+                    Err(e) => e.to_string(),
+                };
+                if global.get_flag("json") {
+                    println!(
+                        "{{\"path\":{},\"version\":{},\"smysl\":{},\"sandbox\":{}}}",
+                        bund::QueryValue::Text(info.path.display().to_string()).to_json(),
+                        bund::QueryValue::Text(info.version.clone()).to_json(),
+                        info.has_smysl,
+                        bund::QueryValue::Text(sandbox).to_json(),
+                    );
+                } else {
+                    println!("bund2:   {}", info.path.display());
+                    println!("version: {}", info.version);
+                    println!("smysl:   {}", if info.has_smysl { "yes" } else { "no" });
+                    println!("sandbox: {sandbox}");
+                }
+                if info.has_smysl {
+                    ExitCode::Success
+                } else {
+                    ExitCode::Failure
+                }
+            }
+            Err(e) => {
+                eprintln!("smysl bund: {e}");
+                ExitCode::Failure
+            }
+        };
+    }
+
+    let script = match (m.get_one::<String>("script"), m.get_one::<String>("eval")) {
+        (Some(_), Some(_)) => {
+            eprintln!("smysl bund: give the script once, with --script or --eval");
+            return ExitCode::Usage;
+        }
+        (Some(f), None) => match std::fs::read_to_string(f) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("smysl bund: {f}: {e}");
+                return ExitCode::Failure;
+            }
+        },
+        (None, Some(t)) => t.clone(),
+        (None, None) => {
+            eprintln!("smysl bund: no script given (--script FILE or --eval SCRIPT)");
+            return ExitCode::Usage;
+        }
+    };
+    let Some(path) = store_arg(m, global) else {
+        eprintln!("smysl bund: no store given (-s PATH; a library root or a store file)");
+        return ExitCode::Usage;
+    };
+    if m.get_flag("trusted") {
+        policy = policy.with_trust(Trust::Trusted);
+    }
+    if let Some(ms) = m.get_one::<u64>("timeout-ms") {
+        policy = policy.with_max_wall_ms(*ms);
+    }
+    if let Some(n) = m.get_one::<u64>("max-inferences") {
+        policy = policy.with_max_inferences(Some(*n));
+    }
+
+    let root = std::path::Path::new(&path);
+    let is_library = smysl::text::library::Library::is_library(root);
+    let sq = m.get_one::<String>("sq");
+    let result = match (is_library, sq) {
+        (true, None) => bund::eval_library(root, &script, &policy),
+        (false, None) | (_, Some(_)) => {
+            let store = match load_store(&path) {
+                Ok((s, _)) => s.into_memory(),
+                Err(e) => {
+                    eprintln!("smysl bund: {e}");
+                    return ExitCode::Failure;
+                }
+            };
+            match sq {
+                Some(q) => bund::eval_over_sq(&store, q, &script, &policy),
+                None => bund::eval_store(&store, &script, &policy),
+            }
+        }
+    };
+    match result {
+        Ok(r) => {
+            for w in &r.warnings {
+                eprintln!("bund2: {w}");
+            }
+            if global.get_flag("json") {
+                println!("{}", r.value.to_json());
+            } else {
+                println!("{}", r.value);
+            }
+            ExitCode::Success
+        }
+        Err(e) => {
+            eprintln!("smysl bund: {e}");
+            match e {
+                BundError::PolicyViolation { .. }
+                | BundError::ScriptTooLarge { .. }
+                | BundError::SandboxUnavailable { .. }
+                | BundError::InvalidScriptOrArgs { .. } => ExitCode::Usage,
+                _ => ExitCode::Failure,
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "bund"))]
+fn cmd_bund(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl bund: this build has no Bund2 bridge (build with --features bund)");
+    ExitCode::Usage
+}
+
 /// How progress should be reported for this invocation.
 ///
 /// One place, so a command cannot draw in one branch and stay silent in another.
@@ -12981,6 +13185,7 @@ fn main() -> ProcExitCode {
         "schema" => cmd_schema(sub, &matches),
         "migrate" => cmd_migrate(sub, &matches),
         "tel" => cmd_tel(sub, &matches),
+        "bund" => cmd_bund(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -13915,6 +14120,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "trace" => tel_trace(m, global, &args),
         "templates" => tel_templates(m, global, &args),
         "similar" => tel_similar(m, global, &args),
+        "info" => tel_info(m, global, &args),
         "read" => tel_read(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
@@ -15907,6 +16113,378 @@ impl smysl::Attesting for DetectAttest {
     }
 }
 
+/// `smysl tel info RECIPE --series S… [--with S2] --during FROM-TO -s LIB [--instrument I]
+/// [--with-instrument I2] [--at MS --yes]`: an information measure over each series (RFC
+/// SMYSL-5 §13, TI-P1 to TI-P3).
+///
+/// `RECIPE` is an HJSON file naming the statistic and its parameters
+/// (`smysl::tel::info::Spec`): `ent/1`, `perm/1`, `jsd/1`, `mi/1` or `tent/1`. Each
+/// `--series` is read in `--during`, once per instrument it has samples from or for
+/// `--instrument` alone, and gives an `x.tel/info` unit or a refusal, each printed. `mi/1` pairs
+/// each with `--with`, once per instrument of it or for `--with-instrument` alone. `tent/1`
+/// reads each `--series` as a log stream: its template units from the library, or, when there
+/// are none, Drain over its events, whose templates `--yes` commits first. Without
+/// `--yes` nothing is written; with it the units are committed with their `x.tel/of-series`
+/// edges, attested by rule TI (`Op::Transformed` at `Rung::Computed`), at `--at`. A recipe that
+/// is not admitted, or `--with` missing from `mi/1` or given to another statistic, is exit 2; a
+/// series refused (`SMY-E701`) or not run (`SMY-W703`) is reported and the rest go on.
+#[cfg(feature = "tel")]
+fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::Substrate;
+    use smysl::tel::info::{run_on, Spec, With};
+    use smysl::text::library::Library;
+
+    let (Some(recipe_path), None) = (args.first(), args.get(1)) else {
+        eprintln!("smysl tel info: `RECIPE`, an HJSON information recipe");
+        return ExitCode::Usage;
+    };
+    let recipe_text = match std::fs::read_to_string(recipe_path.as_str()) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("smysl tel info: {recipe_path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let spec = match Spec::parse(&recipe_text) {
+        Ok(s) => s,
+        Err(r) => {
+            eprintln!("smysl tel info: {recipe_path}: {r}");
+            return ExitCode::Usage;
+        }
+    };
+    let Some((from, to)) = m.get_one::<String>("during").and_then(|d| {
+        d.split_once('-')
+            .and_then(|(a, b)| Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?)))
+            .filter(|(a, b)| a < b)
+    }) else {
+        eprintln!("smysl tel info: --during FROM-TO, epoch ms, FROM < TO");
+        return ExitCode::Usage;
+    };
+    let mut series = Vec::new();
+    for s in m.get_many::<String>("series").into_iter().flatten() {
+        match tel_series_arg(s) {
+            Ok(u) => series.push(u),
+            Err(e) => {
+                eprintln!("smysl tel info: --series {e}");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if series.is_empty() {
+        eprintln!(
+            "smysl tel info: {} runs over --series, at least one",
+            spec.id()
+        );
+        return ExitCode::Usage;
+    }
+    let instrument_arg = |name: &str| match m.get_one::<String>(name).map(|t| t.parse::<Uid>()) {
+        Some(Ok(u)) => Ok(Some(u)),
+        Some(Err(_)) => {
+            eprintln!("smysl tel info: --{name} takes an instrument uid");
+            Err(ExitCode::Usage)
+        }
+        None => Ok(None),
+    };
+    let instrument = match instrument_arg("instrument") {
+        Ok(i) => i,
+        Err(code) => return code,
+    };
+    let with_instrument = match instrument_arg("with-instrument") {
+        Ok(i) => i,
+        Err(code) => return code,
+    };
+    let with = match (
+        m.get_one::<String>("with").map(|s| tel_series_arg(s)),
+        spec.pairs(),
+    ) {
+        (Some(Ok(series)), true) => Some(With {
+            series,
+            instrument: with_instrument,
+        }),
+        (Some(Err(e)), _) => {
+            eprintln!("smysl tel info: --with {e}");
+            return ExitCode::Usage;
+        }
+        (None, true) => {
+            eprintln!(
+                "smysl tel info: {} reads two series: name the second with --with",
+                spec.id()
+            );
+            return ExitCode::Usage;
+        }
+        (Some(Ok(_)), false) => {
+            eprintln!(
+                "smysl tel info: {} reads one series; --with is mi/1's",
+                spec.id()
+            );
+            return ExitCode::Usage;
+        }
+        (None, false) => {
+            if with_instrument.is_some() {
+                eprintln!("smysl tel info: --with-instrument goes with --with");
+                return ExitCode::Usage;
+            }
+            None
+        }
+    };
+    let yes = m.get_flag("yes");
+    let Some(&at) = m.get_one::<u64>("at").or(if yes { None } else { Some(&0) }) else {
+        eprintln!("smysl tel info: --yes needs --at, the attestation clock");
+        return ExitCode::Usage;
+    };
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let path = tel_series_path(&root);
+    // tent/1 reads template units, and needs the substrate only to materialise them.
+    if !path.exists() && !spec.templates() {
+        eprintln!(
+            "smysl tel info: {} has no series substrate; `tel read --yes` writes one",
+            root.display()
+        );
+        return ExitCode::Failure;
+    }
+    let mut library = if Library::is_library(&root) {
+        match Library::open(&root) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                eprintln!("smysl tel info: {}: {e}", root.display());
+                return ExitCode::Failure;
+            }
+        }
+    } else {
+        None
+    };
+    let run = if spec.templates() {
+        use smysl::series::MemBackend;
+        use smysl::tel::info::logs;
+        let stored: Vec<&smysl::UnitCore> = library
+            .as_ref()
+            .map(|l| {
+                StoreRead::units(l.store())
+                    .map(|(_, c)| &c.core)
+                    .filter(|u| u.schema.as_str() == smysl::schemas::tel::LOG_TEMPLATE)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let r = if path.exists() {
+            RedbBackend::open(&path)
+                .map_err(|e| format!("{}: {e}", path.display()))
+                .and_then(|b| {
+                    logs::run_on(
+                        &spec,
+                        &Substrate::new(b),
+                        stored,
+                        &series,
+                        instrument,
+                        from,
+                        to,
+                    )
+                })
+        } else {
+            let empty = Substrate::new(MemBackend::default());
+            logs::run_on(&spec, &empty, stored, &series, instrument, from, to)
+        };
+        r.map(|r| (r.outcomes, r.materialised))
+    } else {
+        RedbBackend::open(&path)
+            .map_err(|e| format!("{}: {e}", path.display()))
+            .and_then(|b| {
+                run_on(
+                    &spec,
+                    &Substrate::new(b),
+                    &series,
+                    instrument,
+                    with,
+                    from,
+                    to,
+                )
+            })
+            .map(|o| (o, Vec::new()))
+    };
+    let (outcomes, materialised) = match run {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("smysl tel info: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let recipe = spec.recipe().text();
+    let (mut units, mut relations) = (Vec::new(), Vec::new());
+    for o in &outcomes {
+        match &o.result {
+            Ok(c) => {
+                let pair = o
+                    .with
+                    .as_ref()
+                    .map(|(k, _)| format!(" ~ {k}"))
+                    .unwrap_or_default();
+                println!(
+                    "{:<17} {}  {} {}{pair}",
+                    smysl::schemas::tel::INFO,
+                    smysl::canonical_uid(&c.unit).canonical(),
+                    spec.stat_name(),
+                    o.key
+                );
+                let mut line = format!("    value {} bits", c.value);
+                if let Some(mm) = &c.mm {
+                    line += &format!(", Miller-Madow {mm}");
+                }
+                if let Some(lag) = c.lag {
+                    line += &format!(", at lag {lag}");
+                }
+                if let Some(bias) = &c.bias {
+                    line += &format!(", bias {bias}");
+                }
+                line += &format!(", n {}, k {}", c.n, c.k);
+                if let Some(k) = c.k_with {
+                    line += &format!(", k_with {k}");
+                }
+                if let Some((ge, b)) = c.null {
+                    line += &format!(", {ge} of {b} surrogates at least as high");
+                }
+                if c.missing > 0 {
+                    line += &format!(", {} point(s) missing", c.missing);
+                }
+                println!("{line}");
+                if !c.values.is_empty() {
+                    let curve: Vec<String> =
+                        c.values.iter().map(|(l, v)| format!("{l}:{v}")).collect();
+                    println!("    by lag {}", curve.join(" "));
+                }
+                units.push(c.unit.clone());
+                relations.extend(c.relations.iter().cloned());
+            }
+            Err(r) => {
+                let pair = o
+                    .with
+                    .as_ref()
+                    .map(|(k, i)| format!(" ~ {k} {}", i.short()))
+                    .unwrap_or_default();
+                println!(
+                    "refused           {} {}{pair}: {r}",
+                    o.key,
+                    o.instrument.short()
+                )
+            }
+        }
+    }
+    println!(
+        "info      {recipe}: {} unit(s), {} refused",
+        units.len(),
+        outcomes.len() - units.len()
+    );
+    if units.is_empty() {
+        return ExitCode::Success;
+    }
+    if !materialised.is_empty() {
+        // tent/1 read templates the store did not hold: they are its input, and are committed
+        // first, as `tel templates` commits them (RFC SMYSL-5 §6.4).
+        println!(
+            "{} template(s) materialised from the window's events, which the store did not hold",
+            materialised.len()
+        );
+        if yes {
+            let streams: std::collections::BTreeMap<_, _> = materialised
+                .iter()
+                .filter_map(|t| {
+                    Some((
+                        t.stream,
+                        smysl::schemas::tel::series(&t.scheme, &t.key).ok()?,
+                    ))
+                })
+                .collect();
+            let template_units: Vec<smysl::UnitCore> =
+                materialised.iter().map(|t| t.unit()).collect();
+            drop(library);
+            let code = tel_commit_evidence(
+                "info",
+                &root,
+                streams.into_values().collect(),
+                Vec::new(),
+                &template_units,
+                at,
+                &format!("tel templates {}", smysl::tel::drain::RECIPE),
+            );
+            if code != ExitCode::Success {
+                return code;
+            }
+            library = match Library::open(&root) {
+                Ok(l) => Some(l),
+                Err(e) => {
+                    eprintln!("smysl tel info: {}: {e}", root.display());
+                    return ExitCode::Failure;
+                }
+            };
+        }
+    }
+    let agent = match AgentId::new("tool:smysl-tel") {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("smysl tel info: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let hash = smysl::hash_bytes(format!("{recipe}\n{from}-{to}").as_bytes());
+    // Rule TI: an info unit is transformed at the computed rung, as a detector's output is.
+    let attest = DetectAttest(
+        smysl::stage::Attest::new(
+            agent.clone(),
+            smysl::Rung::Computed,
+            smysl::Hlc::new(at, 0, agent),
+        )
+        .with_recipe(hash, hash),
+    );
+    let empty = Store::new();
+    let staged = smysl::stage::prepare_attested(
+        library.as_ref().map_or(&empty, |l| l.store()),
+        units,
+        relations,
+        std::collections::BTreeMap::new(),
+        vec![smysl::schemas::tel::decl()],
+        &attest,
+    );
+    if staged.has_errors() {
+        eprintln!("smysl tel info: the batch did not check clean");
+        for d in &staged.report.diagnostics {
+            eprintln!("  {d}");
+        }
+        return ExitCode::Failure;
+    }
+    let n = staged.len();
+    if !yes {
+        // An info unit has no surface form (its digests are bytes), so, as with a window, there
+        // is nothing to stage for review: the uid printed is the uid `--yes` commits.
+        println!("{n} record(s) checked; nothing was written - run again with --yes --at MS to commit them");
+        return ExitCode::Success;
+    }
+    let mut library = match library {
+        Some(l) => l,
+        None => match Library::create(&root) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("smysl tel info: {}: {e}", root.display());
+                return ExitCode::Failure;
+            }
+        },
+    };
+    let _locks = match smysl::text::lock::acquire_all(&root, &library.shards(), "tel info") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("smysl tel info: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    if let Err(e) = library.append_records(&staged.records()) {
+        eprintln!("smysl tel info: {e}");
+        return ExitCode::Failure;
+    }
+    println!("{n} record(s) committed");
+    ExitCode::Success
+}
+
 /// `smysl tel detect RECIPE --series S… --during FROM-TO -s LIB [--trigger UID] [--at MS --yes]`:
 /// run a detector (RFC SMYSL-3 §21, §23).
 ///
@@ -16329,6 +16907,13 @@ fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> Exi
                         .parse()
                         .ok()
                 }
+                smysl::schemas::tel::INFO => {
+                    smysl::schemas::tel::info_fields(c.payload.as_deref()?)
+                        .ok()?
+                        .series?
+                        .parse()
+                        .ok()
+                }
                 _ => None,
             }
         };
@@ -16370,6 +16955,32 @@ fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> Exi
             })
         })
         .collect();
+        // The statistics among the evidence (RFC SMYSL-5 §8): each with its value, its `n`, and
+        // `null_ge` of `null_b` where it drew surrogates.
+        let infos: Vec<(Uid, &smysl::UnitCore)> = evidence
+            .iter()
+            .filter_map(|u| Some((*u, *units.get(u)?)))
+            .filter(|(_, c)| c.schema.as_str() == smysl::schemas::tel::INFO)
+            .collect();
+        println!("statistics    {}", infos.len());
+        for (u, c) in &infos {
+            let p = c.payload.as_deref().unwrap_or_default();
+            let field = |k: &str| smysl::schemas::tel::quoted_value(p, k, None);
+            let f = smysl::schemas::tel::info_fields(p).unwrap_or_default();
+            let null = match (field("null_ge"), field("null_b")) {
+                (Some(ge), Some(b)) => format!("  null {ge} of {b}"),
+                _ => String::new(),
+            };
+            let recipe = f.recipe.as_deref().unwrap_or("");
+            println!(
+                "  {}  {} {} bits  n {}{null}  {}",
+                u.canonical(),
+                f.stat.as_deref().unwrap_or("?"),
+                field("value").unwrap_or_else(|| "?".to_string()),
+                f.n.map_or("?".to_string(), |n| n.to_string()),
+                recipe.split_once('?').map_or(recipe, |(id, _)| id)
+            );
+        }
         println!("conflicts     {}", conflicts.len());
         for c in &conflicts {
             println!(
@@ -16379,17 +16990,32 @@ fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> Exi
                 StoreRead::contention_status(store, c)
             );
         }
-        // Open questions (§22.2): the windows it used whose samples are not here (`SMY-W605`,
-        // rule TL or never received). Their status stands; only re-deriving them is gone.
+        // Open questions (§22.2): the windows and statistics it used whose samples are not here
+        // (`SMY-W605`, rule TL or never received). Their status stands; only re-deriving them
+        // is gone. A template-entropy unit is re-derived from the store's templates.
         let used: Vec<&smysl::UnitCore> = evidence
             .iter()
             .filter_map(|u| units.get(u).copied())
             .filter(|c| c.schema.as_str() == smysl::schemas::tel::WINDOW)
             .collect();
+        let templates: Vec<&smysl::UnitCore> = units
+            .values()
+            .copied()
+            .filter(|c| c.schema.as_str() == smysl::schemas::tel::LOG_TEMPLATE)
+            .collect();
         let path = tel_series_path(&root);
+        let check = |sub: &smysl::series::Substrate<_>| {
+            let mut d = smysl::tel::evidence::verify(used.iter().copied(), sub);
+            d.extend(smysl::tel::info::verify::verify(
+                infos.iter().map(|(_, c)| *c),
+                &templates,
+                sub,
+            ));
+            d
+        };
         let checked = if path.exists() {
             match smysl::series::redb::RedbBackend::open(&path) {
-                Ok(b) => smysl::tel::evidence::verify(used, &smysl::series::Substrate::new(b)),
+                Ok(b) => check(&smysl::series::Substrate::new(b)),
                 Err(e) => {
                     eprintln!("smysl tel investigate: {}: {e}", path.display());
                     return ExitCode::Failure;
@@ -16397,9 +17023,16 @@ fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> Exi
             }
         } else {
             smysl::tel::evidence::verify(
-                used,
+                used.iter().copied(),
                 &smysl::series::Substrate::new(smysl::series::MemBackend::default()),
             )
+            .into_iter()
+            .chain(smysl::tel::info::verify::verify(
+                infos.iter().map(|(_, c)| *c),
+                &templates,
+                &smysl::series::Substrate::new(smysl::series::MemBackend::default()),
+            ))
+            .collect()
         };
         let gaps: Vec<_> = checked
             .iter()
@@ -16892,13 +17525,16 @@ fn tel_witnesses(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitC
     ExitCode::Success
 }
 
-/// `smysl tel check -s LIB`: the library's window evidence, checked (RFC SMYSL-3 §9.2–§9.5).
+/// `smysl tel check -s LIB`: the library's window evidence and statistics, checked (RFC SMYSL-3
+/// §9.2–§9.5, RFC SMYSL-5 §3 and §7).
 ///
-/// - `SMY-E603`: a window whose status or attestations break rule TW.
-/// - `SMY-W614`: windows of one key that disagree.
-/// - `SMY-E604`: a window recomputed from `series.redb` that is another unit.
-/// - `SMY-W605`: a window whose samples are not in `series.redb`, or all of them when the
-///   library has no substrate.
+/// - `SMY-E603`: a window whose status or attestations break rule TW, or a statistic rule TI.
+/// - `SMY-W614`: windows, or statistics, of one key that disagree.
+/// - `SMY-E604`: a window or statistic recomputed from `series.redb` that is another unit; a
+///   template-entropy unit is recomputed from the library's templates.
+/// - `SMY-W605`: a window or statistic whose samples are not in `series.redb`, or all of them
+///   when the library has no substrate.
+/// - `SMY-W704`: statistics by a recipe this build does not have, once per recipe id.
 ///
 /// Then the derived contentions, each with whether a resolution has reviewed it: rival
 /// explanations (kind 6) and witness conflicts (kind 7, §11.5).
@@ -16922,13 +17558,15 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
     let store = library.store();
-    // Windows and, since TL-P9, spans: the evidence the substrate can recompute.
+    // Windows, since TL-P9 spans and templates, and since TI-P4 statistics: the evidence the
+    // substrate, or for template entropy the templates, can recompute.
     let windows: Vec<(Uid, smysl::UnitCore, Vec<smysl::Attestation>)> = StoreRead::units(store)
         .filter(|(_, u)| {
             let t = u.core.schema.as_str();
             t == smysl::schemas::tel::WINDOW
                 || t == smysl::schemas::tel::SPAN
                 || t == smysl::schemas::tel::LOG_TEMPLATE
+                || t == smysl::schemas::tel::INFO
         })
         .map(|(uid, u)| {
             (
@@ -17025,6 +17663,10 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .iter()
         .filter(|(_, u, _)| u.schema.as_str() == smysl::schemas::tel::LOG_TEMPLATE)
         .count();
+    let statistics = windows
+        .iter()
+        .filter(|(_, u, _)| u.schema.as_str() == smysl::schemas::tel::INFO)
+        .count();
     let mut span_note = String::new();
     if spans > 0 {
         span_note.push_str(&format!(" and {spans} span(s)"));
@@ -17032,10 +17674,13 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if templates > 0 {
         span_note.push_str(&format!(" and {templates} template(s)"));
     }
+    if statistics > 0 {
+        span_note.push_str(&format!(" and {statistics} statistic(s)"));
+    }
     println!(
         "checked   {} window(s){span_note}: {errors} error(s), {} warning(s); {} rival \
          explanation(s), {} witness conflict(s)",
-        windows.len() - spans - templates,
+        windows.len() - spans - templates - statistics,
         diags.len() - errors,
         rivals.len(),
         conflicts.len()
@@ -18329,7 +18974,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 39);
+        assert_eq!(COMMANDS.len(), 40);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -18372,7 +19017,8 @@ mod tests {
                 "lib",
                 "schema",
                 "migrate",
-                "tel"
+                "tel",
+                "bund"
             ]
         );
     }
@@ -18469,10 +19115,11 @@ mod tests {
     #[test]
     fn every_command_names_the_phase_that_wires_it() {
         for c in COMMANDS {
-            // Three phase vocabularies, because there are three RFCs: `SM-P*` is SMYSL-1's
-            // delivery plan, `TX-P*` is SMYSL-2.4's and `TL-P*` is SMYSL-3's. A release
-            // number is the fourth form, for a command that arrived outside any plan.
-            let phase = ["SM-P", "TX-P", "TL-P"]
+            // Four phase vocabularies, because there are four RFCs: `SM-P*` is SMYSL-1's
+            // delivery plan, `TX-P*` is SMYSL-2.4's, `TL-P*` is SMYSL-3's and `BQ-P*` is
+            // SMYSL-4's. A release number is the fifth form, for a command that arrived outside
+            // any plan.
+            let phase = ["SM-P", "TX-P", "TL-P", "BQ-P"]
                 .iter()
                 .any(|p| c.phase.starts_with(p));
             let cycle = c

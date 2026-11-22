@@ -99,6 +99,9 @@ jobs:
           - "--no-default-features --features remote"
           - "--no-default-features --features exact-pack"
           - "--no-default-features --features render-typst,render-html"
+          # `smysl bund` (RFC SMYSL-4 BQ-P4). Its tests run against a real `bund2` only in
+          # `bund2-bridge`; here they build, and the rest pass trivially.
+          - "--no-default-features --features bund"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -353,6 +356,11 @@ jobs:
       # macOS; a detector or sketch whose bytes differ here is off the pure path until fixed.
       - name: GE-M3 and the sketch pins on ${{ matrix.target }}
         run: cargo test -p smysl-tel --test ge_m3 --test window_cases --target ${{ matrix.target }}
+      # GE-I1 (RFC SMYSL-5 §15, TI-P1): every information statistic over fixtures/tel/info/,
+      # twice and pinned by uid in expected.tsv, written on aarch64 macOS. A statistic whose bytes
+      # differ on a target stays off until fixed. The libm pin is what this checks.
+      - name: GE-I1, the information pins on ${{ matrix.target }}
+        run: cargo test -p smysl-tel --test info_cases --target ${{ matrix.target }}
 
   # Proposition classes (SMYSL-2.3 A-12.4), which is normative for the same reason the tables
   # above are checked: the number of classes is the number of propositions, and every corpus
@@ -622,3 +630,55 @@ jobs:
         run: >
           cargo test --release -p smysl-lib --test ge_t15 --test cross_impl --
           --include-ignored --skip scale_cell_at_10e6
+
+  # **SMYSL-4 BQ-P3: the Bund2 bridge against a real `bund2`, in the sandbox.** Every
+  # `smysl-bund` test that runs a script passes trivially without `BUND2_BIN`, so this is the
+  # only place they run in CI. Bund2 is built from a pinned commit with its own toolchain
+  # (`rust-toolchain.toml`: 1.95.0) and cached by that commit. On Linux the sandbox is `bwrap`,
+  # and Ubuntu 24.04 restricts unprivileged user namespaces under AppArmor, so the restriction
+  # is lifted for the job. `SMYSL_BUND_REQUIRED` turns "no bund2" and "no sandbox" into
+  # failures; the adversarial suite then asserts each operation was denied on the platform
+  # it runs on (RFC SMYSL-4 §13).
+  bund2-bridge:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      BUND2_REV: 63fa39d600fa7ffb046e80d8ce973ec90ea4b77a
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: vulogov/Bund2
+          ref: ${{ env.BUND2_REV }}
+          path: bund2-src
+      - uses: actions/cache@v4
+        id: bund2
+        with:
+          path: bund2-bin
+          key: bund2-${{ runner.os }}-${{ runner.arch }}-${{ env.BUND2_REV }}
+      - name: build bund2 with smysl
+        if: steps.bund2.outputs.cache-hit != 'true'
+        working-directory: bund2-src
+        env:
+          RUSTFLAGS: ""
+        run: |
+          cargo build --release --locked -p bund2-cli --features smysl
+          mkdir -p ../bund2-bin && cp target/release/bund2 ../bund2-bin/
+      - name: the Linux sandbox
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: smysl-bund against bund2
+        env:
+          SMYSL_BUND_REQUIRED: "1"
+        run: |
+          export BUND2_BIN="$PWD/bund2-bin/bund2"
+          "$BUND2_BIN" --version
+          cargo test -p smysl-bund --features store-redb
+          cargo test --features bund --test cmd_bund

@@ -1,0 +1,17 @@
+# RFC SMYSL-5 D-I4: every transcendental an information measure stores goes through `libm`
+# (`src/info/num.rs`), never the platform's, as `smysl-measure`'s do (SMYSL-2.6 §3.5). A method
+# here is one whose result differs in the last bit between libms, and a last bit can move a
+# stored number and with it a uid. The `detect` module keeps its stricter rule of none at all.
+disallowed-methods = [
+    { path = "f64::ln",    reason = "use crate::info::num::ln (libm), SMYSL-5 D-I4" },
+    { path = "f64::log2",  reason = "use crate::info::num::log2 (libm), SMYSL-5 D-I4" },
+    { path = "f64::log10", reason = "use libm through crate::info::num, SMYSL-5 D-I4" },
+    { path = "f64::exp",   reason = "use libm through crate::info::num, SMYSL-5 D-I4" },
+    { path = "f64::powf",  reason = "use libm through crate::info::num, SMYSL-5 D-I4" },
+    { path = "f64::powi",  reason = "use a product in a fixed order, SMYSL-5 D-I4" },
+    { path = "f64::ln_1p", reason = "use libm through crate::info::num, SMYSL-5 D-I4" },
+    { path = "f64::exp_m1", reason = "use libm through crate::info::num, SMYSL-5 D-I4" },
+    { path = "f32::ln",    reason = "accumulate in f64 through crate::info::num, SMYSL-5 D-I4" },
+    { path = "f32::exp",   reason = "accumulate in f64 through crate::info::num, SMYSL-5 D-I4" },
+    { path = "f32::powf",  reason = "accumulate in f64 through crate::info::num, SMYSL-5 D-I4" },
+]

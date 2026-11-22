@@ -14,7 +14,7 @@
 
 ## Getting it
 
-**On crates.io.** Nineteen crates: the facade, plus the eighteen behind it that exist so the
+**On crates.io.** Twenty crates: the facade, plus the nineteen behind it that exist so the
 compiler can check that the pure set stays pure. The evaluation harness stays unpublished — its
 tests read `fixtures/corpus` from outside its own package root, so a published copy would ship
 tests nobody could run.
@@ -28,47 +28,42 @@ As a library:
 
 ```toml
 [dependencies]
-smysl = "1.17"
+smysl = "1.18"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.17.0` and the format is `smysl/1.0`.** The crate version means the API is
+**The crate is `1.18.0` and the format is `smysl/1.0`.** The crate version means the API is
 frozen: every public item moves only with a 2.0, enforced per crate by `cargo-semver-checks` on
 every push. [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise
 written down. The format version means nothing about the format changed incompatibly:
 `smysl/0.1` held across fourteen releases and four independent implementations — the Rust, and
 Python, JavaScript and Go written from the specification alone — and `smysl/1.0` reports that
-record rather than a change. SMYSL-2's library records and SMYSL-3's `x.tel/v1` are additions a 1.0 reader skips.
+record rather than a change. SMYSL-2's library records and SMYSL-3's `x.tel/v1`, at revision 2 since 1.18, are additions a
+1.0 reader skips.
 
-## Release 1.17.0
+## Release 1.18.0
 
-SMYSL-3: smysl for telemetry study and research, all nine phases of its RFC, and the
-incremental check a live ledger needed. The kernel did not change. The full account, with
-every figure measured, is in [`CHANGELOG.md`](CHANGELOG.md).
+Two RFCs, each built to its last phase: SMYSL-4, Bund2 scripts over a library, and SMYSL-5,
+information measures over telemetry. The kernel did not change. The full account, with every
+figure measured, is in [`CHANGELOG.md`](CHANGELOG.md).
 
-- **Telemetry reaches a store as evidence, not as rows.** Kubernetes and Zabbix snapshots
-  become change units by a canonical diff. Prometheus, OTLP and Zabbix history go to a series
-  substrate, and a unit cites a window of it by a digest of its samples, exact or sketched.
-- **Detectors that replay to the byte.** CUSUM, PELT, robust z, episodes and a BARO-style
-  ranking, identical across four platforms in CI.
-- **Investigations a person or an agent writes into.** Hypotheses, probes and actions are
-  units. A number quoted from a window is checked against it (rule TQ, `SMY-W606`). Rival
-  explanations and witness conflicts are derived, and so is an incident's `timeline` thread.
-- **Instruments and witnesses.** What measured a series is declared, and independent
-  witnesses are counted and reported.
-- **Retention without rewriting history.** Old samples are evicted, and no record changes. A
-  library exports with its substrate and merges back unchanged.
-- **Traces and logs.** OTLP spans, journald and CloudEvents, Drain templates, and episodes
-  compared by MinHash.
-- **A commit stays fast as the store grows.** The check is kept as derived state, and a batch
-  recomputes only what it can change: 7.7 ms per commit at 10⁵ units, where it was 43 ms and
-  climbing at 6,000.
-- **Six experiments decided on simulated data, and said so.** Millisecond time is kept, rule E
-  is unchanged, witness counts stay a report, and similarity is model-independent. The real
-  data runs, and GE-M7 on agents, are still owed. The registry is 172.
+- **Programmable queries, in another process.** `smysl bund` runs a Bund2 script, with logic
+  and CLP(FD), over a disposable snapshot of a store or a library, and returns a typed value.
+  It never links Bund2. The boundary is an operating-system sandbox on macOS and Linux, tested
+  in CI by running each attack trusted and then sandboxed.
+- **Information measures that replay to the byte.** `smysl tel info` states the entropy of a
+  series and of its ordinal patterns, mutual information with lag scans and surrogates,
+  divergence between windows, and the entropy of a log stream's templates, as units whose
+  recipe and sample digest let `tel check` recompute them.
+- **Statistics are evidence.** Rule TI holds an info unit to its shape, a recomputation that
+  differs is `SMY-E604`, and rule TQ catches a wrong quote of one in an investigation.
+- **Five experiments, on simulated data, and said so.** The estimators' defaults hold, the
+  statistics see a decoupling and an oscillation that the level detectors miss, and transfer
+  entropy names a direction where there is none too often to be released. GE-I3 on RCAEval's
+  real incidents, and every real-data run 1.17 left, are still owed. The registry is 176.
 
 Building from source:
 
@@ -295,10 +290,29 @@ cargo install smysl --features tel
 | **Instruments** | `tel declare`, `tel witnesses`: lineage, and how many independent instruments saw a quantity |
 | **Traces and logs** | `tel trace`, `tel templates`, `tel similar`: spans, Drain templates, MinHash over episodes |
 | **Retention** | `tel evict`, and `lib export --with-substrate` |
+| **Information** | `tel info` (1.18): `ent/1`, `perm/1`, `mi/1`, `jsd/1`, `tent/1` as `x.tel/info` units, recomputed by `tel check` |
 
 The design is RFC SMYSL-3, in
 [`Documentation/SMYSL-3_RFC/`](Documentation/SMYSL-3_RFC/SMYSL-3_TELEMETRY.md); its phases
-TL-P1 to TL-P9 are complete.
+TL-P1 to TL-P9 are complete. The information measures are RFC SMYSL-5, in
+[`Documentation/SMYSL-5_RFC/`](Documentation/SMYSL-5_RFC/SMYSL-5_TELEMETRY_INFORMATION.md).
+
+## Bund2 queries (SMYSL-4)
+
+Since 1.18, a Bund2 script can query a store or a library: its `smysl.*` words, logic and
+CLP(FD), run in a separate `bund2` process over a disposable snapshot. Behind the facade's
+`bund` feature, with a `bund2` built with its `smysl` feature on the path:
+
+```sh
+cargo install smysl --features bund
+smysl bund -s fixtures/corpus/F1-incident.smy \
+  --eval ':lib var? "from library" smysl.kb [ [ unit U claim S ] [ gist U G ] ] kb.query'
+```
+
+Scripts run sandboxed unless `--trusted`, and a platform without the sandbox refuses them. The
+design is RFC SMYSL-4, in
+[`Documentation/SMYSL-4_RFC/`](Documentation/SMYSL-4_RFC/SMYSL-4_BUND2_BRIDGE.md); its phases
+BQ-P1 to BQ-P4 are complete.
 
 ## Getting content in
 
@@ -409,7 +423,7 @@ and `cargo run --example information_theory` for the library layer. See
 
 ## Status
 
-Crate `1.17.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.18.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 
@@ -451,6 +465,16 @@ say so; the runs on real data, and GE-M7 on agents, are owed.
 | TL-P6 – P7 | investigations, rule TQ, kinds 6 and 7, the timeline thread, instruments and witnesses | **done** |
 | TL-P8 – P9 | retention and exchange, traces and logs, similar episodes | **done** |
 | AC-8 | a store's check kept as derived state | **done** |
+
+RFC SMYSL-4, Bund2 queries, and RFC SMYSL-5, information measures, are built to their last
+phases. SMYSL-5's experiments ran on simulated data; GE-I3 on RCAEval is owed.
+
+| Phase | Delivers | State |
+|---|---|---|
+| BQ-P1 – P4 | `smysl-bund`: the word gate, the decoder, the runner, the sandbox, `smysl bund` | **done** |
+| TI-P0 – P2 | `x.tel/v1` revision 2, `ent/1`, `perm/1`, `mi/1`, `jsd/1`, `tel info` | **done** |
+| TI-P3 – P4 | `tent/1`; rule TI, recomputation in `tel check`, statistics in investigations | **done** |
+| TI-P5 | transfer entropy: not released, by GE-I5 | **closed** |
 
 Model providers, and how far each has actually been proven — an untested mapper is a
 reading of a vendor's documentation, not a fact about their API:
@@ -496,6 +520,7 @@ crates/smysl-measure   text, graph, channel and dialogue measures; assessment
 crates/smysl-lib       library export, import and verify
 crates/smysl-tel       SMYSL-3 telemetry: readers, diff, evidence, detectors, investigations
 crates/smysl-series    SMYSL-3 series substrate: samples, window digests, chunks
+crates/smysl-bund      SMYSL-4 Bund2 bridge: word gate, snapshot, runner, sandbox
 crates/smysl-tui       seven-pane terminal UI, with a live pack simulator
 crates/smysl-eval      evaluation harness E1-E9 (not published)
 examples/              simple_demo and information_theory
