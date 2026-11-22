@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.18.0
+## 1.18.0 — 2026-11-22
 
 Two RFCs, each built to its last phase: SMYSL-4, which runs Bund2 scripts over a library, and
 SMYSL-5, information measures over telemetry. The kernel did not change. `x.tel/v1` moves to
