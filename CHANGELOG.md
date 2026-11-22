@@ -9,30 +9,51 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.18.0
 
-What 1.17 leaves open, by what it blocks rather than the order it is easiest. 1.17 built SMYSL-3
-to its last phase and decided six of its experiments on simulated data, saying so in each; what
-a simulation cannot decide is where 1.18 starts.
+Two RFCs, each built to its last phase: SMYSL-4, which runs Bund2 scripts over a library, and
+SMYSL-5, information measures over telemetry. The kernel did not change. `x.tel/v1` moves to
+revision 2 to register `x.tel/info`, an extension schema a 1.0 reader skips, and `smysl/1.0`
+holds. One new crate, `smysl-bund`, is published for the first time, behind the facade's `bund`
+feature. The registry is 176.
 
-**GE-M7 is the reason for all of this, and it has not run.** It needs the Train-Ticket
-testbed (D-T12) and agent runs, arms (a) to (d). Until it runs, §11's design of investigations
-is untested against an agent, and rule TQ's catch rate is a property of `examples/oko_ledger`'s
-planted quotes rather than of a model's.
+**Programmable queries, in another process (SMYSL-4, BQ-P1 to BQ-P4).** `smysl bund` runs a Bund2
+script, with its `smysl.*` words, logic and CLP(FD), over a disposable snapshot of a store or a
+library and returns a typed value. It never links Bund2. A word list was not a boundary, since
+Bund2 can build a word's name at run time, so the operating system is: a sandbox on macOS and
+Linux, tested in CI by an adversarial suite that runs each attack trusted and then sandboxed.
+Scripts replay to the same value over equal stores written in different orders, and a timeout
+leaves no process and no directory behind. A call costs about 12 ms trusted and 15 ms sandboxed.
 
-**The real-data runs.** GE-M1 on a cluster observed for seven days (I-1), the Zabbix fixtures
-(I-2), GE-M2 and GE-M5 on DeathStarBench at production-like load, GE-M8 on GE-M7's corpus and
-RCAEval. Each simulated verdict names the run on real data that could overturn it.
+**Information measures (SMYSL-5, TI-P0 to TI-P5).** `smysl tel info` states a statistic as an
+`x.tel/info` unit, with a recipe that names every parameter and a digest of the samples it read:
 
-**OKO's own ledger.** `examples/oko_ledger` runs smysl's side through the library API; OKO
-writing a rotation ledger is TL-P6's criterion, and it is OKO's code.
+- **`ent/1` and `perm/1`**: the entropy of a series and of its ordinal patterns, over an explicit
+  grid in exact decimal arithmetic, so a value is the same on four platforms in CI.
+- **`mi/1` and `jsd/1`**: mutual information between two series, with lag scans and
+  circular-shift surrogates, and divergence between a window and a reference.
+- **`tent/1`**: the entropy of a log stream's Drain templates.
+- **Checked like any evidence.** Rule TI holds each unit to its shape (`SMY-E603`), `tel check`
+  recomputes each statistic from its recipe (`SMY-E604`, `SMY-W605`), and rule TQ catches a
+  wrong quote of one.
 
-**The range index's tables.** At 10⁵ units, 41% of a commit is the text library's range index,
-rewritten whole per append. An O(log n) structure is a change to `smysl-text`, recorded in RFC
-SMYSL-3 §17.1 and not planned until a ledger that size needs it.
+**What the experiments decided, on simulated data.** Each ran with its stop condition stated
+first:
 
-**And what 1.16 and 1.14 left.** The cache's written share, the repair a cut would do, the bound
-stated in tokens, the sizing residual on German, the Ollama arm's model size; questions still
-unread, a subject by a name the store does not write, GE-T7 on a thousand real works, and the
-ones only people can close. None of it moved in 1.17.
+- **GE-I2:** the Miller–Madow value is at worst 0.81 % from the true entropy, against 5 %, and
+  circular shifts flag at most 10.0 % of independent AR(1) pairs, so every default holds.
+- **GE-I3:** held to MAD's false-alarm rate, `mi/1` flags every pair that decouples, and
+  `perm/1` about 92 % of an oscillation, against PELT's 56 %. The statistics see what the level
+  detectors miss, and a later RFC may propose a detector from them.
+- **GE-I4:** `tent/1` moves 0.55 bits for a fault that adds error messages, against 0.013 bits
+  of sampling, but a fault that only changes the mix moves it about as little as sampling does.
+  It ships by the author's decision, recorded in RFC SMYSL-5 §15.
+- **GE-I5:** transfer entropy named a direction in 88 to 92 % of pairs that only share a
+  driver, against a bound of 10 %, so `te/1` is not released.
+
+**What 1.18 leaves open.** Everything 1.17 left. GE-M7 on agents, which needs the Train-Ticket
+testbed. The real-data runs: GE-M1 on a cluster observed for seven days (I-1), the Zabbix
+fixtures (I-2), GE-M2 and GE-M5 on DeathStarBench, GE-M8 on GE-M7's corpus, and now GE-I3 on
+RCAEval's real incidents. OKO's own ledger. The range index's tables. What 1.16 and 1.14 left.
+None of it moved in 1.18.
 
 ### Transfer entropy is not released (SMYSL-5 TI-P5)
 
