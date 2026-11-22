@@ -7,6 +7,35 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.19.0
+
+What 1.18 leaves open, by what it blocks rather than the order it is easiest. 1.18 built SMYSL-4
+and SMYSL-5 to their last phases. SMYSL-5's experiments ran on simulated data and say so, and
+what a simulation cannot decide is still where the work is.
+
+**GE-M7 is still the reason for all of this, and it has not run.** It needs the Train-Ticket
+testbed (D-T12) and agent runs, arms (a) to (d). Until it runs, the design of investigations is
+untested against an agent, and rule TQ's catch rate, now over statistics as well as windows, is a
+property of `examples/oko_ledger`'s planted quotes rather than of a model's.
+
+**The real-data runs.** GE-I3 on RCAEval's real incidents, which decides whether a detector
+built from `mi/1` and `perm/1` is worth an RFC. GE-M1 on a cluster observed for seven days
+(I-1), the Zabbix fixtures (I-2), GE-M2 and GE-M5 on DeathStarBench at production-like load,
+GE-M8 on GE-M7's corpus and RCAEval. Each simulated verdict names the run on real data that
+could overturn it.
+
+**OKO's own ledger.** `examples/oko_ledger` runs smysl's side through the library API; OKO
+writing a rotation ledger is TL-P6's criterion, and it is OKO's code.
+
+**The range index's tables.** At 10⁵ units, 41% of a commit is the text library's range index,
+rewritten whole per append. An O(log n) structure is a change to `smysl-text`, recorded in RFC
+SMYSL-3 §17.1 and not planned until a ledger that size needs it.
+
+**And what 1.16 and 1.14 left.** The cache's written share, the repair a cut would do, the bound
+stated in tokens, the sizing residual on German, the Ollama arm's model size; questions still
+unread, a subject by a name the store does not write, GE-T7 on a thousand real works, and the
+ones only people can close. None of it moved in 1.18.
+
 ## 1.18.0 — 2026-11-22
 
 Two RFCs, each built to its last phase: SMYSL-4, which runs Bund2 scripts over a library, and
