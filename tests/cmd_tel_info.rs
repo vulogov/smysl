@@ -256,3 +256,72 @@ fn a_template_entropy_commits_its_templates_and_then_reads_them() {
     assert!(!out(&second).contains("materialised"), "{}", out(&second));
     assert_eq!(uids(&first), uids(&second));
 }
+
+/// TI-P4: `tel check` recomputes committed statistics from the substrate and finds them
+/// themselves; with the substrate gone it says `SMY-W605` and nothing worse; and a dossier lists
+/// the statistic an investigation consulted, with its surrogates.
+#[test]
+fn tel_check_recomputes_statistics_and_a_dossier_lists_them() {
+    let dir = library("check");
+    let latency = series("latency");
+    let mut committed = Vec::new();
+    for (r, extra) in [
+        ("ent.hjson", vec![]),
+        ("mi.hjson", vec!["--with", latency.as_str()]),
+        ("jsd.hjson", vec![]),
+    ] {
+        let mut args = extra.clone();
+        args.extend(["--at", "1768564800000", "--yes"]);
+        let o = info(&dir, r, &args);
+        assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+        committed.extend(uids(&o));
+    }
+    assert_eq!(committed.len(), 6);
+    let check = || run(&dir, &["tel", "check", "-s", "lib"]);
+    let o = check();
+    assert_eq!(o.status.code(), Some(0), "{}{}", out(&o), err(&o));
+    for code in ["SMY-E603", "SMY-E604", "SMY-W605", "SMY-W614", "SMY-W704"] {
+        assert!(!out(&o).contains(code), "{code}: {}", out(&o));
+    }
+
+    // An investigation consults the mutual information; the dossier lists it.
+    let ledger = |args: &[&str]| {
+        let mut a = vec!["tel", "investigate"];
+        a.extend_from_slice(args);
+        a.extend(["-s", "lib", "--as", "human:ana", "--at", "1768564900000"]);
+        run(&dir, &a)
+    };
+    let o = ledger(&["open", "why did latency follow cpu?"]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let inv = out(&o)
+        .split_whitespace()
+        .find(|w| w.starts_with("b3:"))
+        .expect("the investigation's uid")
+        .to_string();
+    let mi = &committed[2];
+    let o = ledger(&["consult", &inv, mi]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let o = run(&dir, &["tel", "investigate", "show", &inv, "-s", "lib"]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let text = out(&o);
+    assert!(text.contains("statistics    1"), "{text}");
+    let line = text
+        .lines()
+        .find(|l| l.starts_with(&format!("  {mi}  ")))
+        .unwrap_or_else(|| panic!("{text}"));
+    assert!(
+        line.contains(" mi ") && line.contains("null ") && line.contains(" of 10"),
+        "{line}"
+    );
+    assert!(text.contains("gaps          0"), "{text}");
+
+    // The substrate gone, every statistic is W605, and the check still passes.
+    std::fs::remove_file(dir.join("lib/index/series.redb")).unwrap();
+    let o = check();
+    assert_eq!(o.status.code(), Some(0), "{}{}", out(&o), err(&o));
+    let w605 = out(&o).lines().filter(|l| l.contains("SMY-W605")).count();
+    assert!(w605 >= committed.len(), "{}", out(&o));
+    assert!(!out(&o).contains("SMY-E604"), "{}", out(&o));
+    let o = run(&dir, &["tel", "investigate", "show", &inv, "-s", "lib"]);
+    assert!(out(&o).contains("gaps          1"), "{}", out(&o));
+}

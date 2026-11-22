@@ -946,6 +946,158 @@ pub fn rule_tw_violations(unit: &UnitCore, attestations: &[crate::Attestation]) 
     out
 }
 
+/// What an `x.tel/info` payload says (RFC SMYSL-5 §3), read from its CBOR: the fields rule TI,
+/// the info key and recomputation need. Other fields are skipped, as rule X asks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InfoFields {
+    pub stat: Option<String>,
+    pub series: Option<String>,
+    pub instrument: Option<String>,
+    pub from_ms: Option<u64>,
+    pub to_ms: Option<u64>,
+    pub recipe: Option<String>,
+    pub n: Option<u64>,
+    pub digest: Option<[u8; 32]>,
+    pub with: Option<String>,
+    pub with_instrument: Option<String>,
+    pub with_digest: Option<[u8; 32]>,
+    pub ref_from_ms: Option<u64>,
+    pub ref_to_ms: Option<u64>,
+    pub ref_digest: Option<[u8; 32]>,
+    pub lag: Option<i64>,
+    /// `tel:lags` and `tel:values`: how many elements each holds.
+    pub lags: Option<usize>,
+    pub values: Option<usize>,
+}
+
+/// Read an info payload. `Err` names what is malformed.
+pub fn info_fields(payload: &[u8]) -> Result<InfoFields, String> {
+    use crate::cbor::major;
+    use crate::cbor::reader::Dec;
+    let mut d = Dec::new(payload);
+    let n = d.map_head().map_err(|e| format!("not a map: {e}"))?;
+    let mut f = InfoFields::default();
+    for _ in 0..n {
+        let key = d
+            .text()
+            .map_err(|e| format!("a key that is not text: {e}"))?;
+        let what = |e: crate::error::CodecError| format!("`{key}`: {e}");
+        let digest = |d: &mut Dec<'_>| -> Result<[u8; 32], String> {
+            if d.peek_major().map_err(what)? != major::BYTES {
+                return Err(format!("`{key}` is not a byte string"));
+            }
+            let b = d.bytes().map_err(what)?;
+            b.try_into()
+                .map_err(|_| format!("`{key}` is {} bytes, not 32", b.len()))
+        };
+        match key {
+            "tel:stat" => f.stat = Some(d.text().map_err(what)?.to_string()),
+            "tel:series" => f.series = Some(d.text().map_err(what)?.to_string()),
+            "tel:instrument" => f.instrument = Some(d.text().map_err(what)?.to_string()),
+            "tel:recipe" => f.recipe = Some(d.text().map_err(what)?.to_string()),
+            "tel:with" => f.with = Some(d.text().map_err(what)?.to_string()),
+            "tel:with_instrument" => f.with_instrument = Some(d.text().map_err(what)?.to_string()),
+            "tel:from_ms" => f.from_ms = Some(d.uint().map_err(what)?),
+            "tel:to_ms" => f.to_ms = Some(d.uint().map_err(what)?),
+            "tel:ref_from_ms" => f.ref_from_ms = Some(d.uint().map_err(what)?),
+            "tel:ref_to_ms" => f.ref_to_ms = Some(d.uint().map_err(what)?),
+            "tel:n" => f.n = Some(d.uint().map_err(what)?),
+            "tel:lag" => f.lag = Some(d.int().map_err(what)?),
+            "tel:digest" => f.digest = Some(digest(&mut d)?),
+            "tel:with_digest" => f.with_digest = Some(digest(&mut d)?),
+            "tel:ref_digest" => f.ref_digest = Some(digest(&mut d)?),
+            "tel:lags" | "tel:values" => {
+                let len = d.array_head().map_err(what)?;
+                for _ in 0..len {
+                    d.skip_item().map_err(what)?;
+                }
+                if key == "tel:lags" {
+                    f.lags = Some(len);
+                } else {
+                    f.values = Some(len);
+                }
+            }
+            _ => {
+                d.skip_item().map_err(what)?;
+            }
+        }
+    }
+    if !d.is_done() {
+        return Err("bytes after the map".into());
+    }
+    Ok(f)
+}
+
+/// How an `x.tel/info` unit, with these attestations, breaks rule TI (RFC SMYSL-5 §3,
+/// `SMY-E603`); empty when it does not. Any other type, nothing.
+///
+/// `derived`, attested `Op::Transformed` at `Rung::Computed`, and carrying the digest of every
+/// sample set it read: `digest` always, `with_digest` for `mi` (with `with` and
+/// `with_instrument`), `ref_digest` wherever a reference window is named. Whether its numbers
+/// are the function of those sets is recomputation's (`SMY-E604`), not this.
+pub fn rule_ti_violations(unit: &UnitCore, attestations: &[crate::Attestation]) -> Vec<String> {
+    use crate::{Op, Rung};
+    if unit.schema.as_str() != INFO {
+        return Vec::new();
+    }
+    let Some(payload) = unit.payload.as_deref() else {
+        return vec!["it has no payload".into()];
+    };
+    let f = match info_fields(payload) {
+        Ok(f) => f,
+        Err(e) => return vec![format!("its payload is not an info unit's: {e}")],
+    };
+    let mut out = Vec::new();
+    if unit.status != Status::Derived {
+        out.push(format!(
+            "a statistic is derived, not {}",
+            unit.status.as_str()
+        ));
+    }
+    if f.digest.is_none() {
+        out.push("it has no digest of the samples it read".into());
+    }
+    let stat = f.stat.as_deref().unwrap_or("");
+    if stat == "mi" {
+        for (present, what) in [
+            (f.with.is_some(), "with"),
+            (f.with_instrument.is_some(), "with_instrument"),
+            (f.with_digest.is_some(), "with_digest"),
+            (f.lag.is_some(), "lag"),
+        ] {
+            if !present {
+                out.push(format!("an mi unit has no `{what}`"));
+            }
+        }
+    } else if f.with_digest.is_some() || f.with.is_some() {
+        out.push(format!(
+            "a `{stat}` unit reads one series, and names a second"
+        ));
+    }
+    let named = f.ref_from_ms.is_some() || f.ref_to_ms.is_some();
+    if stat == "jsd" && !named {
+        out.push("a jsd unit names no reference window".into());
+    }
+    if named && (f.ref_from_ms.is_none() || f.ref_to_ms.is_none() || f.ref_digest.is_none()) {
+        out.push("its reference window lacks `ref_from_ms`, `ref_to_ms` or `ref_digest`".into());
+    }
+    if !named && f.ref_digest.is_some() {
+        out.push("it carries a `ref_digest` and names no reference window".into());
+    }
+    if f.lags != f.values {
+        out.push("a scan's `lags` and `values` differ in length, or one is absent".into());
+    }
+    for a in attestations {
+        if a.op != Op::Transformed || a.rung != Rung::Computed {
+            out.push(format!(
+                "attested {:?} at {:?} by {}; rule TI asks Transformed at Computed",
+                a.op, a.rung, a.agent
+            ));
+        }
+    }
+    out
+}
+
 /// One numeric quote of a hypothesis (§11.4): `<uid>#<field>=<value>`, or
 /// `<uid>#<field>[<index>]=<value>` into a list field.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1954,6 +2106,97 @@ mod tests {
         let measured = unit(LOG_TEMPLATE, Status::Measured, true);
         let v = rule_tw_violations(&measured, &[]);
         assert!(v.iter().any(|m| m.contains("is derived")), "{v:?}");
+    }
+
+    /// Rule TI (RFC SMYSL-5 §3, TI-P4): a statistic is derived, transformed at the computed rung,
+    /// and carries the digest of every sample set it read.
+    #[test]
+    fn rule_ti_asks_each_sample_sets_digest() {
+        use crate::cbor::{major, writer::Enc};
+        use crate::{AgentId, Attestation, Hlc, Op, Rung};
+        // Fields in key order; a digest is 32 bytes of 7.
+        fn unit(status: Status, fields: &[(&str, &str)]) -> UnitCore {
+            let mut fs: Vec<(&str, &str)> = fields.to_vec();
+            fs.sort();
+            let mut e = Enc::new();
+            e.head(major::MAP, fs.len() as u64);
+            for (k, v) in fs {
+                e.text(k);
+                match v {
+                    "#" => e.bytes(&[7; 32]),
+                    "0" => e.uint(0),
+                    _ => e.text(v),
+                }
+            }
+            UnitCoreBuilder::new(SchemaId::Extension(INFO.to_string()), "g", status)
+                .source(SourceRef::new(SourceKind::Metric, "series:prom:x"))
+                .grounds(vec![crate::Uid::from_bytes([1; 32])])
+                .payload(e.into_bytes())
+                .build()
+                .unwrap()
+        }
+        let att = |u: &UnitCore, op, rung| {
+            let a = AgentId::new("tool:smysl-tel").unwrap();
+            Attestation::new(
+                crate::canonical_uid(u),
+                a.clone(),
+                op,
+                rung,
+                Hlc::new(1, 0, a),
+            )
+        };
+        let ent = unit(
+            Status::Derived,
+            &[("tel:stat", "entropy"), ("tel:digest", "#")],
+        );
+        let ok = att(&ent, Op::Transformed, Rung::Computed);
+        assert!(rule_ti_violations(&ent, &[ok]).is_empty());
+        let wrong = att(&ent, Op::Imported, Rung::Computed);
+        assert_eq!(rule_ti_violations(&ent, &[wrong]).len(), 1);
+        let measured = unit(
+            Status::Measured,
+            &[("tel:stat", "entropy"), ("tel:digest", "#")],
+        );
+        assert_eq!(rule_ti_violations(&measured, &[]).len(), 1);
+        let bare = unit(Status::Derived, &[("tel:stat", "entropy")]);
+        let v = rule_ti_violations(&bare, &[]);
+        assert!(v.iter().any(|m| m.contains("no digest")), "{v:?}");
+
+        let mi = |with_digest: bool| {
+            let mut f = vec![
+                ("tel:stat", "mi"),
+                ("tel:digest", "#"),
+                ("tel:with", "b3:x"),
+                ("tel:with_instrument", "b3:y"),
+                ("tel:lag", "0"),
+            ];
+            if with_digest {
+                f.push(("tel:with_digest", "#"));
+            }
+            unit(Status::Derived, &f)
+        };
+        assert!(rule_ti_violations(&mi(true), &[]).is_empty());
+        let v = rule_ti_violations(&mi(false), &[]);
+        assert!(v.iter().any(|m| m.contains("with_digest")), "{v:?}");
+        let jsd = unit(Status::Derived, &[("tel:stat", "jsd"), ("tel:digest", "#")]);
+        assert_eq!(rule_ti_violations(&jsd, &[]).len(), 1);
+        let jsd = unit(
+            Status::Derived,
+            &[
+                ("tel:stat", "jsd"),
+                ("tel:digest", "#"),
+                ("tel:ref_from_ms", "0"),
+                ("tel:ref_to_ms", "0"),
+            ],
+        );
+        let v = rule_ti_violations(&jsd, &[]);
+        assert!(v.iter().any(|m| m.contains("ref_digest")), "{v:?}");
+        // Another type is not rule TI's.
+        assert!(rule_ti_violations(&tel_series(), &[]).is_empty());
+    }
+
+    fn tel_series() -> UnitCore {
+        series("prom", "up").unwrap()
     }
 
     #[test]

@@ -498,15 +498,20 @@ pub fn materialise_sketched<B: Backend>(
 /// is not recomputed; neither is reported.
 ///
 /// Span and template units (TL-P9, §9.8) are recomputed too, by [`crate::trace::verify`] and
-/// [`crate::logs::verify`].
+/// [`crate::logs::verify`], and info units (RFC SMYSL-5 §7) by [`crate::info::verify::verify`],
+/// `tent/1`'s from the template units among `windows`.
 pub fn verify<'a, B: Backend>(
     windows: impl IntoIterator<Item = &'a UnitCore>,
     substrate: &Substrate<B>,
 ) -> Vec<smysl_core::Diagnostic> {
     use smysl_core::{Code, Diagnostic};
     let mut out = Vec::new();
-    let (mut spans, mut templates) = (Vec::new(), Vec::new());
+    let (mut spans, mut templates, mut infos) = (Vec::new(), Vec::new(), Vec::new());
     for unit in windows {
+        if unit.schema.as_str() == tel::INFO {
+            infos.push(unit);
+            continue;
+        }
         if unit.schema.as_str() == tel::SPAN {
             spans.push(unit);
             continue;
@@ -602,6 +607,7 @@ pub fn verify<'a, B: Backend>(
         )));
     }
     out.extend(crate::trace::verify(spans, substrate));
+    out.extend(crate::info::verify::verify(infos, &templates, substrate));
     out.extend(crate::logs::verify(templates, substrate));
     out
 }

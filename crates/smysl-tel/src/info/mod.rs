@@ -36,6 +36,7 @@ pub mod logs;
 pub mod mi;
 pub mod num;
 pub mod symbols;
+pub mod verify;
 
 pub use grid::Of;
 pub use mi::Lag;
@@ -367,6 +368,46 @@ impl Spec {
             cover,
             min_n,
         })
+    }
+
+    /// Read a stored recipe text back, `id?k=v&k=v` as [`Spec::recipe`] writes it (§4): what
+    /// recomputation (§7) runs a unit by. `Err` when it does not parse, or parses to a recipe
+    /// this build would write otherwise, since then the unit was not written by this build's
+    /// rules and recomputing it would compute something else.
+    pub fn from_recipe(text: &str) -> Result<Spec, Refusal> {
+        let (id, params) = text.split_once('?').unwrap_or((text, ""));
+        let mut h = format!("{{ stat: \"{id}\"");
+        for kv in params.split('&').filter(|kv| !kv.is_empty()) {
+            let (k, v) = kv
+                .split_once('=')
+                .ok_or_else(|| Refusal::recipe(format!("`{kv}` is not key=value")))?;
+            if k.is_empty() || !k.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+                return Err(Refusal::recipe(format!("`{k}` is not a parameter name")));
+            }
+            if v.bytes()
+                .any(|b| b == b'"' || b == b'\\' || b.is_ascii_control())
+            {
+                return Err(Refusal::recipe(format!(
+                    "`{k}`'s value is not a recipe value"
+                )));
+            }
+            // A number is written bare, so that `lag: -3` is one lag and `lag: "-3..3"` a scan;
+            // a hash is text whatever its digits.
+            if k != "templates" && v.parse::<i64>().is_ok() {
+                h.push_str(&format!(", {k}: {v}"));
+            } else {
+                h.push_str(&format!(", {k}: \"{v}\""));
+            }
+        }
+        h.push_str(" }");
+        let spec = Spec::parse(&h)?;
+        if spec.recipe().text() != text {
+            return Err(Refusal::recipe(format!(
+                "`{text}` is not written as this build writes it: `{}`",
+                spec.recipe().text()
+            )));
+        }
+        Ok(spec)
     }
 
     /// The recipe id.
@@ -1225,6 +1266,32 @@ mod tests {
             "jsd/1?bins=diff&cover=4/5&hold=60000&min_n=200&of=value&ref=0-3600000&step=60000"
         );
         assert_eq!(s.reference(), Some((0, 3_600_000)));
+    }
+
+    #[test]
+    fn a_stored_recipe_reads_back_to_the_spec_that_wrote_it() {
+        for text in [
+            r#"{ stat: ent/1, step: 60000, bins: "width:0.5" }"#,
+            r#"{ stat: ent/1, step: 60000, bins: "baseline:4", ref: "0-3600000", of: increase }"#,
+            r#"{ stat: perm/1, step: 1000, m: 4, tau: 2 }"#,
+            r#"{ stat: mi/1, step: 60000, bins: "rank:4", lag: "-10..10", null: 200, seed: 7 }"#,
+            r#"{ stat: mi/1, step: 60000, bins: diff, lag: -3 }"#,
+            r#"{ stat: jsd/1, step: 60000, bins: diff, ref: "0-3600000" }"#,
+            r#"{ stat: tent/1 }"#,
+            r#"{ stat: tent/1, min_n: 5, templates: "0000000000000000000000000000000000000000000000000000000000000000" }"#,
+        ] {
+            let s = Spec::parse(text).unwrap();
+            assert_eq!(Spec::from_recipe(&s.recipe().text()).unwrap(), s, "{text}");
+        }
+        for bad in [
+            "ent/1?bins=width:0.50&cover=4/5&hold=60000&min_n=200&of=value&step=60000",
+            "ent/1?bins=width:0.5&step=60000",
+            "ent/1?bins=width:0.5&cover=4/5&hold=60000&min_n=200&of=value&step=60000&x=1",
+            "ent/2?step=60000",
+            "ent/1?bins",
+        ] {
+            assert!(Spec::from_recipe(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

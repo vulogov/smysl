@@ -37,6 +37,15 @@
 //!   all attested as the rule asks; then a span attested `Transformed`, a span with no digest,
 //!   and a template stated `measured` (`SMY-E603` each). The first also breaks rule T, as the
 //!   `tw` case's exact window does (`SMY-E033`, `SMY-W035`).
+//! - `info`: rule TI (RFC SMYSL-5 §3, TI-P4), on a store revision 2 declares. An entropy and a
+//!   mutual-information scan attested as the rule asks, and a hypothesis quoting their `value`,
+//!   `mm`, an element of `values` and `null_ge` at the stored six places, which verifies; a
+//!   second quoting `value` to two places and with a trailing zero (`SMY-W606` each, so it is
+//!   capped at `speculative`). Then an entropy stated `measured`, and a mutual information with
+//!   no `with_digest` (`SMY-E603` each), each by a recipe of its own so that it shares no info
+//!   key; the first, `measured` but attested `Transformed`, also breaks rule T (`SMY-E033`,
+//!   `SMY-W035`), as the `tw` case's exact window does. Last, a second entropy of the first's
+//!   info key over another sample set (`SMY-W614`).
 //! - `reserved`: what no writer may emit, carried and reported: records 6 of kinds 6 and 7
 //!   (`SMY-E611`), record 16 and `source` key 7 (`SMY-E612`), and a series that breaks §4.1's
 //!   entity-like rule (`SMY-E607`).
@@ -73,6 +82,7 @@ const CASES: &[&str] = &[
     "rivals",
     "witnesses",
     "events",
+    "info",
     "reserved",
 ];
 
@@ -88,6 +98,7 @@ enum V {
     Dec(&'static str),
     Decs(Vec<&'static str>),
     Texts(Vec<String>),
+    Ints(Vec<i64>),
     Bytes([u8; 32]),
 }
 
@@ -115,6 +126,12 @@ fn payload(entries: Vec<(&str, V)>) -> Vec<u8> {
                     ve.array_head(ts.len());
                     for t in ts {
                         ve.text(&t);
+                    }
+                }
+                V::Ints(ns) => {
+                    ve.array_head(ns.len());
+                    for n in ns {
+                        ve.int(n);
                     }
                 }
                 V::Bytes(b) => ve.bytes(&b),
@@ -854,9 +871,154 @@ fn events() -> Case {
     c
 }
 
+/// RFC SMYSL-5 §3 and §8: rule TI, the info key, and rule TQ over a statistic's fields.
+fn info() -> Case {
+    let mut c = Case::new();
+    // `x.tel/info` is revision 2's.
+    c.records[0] = Record::SchemaDecl(tel::decl());
+    let b = base(&mut c, "load");
+    let peer = c.measured("load_peer_seconds", b.exporter);
+    let ent_recipe = "ent/1?bins=width:0.5&cover=4/5&hold=1000&min_n=50&of=value&step=1000";
+    let mi_recipe = "mi/1?bins=rank:4&cover=4/5&guard=1/10&hold=1000&lag=-3..3&min_n=50\
+                     &null=200&of=value&seed=7&step=1000";
+    let info = |c: &mut Case,
+                label: &str,
+                status: Status,
+                stat: &str,
+                fields: Vec<(&'static str, V)>,
+                digest: u8| {
+        let mut source = SourceRef::new(SourceKind::Metric, "series:prom:load_seconds");
+        source.observed = Some(TO);
+        let mut p = vec![
+            ("tel:stat", V::Text(stat.into())),
+            ("tel:series", V::Uid(b.series)),
+            ("tel:instrument", V::Uid(b.scraper)),
+            ("tel:from_ms", V::Int(FROM)),
+            ("tel:to_ms", V::Int(TO)),
+            ("tel:digest", V::Bytes([digest; 32])),
+        ];
+        p.extend(fields);
+        let mut grounds = vec![b.series];
+        if stat == "mi" {
+            grounds.push(peer);
+            grounds.sort();
+        }
+        let u = UnitCoreBuilder::new(ty(tel::INFO), label, status)
+            .source(source)
+            .grounds(grounds.clone())
+            .payload(payload(p))
+            .build()
+            .unwrap();
+        let id = c.unit(label, u);
+        c.attest(id, Op::Transformed, Rung::Computed);
+        for g in grounds {
+            c.rel(tel::OF_SERIES, id, g);
+        }
+        id
+    };
+    let entropy = |n: u64, value: &'static str, recipe: &str| {
+        vec![
+            ("tel:recipe", V::Text(recipe.into())),
+            ("tel:n", V::Int(n)),
+            ("tel:value", V::Dec(value)),
+            ("tel:k", V::Int(6)),
+            ("tel:mm", V::Dec("1.84211")),
+        ]
+    };
+    let mi = |with_digest: bool, recipe: &str| {
+        let mut f = vec![
+            ("tel:recipe", V::Text(recipe.into())),
+            ("tel:n", V::Int(57)),
+            ("tel:value", V::Dec("0.412")),
+            ("tel:with", V::Uid(peer)),
+            ("tel:with_instrument", V::Uid(b.scraper)),
+            ("tel:k", V::Int(4)),
+            ("tel:k_with", V::Int(4)),
+            ("tel:bias", V::Dec("0.11389")),
+            ("tel:lag", V::Int(0)),
+            ("tel:lags", V::Ints(vec![-3, -2, -1, 0, 1, 2, 3])),
+            (
+                "tel:values",
+                V::Decs(vec![
+                    "0.021", "0.05", "0.190116", "0.412", "0.18", "0.033", "0.02",
+                ]),
+            ),
+            ("tel:null_b", V::Int(200)),
+            ("tel:null_ge", V::Int(0)),
+        ];
+        if with_digest {
+            f.push(("tel:with_digest", V::Bytes([0xc2; 32])));
+        }
+        f
+    };
+    let ent = info(
+        &mut c,
+        "entropy",
+        Status::Derived,
+        "entropy",
+        entropy(60, "1.831294", ent_recipe),
+        0xb1,
+    );
+    let scan = info(
+        &mut c,
+        "mi scan",
+        Status::Derived,
+        "mi",
+        mi(true, mi_recipe),
+        0xb1,
+    );
+    let a = c.anomaly("load jumped", b.series, b.window);
+    c.hypothesis(
+        "h: the load and its peer move together",
+        Status::Inferred,
+        a,
+        &[ent, scan],
+        vec![
+            quote(ent, "value=1.831294"),
+            quote(ent, "mm=1.84211"),
+            quote(scan, "values[2]=0.190116"),
+            quote(scan, "null_ge=0"),
+        ],
+    );
+    c.hypothesis(
+        "w606: h quoting the entropy to two places, and with a trailing zero",
+        Status::Inferred,
+        a,
+        &[ent],
+        vec![quote(ent, "value=1.83"), quote(ent, "value=1.8312940")],
+    );
+    info(
+        &mut c,
+        "e603: entropy, measured",
+        Status::Measured,
+        "entropy",
+        entropy(59, "1.8", &ent_recipe.replace("min_n=50", "min_n=40")),
+        0xb3,
+    );
+    let other = mi_recipe.replace("seed=7", "seed=8");
+    info(
+        &mut c,
+        "e603: mi, no with_digest",
+        Status::Derived,
+        "mi",
+        mi(false, &other),
+        0xb4,
+    );
+    info(
+        &mut c,
+        "w614: entropy, another sample set",
+        Status::Derived,
+        "entropy",
+        entropy(61, "1.83", ent_recipe),
+        0xb2,
+    );
+    c
+}
+
 fn build(name: &str) -> Case {
     match name {
         "events" => events(),
+        "info" => info(),
         "clean" => clean(),
         "tw" => tw(),
         "tq" => tq(),

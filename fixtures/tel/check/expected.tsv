@@ -156,6 +156,28 @@ events	code	SMY-E603	b3:3k7tfdd5moy2nuposc275j4jjuehlnrn465wjkyknjlymmtntuaa
 events	code	SMY-E603	b3:nkuvwxlu47y6eqphe6snoeh7ymsrqms4da4fbtocdyxsx7pakgwq
 events	code	SMY-E603	b3:s2z6trixgkinefq32ci22tyzodvz6ddsbawfmzq2twxhyn2kpaeq
 events	code	SMY-W035	b3:nkuvwxlu47y6eqphe6snoeh7ymsrqms4da4fbtocdyxsx7pakgwq
+info	unit	b3:auajfse7xgsb2y63d6bnarslxgsz4pmnlfjmeayhumwjr74bwc4a	prom-scrape:load/h1:9100
+info	unit	b3:gicj4tkvwij375zwpjprndtohfqk3fxnjql62ezycei2ldthjluq	e603: entropy, measured
+info	unit	b3:ifp7y33serum2bz7gsqqsv34yxej6kvqqnbx6zm74qx3mwr6duyq	w614: entropy, another sample set
+info	unit	b3:ih2usr3z45vi577uugmzqx7i377khgg66vazqcsxcp7bnc5x3e3a	load jumped
+info	unit	b3:jjgmbzewxf52egd5rq3h4pwvofxub6hudz7ut3e7wozbk3juqj3q	load_peer_seconds
+info	unit	b3:k6dxnjnjya5tx6dqelkgkxyb77gggebdzqntkmbvltoja24oty3q	w
+info	unit	b3:mftdaawuw2x2ldtuf5mgzvw2r7463l36g2f5dnciluzkdixhcrba	load_seconds
+info	unit	b3:qxcbzfc5hnpgol5l7dt3zwrrglqmhb3xffh6jrxypiknkjzxm5ma	entropy
+info	unit	b3:rtugetgcm6w5z2xnvf76s4mzy2rqkxgad33qvmklrthrakhvecaq	e603: mi, no with_digest
+info	unit	b3:xyeskgw5aaxoco2fvqiyirppruvkocqgv72b5anunblpvs2mqmha	h: the load and its peer move together
+info	unit	b3:3glbduz5n6cqn33r6en72nitcyvwao2aaat7su5fyogmulru7wga	mi scan
+info	unit	b3:3yckdbvwdi5jnswplgoqyookottb2syu3ixb4chk2iqfmc3dbxva	w606: h quoting the entropy to two places, and with a trailing zero
+info	unit	b3:42txwlljmcl2tcgyycvp5cffmgo7dbae3cegpfcjx24z46xmloka	prom-target:load/h1:9100
+info	code	SMY-E033	b3:gicj4tkvwij375zwpjprndtohfqk3fxnjql62ezycei2ldthjluq
+info	code	SMY-E603	b3:gicj4tkvwij375zwpjprndtohfqk3fxnjql62ezycei2ldthjluq
+info	code	SMY-E603	b3:rtugetgcm6w5z2xnvf76s4mzy2rqkxgad33qvmklrthrakhvecaq
+info	code	SMY-W035	b3:gicj4tkvwij375zwpjprndtohfqk3fxnjql62ezycei2ldthjluq
+info	code	SMY-W606	b3:3yckdbvwdi5jnswplgoqyookottb2syu3ixb4chk2iqfmc3dbxva
+info	code	SMY-W606	b3:3yckdbvwdi5jnswplgoqyookottb2syu3ixb4chk2iqfmc3dbxva
+info	code	SMY-W614	-
+info	status	b3:xyeskgw5aaxoco2fvqiyirppruvkocqgv72b5anunblpvs2mqmha	inferred
+info	status	b3:3yckdbvwdi5jnswplgoqyookottb2syu3ixb4chk2iqfmc3dbxva	speculative
 reserved	unit	b3:iffdtxqyfjsjagiuh3343w3gsvanc3flbghswo46lhuttsnzn5ja	w
 reserved	unit	b3:l63ds3ri7lgkbyl3lauxqdv2qssm2w67meqfjxggyxpsjkcjl7jq	e612: source key 7
 reserved	unit	b3:pxgezcpaukjqoejaqxj6nribtztgcpxy3uhexuzepoqgqtdjykxa	prom-scrape:reserved/h1:9100

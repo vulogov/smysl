@@ -34,6 +34,35 @@ stated in tokens, the sizing residual on German, the Ollama arm's model size; qu
 unread, a subject by a name the store does not write, GE-T7 on a thousand real works, and the
 ones only people can close. None of it moved in 1.17.
 
+### Statistics in `check` and investigations (SMYSL-5 TI-P4)
+
+An `x.tel/info` statistic is now evidence as a window is: checked, recomputed, quoted and listed.
+
+- **Rule TI in `check`** (§3): a statistic is `derived`, attested as transformed at the computed
+  rung, and carries the digest of every sample set it read: `with_digest` for `mi`,
+  `ref_digest` wherever a reference window is named. Otherwise `SMY-E603`. Units of one info key
+  over different sample sets are `SMY-W614`, in the full check and in the kept one (AC-8).
+- **Recomputation** (§7): `tel check` recomputes each statistic from the substrate by its stored
+  recipe, through the code that wrote it. Another unit is `SMY-E604`, naming the fields that
+  differ; samples gone are `SMY-W605` and nothing worse; a recipe id this build does not have is
+  one `SMY-W704`. A template entropy recomputes from its template units, so it outlives its
+  log records. The summary line counts statistics apart from windows.
+- **Quotes** (§8): rule TQ verifies a quote of `value`, `mm`, `bias`, `n`, `k`, `null_ge`,
+  `null_b` or `values[i]` at the stored six places. `fixtures/tel/check/` gains an `info` case
+  for C-Tel-Check: rule TI, the info key and TQ over a statistic's fields.
+- **The dossier**: `tel investigate show` lists the statistics among the evidence, with value,
+  `n` and surrogates, and its gaps include those not re-derivable.
+- **Examples**: `oko_ledger` commits two statistics, and its first investigation quotes them
+  rightly and once rounded to two places, which rule TQ catches. `examples/tel_info` runs the
+  measures over GE-M3's series and recomputes them.
+- **GE-I3**, simulated (`crates/smysl-tel/examples/ge_i3.rs`, 400 incidents a kind, ten seeds).
+  Held to MAD's false-alarm rate, `mi/1` flags every pair that decouples, which no shipped
+  detector sees; `perm/1` flags about 92 % of noise turned oscillation, against PELT's 56 % and
+  MAD's none; `jsd/1` flags 95 % of a variance change that MAD already flags in full. So the
+  stop condition does not hold: the statistics see what level detectors miss, and a later RFC
+  may propose a detector from them. `tent/1` does not see a permuted log mix, as GE-I4
+  predicted. The run on RCAEval's real incidents is still owed.
+
 ### `smysl tel info`: the entropy of a log stream's templates (SMYSL-5 TI-P3)
 
 `tent/1`, the last statistic of RFC SMYSL-5 short of transfer entropy: the entropy of a log

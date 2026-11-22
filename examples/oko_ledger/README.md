@@ -19,6 +19,11 @@ cargo run --release --features tel --example oko_ledger -- --investigations 200 
 | confirmation on unsafe commands | `confirmed_by` on a model's action |
 | Zabbix demo source | `fixtures/tel/zabbix/trends.json` through `zabbix/1`, as cited windows |
 
+Before the incidents it commits two statistics (RFC SMYSL-5, TI-P4) over GE-I1's driver and
+follower (`fixtures/tel/info/`): an `ent/1`, and an `mi/1` lag scan with 50 surrogates. The
+first investigation consults them and quotes them: once at their stored six places, which
+verifies, and once rounded to two, a planted wrong quote that rule TQ must catch with the rest.
+
 Every ledger operation is committed alone and read back at once, as OKO appends. The run
 reports commit latency (and the staging half of it) and read latency over its first and last
 tenth, because AC-8 (incremental

@@ -372,3 +372,118 @@ fn a_template_entropy_is_its_templates_and_outlives_the_events() {
     assert!(faulty > normal, "faulty {faulty}, normal {normal}");
     assert!(k_faulty > k_normal, "a timeout template appears");
 }
+
+/// Every unit the fixture writes, with the substrate it was computed from, the journal added,
+/// and the journal's stream.
+fn units_and_substrate() -> (Vec<smysl_core::UnitCore>, Substrate<MemBackend>, Uid) {
+    let (mut sub, _) = substrate();
+    let stream = journal(&mut sub);
+    let units = run_all()
+        .into_iter()
+        .flat_map(|(_, o)| o)
+        .filter_map(|o| o.result.ok().map(|c| c.unit))
+        .collect();
+    (units, sub, stream)
+}
+
+/// RFC SMYSL-5 §7 (TI-P4): `tel-evidence` recomputes every unit the fixture writes, and each is
+/// itself; a late sample in a window makes its units `SMY-E604` on the digest.
+#[test]
+fn every_statistic_recomputes_from_what_it_read() {
+    use smysl_core::diag::Code;
+    use smysl_tel::info::verify::verify;
+    let (units, mut sub, _) = units_and_substrate();
+    assert!(units.len() > 20, "{} units", units.len());
+    let clean = verify(&units, &[], &sub);
+    assert!(clean.is_empty(), "{clean:?}");
+
+    // A sample arrives late, inside the window of every unit of info_osc.
+    let osc = canonical_uid(&tel::series("prom", "info_osc").unwrap());
+    let inst = sub.instruments(&osc).unwrap()[0];
+    let row = sub.row(&osc).unwrap().unwrap();
+    let info = SeriesInfo {
+        scheme: row.scheme,
+        key: row.key,
+        class: row.class,
+    };
+    let late = Sample::new(FROM + 90 * 60_000 + 30_000, None, Decimal::from_i64(99), 7).unwrap();
+    sub.add(&osc, &inst, &info, &[late]).unwrap();
+    let late = verify(&units, &[], &sub);
+    let reads_osc = |u: &smysl_core::UnitCore| {
+        let f = tel::info_fields(u.payload.as_deref().unwrap()).unwrap();
+        f.series.as_deref() == Some(&osc.canonical()[..]) || f.with == Some(osc.canonical())
+    };
+    let expect = units.iter().filter(|u| reads_osc(u)).count();
+    assert!(expect > 0);
+    assert_eq!(late.len(), expect, "{late:?}");
+    assert!(late
+        .iter()
+        .all(|d| d.code == Code::E604 && d.message.contains("digest")));
+}
+
+/// §7: with the samples gone a unit is `SMY-W605` and nothing else, except a template entropy,
+/// which is recomputed from its templates; a recipe id this build does not have is `SMY-W704`,
+/// once for all its units.
+#[test]
+fn a_statistic_without_its_samples_is_w605_and_tent_needs_only_its_templates() {
+    use smysl_core::diag::Code;
+    use smysl_tel::info::verify::verify;
+    let (units, sub, stream) = units_and_substrate();
+    let tents: Vec<_> = units
+        .iter()
+        .filter(|u| {
+            tel::info_fields(u.payload.as_deref().unwrap())
+                .unwrap()
+                .stat
+                .as_deref()
+                == Some("template-entropy")
+        })
+        .cloned()
+        .collect();
+    assert_eq!(tents.len(), TENT_WINDOWS.len());
+    let mut templates = Vec::new();
+    for (_, from, to) in TENT_WINDOWS {
+        let r = logs::run_on(&spec("tent"), &sub, [], &[stream], None, *from, *to).unwrap();
+        templates.extend(r.materialised.iter().map(|t| t.unit()));
+    }
+    let refs: Vec<&smysl_core::UnitCore> = templates.iter().collect();
+    let empty = Substrate::new(MemBackend::default());
+    let d = verify(&units, &refs, &empty);
+    assert_eq!(d.len(), units.len() - tents.len(), "{d:?}");
+    assert!(d.iter().all(|d| d.code == Code::W605));
+    // Without the templates either, the template entropies are W605 too.
+    assert_eq!(verify(&tents, &[], &empty).len(), tents.len());
+    assert!(verify(&tents, &[], &empty)
+        .iter()
+        .all(|d| d.code == Code::W605));
+
+    // `ent/9`, a version this build does not have: one W704 for both units.
+    let renamed: Vec<_> = units
+        .iter()
+        .filter(|u| {
+            tel::info_fields(u.payload.as_deref().unwrap())
+                .unwrap()
+                .stat
+                .as_deref()
+                == Some("entropy")
+        })
+        .take(2)
+        .map(|u| {
+            let mut u = u.clone();
+            let mut p = u.payload.take().unwrap();
+            let i = p.windows(6).position(|w| w == b"ent/1?").unwrap();
+            p[i + 4] = b'9';
+            u.payload = Some(p);
+            u
+        })
+        .collect();
+    assert_eq!(renamed.len(), 2);
+    let d = verify(&renamed, &[], &sub);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].code, Code::W704);
+    assert!(
+        d[0].message.contains("2 info unit(s) by `ent/9`"),
+        "{}",
+        d[0].message
+    );
+}

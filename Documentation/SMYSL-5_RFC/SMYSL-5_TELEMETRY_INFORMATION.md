@@ -1,10 +1,11 @@
 # RFC SMYSL-5 — information measures over telemetry
 
 **Author:** Vladimir Ulogov
-**Status:** first draft, amended after review (R1, 2026-11-20) and while building (R2 to R4).
-TI-P0 to TI-P3 are built: `ent/1`, `perm/1`, `mi/1`, `jsd/1` and `tent/1`. GE-I1, GE-I2 and
-GE-I4 have run on simulated data (§15); every other threshold is a proposal until the experiment
-that owns it has run (§17).
+**Status:** first draft, amended after review (R1, 2026-11-20) and while building (R2 to R5).
+TI-P0 to TI-P4 are built: `ent/1`, `perm/1`, `mi/1`, `jsd/1` and `tent/1`, rule TI in `check`,
+and their recomputation. GE-I1 to GE-I4 have run on simulated data (§15); GE-I3's run on
+RCAEval, and every other real-data run, is still owed, and every other threshold is a proposal
+until the experiment that owns it has run (§17).
 **Target version:** not fixed. Phases are named (TI-P0 to TI-P5), not numbered by release.
 **Evidence baseline:** `dev/1.18.0` at `3e57160` ("SMYSL-4 BQ-P4"). Every code pointer below
 describes that tree. Re-check them against the tree in hand before starting a phase.
@@ -24,6 +25,7 @@ Part A.
 | R2 | 2026-11-20 | Found while building TI-P1. **R2-1** admission is by the leaf class the substrate records for a series (`SeriesRow::class`), which every reader writes, and not by `tel:kind`, which the schema allows and no reader writes: R1-2 read the schema and not the readers, and the draft's "class" was right. `state` is not a class, so its row goes. **R2-2** `diff` reads the sequence `of` produces, so under `of=increase` it is the sign of the increase's change. |
 | R3 | 2026-11-21 | Found while building TI-P2. **R3-1** `mi/1` refuses `baseline` bins: they would read a reference window of each series, and `x.tel/info` has one `ref_digest`, so rule TI could not be met (§5.3). **R3-2** `guard` is a share of the grid length `G`, as §6.3 always said, not of `n` (§4). **R3-3** `mi/1`'s `cover` at lag `ℓ` is over the `G − |ℓ|` points where a pair can form, and `missing` counts those where none did; otherwise a long lag alone would fail it (§6.3). **R3-4** a scan's `n`, `k`, `k_with`, `bias` and `missing` are those at `lag` (§6.3). **R3-5** a scan's surrogate counts toward `null_ge` only when every lag meets `min_n` (§6.3). **R3-6** `jsd/1`'s `k` and `missing` are the window's, `cover` applies to each window, and `H(M)` is a plug-in over integer weights, so no probability is formed (§6.2). |
 | R4 | 2026-11-21 | Found while building TI-P3. **R4-1** one window's template units that carry different digests (late events) are separate inputs, and give one `tent/1` unit each, as windows of one key do (§6.4). **R4-2** a metric series given to `tent/1` is `SMY-E701`; a `templates` hash other than the shipped Drain's, with no such templates in the store, is `SMY-W703`, since this build runs one Drain (§6.4). **R4-3** templates `tel info` materialises are committed before the statistic, with their stream's series unit, attested as `tel templates` attests them (§6.4). **R4-4** GE-I4's stop condition failed on 2 of 20 seeds, for a fault that barely moves the entropy, while Drain's share of every boundary move was zero; `tent/1` ships by the author's decision, and the result is recorded in §15. |
+| R5 | 2026-11-21 | Found while building TI-P4. **R5-1** two info units of one key disagree (`SMY-W614`) when they read different sample sets: their `digest`, `with_digest` and `ref_digest` together (§3). **R5-2** recomputation reads a stored recipe text back into a recipe, and one this build would write otherwise, a parameter respelled or missing, is `SMY-E604`, since recomputing it would compute something else; `SMY-W704` is a recipe id this build does not have (§7). **R5-3** rule TI's checks of the fields: `mi` carries `with`, `with_instrument`, `with_digest` and `lag`; a statistic of one series names no second; `jsd` names a reference window; a reference window carries `ref_from_ms`, `ref_to_ms` and `ref_digest` together; a scan's `lags` and `values` are of one length (§3). **R5-4** a `template-entropy` unit is recomputed from the store's templates of its stream, instrument, window and recipe hash; with none, from the events, for the shipped Drain only; with neither, it is `SMY-W605` (§7). **R5-5** the dossier lists the statistics among the evidence an investigation consulted or grounds on, and its open questions include those not re-derivable (§8). **R5-6** GE-I3's reading of its stop condition, fixed before the run, and its result (§15). |
 
 ---
 
@@ -446,6 +448,7 @@ smysl-tel/src/info/
   jsd.rs       jsd/1
   mi.rs        mi/1, scans, surrogates
   logs.rs      tent/1
+  verify.rs    §7's recomputation, for the tel-evidence pass
 ```
 
 - **`libm`** becomes a workspace dependency at `=0.2.16`, `default-features = false`, used by
@@ -510,7 +513,7 @@ it is SMYSL-2's example. A telemetry example over `fixtures/tel/detect/` is TI-P
 | **TI-P1** symbols and one series (**done**, 1.18) | grid, `of`, the four binnings, ordinal patterns; `ent/1`, `perm/1`; `tel info`; the info test in `measure-platforms` | `fixtures/tel/info/` uids stable on the four CI platforms; **GE-I1** harness runs; **GE-I2 (a)** |
 | **TI-P2** two series and two windows (**done**, 1.18) | `mi/1` with lag, scan and surrogates; `jsd/1` | **GE-I1** over them; **GE-I2 (b)**; scan cost measured |
 | **TI-P3** logs (**done**, 1.18) | `tent/1` | **GE-I4** run |
-| **TI-P4** check and investigations | rule TI in `check`; `tel-evidence` recomputation; the info key in `SMY-W614`'s incremental state; tests of TQ over info fields (no TQ code changes, §8); the dossier's evidence section; the manual section and the example | the `oko_ledger` example quotes an info value and a planted wrong quote is caught; **GE-I3** run |
+| **TI-P4** check and investigations (**done**, 1.18) | rule TI in `check`; `tel-evidence` recomputation; the info key in `SMY-W614`'s incremental state; tests of TQ over info fields (no TQ code changes, §8); the dossier's evidence section; the manual section and the example | the `oko_ledger` example quotes an info value and a planted wrong quote is caught; **GE-I3** run |
 | **TI-P5** transfer entropy | `te/1`, only if released | **GE-I5** decides |
 
 TI-P3 needs TI-P1 and not TI-P2. GE-I3 needs TI-P2.
@@ -542,7 +545,11 @@ musl), aarch64 macOS and x86_64 Windows, and TI-P1's seven passed there unchange
 hour four) in three windows, over a metric series (`SMY-E701`), and under another Drain's
 hash (`SMY-W703`): 1.828088 bits over the first four hours and 2.201365 over the last two, as
 the fifth template appears. A further test recomputes the six-hour unit from its template units
-alone, against a substrate holding no event, and gets the same uid, which is §6.4's claim.
+alone, against a substrate holding no event, and gets the same uid, which is §6.4's claim. TI-P4
+adds §7 over the same units: every one recomputes to itself; a sample arriving late in
+`info_osc`'s window makes exactly the units that read it `SMY-E604` on their digest; with the
+substrate empty every unit is `SMY-W605` except the template entropies, which recompute from
+their templates; and a recipe id this build does not have is one `SMY-W704` for its units.
 
 What the fixture shows, and one thing it was not built to: `info_follower`, the driver three
 minutes late, peaks at lag −3 with 1.495574 bits and no surrogate as high; `info_shift`'s
@@ -621,6 +628,51 @@ from normal. Twenty seeds:
 - Real logs carry what this simulation does not: shapes Drain splits or merges, and messages
   whose variable fields its masks miss. GE-I4 says nothing about those, and a run on real logs
   could overturn it.
+
+**GE-I3, run at TI-P4 on simulated data** (`cargo run --release -p smysl-tel --example
+ge_i3`, 400 incidents of each kind, seeds 1 to 10). An incident is a two-hour reference window
+and a one-hour test window at one sample a minute, Gaussian noise about a level. The faults
+are GE-M6's level shift (3 to 10 σ), a variance change (σ × 2 to 4, the median unmoved), noise
+become a sine of period 8 to 20 minutes of about the same variance, a pair at correlation 0.9
+that decouples, and GE-I4's log mix permuted among eight templates. The detectors run as
+shipped; a statistic is held, by its threshold, to MAD's false-alarm rate on the kind's normal
+incidents. The reading was fixed before the run: a statistic **separates** a kind when it then
+flags at least half of it.
+
+| kind | MAD's false alarms | MAD | CUSUM | PELT | `jsd/1` | `perm/1` | `mi/1` | `tent/1` |
+|---|---|---|---|---|---|---|---|---|
+| level | 5.0 to 7.8 % | 100 % | 74.5 to 79.2 % | 98.8 to 99.8 % | 100 % | 4.8 to 11.0 % | | |
+| variance | as above | 99.5 to 100 % | 88.8 to 93.0 % | 92.0 to 95.5 % | 93.0 to 97.8 % | 5.2 to 10.5 % | | |
+| oscillation | as above | 0 % | 34.0 to 42.8 % | 51.5 to 60.5 % | 19.5 to 29.5 % | 89.5 to 94.0 % | | |
+| decouple | 7.5 to 11.0 % | 9.2 to 14.0 % | 43.0 to 49.2 % | 4.5 to 8.5 % | 7.0 to 12.2 % | 6.0 to 13.0 % | 100 % | |
+| mix | (single series') | | | | | | | 2.5 to 12.5 % |
+
+A detector's column is at its own false-alarm rate on normal incidents: MAD's above; CUSUM's
+24.8 to 30.2 % on one series and 38.0 to 48.2 % on a pair (either flagged); PELT's 2.2 to
+6.2 % and 3.8 to 7.0 %.
+
+- **The stop condition does not hold.** On every seed a statistic separates each of the three
+  kinds: variance by `jsd/1`, oscillation by `perm/1`, decoupling by `mi/1`. The statistics
+  are not confined to study, and a later RFC may propose a detector from them; §16's non-goal
+  stands for this one.
+- **Decoupling is the clear case.** `mi/1`'s fall flags every decoupled pair, and no shipped
+  detector flags more of them than of coupled ones: each series' distribution is unmoved.
+- **Oscillation is half seen already.** MAD sees none of it, but PELT, at a false-alarm rate
+  under MAD's, finds a change in about 56 % of incidents, the sine's slow half-periods reading
+  as shifts of level. `perm/1` finds about 92 %.
+- **Variance is not a kind the shipped detectors miss** at these sizes. A spread doubled or
+  more puts points past MAD's 3.5, and MAD flags all of it; `jsd/1`'s 95 % adds nothing. The
+  draft's "three kinds no level detector sees" is two here. A smaller change of spread is
+  where the two would differ, and this run does not ask it.
+- **`tent/1` does not see the permuted mix**, as GE-I4 found and as it cannot by
+  construction: the mix changes and its entropy does not.
+- **CUSUM at its defaults** raises a false alarm on about 27 % of normal one-hour windows here,
+  its ten-point baseline estimating the level from noise. That is a finding about `cusum/1`
+  under this setting, reported and not acted on.
+- The noise is independent from minute to minute. Real series are autocorrelated, which moves
+  `perm/1`'s value on normal windows and, as GE-I2 (b) found, weakens what surrogates say. The
+  run on RCAEval (CC BY 4.0, labelled real incidents) is what would test that, and it is still
+  owed: its data is not on this machine.
 
 **Order.** GE-I1 and GE-I2 first: they are cheap and decide the defaults. GE-I3 is the one that
 says whether the work was worth doing. The real-data runs wait on the cluster GE-M1 still

@@ -16907,6 +16907,13 @@ fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> Exi
                         .parse()
                         .ok()
                 }
+                smysl::schemas::tel::INFO => {
+                    smysl::schemas::tel::info_fields(c.payload.as_deref()?)
+                        .ok()?
+                        .series?
+                        .parse()
+                        .ok()
+                }
                 _ => None,
             }
         };
@@ -16948,6 +16955,32 @@ fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> Exi
             })
         })
         .collect();
+        // The statistics among the evidence (RFC SMYSL-5 §8): each with its value, its `n`, and
+        // `null_ge` of `null_b` where it drew surrogates.
+        let infos: Vec<(Uid, &smysl::UnitCore)> = evidence
+            .iter()
+            .filter_map(|u| Some((*u, *units.get(u)?)))
+            .filter(|(_, c)| c.schema.as_str() == smysl::schemas::tel::INFO)
+            .collect();
+        println!("statistics    {}", infos.len());
+        for (u, c) in &infos {
+            let p = c.payload.as_deref().unwrap_or_default();
+            let field = |k: &str| smysl::schemas::tel::quoted_value(p, k, None);
+            let f = smysl::schemas::tel::info_fields(p).unwrap_or_default();
+            let null = match (field("null_ge"), field("null_b")) {
+                (Some(ge), Some(b)) => format!("  null {ge} of {b}"),
+                _ => String::new(),
+            };
+            let recipe = f.recipe.as_deref().unwrap_or("");
+            println!(
+                "  {}  {} {} bits  n {}{null}  {}",
+                u.canonical(),
+                f.stat.as_deref().unwrap_or("?"),
+                field("value").unwrap_or_else(|| "?".to_string()),
+                f.n.map_or("?".to_string(), |n| n.to_string()),
+                recipe.split_once('?').map_or(recipe, |(id, _)| id)
+            );
+        }
         println!("conflicts     {}", conflicts.len());
         for c in &conflicts {
             println!(
@@ -16957,17 +16990,32 @@ fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> Exi
                 StoreRead::contention_status(store, c)
             );
         }
-        // Open questions (§22.2): the windows it used whose samples are not here (`SMY-W605`,
-        // rule TL or never received). Their status stands; only re-deriving them is gone.
+        // Open questions (§22.2): the windows and statistics it used whose samples are not here
+        // (`SMY-W605`, rule TL or never received). Their status stands; only re-deriving them
+        // is gone. A template-entropy unit is re-derived from the store's templates.
         let used: Vec<&smysl::UnitCore> = evidence
             .iter()
             .filter_map(|u| units.get(u).copied())
             .filter(|c| c.schema.as_str() == smysl::schemas::tel::WINDOW)
             .collect();
+        let templates: Vec<&smysl::UnitCore> = units
+            .values()
+            .copied()
+            .filter(|c| c.schema.as_str() == smysl::schemas::tel::LOG_TEMPLATE)
+            .collect();
         let path = tel_series_path(&root);
+        let check = |sub: &smysl::series::Substrate<_>| {
+            let mut d = smysl::tel::evidence::verify(used.iter().copied(), sub);
+            d.extend(smysl::tel::info::verify::verify(
+                infos.iter().map(|(_, c)| *c),
+                &templates,
+                sub,
+            ));
+            d
+        };
         let checked = if path.exists() {
             match smysl::series::redb::RedbBackend::open(&path) {
-                Ok(b) => smysl::tel::evidence::verify(used, &smysl::series::Substrate::new(b)),
+                Ok(b) => check(&smysl::series::Substrate::new(b)),
                 Err(e) => {
                     eprintln!("smysl tel investigate: {}: {e}", path.display());
                     return ExitCode::Failure;
@@ -16975,9 +17023,16 @@ fn tel_investigate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> Exi
             }
         } else {
             smysl::tel::evidence::verify(
-                used,
+                used.iter().copied(),
                 &smysl::series::Substrate::new(smysl::series::MemBackend::default()),
             )
+            .into_iter()
+            .chain(smysl::tel::info::verify::verify(
+                infos.iter().map(|(_, c)| *c),
+                &templates,
+                &smysl::series::Substrate::new(smysl::series::MemBackend::default()),
+            ))
+            .collect()
         };
         let gaps: Vec<_> = checked
             .iter()
@@ -17470,13 +17525,16 @@ fn tel_witnesses(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitC
     ExitCode::Success
 }
 
-/// `smysl tel check -s LIB`: the library's window evidence, checked (RFC SMYSL-3 §9.2–§9.5).
+/// `smysl tel check -s LIB`: the library's window evidence and statistics, checked (RFC SMYSL-3
+/// §9.2–§9.5, RFC SMYSL-5 §3 and §7).
 ///
-/// - `SMY-E603`: a window whose status or attestations break rule TW.
-/// - `SMY-W614`: windows of one key that disagree.
-/// - `SMY-E604`: a window recomputed from `series.redb` that is another unit.
-/// - `SMY-W605`: a window whose samples are not in `series.redb`, or all of them when the
-///   library has no substrate.
+/// - `SMY-E603`: a window whose status or attestations break rule TW, or a statistic rule TI.
+/// - `SMY-W614`: windows, or statistics, of one key that disagree.
+/// - `SMY-E604`: a window or statistic recomputed from `series.redb` that is another unit; a
+///   template-entropy unit is recomputed from the library's templates.
+/// - `SMY-W605`: a window or statistic whose samples are not in `series.redb`, or all of them
+///   when the library has no substrate.
+/// - `SMY-W704`: statistics by a recipe this build does not have, once per recipe id.
 ///
 /// Then the derived contentions, each with whether a resolution has reviewed it: rival
 /// explanations (kind 6) and witness conflicts (kind 7, §11.5).
@@ -17500,13 +17558,15 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
     let store = library.store();
-    // Windows and, since TL-P9, spans: the evidence the substrate can recompute.
+    // Windows, since TL-P9 spans and templates, and since TI-P4 statistics: the evidence the
+    // substrate, or for template entropy the templates, can recompute.
     let windows: Vec<(Uid, smysl::UnitCore, Vec<smysl::Attestation>)> = StoreRead::units(store)
         .filter(|(_, u)| {
             let t = u.core.schema.as_str();
             t == smysl::schemas::tel::WINDOW
                 || t == smysl::schemas::tel::SPAN
                 || t == smysl::schemas::tel::LOG_TEMPLATE
+                || t == smysl::schemas::tel::INFO
         })
         .map(|(uid, u)| {
             (
@@ -17603,6 +17663,10 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .iter()
         .filter(|(_, u, _)| u.schema.as_str() == smysl::schemas::tel::LOG_TEMPLATE)
         .count();
+    let statistics = windows
+        .iter()
+        .filter(|(_, u, _)| u.schema.as_str() == smysl::schemas::tel::INFO)
+        .count();
     let mut span_note = String::new();
     if spans > 0 {
         span_note.push_str(&format!(" and {spans} span(s)"));
@@ -17610,10 +17674,13 @@ fn tel_check(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if templates > 0 {
         span_note.push_str(&format!(" and {templates} template(s)"));
     }
+    if statistics > 0 {
+        span_note.push_str(&format!(" and {statistics} statistic(s)"));
+    }
     println!(
         "checked   {} window(s){span_note}: {errors} error(s), {} warning(s); {} rival \
          explanation(s), {} witness conflict(s)",
-        windows.len() - spans - templates,
+        windows.len() - spans - templates - statistics,
         diags.len() - errors,
         rivals.len(),
         conflicts.len()

@@ -375,23 +375,45 @@ fn entity_like(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, repor
     }
 }
 
-/// SMYSL-3's window evidence (TL-P4): rule TW per window, and the windows of one key.
+/// SMYSL-3's window evidence (TL-P4) and SMYSL-5's statistics: rules TW and TI per unit, and
+/// the units of one evidence key.
 ///
 /// - `SMY-E603`: a window whose status or attestation is not the one rule TW gives its basis
 ///   and fields (§9.4), or a span or log template (TL-P9) not attested as an exact or a sketched
 ///   window is. The rule is `smysl_core::schemas::tel::rule_tw_violations`, which the
-///   producer attests by, so the two cannot drift.
-/// - `SMY-W614`: several windows of one window key with different digests (§9.2). Each is true
-///   of its own sample set, so this is a report, not a contention.
+///   producer attests by, so the two cannot drift. An `x.tel/info` unit (RFC SMYSL-5 §3) that
+///   breaks rule TI, `smysl_core::schemas::tel::rule_ti_violations`, is the same code.
+/// - `SMY-W614`: several windows of one window key with different digests (§9.2), or several
+///   info units of one info key with different sample sets (RFC SMYSL-5 §3). Each is true of its
+///   own sample set, so this is a report, not a contention.
 ///
 /// Recomputing a window against the substrate (`SMY-E604`, `SMY-W605`) needs the substrate,
 /// which a store does not hold; that is `smysl_tel::evidence::verify`'s, and `tel check`'s.
 fn windows(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &mut Report) {
     use smysl_core::schemas::tel;
-    let mut by_key: std::collections::BTreeMap<WindowKey, BTreeSet<[u8; 32]>> =
+    let mut by_key: std::collections::BTreeMap<EvidenceKey, BTreeSet<[u8; 32]>> =
         std::collections::BTreeMap::new();
     for (uid, unit) in scope.units(store) {
         let ty = unit.core.schema.as_str();
+        if ty == tel::INFO {
+            let atts: Vec<smysl_core::Attestation> = unit.attestations.iter().cloned().collect();
+            let broken = tel::rule_ti_violations(&unit.core, &atts);
+            if !broken.is_empty() {
+                report.push(
+                    Diagnostic::on(Code::E603, *uid)
+                        .with_message(format!("a statistic breaks rule TI: {}", broken.join("; ")))
+                        .with_suggestion(
+                            "a statistic is derived (transformed, computed) and carries the \
+                             digest of every sample set it read"
+                                .to_string(),
+                        ),
+                );
+            }
+            if let Some((key, digest)) = evidence_key(&unit.core) {
+                by_key.entry(key).or_default().insert(digest);
+            }
+            continue;
+        }
         if ty == tel::SPAN || ty == tel::LOG_TEMPLATE {
             let atts: Vec<smysl_core::Attestation> = unit.attestations.iter().cloned().collect();
             let broken = tel::rule_tw_violations(&unit.core, &atts);
@@ -430,7 +452,7 @@ fn windows(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &
                     ),
             );
         }
-        if let Some((key, digest)) = window_key(&unit.core) {
+        if let Some((key, digest)) = evidence_key(&unit.core) {
             by_key.entry(key).or_default().insert(digest);
         }
     }
@@ -444,29 +466,84 @@ fn windows(store: &(impl StoreRead + ?Sized), scope: super::Scope<'_>, report: &
     }
 }
 
-/// `SMY-W614`'s grouping: (series, instrument, from, to, recipe).
-pub(crate) type WindowKey = (String, String, u64, u64, String);
-
-/// A window unit's key and digest, when it has every field of both.
-pub(crate) fn window_key(core: &smysl_core::UnitCore) -> Option<(WindowKey, [u8; 32])> {
-    use smysl_core::schemas::tel;
-    if core.schema.as_str() != tel::WINDOW {
-        return None;
-    }
-    let w = tel::window_fields(core.payload.as_deref()?).ok()?;
-    Some((
-        (w.series?, w.instrument?, w.from_ms?, w.to_ms?, w.recipe?),
-        w.digest?,
-    ))
+/// `SMY-W614`'s grouping: a window key (series, instrument, from, to, recipe; SMYSL-3 §9.2),
+/// or an info key (stat, series, instrument, with, with_instrument, from, to, recipe; RFC
+/// SMYSL-5 §3).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum EvidenceKey {
+    Window(String, String, u64, u64, String),
+    Info {
+        stat: String,
+        series: String,
+        instrument: String,
+        with: Option<(String, String)>,
+        from: u64,
+        to: u64,
+        recipe: String,
+    },
 }
 
-/// `SMY-W614`'s diagnostic for a key with `n` digests.
-pub(crate) fn w614(key: &WindowKey, n: usize) -> Diagnostic {
-    let (series, _, from, to, recipe) = key;
-    Diagnostic::new(Code::W614).with_message(format!(
-        "{n} windows of series {series} over [{from}, {to}) by {recipe} disagree: \
-         each describes a different sample set"
-    ))
+/// A window's or an info unit's key, and the identity of the sample set it read: a window's
+/// digest; for an info unit, `BLAKE3` over its digest, `with_digest` and `ref_digest`, absent
+/// ones as 32 zero bytes. `None` when a field of either is missing.
+pub(crate) fn evidence_key(core: &smysl_core::UnitCore) -> Option<(EvidenceKey, [u8; 32])> {
+    use smysl_core::schemas::tel;
+    match core.schema.as_str() {
+        tel::WINDOW => {
+            let w = tel::window_fields(core.payload.as_deref()?).ok()?;
+            Some((
+                EvidenceKey::Window(w.series?, w.instrument?, w.from_ms?, w.to_ms?, w.recipe?),
+                w.digest?,
+            ))
+        }
+        tel::INFO => {
+            let f = tel::info_fields(core.payload.as_deref()?).ok()?;
+            let mut read = Vec::with_capacity(96);
+            for d in [Some(f.digest?), f.with_digest, f.ref_digest] {
+                read.extend_from_slice(&d.unwrap_or([0; 32]));
+            }
+            let with = match (f.with, f.with_instrument) {
+                (Some(w), Some(i)) => Some((w, i)),
+                (None, None) => None,
+                _ => return None,
+            };
+            Some((
+                EvidenceKey::Info {
+                    stat: f.stat?,
+                    series: f.series?,
+                    instrument: f.instrument?,
+                    with,
+                    from: f.from_ms?,
+                    to: f.to_ms?,
+                    recipe: f.recipe?,
+                },
+                smysl_core::hash_bytes(&read),
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// `SMY-W614`'s diagnostic for a key with `n` sample sets.
+pub(crate) fn w614(key: &EvidenceKey, n: usize) -> Diagnostic {
+    let message = match key {
+        EvidenceKey::Window(series, _, from, to, recipe) => format!(
+            "{n} windows of series {series} over [{from}, {to}) by {recipe} disagree: \
+             each describes a different sample set"
+        ),
+        EvidenceKey::Info {
+            stat,
+            series,
+            from,
+            to,
+            recipe,
+            ..
+        } => format!(
+            "{n} {stat} units of series {series} over [{from}, {to}) by {recipe} disagree: \
+             each was computed from a different sample set"
+        ),
+    };
+    Diagnostic::new(Code::W614).with_message(message)
 }
 
 /// Rule TQ (SMYSL-3 §11.4, TL-P6): `SMY-W606` for each numeric quote of a hypothesis that does
