@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.19.0
+## 1.19.0 — 2026-11-23
 
 One question 1.18 left, answered on real data: is a level detector's alarm worth anything on
 someone else's system, and can a threshold set on one system be carried to another? The kernel
