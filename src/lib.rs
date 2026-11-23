@@ -440,6 +440,11 @@ pub use smysl_series as series;
 #[cfg(feature = "bund")]
 pub use smysl_bund as bund;
 
+/// The language server (RFC SMYSL-6): diagnostics for `.smy` and `.sq` documents over LSP 3.17,
+/// served by `smysl lsp-server`. Behind `lsp`.
+#[cfg(feature = "lsp")]
+pub use smysl_lsp as lsp;
+
 /// The crate version, as a convenience for embedders recording provenance.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

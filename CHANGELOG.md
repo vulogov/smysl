@@ -39,6 +39,24 @@ in tokens, the sizing residual on German, the Ollama arm's model size; questions
 subject by a name the store does not write, GE-T7 on a thousand real works, and the ones only
 people can close. None of it moved in 1.19.
 
+### `smysl lsp-server`: a language server in the same binary (RFC SMYSL-6, LS-P1)
+
+- **RFC SMYSL-6** specifies a language server for `.smy` and `.sq` documents, read against the
+  code before anything was built (R1). Its first phase is here: a new crate, `smysl-lsp`,
+  reached as `smysl::lsp` behind the `lsp` feature (on by default), and `smysl lsp-server`.
+- **Diagnostics while you type.** An open `.smy` document gets what `smysl check FILE`
+  reports, each finding on the record it names, and its parse errors on their spans; a `.sq`
+  document gets its parse error. Positions are UTF-16 or, when the editor offers it, UTF-8. A
+  burst of changes is checked once, 150 ms after the last (`--debounce-ms`).
+- **One binary, no runtime.** JSON-RPC 2.0 over stdio with `serde_json` and `std` threads, so no
+  `tokio` and no `lsp-types`. stdout carries the protocol only, and nothing is written to
+  disk. The `analysis` module is pure, and `xtask check-purity` now scans it on its own.
+- **The parser keeps its places.** `ParseOutcome` gains `spans`, each record's span parallel
+  to `records`, and `refs`, every reference that resolved with its span and target. A `@rel`'s
+  ends now carry their own spans. Both are additions to a `#[non_exhaustive]` struct.
+- Hover, navigation, completion, formatting, safe code actions and a library's context are
+  LS-P2 to LS-P4. `smysl-lsp` is unpublished until the release that ships them.
+
 ### `floor: spread`: PELT's scale on float metrics (SMYSL-3 §21.2, SMYSL-5 R12)
 
 - **`floor: spread`** in a `cusum/1`, `pelt/1` or `mad/1` recipe keeps the detector's scale at

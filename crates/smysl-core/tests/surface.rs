@@ -2278,3 +2278,38 @@ fn every_edtf_shape_of_published_is_a_fixed_point() {
         );
     }
 }
+
+/// `spans` runs parallel to `records`, and `refs` gives each written reference its place and
+/// target (1.20, RFC SMYSL-6): what an editor needs to put a check finding on a line and to go
+/// from a reference to its definition.
+#[test]
+fn spans_and_refs_point_back_into_the_text() {
+    let src = "@doc smysl/0.1 { id: v/s }\n\n\
+               @evidence e/a { status: measured, source: { kind: metric, ref: \"m\" } }\n~ A measured thing.\n\n\
+               @claim c/b { status: derived, grounds: [e/a] }\n~ A claim on it.\n\n\
+               @rel c/b --elaborates--> e/a\n";
+    let out = smysl_core::surface::parse_surface(src).unwrap();
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    assert_eq!(out.spans.len(), out.records.len());
+    let a = out.uid_of(&"e/a".parse().unwrap()).unwrap();
+    let b = out.uid_of(&"c/b".parse().unwrap()).unwrap();
+    let at = |uid| {
+        out.records
+            .iter()
+            .zip(&out.spans)
+            .find(|(r, _)| {
+                r.as_unit()
+                    .is_some_and(|u| smysl_core::canonical_uid(u) == uid)
+            })
+            .and_then(|(_, s)| *s)
+            .unwrap()
+    };
+    assert!(src[at(a).start..at(a).end].starts_with("@evidence e/a"));
+    assert!(src[at(b).start..at(b).end].starts_with("@claim c/b"));
+    let named: Vec<(&str, smysl_core::Uid)> = out
+        .refs
+        .iter()
+        .map(|(s, u)| (&src[s.start..s.end], *u))
+        .collect();
+    assert_eq!(named, vec![("e/a", a), ("c/b", b), ("e/a", a)]);
+}

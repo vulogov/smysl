@@ -1086,3 +1086,24 @@ bund       [possible values: memory, redb]
 bund       --shard
 bund       --seed-check
 bund       --help
+lsp-server --config
+lsp-server --stdio
+lsp-server --library
+lsp-server --store
+lsp-server --debounce-ms
+lsp-server --output
+lsp-server --format
+lsp-server [possible values: surface, cbor, pack]
+lsp-server --log-file
+lsp-server --strict
+lsp-server --offline
+lsp-server --no-color
+lsp-server --noprogress
+lsp-server --json
+lsp-server --quiet
+lsp-server --verbose
+lsp-server --backend
+lsp-server [possible values: memory, redb]
+lsp-server --shard
+lsp-server --seed-check
+lsp-server --help

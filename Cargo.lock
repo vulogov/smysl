@@ -2153,6 +2153,7 @@ dependencies = [
  "smysl-graph",
  "smysl-ingest",
  "smysl-lib",
+ "smysl-lsp",
  "smysl-measure",
  "smysl-pack",
  "smysl-provider",
@@ -2264,6 +2265,17 @@ dependencies = [
  "smysl-pack",
  "smysl-query",
  "smysl-text",
+]
+
+[[package]]
+name = "smysl-lsp"
+version = "1.20.0"
+dependencies = [
+ "serde_json",
+ "smysl-check",
+ "smysl-core",
+ "smysl-graph",
+ "smysl-query",
 ]
 
 [[package]]

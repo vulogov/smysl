@@ -73,6 +73,17 @@ pub struct ParseOutcome {
     /// pre-commit habit, which makes silent loss the difference between a formatter and a
     /// hazard.
     pub comments: usize,
+    /// Where each record was written, parallel to `records`: the record's byte span in the
+    /// text, or `None` for one with no single place (a label binding, a schema declaration, a
+    /// manifest, the view). Empty when the outcome did not come from text. Added in 1.20 for
+    /// an editor (RFC SMYSL-6): a check finding names a unit or a record, and this is how it
+    /// finds its way back to a line.
+    pub spans: Vec<Option<Span>>,
+    /// Every reference written in the text that resolved, with its span and the uid it names:
+    /// a unit's `deps` and `grounds`, a relation's ends and note, a thread's steps, a
+    /// commitment's target and the view's roots. In text order within each kind. Added in 1.20
+    /// with `spans` (RFC SMYSL-6), for going to a definition and finding references.
+    pub refs: Vec<(Span, Uid)>,
 }
 
 /// Undo the leading-backslash escape on a body or detail line.
@@ -113,6 +124,8 @@ impl Default for ParseOutcome {
             diagnostics: Vec::new(),
             recovered: 0,
             comments: 0,
+            spans: Vec::new(),
+            refs: Vec::new(),
         }
     }
 }
@@ -1234,8 +1247,14 @@ impl<'a> Parser<'a> {
             }
         };
 
-        let from = self.reference(from_txt, l.span)?;
-        let to = self.reference(to_txt, l.span)?;
+        // Each end's own span, so an editor can go from it (1.20, RFC SMYSL-6). Both are
+        // subslices of `rest`, which starts at `base`.
+        let at = |t: &str| {
+            let off = base + (t.as_ptr() as usize - rest.as_ptr() as usize);
+            Span::new(off, off + t.len())
+        };
+        let from = self.reference(from_txt, at(from_txt))?;
+        let to = self.reference(to_txt, at(to_txt))?;
 
         let (mut weight, mut note) = (None, None);
         if let Some(at) = header_at {
@@ -2471,6 +2490,17 @@ impl<'a> Parser<'a> {
             );
         }
         self.out.diagnostics.append(&mut diagnostics);
+        for u in &self.units {
+            for r in u.deps.iter().chain(&u.grounds) {
+                let uid = match &r.value {
+                    Ref::Uid(x) => Some(*x),
+                    Ref::Label(l) => index.get(l).and_then(|j| resolved[*j]),
+                };
+                if let Some(x) = uid {
+                    self.out.refs.push((r.span, x));
+                }
+            }
+        }
 
         let mut labels = BTreeMap::new();
         // A uid may be named twice — identity is content, so two declarations with the same
@@ -2571,6 +2601,7 @@ impl<'a> Parser<'a> {
         // what keeps `parse -> write -> parse` a fixed point.
         for d in std::mem::take(&mut self.schemas) {
             self.out.records.push(Record::SchemaDecl(d));
+            self.out.spans.push(None);
         }
 
         // Manifests next, before the units. A manifest names nothing by label — its parts are
@@ -2580,6 +2611,7 @@ impl<'a> Parser<'a> {
         // is what keeps `parse -> write -> parse` a fixed point.
         for m in std::mem::take(&mut self.manifests) {
             self.out.records.push(Record::Manifest(m));
+            self.out.spans.push(None);
         }
 
         for (i, core) in cores.into_iter().enumerate() {
@@ -2590,6 +2622,7 @@ impl<'a> Parser<'a> {
                         .insert(uid, crate::types::quantise(s.clamp(0.0, 1.0)));
                 }
                 self.out.records.push(Record::Unit(c));
+                self.out.spans.push(Some(self.units[i].span));
             }
         }
 
@@ -2604,6 +2637,7 @@ impl<'a> Parser<'a> {
                     label.clone(),
                     *uid,
                 )));
+            self.out.spans.push(None);
         }
 
         for r in &self.relations {
@@ -2613,16 +2647,20 @@ impl<'a> Parser<'a> {
             ) else {
                 continue;
             };
+            self.out.refs.push((r.from.span, from));
+            self.out.refs.push((r.to.span, to));
             let mut rel = Relation::new(r.kind.clone(), from, to);
             if let Some(w) = r.weight {
                 rel = rel.with_weight(w);
             }
             if let Some(n) = &r.note {
                 if let Some(u) = lookup(&n.value, &mut self.out, r.span) {
+                    self.out.refs.push((n.span, u));
                     rel = rel.with_note(u);
                 }
             }
             self.out.records.push(Record::Relation(rel));
+            self.out.spans.push(Some(r.span));
         }
 
         for t in &self.threads {
@@ -2631,6 +2669,7 @@ impl<'a> Parser<'a> {
                 .iter()
                 .filter_map(|(role, r, note)| {
                     let uid = lookup(&r.value, &mut self.out, t.span)?;
+                    self.out.refs.push((r.span, uid));
                     let mut s = Step::new(*role, uid);
                     s.note = note.clone();
                     Some(s)
@@ -2646,6 +2685,7 @@ impl<'a> Parser<'a> {
                 )
                 .with_steps(steps),
             ));
+            self.out.spans.push(Some(t.span));
         }
 
         // Withdrawals and resolutions last: they name edges and units, and a reader meets what
@@ -2685,6 +2725,7 @@ impl<'a> Parser<'a> {
                 (true, _) => continue,
             };
             self.out.records.push(record);
+            self.out.spans.push(Some(r.span));
         }
 
         // Commitments last of all, for the same reason: they name a unit the reader has met.
@@ -2692,6 +2733,7 @@ impl<'a> Parser<'a> {
             let Some(unit) = lookup(&c.target.value, &mut self.out, c.span) else {
                 continue;
             };
+            self.out.refs.push((c.target.span, unit));
             let note = match &c.note {
                 None => None,
                 Some(u) => match lookup(&u.value, &mut self.out, u.span) {
@@ -2702,6 +2744,7 @@ impl<'a> Parser<'a> {
             let mut commit = Commit::new(unit, c.level, c.agent, c.ts);
             commit.note = note;
             self.out.records.push(Record::Commit(commit));
+            self.out.spans.push(Some(c.span));
         }
 
         // Redactions after the commitments, which is after everything that can be named: a
@@ -2717,8 +2760,8 @@ impl<'a> Parser<'a> {
             };
             let mut redaction = Redaction::new(r.tid, r.agent.clone(), r.ts);
             redaction.reason = reason;
-            let _ = r.span;
             self.out.records.push(Record::Redaction(redaction));
+            self.out.spans.push(Some(r.span));
         }
 
         // Datings after the redactions, last of all: a dating's `target` and its `basis` may
@@ -2764,15 +2807,19 @@ impl<'a> Parser<'a> {
             };
             let mut dating = Dating::new(target, d.axis, value, d.agent.clone(), d.ts);
             dating.basis = basis;
-            let _ = d.span;
             self.out.records.push(Record::Dating(dating));
+            self.out.spans.push(Some(d.span));
         }
 
         if let Some(v) = &self.view {
             let roots: BTreeSet<Uid> = v
                 .roots
                 .iter()
-                .filter_map(|r| lookup(&r.value, &mut self.out, r.span))
+                .filter_map(|r| {
+                    let u = lookup(&r.value, &mut self.out, r.span)?;
+                    self.out.refs.push((r.span, u));
+                    Some(u)
+                })
                 .collect();
             let view = View {
                 id: v.id.clone(),
@@ -2787,11 +2834,13 @@ impl<'a> Parser<'a> {
             // The view is a record like any other, so a store built from a parse knows
             // the granularity its units were produced under.
             self.out.records.push(Record::View(view.clone()));
+            self.out.spans.push(None);
             self.out.view = Some(view);
         }
 
         self.out.labels = labels;
         self.out.diagnostics.sort();
+        debug_assert_eq!(self.out.spans.len(), self.out.records.len());
         self.out
     }
 }

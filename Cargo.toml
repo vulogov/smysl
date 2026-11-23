@@ -38,6 +38,7 @@ smysl-lib      = { path = "crates/smysl-lib",      version = "1.20.0" }
 smysl-tel      = { path = "crates/smysl-tel",      version = "1.20.0" }
 smysl-series   = { path = "crates/smysl-series",   version = "1.20.0" }
 smysl-bund     = { path = "crates/smysl-bund",     version = "1.20.0" }
+smysl-lsp      = { path = "crates/smysl-lsp",      version = "1.20.0" }
 
 # `pure` keeps the C SIMD backend out of the build: zero C in the core path (§13).
 blake3                = { version = "1", default-features = false, features = ["std", "pure"] }
@@ -220,7 +221,9 @@ required-features = ["cli"]
 # `tui` is deliberately absent. It works and it is tested, but `ratatui` and `crossterm` in
 # every default build is a cost an embedder who only calls the library never opted into.
 # `--features tui` for anyone who wants the browser; free for everyone else.
-default   = ["cli", "local", "render-typst"]
+# `lsp` is on: an editor finds `smysl lsp-server` in the same binary as `smysl check`, so the
+# two cannot disagree about a version (RFC SMYSL-6). It adds `serde_json`, which `cli` has.
+default   = ["cli", "local", "render-typst", "lsp"]
 # `text` is the library layer of RFC SMYSL-2.4: a catalog, an object store, and the readers.
 # It is **not** in the library's default tree and arrives only through `cli`, which is what
 # keeps the claim that `--no-default-features` carries no serde stack true (§4.5). `cli` turns
@@ -280,6 +283,9 @@ tel       = ["dep:smysl-tel", "dep:smysl-series", "smysl-series/store-redb", "sm
 # platform has one. `text`, because a script reads a library, and the bridge writes its
 # snapshot as one.
 bund      = ["dep:smysl-bund", "text", "cli"]
+# The language server (RFC SMYSL-6), reached as `smysl::lsp`, and `smysl lsp-server`. JSON-RPC
+# over stdio, with `serde_json` and `std` threads: no async runtime.
+lsp       = ["dep:smysl-lsp", "cli"]
 # The substrate index's backing store (SMYSL-2.4 §3.8). Off by default, and the default is the
 # decision rather than an oversight: it puts `redb` in the tree of a binary that runs perfectly
 # well without it, and what it buys shows up on a corpus large enough for 1.1 KB a unit to
@@ -345,6 +351,8 @@ smysl-tel      = { workspace = true, optional = true }
 smysl-series   = { workspace = true, optional = true }
 # The Bund2 bridge (RFC SMYSL-4), for `smysl bund`. It links no Bund2 crate: it runs `bund2`.
 smysl-bund     = { workspace = true, optional = true }
+# The language server (RFC SMYSL-6), for `smysl lsp-server`.
+smysl-lsp      = { workspace = true, optional = true }
 smysl-thread   = { workspace = true }
 smysl-render   = { workspace = true }
 smysl-provider = { workspace = true, optional = true }

@@ -1,0 +1,27 @@
+[package]
+name        = "smysl-lsp"
+description = "smysl's language server (RFC SMYSL-6): diagnostics, navigation and safe edits for .smy and .sq documents, over LSP 3.17"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+# Set on every published crate, as the others do, so a feature added later is documented.
+[package.metadata.docs.rs]
+all-features = true
+
+# A boundary crate (RFC SMYSL-6 §3): it reads stdin and writes stdout, so it is not on
+# `xtask check-purity`'s pure list, and no pure crate may depend on it. Its `analysis` module is
+# pure, and `check-purity` scans that module on its own (§3.2).
+[features]
+default = []
+
+[dependencies]
+smysl-core  = { workspace = true }
+smysl-graph = { workspace = true }
+smysl-check = { workspace = true }
+smysl-query = { workspace = true }
+# JSON-RPC, and nothing else of the protocol (R1-5): the transport's alone.
+serde_json  = { workspace = true }

@@ -37,7 +37,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_smysl");
 ///
 /// Hardcoding it costs one thing — the list can go stale when a command is added — and
 /// `the_help_lists_exactly_these_commands` below is what covers that, in both directions.
-const COMMANDS: [&str; 40] = [
+const COMMANDS: [&str; 41] = [
     "fmt",
     "check",
     "pack",
@@ -78,6 +78,7 @@ const COMMANDS: [&str; 40] = [
     "migrate",
     "tel",
     "bund",
+    "lsp-server",
 ];
 
 /// Clap's answer when `cli()` never registered the subcommand.

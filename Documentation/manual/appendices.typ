@@ -1319,6 +1319,29 @@ no sample or the accuracy is out of range. `tel check` exits 3 when any window i
 and `SMY-W610` for an object whose previous snapshot was read under another profile. That
 boundary is recorded and not diffed.
 
+#section("lsp-server")
+
+*Serve the language server protocol over stdio, for an editor.* Pure · LS-P1.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`--stdio`], [—], [Serve over stdin and stdout: the only transport, and the default.]),
+    ([`--library`], [`DIR`], [A library whose records resolve cross-file references (LS-P4).]),
+    ([`--debounce-ms`], [`N`], [Check a document this long after the last of a burst of changes; 150.]),
+    ([`--log-file`], [`PATH`], [Log here instead of stderr.]),
+  ),
+)
+
+An editor starts `smysl lsp-server` and speaks LSP 3.17 to it (RFC SMYSL-6). For `.smy` and
+`.smysl` documents it publishes what `smysl check FILE` reports, each finding placed on the
+record it names, and for `.sq` documents the query's parse error. It writes nothing to disk, and
+stdout carries the protocol only. Exit 0 after the editor's `shutdown` and `exit`; 1 when the
+editor exits without `shutdown`, closes the stream first, or sends a frame that is not JSON-RPC.
+A build without the `lsp` feature exits 2 and says so. Helix, in `languages.toml`:
+`[language-server.smysl]` with `command = "smysl"` and `args = ["lsp-server"]`.
+
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference
 // ═══════════════════════════════════════════════════════════════════════

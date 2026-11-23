@@ -195,6 +195,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "migrate",   about: "Re-derive a schema's units under a newer revision; staged", purity: Purity::Pure,  phase: "TX-P12" , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "tel",       about: "Read telemetry into a library; the value in force at t; check a profile", purity: Purity::Pure,  phase: "TL-P2"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "bund",      about: "Run a Bund2 script over a store or a library, in a bund2 process", purity: Purity::Pure,  phase: "BQ-P4"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "lsp-server", about: "Serve the language server protocol over stdio, for an editor", purity: Purity::Pure,  phase: "LS-P1"  , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -2524,6 +2525,38 @@ fn cli() -> Command {
                         .long("force")
                         .help("Write into an output directory that is not empty (`export`)")
                         .action(ArgAction::SetTrue),
+                ),
+            "lsp-server" => sub
+                .after_help(
+                    "Purity: pure. Reads documents from the editor and writes nothing to disk; \
+                     stdout carries the protocol only (RFC SMYSL-6). Point an editor at \
+                     `smysl lsp-server` for .smy, .smysl and .sq files.",
+                )
+                .arg(
+                    Arg::new("stdio")
+                        .long("stdio")
+                        .help("Serve over stdin and stdout, the only transport and the default")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("library")
+                        .long("library")
+                        .value_name("DIR")
+                        .help("A library whose records resolve cross-file references (LS-P4)"),
+                )
+                .arg(
+                    Arg::new("debounce-ms")
+                        .long("debounce-ms")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("150")
+                        .help("Check a document this long after the last of a burst of changes"),
+                )
+                .arg(
+                    Arg::new("log-file")
+                        .long("log-file")
+                        .value_name("PATH")
+                        .help("Log here instead of stderr"),
                 ),
             "bund" => sub
                 .after_help(
@@ -12894,6 +12927,34 @@ fn cmd_bund(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     ExitCode::Usage
 }
 
+/// `smysl lsp-server` (RFC SMYSL-6): the language server over stdin and stdout until the
+/// editor's `exit`. Exit 0 after `shutdown` then `exit`, 1 when the client broke the protocol or
+/// left first. Nothing but the protocol is written to stdout.
+#[cfg(feature = "lsp")]
+fn cmd_lsp_server(m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    let mut config = smysl::lsp::LspConfig::default()
+        .with_check_debounce_ms(*m.get_one::<u64>("debounce-ms").unwrap_or(&150));
+    if let Some(dir) = m.get_one::<String>("library") {
+        config = config.with_workspace_root(dir);
+    }
+    if let Some(path) = m.get_one::<String>("log-file") {
+        config = config.with_log_file(path);
+    }
+    match smysl::lsp::serve_stdio(config) {
+        Ok(()) => ExitCode::Success,
+        Err(e) => {
+            eprintln!("smysl lsp-server: {e}");
+            ExitCode::Failure
+        }
+    }
+}
+
+#[cfg(not(feature = "lsp"))]
+fn cmd_lsp_server(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    eprintln!("smysl lsp-server: this build has no language server (build with --features lsp)");
+    ExitCode::Usage
+}
+
 /// How progress should be reported for this invocation.
 ///
 /// One place, so a command cannot draw in one branch and stay silent in another.
@@ -13221,6 +13282,7 @@ fn main() -> ProcExitCode {
         "migrate" => cmd_migrate(sub, &matches),
         "tel" => cmd_tel(sub, &matches),
         "bund" => cmd_bund(sub, &matches),
+        "lsp-server" => cmd_lsp_server(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -19198,7 +19260,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 40);
+        assert_eq!(COMMANDS.len(), 41);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -19242,7 +19304,8 @@ mod tests {
                 "schema",
                 "migrate",
                 "tel",
-                "bund"
+                "bund",
+                "lsp-server"
             ]
         );
     }
@@ -19339,11 +19402,11 @@ mod tests {
     #[test]
     fn every_command_names_the_phase_that_wires_it() {
         for c in COMMANDS {
-            // Four phase vocabularies, because there are four RFCs: `SM-P*` is SMYSL-1's
-            // delivery plan, `TX-P*` is SMYSL-2.4's, `TL-P*` is SMYSL-3's and `BQ-P*` is
-            // SMYSL-4's. A release number is the fifth form, for a command that arrived outside
-            // any plan.
-            let phase = ["SM-P", "TX-P", "TL-P", "BQ-P"]
+            // Five phase vocabularies, one per RFC with commands: `SM-P*` is SMYSL-1's
+            // delivery plan, `TX-P*` is SMYSL-2.4's, `TL-P*` is SMYSL-3's, `BQ-P*` is
+            // SMYSL-4's and `LS-P*` is SMYSL-6's. A release number is the sixth form, for a
+            // command that arrived outside any plan.
+            let phase = ["SM-P", "TX-P", "TL-P", "BQ-P", "LS-P"]
                 .iter()
                 .any(|p| c.phase.starts_with(p));
             let cycle = c
