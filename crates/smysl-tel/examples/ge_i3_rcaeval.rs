@@ -18,15 +18,11 @@
 //! `logs.csv` lines for `tent/1`. A window pair is flagged by a detector if any of its series is;
 //! a statistic's score for it is the largest over its series (over its pairs, for `mi/1`).
 //!
-//! **Arms**, each by the shipped code. Every arm gives a window pair a **score**, so that all of
-//! them can be held to one false-alarm rate:
+//! **Arms**, each by the shipped code, so that all of them can be held to one false-alarm rate:
 //!
-//! - `mad/1`: the largest |robust z| in the test window, against the reference window's centre
-//!   and scale (`mad::centre_and_scale`). `mad/1` at threshold θ flags the pair exactly when
-//!   this exceeds θ.
-//! - `cusum/1` and `pelt/1` over the twelve minutes: the largest `h` (CUSUM, its other
-//!   parameters at their defaults) or `penalty` (PELT) on a grid of 10^(i/8), i = −8 … 160, at
-//!   which a change point falls in the test window; 0 if none does at any.
+//! - `mad/1`, `cusum/1`, `pelt/1`: calibrated by `detect::calibrate` (RFC SMYSL-3 §21.1) on the
+//!   normal pairs, each case's series one trial; a pair is flagged when the detector, at its
+//!   calibrated threshold, `h` or `penalty`, fires on any of its series.
 //! - `jsd/1` (`baseline:4`) against the reference; |Δ `perm/1`| (m = 3); the fall of `mi/1`
 //!   (`rank:4`, lag 0); |Δ `tent/1`| over each window's templates by the shipped Drain.
 //!
@@ -40,7 +36,8 @@
 //! kinds (variance, oscillation, decouple), so the stop condition is read on what is labelled:
 //!
 //! - Every arm, detector or statistic, is held to a **10 % false-alarm rate** on the 90 normal
-//!   pairs: its threshold is the least score that at most 9 of them exceed. Its detection rate
+//!   pairs: a statistic's threshold is the least score that at most 9 of them exceed, a
+//!   detector's the least ladder value at which at most 9 of them fire. Its detection rate
 //!   per fault type is the share of that type's 15 faulty pairs over its threshold.
 //! - A fault type is **unseen by the level detectors** when MAD, CUSUM and PELT each flag fewer
 //!   than half of it. A statistic **separates** a type when it flags at least half.
@@ -49,20 +46,20 @@
 //!   real data shows nothing the detectors miss at that rate, the simulated verdict rests on
 //!   simulated kinds alone, and RFC SMYSL-5 records that against any detector RFC.
 //!
+//! **Held out** (R8). With `--held PATH/RE2-OB` the detectors' values calibrated on `--data`
+//! are run on a second system's normal and faulty pairs unchanged, which is what a calibrated
+//! recipe is for; that system is then read at its own calibration as above.
+//!
 //! ```text
-//! cargo run --release -p smysl-tel --example ge_i3_rcaeval -- --data PATH/RE2-SS
+//! cargo run --release -p smysl-tel --example ge_i3_rcaeval -- --data PATH/RE2-SS [--held PATH/RE2-OB]
 //! ```
-
-// The detectors' parameter grid is drawn with the platform's `powf`; every number the arms
-// compute is the shipped code's.
-#![allow(clippy::disallowed_methods)]
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use smysl_core::{Decimal, Uid};
 use smysl_series::Sample;
-use smysl_tel::detect::{cusum, mad, pelt, Input};
+use smysl_tel::detect::{calibrate, cusum, mad, pelt, Input, Spec as DetSpec};
 use smysl_tel::drain;
 use smysl_tel::info::{self, logs, Read, Spec, Stream};
 
@@ -209,8 +206,10 @@ fn value(c: Result<info::Computed, info::Refusal>) -> Option<f64> {
 struct Row {
     /// Flagged by the detectors at their shipped defaults: MAD, CUSUM, PELT.
     flags: [bool; 3],
-    /// The detectors' scores: MAD, CUSUM, PELT.
-    det: [f64; 3],
+    /// The detectors' calibration scores (`calibrate::score`): MAD, CUSUM, PELT.
+    det: [Option<Decimal>; 3],
+    /// Whether each detector fires, at each set of values asked for.
+    at: Vec<[bool; 3]>,
     jsd: Option<f64>,
     perm: Option<f64>,
     mi: Option<f64>,
@@ -225,8 +224,8 @@ fn max(a: Option<f64>, b: Option<f64>) -> Option<f64> {
     }
 }
 
-/// An arm's score of a window pair, if it ran.
-type Score = dyn Fn(&Row) -> Option<f64>;
+/// One stream's `(ts_ms, value)` points in a window.
+type Points = Vec<(u64, f64)>;
 
 /// Counts of refused computations, by statistic.
 #[derive(Default)]
@@ -242,8 +241,14 @@ impl Refused {
 }
 
 /// The window pair `[r0, t0)`, `[t0, t1)` of one case.
-fn row(case: &Case, r0: u64, t0: u64, t1: u64, refused: &mut Refused) -> Row {
+fn row(
+    case: &Case,
+    (r0, t0, t1): (u64, u64, u64),
+    at: &[[Decimal; 3]],
+    refused: &mut Refused,
+) -> Row {
     let mut out = Row::default();
+    let mut pairs: Vec<(Points, Points)> = Vec::new();
     let jsd = Spec::parse(&format!(
         r#"{{ stat: jsd/1, step: 1000, bins: "baseline:4", ref: "{r0}-{t0}", min_n: 50 }}"#
     ))
@@ -278,38 +283,8 @@ fn row(case: &Case, r0: u64, t0: u64, t1: u64, refused: &mut Refused) -> Row {
             .iter()
             .any(|&i| i >= split);
 
-        let (base, test) = values.split_at(split);
-        if let Some((med, scale)) = mad::centre_and_scale(base) {
-            let z = test
-                .iter()
-                .map(|x| ((x - med) / scale).abs())
-                .fold(0.0, f64::max);
-            out.det[0] = out.det[0].max(z);
-        }
-        let in_test = |cps: Vec<usize>| cps.iter().any(|&i| i >= split);
-        let largest = |hit: &dyn Fn(Decimal) -> bool| {
-            grid().rev().find(|(_, d)| hit(*d)).map_or(0.0, |(g, _)| g)
-        };
-        let c = largest(&|h| {
-            in_test(cusum::change_points(
-                &points,
-                &cusum::Params {
-                    h,
-                    ..cusum::Params::default()
-                },
-            ))
-        });
-        let p = largest(&|penalty| {
-            in_test(pelt::change_points(
-                &values,
-                &pelt::Params {
-                    penalty,
-                    ..pelt::Params::default()
-                },
-            ))
-        });
-        out.det[1] = out.det[1].max(c);
-        out.det[2] = out.det[2].max(p);
+        let (base, test) = points.split_at(split);
+        pairs.push((base.to_vec(), test.to_vec()));
 
         let st = stream(i, "gauge");
         let (r, t) = (read(s, r0, t0), read(s, t0, t1));
@@ -320,6 +295,19 @@ fn row(case: &Case, r0: u64, t0: u64, t1: u64, refused: &mut Refused) -> Row {
         let p = refused.note("perm/1", pr.zip(pt).map(|(a, b)| (b - a).abs()));
         out.perm = max(out.perm, p);
     }
+    let trial: Vec<calibrate::Pair<'_>> = pairs
+        .iter()
+        .map(|(r, t)| calibrate::Pair {
+            reference: r,
+            test: t,
+        })
+        .collect();
+    let specs = specs();
+    out.det = std::array::from_fn(|k| calibrate::score(&specs[k], &trial));
+    out.at = at
+        .iter()
+        .map(|v| std::array::from_fn(|k| calibrate::fires(&specs[k], &trial, v[k])))
+        .collect();
     for a in 0..case.series.len() {
         for b in a + 1..case.series.len() {
             let (sa, sb) = (&case.series[a].1, &case.series[b].1);
@@ -353,13 +341,14 @@ fn row(case: &Case, r0: u64, t0: u64, t1: u64, refused: &mut Refused) -> Row {
     out
 }
 
-/// The detectors' parameter grid, 10^(i/8) for i = −8 … 160, as (value, the decimal passed).
-fn grid() -> impl DoubleEndedIterator<Item = (f64, Decimal)> {
-    (-8i32..=160).map(|i| {
-        let g = 10f64.powf(f64::from(i) / 8.0);
-        let d = Decimal::parse_token(&format!("{g:.6e}")).expect("a decimal");
-        (g, d)
-    })
+/// The level detectors at their shipped defaults, for calibration: MAD (its baseline is each
+/// pair's reference), CUSUM, PELT.
+fn specs() -> [DetSpec; 3] {
+    [
+        DetSpec::Mad(mad::Params::new(0, 1)),
+        DetSpec::Cusum(cusum::Params::default()),
+        DetSpec::Pelt(pelt::Params::default()),
+    ]
 }
 
 /// The least threshold that at most `rate` of `normal` scores exceed.
@@ -379,18 +368,11 @@ fn share(xs: impl Iterator<Item = bool>) -> f64 {
     k as f64 / n.max(1) as f64
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let data: PathBuf = args
-        .iter()
-        .position(|a| a == "--data")
-        .and_then(|i| args.get(i + 1))
-        .map(PathBuf::from)
-        .expect("--data PATH/RE2-SS");
-
+/// Every case under an extracted RE2 directory: `SERVICE_FAULT/REP/`.
+fn load_all(data: &Path) -> Vec<Case> {
     let mut cases = Vec::new();
-    let mut dirs: Vec<_> = std::fs::read_dir(&data)
-        .expect("the RE2-SS directory")
+    let mut dirs: Vec<_> = std::fs::read_dir(data)
+        .unwrap_or_else(|e| panic!("{}: {e}", data.display()))
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| p.is_dir())
@@ -405,129 +387,175 @@ fn main() {
             .expect("a case directory")
             .filter_map(Result::ok)
             .map(|e| e.path())
-            .filter(|p| p.is_dir())
+            // The numbered repetitions; RE2-OB ships a stray `multi-source-data/` beside them.
+            .filter(|p| {
+                p.is_dir()
+                    && p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().bytes().all(|b| b.is_ascii_digit()))
+            })
             .collect();
         reps.sort();
         for rep in reps {
             cases.push(load(&rep, service, fault));
         }
     }
+    cases
+}
 
-    let mut refused = Refused::default();
-    let mut normal = Vec::new();
-    let mut faulty: BTreeMap<String, Vec<Row>> = BTreeMap::new();
-    for c in &cases {
+/// One data set's rows: the normal pairs, and the faulty pairs by fault type.
+struct Reading {
+    normal: Vec<Row>,
+    faulty: BTreeMap<String, Vec<Row>>,
+}
+
+/// The normal pairs of `cases`, with each detector's firing at each of `at`.
+fn normal_rows(cases: &[Case], at: &[[Decimal; 3]], refused: &mut Refused) -> Vec<Row> {
+    cases
+        .iter()
+        .map(|c| {
+            let t = c.inject_ms;
+            row(c, (t - 2 * HALF, t - HALF, t), at, refused)
+        })
+        .collect()
+}
+
+fn faulty_rows(
+    cases: &[Case],
+    at: &[[Decimal; 3]],
+    refused: &mut Refused,
+) -> BTreeMap<String, Vec<Row>> {
+    let mut out: BTreeMap<String, Vec<Row>> = BTreeMap::new();
+    for c in cases {
         let t = c.inject_ms;
-        normal.push(row(c, t - 2 * HALF, t - HALF, t, &mut refused));
-        faulty.entry(c.fault.clone()).or_default().push(row(
-            c,
-            t - HALF,
-            t,
-            t + HALF,
-            &mut refused,
-        ));
+        out.entry(c.fault.clone())
+            .or_default()
+            .push(row(c, (t - HALF, t, t + HALF), at, refused));
     }
-    let services: std::collections::BTreeSet<&str> =
-        cases.iter().map(|c| c.service.as_str()).collect();
+    out
+}
 
+/// The detectors calibrated on `normal` (`calibrate::from_scores`) at `RATE`.
+fn calibrated(normal: &[Row]) -> [calibrate::Calibrated; 3] {
+    let rate = Decimal::parse_token(&format!("{RATE}")).expect("a rate");
+    let specs = specs();
+    std::array::from_fn(|k| {
+        let scores: Vec<Option<Decimal>> = normal.iter().map(|r| r.det[k]).collect();
+        calibrate::from_scores(&specs[k], &scores, rate).expect("a calibration")
+    })
+}
+
+fn values(c: &[calibrate::Calibrated; 3]) -> [Decimal; 3] {
+    std::array::from_fn(|k| c[k].value)
+}
+
+/// A statistic's score of a window pair, if it ran.
+type Stat = fn(&Row) -> Option<f64>;
+
+const STATS: [(&str, Stat); 4] = [
+    ("jsd/1", |r| r.jsd),
+    ("perm/1", |r| r.perm),
+    ("mi/1", |r| r.mi),
+    ("tent/1", |r| r.tent),
+];
+
+/// The table of one reading: the detectors as they fire at `at` (an index into each row's
+/// `at`), the statistics at the threshold that at most `RATE` of the normal pairs exceed.
+/// Returns the fault types some statistic separates and the level detectors miss.
+fn table(
+    name: &str,
+    reading: &Reading,
+    at: usize,
+    cal: &[calibrate::Calibrated; 3],
+) -> Vec<String> {
+    let thresholds: Vec<Option<f64>> = STATS
+        .iter()
+        .map(|(_, get)| {
+            let ns: Vec<f64> = reading.normal.iter().filter_map(get).collect();
+            (!ns.is_empty()).then(|| threshold(&ns, RATE))
+        })
+        .collect();
+    let over =
+        |k: usize, r: &Row| thresholds[k].is_some_and(|t| STATS[k].1(r).is_some_and(|s| s > t));
     println!(
-        "GE-I3 on RCAEval RE2-SS (real, CC BY 4.0): {} cases, services {:?}; six-minute \
-         windows at one sample a second.",
-        cases.len(),
-        services
-    );
-    println!(
-        "Normal pairs end at the injection, faulty pairs start at it. Every arm at the \
-         threshold that at most {:.0} % of the normal pairs exceed.\n",
-        100.0 * RATE
+        "{name}: detectors at MAD {}, CUSUM h {}, PELT penalty {}",
+        cal[0].value, cal[1].value, cal[2].value
     );
     println!(
         "{:<8} {:>3} {:>7} {:>7} {:>7} | {:>7} {:>7} {:>7} {:>7} | {:>9}",
         "fault", "n", "MAD", "CUSUM", "PELT", "jsd/1", "perm/1", "mi/1", "tent/1", "beyond"
     );
     let cell = |x: Option<f64>| x.map_or("-".to_string(), |v| format!("{:.1} %", 100.0 * v));
-    let gets: [(&str, &Score); 7] = [
-        ("MAD", &|r| Some(r.det[0])),
-        ("CUSUM", &|r| Some(r.det[1])),
-        ("PELT", &|r| Some(r.det[2])),
-        ("jsd/1", &|r| r.jsd),
-        ("perm/1", &|r| r.perm),
-        ("mi/1", &|r| r.mi),
-        ("tent/1", &|r| r.tent),
-    ];
-    let thresholds: Vec<Option<f64>> = gets
-        .iter()
-        .map(|(_, get)| {
-            let ns: Vec<f64> = normal.iter().filter_map(get).collect();
-            (!ns.is_empty()).then(|| threshold(&ns, RATE))
-        })
-        .collect();
-    let over =
-        |k: usize, r: &Row| thresholds[k].is_some_and(|t| gets[k].1(r).is_some_and(|s| s > t));
     let mut separated = Vec::new();
     for fault in FAULTS {
-        let rows = faulty.get(fault).map(Vec::as_slice).unwrap_or(&[]);
-        let rates: Vec<Option<f64>> = (0..gets.len())
+        let rows = reading.faulty.get(fault).map(Vec::as_slice).unwrap_or(&[]);
+        if rows.is_empty() {
+            continue;
+        }
+        let det: Vec<f64> = (0..3)
+            .map(|k| share(rows.iter().map(|r| r.at[at][k])))
+            .collect();
+        let stat: Vec<Option<f64>> = (0..4)
             .map(|k| thresholds[k].map(|_| share(rows.iter().map(|r| over(k, r)))))
             .collect();
-        // Faulty pairs some statistic flags and no detector does.
         let beyond = rows
             .iter()
-            .filter(|r| (3..7).any(|k| over(k, r)) && !(0..3).any(|k| over(k, r)))
+            .filter(|r| (0..4).any(|k| over(k, r)) && !r.at[at].iter().any(|f| *f))
             .count();
-        let cells: Vec<String> = rates.iter().map(|v| cell(*v)).collect();
         println!(
             "{:<8} {:>3} {:>7} {:>7} {:>7} | {:>7} {:>7} {:>7} {:>7} | {:>9}",
             fault,
             rows.len(),
-            cells[0],
-            cells[1],
-            cells[2],
-            cells[3],
-            cells[4],
-            cells[5],
-            cells[6],
+            cell(Some(det[0])),
+            cell(Some(det[1])),
+            cell(Some(det[2])),
+            cell(stat[0]),
+            cell(stat[1]),
+            cell(stat[2]),
+            cell(stat[3]),
             format!("{beyond}/{}", rows.len())
         );
-        let unseen = rates[..3].iter().all(|d| d.is_some_and(|d| d < 0.5));
-        for k in 3..7 {
-            if unseen && rates[k].is_some_and(|v| v >= 0.5) {
-                separated.push(format!("{fault} by {}", gets[k].0));
+        if det.iter().all(|d| *d < 0.5) {
+            for k in 0..4 {
+                if stat[k].is_some_and(|v| v >= 0.5) {
+                    separated.push(format!("{fault} by {}", STATS[k].0));
+                }
             }
         }
     }
-    let held: Vec<String> = (0..gets.len())
+    let held: Vec<String> = (0..4)
         .map(|k| {
-            let n = normal.iter().filter(|r| over(k, r)).count();
-            format!("{} {n}", gets[k].0)
+            let n = reading.normal.iter().filter(|r| over(k, r)).count();
+            format!("{} {n}", STATS[k].0)
         })
         .collect();
     println!(
-        "\nnormal pairs over each threshold (of {}): {}",
-        normal.len(),
+        "normal pairs over each threshold (of {}): MAD {}, CUSUM {}, PELT {} (at most); {}",
+        reading.normal.len(),
+        cal[0].over,
+        cal[1].over,
+        cal[2].over,
         held.join(", ")
     );
-    let nf = |i: usize| 100.0 * share(normal.iter().map(|r| r.flags[i]));
+    let nf = |i: usize| 100.0 * share(reading.normal.iter().map(|r| r.flags[i]));
     println!(
         "the shipped defaults' false alarms on them: MAD {:.1} %, CUSUM {:.1} %, PELT {:.1} %",
         nf(0),
         nf(1),
         nf(2)
     );
-    println!(
-        "refused computations (series or pairs too short or too constant): {:?}",
-        refused.0
-    );
+    separated
+}
 
+fn verdict(name: &str, separated: &[String]) {
     println!(
-        "\nverdict (at {:.0} % false alarms: a type is unseen when MAD, CUSUM and PELT each flag \
-         under half of it; a statistic separates it when it flags at least half)",
+        "verdict on {name} (at {:.0} % false alarms: a type is unseen when MAD, CUSUM and PELT each \
+         flag under half of it; a statistic separates it when it flags at least half)",
         100.0 * RATE
     );
     if separated.is_empty() {
         println!(
-            "  no statistic separates a fault type the level detectors miss: on RE2-SS the \
-             statistics find nothing the detectors do not at this rate, and the simulated verdict rests on \
+            "  no statistic separates a fault type the level detectors miss: the statistics find \
+             nothing the detectors do not at this rate, and the simulated verdict rests on \
              simulated kinds alone"
         );
     } else {
@@ -537,4 +565,119 @@ fn main() {
         );
         println!("  agrees with the simulated verdict: the stop condition does not hold");
     }
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let arg = |name: &str| {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1))
+            .map(PathBuf::from)
+    };
+    let data = arg("--data").expect("--data PATH/RE2-SS");
+    let held = arg("--held");
+    let label = |p: &Path| {
+        p.file_name()
+            .map_or("data".into(), |n| n.to_string_lossy().to_string())
+    };
+
+    let mut refused = Refused::default();
+    let cases = load_all(&data);
+    let services: std::collections::BTreeSet<&str> =
+        cases.iter().map(|c| c.service.as_str()).collect();
+    println!(
+        "GE-I3 on RCAEval {} (real, CC BY 4.0): {} cases, services {:?}; six-minute \
+         windows at one sample a second.",
+        label(&data),
+        cases.len(),
+        services
+    );
+    println!(
+        "Normal pairs end at the injection, faulty pairs start at it. Every arm is held to at \
+         most {:.0} % of the normal pairs: the detectors by `calibrate`, the statistics by their \
+         threshold.\n",
+        100.0 * RATE
+    );
+    let normal = normal_rows(&cases, &[], &mut refused);
+    let cal = calibrated(&normal);
+    let at = values(&cal);
+    let reading = Reading {
+        faulty: faulty_rows(&cases, &[at], &mut refused),
+        normal,
+    };
+    let separated = table(&label(&data), &reading, 0, &cal);
+    println!(
+        "refused computations (series or pairs too short or too constant): {:?}\n",
+        refused.0
+    );
+    verdict(&label(&data), &separated);
+
+    let Some(held) = held else {
+        return;
+    };
+    // The held-out set: the detectors at the values calibrated above, and at its own.
+    let mut refused = Refused::default();
+    let hcases = load_all(&held);
+    let hservices: std::collections::BTreeSet<&str> =
+        hcases.iter().map(|c| c.service.as_str()).collect();
+    println!(
+        "\nheld out: RCAEval {}, {} cases, services {:?}\n",
+        label(&held),
+        hcases.len(),
+        hservices
+    );
+    let normal = normal_rows(&hcases, &[at], &mut refused);
+    let own = calibrated(&normal);
+    let reading = Reading {
+        faulty: faulty_rows(&hcases, &[at, values(&own)], &mut refused),
+        normal,
+    };
+    let transferred: Vec<f64> = (0..3)
+        .map(|k| share(reading.normal.iter().map(|r| r.at[0][k])))
+        .collect();
+    println!(
+        "{}'s values on {}'s normal pairs: false alarms MAD {:.1} %, CUSUM {:.1} %, PELT {:.1} % \
+         (calibrated for {:.0} %)",
+        label(&data),
+        label(&held),
+        100.0 * transferred[0],
+        100.0 * transferred[1],
+        100.0 * transferred[2],
+        100.0 * RATE
+    );
+    println!(
+        "{}'s values on {}'s faulty pairs:",
+        label(&data),
+        label(&held)
+    );
+    for fault in FAULTS {
+        let rows = reading.faulty.get(fault).map(Vec::as_slice).unwrap_or(&[]);
+        if rows.is_empty() {
+            continue;
+        }
+        let d: Vec<f64> = (0..3)
+            .map(|k| 100.0 * share(rows.iter().map(|r| r.at[0][k])))
+            .collect();
+        println!(
+            "  {:<8} {:>3}  MAD {:>5.1} %  CUSUM {:>5.1} %  PELT {:>5.1} %",
+            fault,
+            rows.len(),
+            d[0],
+            d[1],
+            d[2]
+        );
+    }
+    println!();
+    let separated = table(
+        &format!("{} at its own calibration", label(&held)),
+        &reading,
+        1,
+        &own,
+    );
+    println!(
+        "refused computations (series or pairs too short or too constant): {:?}\n",
+        refused.0
+    );
+    verdict(&label(&held), &separated);
 }

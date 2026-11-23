@@ -31,6 +31,7 @@ use crate::scrape::{ms, payload};
 use crate::sketch::to_f64;
 
 pub mod baro;
+pub mod calibrate;
 pub mod cusum;
 pub mod episode;
 pub mod mad;
@@ -339,6 +340,25 @@ impl Spec {
         })
     }
 
+    /// The recipe as HJSON that [`Spec::parse`] reads back to this `Spec`, every parameter
+    /// written; a decimal is quoted, so it is read as written.
+    pub fn hjson(&self) -> String {
+        let body = match self {
+            Spec::Cusum(p) => format!(r#"k: "{}", h: "{}", baseline: {}"#, p.k, p.h, p.baseline),
+            Spec::Pelt(p) => format!(r#"penalty: "{}", min_size: {}"#, p.penalty, p.min_size),
+            Spec::Mad(p) => format!(
+                r#"threshold: "{}", baseline: "{}-{}""#,
+                p.threshold, p.baseline_from, p.baseline_to
+            ),
+            Spec::Episode(p) => format!("gap: {}, min: {}", p.gap_ms, p.min_members),
+            Spec::Baro(p) => format!(
+                "at: {}, pre: {}, post: {}, top: {}",
+                p.at_ms, p.pre_ms, p.post_ms, p.top
+            ),
+        };
+        format!("{{ detector: {}, {body} }}", self.id())
+    }
+
     /// The detector's id.
     pub fn id(&self) -> &'static str {
         match self {
@@ -372,6 +392,16 @@ mod spec_tests {
             panic!()
         };
         assert_eq!((m.baseline_from, m.baseline_to), (100, 200));
+        for text in [
+            r#"{ detector: cusum/1, k: "0.10", h: "1.2e7" }"#,
+            "{ detector: pelt/1, penalty: 250 }",
+            r#"{ detector: mad/1, baseline: "100-200", threshold: "4.5" }"#,
+            "{ detector: episode/1 }",
+            "{ detector: baro/1, at: 1000 }",
+        ] {
+            let s = Spec::parse(text).unwrap();
+            assert_eq!(Spec::parse(&s.hjson()).unwrap(), s, "{}", s.hjson());
+        }
         for bad in [
             "{ }",
             "{ detector: lstm/1 }",
@@ -493,4 +523,68 @@ pub fn run_on<B: smysl_series::Backend>(
         }
     }
     Ok(out)
+}
+
+/// Calibrate `spec` over `substrate` (RFC SMYSL-3 §21.1, `tel calibrate`): one trial per window
+/// `(reference_from, test_from, test_to)` in `windows`, each of `series` per instrument it has
+/// samples from read as a [`calibrate::Pair`] of `[reference_from, test_from)` and `[test_from,
+/// test_to)`. The windows are ones the caller holds fault-free.
+pub fn calibrate_on<B: smysl_series::Backend>(
+    spec: &Spec,
+    substrate: &smysl_series::Substrate<B>,
+    series: &[Uid],
+    windows: &[(u64, u64, u64)],
+    rate: Decimal,
+) -> Result<calibrate::Calibrated, String> {
+    let mut streams = Vec::new();
+    for s in series {
+        if substrate.row(s).map_err(|e| e.to_string())?.is_none() {
+            return Err(format!(
+                "the substrate holds no sample of series {}",
+                s.canonical()
+            ));
+        }
+        for inst in substrate.instruments(s).map_err(|e| e.to_string())? {
+            streams.push((*s, inst));
+        }
+    }
+    let points = |s: &Uid, i: &Uid, a: u64, b: u64| -> Result<Vec<(u64, f64)>, String> {
+        if a >= b {
+            return Ok(Vec::new());
+        }
+        Ok(substrate
+            .window(s, i, a, b)
+            .map_err(|e| e.to_string())?
+            .samples
+            .iter()
+            .filter(|x| counted(x))
+            .map(|x| (x.ts_ms(), to_f64(x.value_dec())))
+            .collect())
+    };
+    let mut read = Vec::new();
+    for &(r0, t0, t1) in windows {
+        if !(r0 < t0 && t0 < t1) {
+            return Err(format!(
+                "a calibration window is REF-FROM-TO with REF < FROM < TO, not {r0}-{t0}-{t1}"
+            ));
+        }
+        let mut pairs = Vec::new();
+        for (s, i) in &streams {
+            pairs.push((points(s, i, r0, t0)?, points(s, i, t0, t1)?));
+        }
+        read.push(pairs);
+    }
+    let trials: Vec<Vec<calibrate::Pair<'_>>> = read
+        .iter()
+        .map(|pairs| {
+            pairs
+                .iter()
+                .map(|(r, t)| calibrate::Pair {
+                    reference: r,
+                    test: t,
+                })
+                .collect()
+        })
+        .collect();
+    calibrate::calibrate(spec, &trials, rate)
 }

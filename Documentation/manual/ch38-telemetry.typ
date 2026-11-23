@@ -386,6 +386,25 @@ detect    baro/1: 2 unit(s), 0 edge(s)
 Without `--yes`, a detector's units are staged for review in `.smysl/staged.smy`, as `tel read`
 stages, and nothing is written.
 
+*Calibrated thresholds.* The defaults (MAD's 3.5, CUSUM's `h = 5`, PELT's `penalty = 10`) are
+textbook values for independent noise, and on real one-second telemetry they alarm on almost
+every quiet window: 90 to 100 % of them on RCAEval's (RFC SMYSL-5 §15). `tel calibrate` replaces a
+default with a stated false-alarm rate. Give it windows you hold fault-free, each as a reference
+and the test window after it (`--window REF-FROM-TO`). It returns the least value on a fixed
+decimal ladder at which at most that share of them alarm, as a recipe `tel detect` takes. It
+writes nothing. Here ten quiet half-hours before the 10:30 shift are used, at 10 %:
+
+#screen(caption: "$ smysl tel calibrate cusum.hjson --series 'otel:{…ge_m3_cpu…}' --window 1768550400000-1768551600000-1768552200000 --window … --rate 0.1 -s lib")[
+```
+{ detector: cusum/1, k: "0.5", h: "3", baseline: 20 }
+calibrate cusum/1: 1 of 10 trial(s) fire at 3 (at most 1 at rate 0.1)
+```
+]
+
+The calibrated value goes into the recipe, so the recipe hash still records what ran. The rate
+holds on the windows given. Whether it carries to another system has to be measured; RFC SMYSL-3
+§21.1 has the rule.
+
 *Replayed to the byte.* A detector here uses only addition, subtraction, multiplication,
 division and square roots, which every machine rounds the same way. It never uses a logarithm or
 an exponential from the platform's maths library, and it draws no randomness. GE-M3 is the check:

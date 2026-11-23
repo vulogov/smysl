@@ -2,11 +2,11 @@
 
 **Author:** Vladimir Ulogov
 **Status:** first draft, amended after review (R1, 2026-11-20), while building (R2 to R6) and
-after (R7).
+after (R7, R8).
 TI-P0 to TI-P4 are built: `ent/1`, `perm/1`, `mi/1`, `jsd/1` and `tent/1`, rule TI in `check`,
 and their recomputation. TI-P5 closed with GE-I5's result: transfer entropy is not released,
 and `te` stays reserved (§10). GE-I1 to GE-I5 have run on simulated data (§15), and GE-I3 on RCAEval's
-RE2-SS, real (R7); every other real-data run is still owed, and every other threshold is a
+RE2-SS and RE2-OB, real (R7, R8); every other real-data run is still owed, and every other threshold is a
 proposal until the experiment that owns it has run (§17).
 **Target version:** not fixed. Phases are named (TI-P0 to TI-P5), not numbered by release.
 **Evidence baseline:** `dev/1.18.0` at `3e57160` ("SMYSL-4 BQ-P4"). Every code pointer below
@@ -30,6 +30,7 @@ Part A.
 | R6 | 2026-11-22 | TI-P5. **R6-1** GE-I5's reading of its stop condition, fixed before the run, and its result: `te/1` is not released, and TI-P5 closes with no code beyond the experiment (§10, §15). |
 | R5 | 2026-11-21 | Found while building TI-P4. **R5-1** two info units of one key disagree (`SMY-W614`) when they read different sample sets: their `digest`, `with_digest` and `ref_digest` together (§3). **R5-2** recomputation reads a stored recipe text back into a recipe, and one this build would write otherwise, a parameter respelled or missing, is `SMY-E604`, since recomputing it would compute something else; `SMY-W704` is a recipe id this build does not have (§7). **R5-3** rule TI's checks of the fields: `mi` carries `with`, `with_instrument`, `with_digest` and `lag`; a statistic of one series names no second; `jsd` names a reference window; a reference window carries `ref_from_ms`, `ref_to_ms` and `ref_digest` together; a scan's `lags` and `values` are of one length (§3). **R5-4** a `template-entropy` unit is recomputed from the store's templates of its stream, instrument, window and recipe hash; with none, from the events, for the shipped Drain only; with neither, it is `SMY-W605` (§7). **R5-5** the dossier lists the statistics among the evidence an investigation consulted or grounds on, and its open questions include those not re-derivable (§8). **R5-6** GE-I3's reading of its stop condition, fixed before the run, and its result (§15). |
 | R7 | 2026-11-22 | 1.19. **R7-1** GE-I3's real-data arm, on RCAEval RE2-SS: its first reading, held to MAD's false-alarm rate with the detectors at their shipped defaults, was degenerate on one-second data, since those defaults flag 90 to 100 % of normal windows; the reading was amended before the rerun to hold every arm, detectors included, to 10 %. Its result: every fault type is seen by a level detector, and no statistic flags a faulty window none of them does (§15). |
+| R8 | 2026-11-22 | 1.19. **R8-1** The detectors are calibrated rather than scored on a grid: `detect::calibrate` (3 §21.1) sets MAD's threshold, CUSUM's `h` and PELT's `penalty` on RE2-SS's normal pairs to 10 %, and the values are run unchanged on RE2-OB, held out. **R8-2** GE-I3's real-data arm is replicated on RE2-OB. Its result: RE2-SS's values hold on RE2-OB (1 to 4 % false alarms) and miss only CUSUM's and PELT's delays there, and RE2-OB gives R7's verdict (§15). |
 
 ---
 
@@ -722,11 +723,61 @@ Normal pairs over each threshold: MAD, the four statistics 9 of 90; CUSUM 6, PEL
   RCAEval cannot.
 - **The detectors' defaults are minute-data defaults.** At one sample a second over about seven
   series, `mad/1` at 3.5 flags 90 % of fault-free windows, and `cusum/1` and `pelt/1` all of
-  them. Reported and not acted on: a default for second data is its own question.
+  them. Acted on in R8: the defaults stay, and calibration (3 §21.1) states a rate instead.
 - **`mi/1` mostly refused** (362 of its pair computations), most of them pairs with a constant
   series (sockets, disk I/O of an idle service), which limits what it could show here.
-- One system of three. Online Boutique (RE2-OB) and Train-Ticket (RE2-TT) are the replications,
-  owed only if a reading turns on them.
+- One system of three. Online Boutique (RE2-OB) is replicated in R8; Train-Ticket (RE2-TT) is
+  owed only if a reading turns on it.
+
+**Calibration, and GE-I3 on RE2-OB, run in 1.19** (R8; `… --example ge_i3_rcaeval -- --data
+PATH/RE2-SS --held PATH/RE2-OB`). The harness now sets the detectors with `detect::calibrate`
+(3 §21.1). Each case's series form one trial, and each detector is set on RE2-SS's 90 normal
+pairs to at most 10 % of them firing. The statistics keep R7's thresholds. RE2-OB is Online
+Boutique, 90 cases of the same six fault types in five other services, in the same layout. It
+is **held out**: RE2-SS's values run on it unchanged, which is what a calibrated recipe is for,
+and it is then read at its own calibration, as R7 read RE2-SS. The reading is R7's, fixed before
+this run, plus one question asked beforehand: does a value calibrated on one system hold its rate
+on another?
+
+| | MAD threshold | CUSUM `h` | PELT `penalty` | false alarms, RE2-OB normal |
+|---|---|---|---|---|
+| shipped default | 3.5 | 5 | 10 | 96.7 % / 100 % / 100 % |
+| calibrated on RE2-SS | 40 | 1.5·10¹⁰ | 4·10¹⁹ | 4.4 % / 2.2 % / 1.1 % |
+| calibrated on RE2-OB | 20 | 2.5·10⁹ | 8·10¹⁸ | ≤ 10 % each |
+
+| RE2-OB fault (15 each) | MAD, SS's / own | CUSUM, SS's / own | PELT, SS's / own | `jsd/1` | `perm/1` | `mi/1` | `tent/1` |
+|---|---|---|---|---|---|---|---|
+| cpu | 100 / 100 % | 93.3 / 100 % | 86.7 / 100 % | 93.3 % | 13.3 % | 13.3 % | 20.0 % |
+| mem | 100 / 100 % | 93.3 / 93.3 % | 100 / 100 % | 93.3 % | 33.3 % | 20.0 % | 6.7 % |
+| disk | 100 / 100 % | 100 / 100 % | 100 / 100 % | 100 % | 66.7 % | 20.0 % | 6.7 % |
+| delay | 100 / 100 % | 13.3 / 20.0 % | 26.7 / 93.3 % | 33.3 % | 33.3 % | 20.0 % | 13.3 % |
+| loss | 100 / 100 % | 73.3 / 73.3 % | 100 / 100 % | 46.7 % | 73.3 % | 20.0 % | 26.7 % |
+| socket | 100 / 100 % | 100 / 100 % | 100 / 100 % | 100 % | 20.0 % | 6.7 % | 6.7 % |
+
+On RE2-SS, calibration gives R7's table within two pairs a cell (CUSUM's cpu and loss at
+86.7 %, R7's grid had 93.3 %). Normal pairs over the calibrated values: MAD 8, CUSUM 9, PELT 7.
+
+- **A calibrated value carried to the second system, conservatively.** RE2-SS's values alarm on
+  1 to 4 % of RE2-OB's fault-free windows, under the 10 % they were set for. They still see
+  every fault type at 73 % or more, except delay under CUSUM (13.3 %) and PELT (26.7 %). RE2-OB's
+  own calibration recovers PELT's delays (93.3 %) but not CUSUM's (20.0 %). MAD sees all of
+  RE2-OB's faults at either value. This is one transfer, between two systems of one benchmark:
+  it shows that a calibrated value can carry, not that it will.
+- **The values are large because some series barely move.** An idle service's sockets or disk
+  I/O are constant over a reference window, or step-like at one sample a second. CUSUM's `σ`
+  and PELT's `σ̂` then fall to their floors (`10⁻⁹`, `10⁻¹⁸` of the level), and any change
+  scores astronomically. A trial fires when any of its series does, so its score is set by its
+  least-moving series, and the calibrated value rises until those series are quiet. The busy
+  series are then read at a value far above their own noise, which is the likely reason
+  CUSUM misses delays. Calibrating per series rather than per trial, or flooring the scale
+  at the data's resolution, would answer that. Both are recorded here, not done.
+- **R7's verdict replicates.** On RE2-OB at its own calibration no type is unseen (MAD flags
+  every one), no faulty pair is flagged by a statistic and by no detector, and no statistic
+  separates a type. `jsd/1` is again the strongest statistic (33 to 100 %). The simulated verdict
+  still rests on simulated kinds alone.
+- **Refused:** `mi/1` 151 and `tent/1` 42 of RE2-OB's computations, the latter windows with
+  no log line from the service. The downloads (RE2-SS 246 MB and RE2-OB 1.2 GB zipped) are
+  not kept.
 
 **GE-I5, run at TI-P5 on simulated data** (`cargo run --release -p smysl-tel --example
 ge_i5`, 300 pairs of each kind, seeds 1 to 5). The estimator is §10's, written in the example

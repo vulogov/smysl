@@ -2592,6 +2592,7 @@ fn cli() -> Command {
                             "window",
                             "check",
                             "detect",
+                            "calibrate",
                             "investigate",
                             "declare",
                             "witnesses",
@@ -2605,7 +2606,7 @@ fn cli() -> Command {
                         .help(
                             "read exports with a reader into a library, the value in force at \
                              an instant, materialise window evidence, recompute it, run a \
-                             detector, evict old substrate, materialise a trace's spans or a \
+                             detector or calibrate one, evict old substrate, materialise a trace's spans or a \
                              log window's templates, rank episodes like one, compute an \
                              information measure (SMYSL-5), or check a profile and print its \
                              hash",
@@ -2620,7 +2621,7 @@ fn cli() -> Command {
                             "`read READER FILE...` (k8s/1, zabbix/1, prom/1, otlp/1, \
                              otlp-json/1, otlp-traces/1, otlp-traces-json/1, journald/1, \
                              cloudevents/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
-                             `detect RECIPE`; `investigate open|consult|hypothesis|probe|action|\
+                             `detect RECIPE`; `calibrate RECIPE`; `investigate open|consult|hypothesis|probe|action|\
                              close|show …`; `declare instrument|measured-by|via|same-quantity …`; `witnesses SERIES`; \
                              `evict --older-than DUR`; `trace TRACE-ID`; `templates STREAM FROM TO`; `similar EPISODE`; `info RECIPE`; `profile check FILE|NAME`",
                         ),
@@ -2686,7 +2687,23 @@ fn cli() -> Command {
                         .long("series")
                         .value_name("SERIES")
                         .action(ArgAction::Append)
-                        .help("detect, info: a series to run over (uid or `<scheme>:<key>`); repeatable"),
+                        .help("detect, calibrate, info: a series to run over (uid or `<scheme>:<key>`); repeatable"),
+                )
+                .arg(
+                    Arg::new("window")
+                        .long("window")
+                        .value_name("REF-FROM-TO")
+                        .action(ArgAction::Append)
+                        .help(
+                            "calibrate: a fault-free trial, reference [REF, FROM) and test \
+                             [FROM, TO), epoch ms; repeatable",
+                        ),
+                )
+                .arg(
+                    Arg::new("rate")
+                        .long("rate")
+                        .value_name("R")
+                        .help("calibrate: the false-alarm rate to hold the trials to, in (0, 1)"),
                 )
                 .arg(
                     Arg::new("with")
@@ -14113,6 +14130,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "window" => tel_window(m, global, &args),
         "check" => tel_check(m, global),
         "detect" => tel_detect(m, global, &args),
+        "calibrate" => tel_calibrate(m, global, &args),
         "investigate" => tel_investigate(m, global, &args),
         "declare" => tel_declare(m, global, &args),
         "witnesses" => tel_witnesses(m, global, &args),
@@ -16483,6 +16501,130 @@ fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
     }
     println!("{n} record(s) committed");
     ExitCode::Success
+}
+
+/// `smysl tel calibrate RECIPE --series S… --window REF-FROM-TO… --rate R -s LIB`: a level
+/// detector's threshold from fault-free windows (RFC SMYSL-3 §21.1).
+///
+/// `RECIPE` names `mad/1`, `cusum/1` or `pelt/1`. Each `--window` is one trial: every `--series`,
+/// per instrument, read as reference `[REF, FROM)` and test `[FROM, TO)`, firing when any of them
+/// does. The answer is the least value on the calibration ladder of MAD's `threshold`, CUSUM's
+/// `h` or PELT's `penalty` that at most `⌊R · n⌋` of the `n` trials fire at; it is printed as a
+/// recipe `tel detect` takes, with how many trials fire at it. Nothing is written. A recipe or
+/// argument that is not admitted is exit 2; a rate the ladder cannot meet is exit 1.
+#[cfg(feature = "tel")]
+fn tel_calibrate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::Substrate;
+    use smysl::tel::detect::{calibrate_on, Spec};
+
+    let (Some(recipe_path), None) = (args.first(), args.get(1)) else {
+        eprintln!("smysl tel calibrate: `RECIPE`, an HJSON detector recipe");
+        return ExitCode::Usage;
+    };
+    let recipe_text = match std::fs::read_to_string(recipe_path.as_str()) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("smysl tel calibrate: {recipe_path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let spec = match Spec::parse(&recipe_text) {
+        Ok(s) if matches!(s, Spec::Mad(_) | Spec::Cusum(_) | Spec::Pelt(_)) => s,
+        Ok(s) => {
+            eprintln!(
+                "smysl tel calibrate: {} has no threshold to calibrate; mad/1, cusum/1 or pelt/1",
+                s.id()
+            );
+            return ExitCode::Usage;
+        }
+        Err(e) => {
+            eprintln!("smysl tel calibrate: {recipe_path}: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let mut series = Vec::new();
+    for s in m.get_many::<String>("series").into_iter().flatten() {
+        match tel_series_arg(s) {
+            Ok(u) => series.push(u),
+            Err(e) => {
+                eprintln!("smysl tel calibrate: --series {e}");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if series.is_empty() {
+        eprintln!("smysl tel calibrate: name at least one --series");
+        return ExitCode::Usage;
+    }
+    let mut windows = Vec::new();
+    for w in m.get_many::<String>("window").into_iter().flatten() {
+        let parts: Vec<Option<u64>> = w.split('-').map(|x| x.parse::<u64>().ok()).collect();
+        match parts.as_slice() {
+            [Some(r), Some(f), Some(t)] if r < f && f < t => windows.push((*r, *f, *t)),
+            _ => {
+                eprintln!(
+                    "smysl tel calibrate: --window is REF-FROM-TO, epoch ms, REF < FROM < TO, not {w}"
+                );
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if windows.is_empty() {
+        eprintln!("smysl tel calibrate: name at least one fault-free --window");
+        return ExitCode::Usage;
+    }
+    let rate = match m
+        .get_one::<String>("rate")
+        .map(|r| smysl::Decimal::parse_token(r))
+    {
+        Some(Ok(r)) => r,
+        _ => {
+            eprintln!("smysl tel calibrate: --rate R, a false-alarm rate in (0, 1)");
+            return ExitCode::Usage;
+        }
+    };
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let path = tel_series_path(&root);
+    if !path.exists() {
+        eprintln!(
+            "smysl tel calibrate: {} has no series substrate; `tel read --yes` writes one",
+            root.display()
+        );
+        return ExitCode::Failure;
+    }
+    let backend = match RedbBackend::open(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("smysl tel calibrate: {}: {e}", path.display());
+            return ExitCode::Failure;
+        }
+    };
+    match calibrate_on(&spec, &Substrate::new(backend), &series, &windows, rate) {
+        Ok(c) => {
+            println!("{}", c.spec.hjson());
+            println!(
+                "calibrate {}: {} of {} trial(s) fire at {} (at most {} at rate {rate})",
+                spec.id(),
+                c.over,
+                c.trials,
+                c.value,
+                c.allowed
+            );
+            ExitCode::Success
+        }
+        Err(e) => {
+            eprintln!("smysl tel calibrate: {e}");
+            if e.contains("rate is in") {
+                ExitCode::Usage
+            } else {
+                ExitCode::Failure
+            }
+        }
+    }
 }
 
 /// `smysl tel detect RECIPE --series S… --during FROM-TO -s LIB [--trigger UID] [--at MS --yes]`:

@@ -1180,6 +1180,38 @@ measures already do.
   reading of the store, never a unit.
 - A detector that fails GE-M3 stays off the pure path until fixed.
 
+### 21.1 Calibration
+
+The level detectors' defaults (robust z's 3.5, CUSUM's `h = 5`, PELT's `penalty = 10`) are
+textbook values for i.i.d. noise. On RCAEval's one-second telemetry they flagged 90 % (MAD) and
+100 % (CUSUM, PELT) of fault-free windows (SMYSL-5 §15, R7). A default therefore says nothing
+about how often a recipe will alarm on a given system. **Calibration** makes that a stated number
+instead: given windows the caller holds fault-free, it sets the parameter to the least value that
+at most a stated fraction of them alarm at. The value then goes into the recipe like any other
+parameter, so the recipe hash still says exactly what ran. The defaults are unchanged.
+
+- **Trial.** A trial is a reference window and the test window after it, read over each series
+  in scope and per instrument. A trial **fires** at a value when any of its streams does:
+  - `mad/1` at threshold θ fires when some test point's |robust z| against the reference
+    exceeds θ;
+  - `cusum/1` at `h` and `pelt/1` at `penalty` (their other parameters as given) fire when,
+    run over the reference and test points together, they put a change point in the test window.
+- **Ladder.** Values come from a fixed decimal ladder of ten steps a decade (1, 1.2, 1.5, 2, 2.5,
+  3, 4, 5, 6, 8 × 10^e), from 10⁻² to 8·10²⁰. They are written as decimals, so a calibrated
+  recipe reads as written and no libm `pow` is involved. A trial's **score** is the largest ladder
+  value at which it fires.
+- **Value.** The calibrated value is the least ladder value `v` such that at most `⌊rate · n⌋` of
+  the `n` trials score `v` or above. `rate` is a decimal in (0, 1), and the floor is exact. Any
+  trial that fires at or above `v` scores at least `v`, so on the given trials the bound holds at
+  `v` and at every value above it, even where CUSUM's and PELT's alarms are not monotone in their
+  parameter. A rate the ladder's top cannot meet is refused.
+- **Scope.** Calibration applies to `mad/1`, `cusum/1` and `pelt/1`. `episode/1` and `baro/1`
+  have no threshold to calibrate, and are refused.
+
+The library API is `smysl_tel::detect::calibrate` and `detect::calibrate_on` (over a substrate).
+`smysl tel calibrate` prints the calibrated recipe and writes nothing. The rate holds on the
+trials given; whether it carries to another system is an empirical question (SMYSL-5 §15, R8).
+
 ## 22. Query and dossiers
 
 ### 22.1 `sq/1` additions
@@ -1225,6 +1257,7 @@ The facade gains feature `tel` and one command group:
 | `smysl tel read <reader> <files…> --profile P [--at T]` | read into parts, series and change units (staged, as `ingest` is) |
 | `smysl tel window <series> <from> <to> [--sketch α] [--instrument I]` | materialise evidence |
 | `smysl tel detect <recipe.hjson> --series … --during …` | run detectors, stage their units |
+| `smysl tel calibrate <recipe.hjson> --series … --window REF-FROM-TO… --rate R` | a level detector's parameter from fault-free windows (§21.1); writes nothing |
 | `smysl tel at <series> <t>` | value in force at t, from the substrate |
 | `smysl tel investigate open\|consult\|hypothesis\|probe\|action\|close` | the ledger operations, for scripts and OKO |
 | `smysl tel evict --older-than <dur>` | rule TL eviction |

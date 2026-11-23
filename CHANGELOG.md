@@ -51,7 +51,29 @@ before the injection and a faulty pair across it.
 - **The simulated verdict stands, on simulated kinds.** RCAEval labels no variance-at-constant-
   median, oscillation or decoupling fault, so this cannot test it; a detector RFC built on the
   statistics needs real evidence of those kinds. RFC SMYSL-5 records it as R7 (§15).
-- **The detectors' defaults do not carry to one-second data.** Reported, not acted on.
+- **The detectors' defaults do not carry to one-second data.** Acted on below.
+
+### `tel calibrate`: a level detector's threshold from fault-free windows (SMYSL-3 §21.1, SMYSL-5 R8)
+
+- **Calibration states a false-alarm rate instead of a default.** `smysl tel calibrate RECIPE
+  --series S… --window REF-FROM-TO… --rate R` takes windows the caller holds fault-free, each a
+  reference and the test window after it. It returns the least value of MAD's `threshold`,
+  CUSUM's `h` or PELT's `penalty` at which at most `⌊R · n⌋` of the `n` windows alarm. The answer
+  is printed as a recipe `tel detect` takes, and nothing is written. Values come from a fixed
+  decimal ladder (1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8 × 10^e), so the recipe reads as written and
+  no libm `pow` is involved. The bound holds at the value and at every value above it, even
+  where CUSUM's and PELT's alarms are not monotone. The shipped defaults are unchanged.
+- **Library:** `smysl_tel::detect::calibrate` (`ladder`, `score`, `fires`, `calibrate`,
+  `from_scores`), `detect::calibrate_on` over a substrate, and `detect::Spec::hjson`, which
+  writes a recipe that `Spec::parse` reads back.
+- **Held out on a second system.** Calibrated to 10 % on RCAEval RE2-SS, the values alarm on 1
+  to 4 % of RE2-OB's (Online Boutique) fault-free windows. They see its faults at 73 % or more,
+  except delays under CUSUM (13 %) and PELT (27 %). MAD sees every RE2-OB fault.
+- **The values are large** (CUSUM `h` 1.5·10¹⁰, PELT `penalty` 4·10¹⁹), set by the series that
+  barely move. Calibrating per series, or flooring the scale at the data's resolution, is
+  recorded in RFC SMYSL-5 §15 and not done.
+- **GE-I3 replicates on RE2-OB.** No fault type is missed by every level detector, and no
+  statistic flags a window none of them does. R7's verdict stands on a second system.
 
 ## 1.18.0 — 2026-11-22
 
