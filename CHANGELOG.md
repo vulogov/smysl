@@ -114,6 +114,21 @@ before the injection and a faulty pair across it.
   differing (16.7 % stays), and it costs detections. MAD holds its rate in every configuration.
   GE-I3's verdict holds.
 
+### A third system: RE2-TT (SMYSL-5 R11)
+
+- **Per-series calibration no longer refuses at the ladder's top.** A series that fires at the
+  top in a fault-free window used to refuse the whole `calibrate_each` / `tel calibrate --each`.
+  It now takes the top, the windows it fires in count against the rate jointly, and only more of
+  them than the rate allows refuse, as for one value. RE2-TT's PELT found it.
+- **On RE2-TT (Train Ticket)**, with values calibrated on RE2-SS and carried unchanged, one
+  configuration held its rate on both held-out systems: CUSUM with `floor: resolution` at one
+  value a trial (3.3 % on RE2-OB, 6.7 % on RE2-TT). On RE2-TT it sees every type at 67 % or more,
+  as well as RE2-TT's own calibration does.
+- **Per-kind values do not carry reliably.** CUSUM per kind under the floor overshoots on RE2-TT
+  (23.3 %, and 12.2 % at margin 2), and PELT per kind fires on every fault-free window. MAD
+  overshoots slightly at margin 1 (up to 15.6 %) and holds at margin 2. GE-I3's verdict holds on
+  a third system.
+
 ## 1.18.0 — 2026-11-22
 
 Two RFCs, each built to its last phase: SMYSL-4, which runs Bund2 scripts over a library, and

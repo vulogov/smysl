@@ -409,7 +409,8 @@ sane range. `--margin 2` holds the windows to half the rate, leaving room for wh
 used somewhere they were not set. The calibrated value goes into the recipe, so the recipe
 hash still records what ran. The rate
 holds on the windows given. Whether it carries to another system has to be measured; RFC SMYSL-3
-§21.1 has the rule.
+§21.1 has the rule. On three systems of one benchmark, the value that carried was one value with
+`floor: resolution`; values set `--each` fitted their own system too closely (RFC SMYSL-5 §15).
 
 *Replayed to the byte.* A detector here uses only addition, subtraction, multiplication,
 division and square roots, which every machine rounds the same way. It never uses a logarithm or

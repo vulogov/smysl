@@ -1215,7 +1215,10 @@ parameter, so the recipe hash still says exactly what ran. The defaults are unch
   - `q` is the largest count at which at most `⌊rate · n⌋` trials fire;
   - a series' count is capped one below the number of trials it scored in, so its value is never
     at or below all of its scores (the ladder's foot, a hair trigger no evidence supports);
-  - a series that fired in no trial keeps the recipe's value and is reported as uncalibrated.
+  - a series that fired in no trial keeps the recipe's value and is reported as uncalibrated;
+  - a series that scores at the ladder's top more often than the count allows takes the top, and
+    fires only in those trials. The rate is refused when, at count 0, more trials fire than it
+    allows (SMYSL-5 §15, R11).
 
   None of these can add an alarm on the given trials.
 - **Margin.** A calibration may be held to `rate / margin` instead of `rate`, with `margin ≥ 1`:

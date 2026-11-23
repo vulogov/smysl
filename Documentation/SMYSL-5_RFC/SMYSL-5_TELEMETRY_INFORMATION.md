@@ -2,11 +2,11 @@
 
 **Author:** Vladimir Ulogov
 **Status:** first draft, amended after review (R1, 2026-11-20), while building (R2 to R6) and
-after (R7 to R10).
+after (R7 to R11).
 TI-P0 to TI-P4 are built: `ent/1`, `perm/1`, `mi/1`, `jsd/1` and `tent/1`, rule TI in `check`,
 and their recomputation. TI-P5 closed with GE-I5's result: transfer entropy is not released,
 and `te` stays reserved (§10). GE-I1 to GE-I5 have run on simulated data (§15), and GE-I3 on RCAEval's
-RE2-SS and RE2-OB, real (R7 to R10); every other real-data run is still owed, and every other threshold is a
+RE2-SS, RE2-OB and RE2-TT, real (R7 to R11); every other real-data run is still owed, and every other threshold is a
 proposal until the experiment that owns it has run (§17).
 **Target version:** not fixed. Phases are named (TI-P0 to TI-P5), not numbered by release.
 **Evidence baseline:** `dev/1.18.0` at `3e57160` ("SMYSL-4 BQ-P4"). Every code pointer below
@@ -33,6 +33,7 @@ Part A.
 | R8 | 2026-11-22 | 1.19. **R8-1** The detectors are calibrated rather than scored on a grid: `detect::calibrate` (3 §21.1) sets MAD's threshold, CUSUM's `h` and PELT's `penalty` on RE2-SS's normal pairs to 10 %, and the values are run unchanged on RE2-OB, held out. **R8-2** GE-I3's real-data arm is replicated on RE2-OB. Its result: RE2-SS's values hold on RE2-OB (1 to 4 % false alarms) and miss only CUSUM's and PELT's delays there, and RE2-OB gives R7's verdict (§15). |
 | R9 | 2026-11-22 | 1.19. **R9-1** The detectors are also calibrated per series (3 §21.1, `calibrate_each`), keyed by metric kind so that values carry between systems, the rate held jointly over the trials. **R9-2** Run on RE2-SS and held out on RE2-OB beside R8's one value a trial. Its result: per series, CUSUM sees every RE2-SS fault and, carried to RE2-OB, its delays (100 % against 13 %); PELT's carried values overshoot their rate there (16.7 %); R7's verdict holds in all four readings (§15). |
 | R10 | 2026-11-22 | 1.19. **R10-1** Every calibration is also made under `floor: resolution` (3 §21.2) and at a transfer margin of 2 (3 §21.1). **R10-2** Its result: the floor brings CUSUM's values to sane ranges and with them RE2-OB's delays at one value a trial (100 % against 13 %), and does nothing for PELT on float-valued metrics; a margin of 2 halves an overshoot that is sampling and not one that is the systems differing. R7's verdict holds, with one RE2-OB pair under the floor flagged by a statistic and no detector (§15). |
+| R11 | 2026-11-23 | 1.19. **R11-1** Per-series calibration no longer refuses when a series fires at the ladder's top in a fault-free trial: the series takes the top, those trials count against the rate jointly, and only more of them than the rate allows refuse (3 §21.1). **R11-2** Every R10 calibration on RE2-SS is carried to a third system, RE2-TT (Train Ticket). CUSUM under `floor: resolution` at one value a trial is the only detector configuration that held its rate on both systems; per-kind values overshoot on one system or the other, PELT's up to every fault-free window. R7's verdict holds (§15). |
 
 ---
 
@@ -859,6 +860,60 @@ at 87 % or more, except CUSUM under the tiny floor at one value a trial (delay 2
   rests on.
 - **R7's verdict holds.** Under the floor on RE2-OB, one faulty pair is flagged by a statistic and
   by no detector. No statistic separates a type in any configuration on either system.
+
+**A third system, run in 1.19** (R11; `--data PATH/RE2-SS --held PATH/RE2-TT`). R10's advice
+rested on two systems of one benchmark. RE2-TT (Train Ticket, Zenodo record 14590730, 90 cases,
+five `ts-*-service`s, the same six fault types and metric kinds) tests it: every R10
+calibration on RE2-SS is carried unchanged to RE2-TT. The question was fixed before the run:
+does a configuration that held its rate on RE2-OB hold it on RE2-TT, and still see the faults?
+
+The first run stopped. On RE2-TT's own data, a `pelt/1` series scored at the ladder's top in a
+fault-free window, and per-series calibration refused the whole calibration, although one
+value a trial over the same windows did not. That was stricter than 3 §21.1's rule, under which
+only a rate the ladder's top cannot meet is refused. Now a series that cannot be brought to the
+count takes the top and fires only in those trials. They count against the rate jointly, and the
+calibration is refused only when more of them fire than the rate allows (R11-1).
+
+| calibration on RE2-SS | RE2-OB false alarms, MAD / CUSUM / PELT (R10) | RE2-TT false alarms, MAD / CUSUM / PELT |
+|---|---|---|
+| tiny floor, one a trial, margin 1 | 4.4 / 2.2 / 1.1 % | 13.3 / 15.6 / 12.2 % |
+| tiny floor, one a trial, margin 2 | | 8.9 / 6.7 / 2.2 % |
+| resolution floor, one a trial, margin 1 | 5.6 / **3.3** / 1.1 % | 15.6 / **6.7** / 12.2 % |
+| resolution floor, one a trial, margin 2 | | 7.8 / **6.7** / 2.2 % |
+| tiny floor, per kind, margin 1 | 6.7 / 4.4 / 16.7 % | 11.1 / 2.2 / **100** % |
+| tiny floor, per kind, margin 2 | 2.2 / 3.3 / 16.7 % | 10.0 / 1.1 / 15.6 % |
+| resolution floor, per kind, margin 1 | 6.7 / 11.1 / 24.4 % | 11.1 / **23.3** / **100** % |
+| resolution floor, per kind, margin 2 | 2.2 / **6.7** / 12.2 % | 10.0 / **12.2** / 30.0 % |
+
+On RE2-TT at its own calibrations every arm holds its rate. MAD and PELT see `cpu`, `mem`,
+`disk` and `socket` faults in full. `loss` is the hardest type: 40 to 100 % depending on the
+detector, and 67 % for CUSUM under the floor at one value a trial.
+
+- **One configuration held on both systems: CUSUM, `floor: resolution`, one value a trial.**
+  Carried, it alarms on 3.3 % of RE2-OB's fault-free windows and 6.7 % of RE2-TT's, at either
+  margin. On RE2-TT it sees `cpu` 87 %, `mem`, `disk` and `socket` 100 %, `delay` 80 % and
+  `loss` 67 %. RE2-TT's own calibration of the same configuration sees `loss` at 67 % too, so
+  the transfer costs nothing there.
+- **Per kind does not carry reliably.** CUSUM per kind under the floor, R10's other candidate
+  (6.7 % on RE2-OB at margin 2), overshoots on RE2-TT: 23.3 % at margin 1 and 12.2 % at margin 2.
+  Under the shipped floor it holds on RE2-TT (2.2 and 1.1 %) after overshooting nowhere on RE2-OB,
+  but its `cpu` value there is `h` 8·10¹⁶. PELT per kind fires on **every** RE2-TT fault-free
+  window at margin 1, and on 15.6 to 30 % at margin 2. Per-kind values are fitted closely to
+  the calibrating system's kinds, and how a kind behaves differs between systems.
+- **A margin of 2 brings MAD under its rate.** At margin 1, MAD's carried values overshoot on
+  RE2-TT (11.1 to 15.6 %), so R10's "MAD held in every configuration" does not replicate. At
+  margin 2 every MAD configuration holds (7.8 to 10.0 %) and sees every type at 73 % or more.
+  PELT at one value a trial holds at margin 2 too (2.2 %), at the cost of `delay` (53 to 67 %)
+  and `loss` (27 %).
+- **What to run, amended.** For a value carried to a system it was not calibrated on:
+  - CUSUM with `floor: resolution` at one value a trial;
+  - MAD at margin 2;
+  - per kind, only with its rate checked on the new system.
+
+  This rests on three systems of one benchmark, at one sample a second.
+- **R7's verdict holds on RE2-TT.** In every configuration, no faulty pair is flagged by a
+  statistic and by no detector, and no statistic separates a type. `jsd/1` is the strongest, at
+  13 to 67 % per type.
 
 **GE-I5, run at TI-P5 on simulated data** (`cargo run --release -p smysl-tel --example
 ge_i5`, 300 pairs of each kind, seeds 1 to 5). The estimator is §10's, written in the example

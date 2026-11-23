@@ -61,6 +61,9 @@
 //! margin of 2 (`calibrate::Target::with_margin`, at most `⌊rate · n / 2⌋` normal pairs) beside
 //! 1. Each is run on the calibrating set and, unchanged, on the held-out one.
 //!
+//! **A third system** (R11). `--held` takes any RCAEval RE2 system; RE2-TT (Train Ticket) is
+//! read as RE2-OB is.
+//!
 //! ```text
 //! cargo run --release -p smysl-tel --example ge_i3_rcaeval -- --data PATH/RE2-SS [--held PATH/RE2-OB]
 //! ```

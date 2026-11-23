@@ -35,7 +35,8 @@
 //! trial still fires when any series fires at its own value, so the rate is held jointly: for a
 //! per-series count `q`, each series takes the least value that at most `q` of its trials score
 //! at or above, and `q` is the largest count at which at most `⌊rate · n⌋` trials then fire at
-//! all. `q = 0` always meets it, so a rate is refused only as above. A series' count is capped one
+//! all. At `q = 0` a series that scores at the ladder's top takes the top and fires only in those
+//! trials; a rate is refused when they are more than `⌊rate · n⌋`. A series' count is capped one
 //! below the number of trials it scored in, so its value is never at or below all of its scores
 //! (the ladder's foot, a hair trigger no evidence supports); the cap rises with `q`, so the trials
 //! firing rise with `q` and the largest `q` is well defined. A series that never fired keeps the
@@ -375,14 +376,6 @@ pub fn each_from_scores<K: Ord + Clone>(
             }
         }
     }
-    let top = ladder.last().expect("a ladder").1;
-    if by_key.values().flatten().any(|x| *x >= top) {
-        return Err(format!(
-            "{} fires at the ladder's top, {}, in a fault-free trial",
-            spec.id(),
-            ladder.last().expect("a ladder").0
-        ));
-    }
     // At count q: each key's least value that at most q of its trials score at or above.
     let values_at = |q: usize| -> BTreeMap<K, (Decimal, f64)> {
         by_key
@@ -396,12 +389,15 @@ pub fn each_from_scores<K: Ord + Clone>(
                     let v = value_of(spec);
                     (v, to_f64(v))
                 } else {
+                    // A series that scores at the top more than q times takes the top, and
+                    // fires there only in those trials.
                     let q = q.min(xs.len() - 1);
+                    let top = *ladder.last().expect("a ladder");
                     ladder
                         .iter()
                         .find(|(_, f)| xs.iter().filter(|x| **x >= *f).count() <= q)
                         .copied()
-                        .expect("the ladder's top meets q = 0")
+                        .unwrap_or(top)
                 };
                 (k.clone(), v)
             })
@@ -419,7 +415,14 @@ pub fn each_from_scores<K: Ord + Clone>(
     let q = (0..=n)
         .rev()
         .find(|&q| firing(&values_at(q)) <= allowed)
-        .expect("q = 0 fires in no trial");
+        .ok_or_else(|| {
+            format!(
+                "{} fires on more than {allowed} of {n} trials with every series at the \
+                 ladder's top, {}",
+                spec.id(),
+                ladder.last().expect("a ladder").0
+            )
+        })?;
     let values = values_at(q);
     let over = firing(&values);
     let series = values
@@ -716,6 +719,39 @@ mod tests {
             }];
             assert!(fires(&res.spec, &floor, &fault, res.value), "{text}");
         }
+    }
+
+    /// A series that fires at the ladder's top in a few fault-free trials is held there, those
+    /// trials counting against the rate jointly; only more of them than the rate allows refuse
+    /// (SMYSL-5 §15, R11: `pelt/1` on RE2-TT).
+    #[test]
+    fn a_series_at_the_ladders_top_counts_against_the_rate_and_does_not_refuse() {
+        let spec = Spec::parse("{ detector: pelt/1 }").unwrap();
+        let top = *ladder().last().unwrap();
+        let busy = Decimal::parse_token("40").unwrap();
+        let trial = |i: usize, hit: bool| -> BTreeMap<&str, Option<Decimal>> {
+            BTreeMap::from([
+                (
+                    "busy",
+                    Some(if i % 2 == 0 {
+                        busy
+                    } else {
+                        Decimal::from_i64(4)
+                    }),
+                ),
+                ("flat", hit.then_some(top)),
+            ])
+        };
+        // Two of thirty at the top; at rate 0.1, three may fire.
+        let scores: Vec<_> = (0..30).map(|i| trial(i, i < 2)).collect();
+        let c = each_from_scores(&spec, &scores, target("0.1")).unwrap();
+        assert_eq!(c.series["flat"].value, top);
+        assert_eq!(c.series["flat"].fired, 2);
+        assert!(c.over <= c.allowed, "{} > {}", c.over, c.allowed);
+        // Four at the top cannot be held to three.
+        let scores: Vec<_> = (0..30).map(|i| trial(i, i < 4)).collect();
+        let e = each_from_scores(&spec, &scores, target("0.1")).unwrap_err();
+        assert!(e.contains("more than 3 of 30"), "{e}");
     }
 
     #[test]
