@@ -1,8 +1,8 @@
 # RFC SMYSL-6 — an embedded language server (`smysl-lsp`, `smysl lsp-server`)
 
 **Author:** Vladimir Ulogov
-**Status:** draft, amended in review against the code (R1, 2026-11-23). LS-P1 and LS-P2 are
-built (1.20); LS-P3 and LS-P4 are not.
+**Status:** draft, amended in review against the code (R1, 2026-11-23). LS-P1 to LS-P3 are
+built (1.20); LS-P4 is not.
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged.
 **Crate:** `crates/smysl-lsp`, new, behind the facade's `lsp` feature.
 **Distribution:** one binary. `smysl lsp-server` serves it.
@@ -170,7 +170,11 @@ On a unit's label, on a reference, or on a `b3:` uid in the text:
   retraction, `SMY-E034`). Inside `grounds: [` and `deps: [`, and after `@rel`: the labels,
   each with its status and gist. Between `--` and `-->`: the fourteen kernel kinds and the
   declared `x.<domain>/<kind>`.
-- **`.sq`.** The clauses, the filter fields, and the labels and schemas of the workspace.
+- **`.sq`.** The stage words (`from`, `find`, `where`, `expand`, `with`, `order`, `group`,
+  `limit`, `pack`, `count`, …) and the kernel fields `kind`, `schema`, `status`,
+  `commitment` and `lang` (R1-9). The workspace's labels and schemas wait for LS-P4.
+- Each completion replaces the word being typed, labels with their `/` included, and in
+  `@rel a --kin` the word starts after the `--`.
 
 ### 5.5 Formatting — LS-P3
 
@@ -183,12 +187,19 @@ canonical printer.
 
 Allowed:
 
-- **`SMY-E030`**: *lower the status to its weakest ground's*. It only ever lowers.
+- **`SMY-E030`**: *lower the status to its weakest ground's*. It only ever lowers. Rule M
+  binds only `derived` and `inferred`, the statuses that rest on grounds; `measured` and
+  `cited` stand on their source, and `check` exempts them, so the action does too (R1-10).
 - **`SMY-E060`**: *replace with the nearest known label*, when one is within edit distance 2.
 - **`SMY-W013`**, an unknown relation kind read as `elaborates`: *declare it*, by inserting
-  `@schema x.<domain>/1 { version: 1, relations: ["x.<domain>/<kind>"] }`. The draft
-  attached this action to "an undeclared extension schema"; `W013` is the relation kind
-  (R1-1).
+  `@schema x.<domain>/1 { version: 1, relations: ["x.<domain>/<kind>"] }` after the `@doc`
+  header. The draft attached this action to "an undeclared extension schema"; `W013` is the
+  relation kind (R1-1). `check` reports it against the relation record, so the action finds
+  undeclared `x.` kinds in the relation records themselves.
+- **Formatting refused** answers `null` and sends `window/showMessage` with the reason.
+- **Built in LS-P3,** and its gate met: a property test over 400 generated documents applies
+  every action offered and finds no status raised, no `rebuts` removed and no `@resolve`
+  written, and no formatting over a comment.
 
 Forbidden, and tested as forbidden: raising any status, deleting or rewriting a `rebuts`
 relation, writing a `@resolve`.
@@ -286,3 +297,7 @@ args = ["lsp-server"]
   `check-purity` enforces: the CLI may only reach a crate through the facade. It is re-exported
   as `smysl::lsp`, behind its feature, as `smysl-bund` is. `serve`, over any streams, is added
   so the protocol can be tested without a process.
+- **R1-9.** `sq/1`'s filter fields are `kind`, `schema`, `status`, `commitment` and `lang`, not
+  the draft's `label` and `tag`; its clauses include `with`, `expand`, `said` and `observed`.
+- **R1-10.** Rule M constrains `derived` and `inferred` only. A quick fix that lowered a
+  `measured` unit over a speculative ground would answer a finding `check` never makes.

@@ -4,6 +4,7 @@
 //! I/O, no thread, no clock, no JSON: `xtask check-purity` scans this directory for them, since
 //! the crate as a whole is not pure.
 
+mod edit;
 mod line_index;
 mod nav;
 
@@ -14,6 +15,7 @@ use smysl_core::surface::{parse_surface, ParseOutcome};
 use smysl_core::{canonical_uid, Record, Span, Subject, Uid};
 use smysl_graph::Store;
 
+pub use edit::{Action, Completion, CompletionKind, TextEdit};
 pub use line_index::{Encoding, LineIndex, Position, Range};
 pub use nav::{Hover, Symbol, SymbolKind};
 
@@ -203,6 +205,44 @@ impl AnalysisHost {
         self.model(uri)
             .map(|m| m.symbols(self.encoding))
             .unwrap_or_default()
+    }
+
+    /// What may be typed at `pos` (§5.4).
+    pub fn completion(&self, uri: &str, pos: Position) -> Vec<Completion> {
+        let Some(doc) = self.docs.get(uri) else {
+            return Vec::new();
+        };
+        let at = nav::offset(doc, pos, self.encoding);
+        let out = match doc.language {
+            Language::Surface => parse(doc).ok(),
+            Language::Query => None,
+        };
+        edit::complete(doc, out.as_ref(), at, self.encoding)
+    }
+
+    /// The document's canonical form as one edit, `None` when it already is, or why it is not
+    /// formatted: a comment or a record would be lost (§5.5).
+    pub fn format(&self, uri: &str) -> Result<Option<TextEdit>, String> {
+        match self.docs.get(uri) {
+            Some(doc) => edit::format(doc, self.encoding),
+            None => Err("the document is not open".into()),
+        }
+    }
+
+    /// The quick fixes for findings within `range` (§5.6). None ever raises a status.
+    pub fn actions(&self, uri: &str, range: Range) -> Vec<Action> {
+        let Some(doc) = self.docs.get(uri) else {
+            return Vec::new();
+        };
+        if doc.language != Language::Surface {
+            return Vec::new();
+        }
+        let Ok(out) = parse(doc) else {
+            return Vec::new();
+        };
+        let from = nav::offset(doc, range.start, self.encoding);
+        let to = nav::offset(doc, range.end, self.encoding);
+        edit::actions(doc, &out, from, to, self.encoding)
     }
 
     /// Every finding in an open document, in text order (§5.1); none for one not open.

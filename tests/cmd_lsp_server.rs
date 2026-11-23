@@ -242,3 +242,116 @@ fn navigation_through_the_binary_answers_exactly() {
     send(&mut stdin, json!({ "jsonrpc": "2.0", "method": "exit" }));
     assert_eq!(child.wait().unwrap().code(), Some(0));
 }
+
+/// LS-P3 through the binary: completion, formatting and its refusal, and a quick fix that
+/// lowers a status.
+#[test]
+fn completion_formatting_and_a_quick_fix_through_the_binary() {
+    let text = "@doc smysl/0.1 { id: v/t }\n\n\
+                @evidence e/a { status: speculative }\n~ A guess.\n\n\
+                @claim c/b   { status: derived, grounds: [e/a] }\n~ Over-claimed.\n";
+    let mut child = Command::new(env!("CARGO_BIN_EXE_smysl"))
+        .arg("lsp-server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+    );
+    let caps = receive(&mut stdout)["result"]["capabilities"].clone();
+    assert_eq!(caps["documentFormattingProvider"], true);
+    assert_eq!(
+        caps["codeActionProvider"]["codeActionKinds"],
+        json!(["quickfix"])
+    );
+    let open = |uri: &str, text: &str| {
+        json!({ "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": { "textDocument": {
+            "uri": uri, "languageId": "smysl", "version": 1, "text": text } } })
+    };
+    send(&mut stdin, open("file:///w/t.smy", text));
+    let _ = receive(&mut stdout);
+    let doc = json!({ "uri": "file:///w/t.smy" });
+
+    // `status: ` — the five a writer may use.
+    let col = text.lines().nth(5).unwrap().find("derived").unwrap() as u64;
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "textDocument/completion", "params": {
+            "textDocument": doc, "position": { "line": 5, "character": col } } }),
+    );
+    let labels: Vec<String> = receive(&mut stdout)["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["label"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        labels,
+        ["cited", "derived", "inferred", "measured", "speculative"]
+    );
+
+    // The fix for Rule M lowers `derived` to `speculative`, and only that.
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 3, "method": "textDocument/codeAction", "params": {
+            "textDocument": doc,
+            "range": { "start": { "line": 5, "character": 0 }, "end": { "line": 5, "character": 0 } },
+            "context": { "diagnostics": [] } } }),
+    );
+    assert_eq!(
+        receive(&mut stdout)["result"],
+        json!([{
+            "title": "Lower status to `speculative`, its weakest ground's",
+            "kind": "quickfix",
+            "edit": { "changes": { "file:///w/t.smy": [{
+                "range": { "start": { "line": 5, "character": col },
+                           "end": { "line": 5, "character": col + 7 } },
+                "newText": "speculative" }] } },
+        }])
+    );
+
+    // A clean document is formatted as one whole-text edit.
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 4, "method": "textDocument/formatting", "params": {
+            "textDocument": doc, "options": { "tabSize": 2, "insertSpaces": true } } }),
+    );
+    let edits = receive(&mut stdout)["result"].clone();
+    assert_eq!(edits.as_array().unwrap().len(), 1);
+    assert!(edits[0]["newText"]
+        .as_str()
+        .unwrap()
+        .contains("@claim c/b {"));
+
+    // With a comment it is refused, and the editor is told why.
+    send(
+        &mut stdin,
+        open("file:///w/c.smy", &format!("{text}# keep me\n")),
+    );
+    let _ = receive(&mut stdout);
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 5, "method": "textDocument/formatting", "params": {
+            "textDocument": { "uri": "file:///w/c.smy" }, "options": {} } }),
+    );
+    assert_eq!(receive(&mut stdout)["result"], Value::Null);
+    let shown = receive(&mut stdout);
+    assert_eq!(shown["method"], "window/showMessage");
+    assert!(shown["params"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("comment"));
+
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 6, "method": "shutdown" }),
+    );
+    let _ = receive(&mut stdout);
+    send(&mut stdin, json!({ "jsonrpc": "2.0", "method": "exit" }));
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+}

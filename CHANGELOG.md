@@ -59,8 +59,14 @@ people can close. None of it moved in 1.19.
   grounds with their statuses, its deps, how many units rebut it, and its source. Go to
   definition, find references and the document outline (`@doc`, `@schema`, units, `@rel`,
   `@thread`) work within a document. `ParseOutcome::spans` now places `@schema` records too.
-- Completion, formatting, safe code actions and a library's context are LS-P3 and LS-P4.
-  `smysl-lsp` is unpublished until the release that ships them.
+- **Completion, formatting and safe quick fixes (LS-P3).** Completion after `@`, `status:`,
+  inside `grounds: [` and `deps: [`, between `--` and `-->`, at a header key, and in `.sq`.
+  Formatting is `smysl fmt`'s canonical form, refused with a message whenever a comment or a
+  record would be lost. Three quick fixes: lower a `derived` or `inferred` unit to its weakest
+  ground's status (Rule M), correct a label within edit distance 2, and declare an undeclared
+  `x.` relation kind. A property test over 400 generated documents finds no fix that raises a
+  status, removes a rebuttal or writes a `@resolve`.
+- A library's context is LS-P4. `smysl-lsp` is unpublished until the release that ships it.
 
 ### `floor: spread`: PELT's scale on float metrics (SMYSL-3 §21.2, SMYSL-5 R12)
 

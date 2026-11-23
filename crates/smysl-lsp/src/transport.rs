@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use crate::analysis::{
-    AnalysisHost, Change, Diagnostic, Encoding, Language, Position, Range, Severity, SymbolKind,
+    AnalysisHost, Change, CompletionKind, Diagnostic, Encoding, Language, Position, Range,
+    Severity, SymbolKind, TextEdit,
 };
 use crate::{LspConfig, LspError};
 
@@ -100,6 +101,23 @@ fn at(params: &Value) -> Result<(String, Position), (i64, String)> {
     Ok((uri.to_string(), pos))
 }
 
+fn text_edit(e: &TextEdit) -> Value {
+    json!({ "range": range(e.range), "newText": e.text })
+}
+
+/// LSP 3.17's `CompletionItemKind` for each: Class, Property, EnumMember, Reference, Value,
+/// Keyword.
+fn completion_kind(k: CompletionKind) -> u32 {
+    match k {
+        CompletionKind::Type => 7,
+        CompletionKind::Key => 10,
+        CompletionKind::Status => 20,
+        CompletionKind::Label => 18,
+        CompletionKind::Kind => 12,
+        CompletionKind::Keyword => 14,
+    }
+}
+
 /// LSP 3.17's `SymbolKind` for each: File, Namespace, Object, Operator, Event.
 fn symbol_kind(k: SymbolKind) -> u32 {
     match k {
@@ -145,6 +163,8 @@ struct Server<W: Write> {
     deadline: Option<Instant>,
     debounce: Duration,
     log: Log,
+    /// Messages for `window/showMessage`, sent after the reply that produced them.
+    notices: Vec<String>,
 }
 
 /// What handling one message decided.
@@ -222,7 +242,15 @@ impl<W: Write> Server<W> {
                     self.request(m, &params)
                 }));
                 match answered {
-                    Ok(Ok(result)) => self.reply(&id, result)?,
+                    Ok(Ok(result)) => {
+                        self.reply(&id, result)?;
+                        for message in std::mem::take(&mut self.notices) {
+                            self.send(json!({
+                                "jsonrpc": "2.0", "method": "window/showMessage",
+                                "params": { "type": 3, "message": message }
+                            }))?;
+                        }
+                    }
                     Ok(Err((code, message))) => self.fail(&id, code, &message)?,
                     Err(_) => {
                         self.log.line(&format!("{m} panicked"));
@@ -259,6 +287,9 @@ impl<W: Write> Server<W> {
                         "definitionProvider": true,
                         "referencesProvider": true,
                         "documentSymbolProvider": true,
+                        "completionProvider": { "triggerCharacters": ["@", ":", "[", ",", "-", ">"] },
+                        "documentFormattingProvider": true,
+                        "codeActionProvider": { "codeActionKinds": ["quickfix"] },
                     },
                     "serverInfo": { "name": "smysl", "version": env!("CARGO_PKG_VERSION") },
                 }))
@@ -314,6 +345,65 @@ impl<W: Write> Server<W> {
                                 "kind": symbol_kind(s.kind),
                                 "range": range(s.range),
                                 "selectionRange": range(s.selection),
+                            })
+                        })
+                        .collect(),
+                ))
+            }
+            "textDocument/completion" => {
+                let (uri, pos) = at(params)?;
+                Ok(Value::Array(
+                    self.host
+                        .completion(&uri, pos)
+                        .into_iter()
+                        .map(|c| {
+                            json!({
+                                "label": c.label,
+                                "kind": completion_kind(c.kind),
+                                "detail": c.detail,
+                                "textEdit": { "range": range(c.replace), "newText": c.label },
+                            })
+                        })
+                        .collect(),
+                ))
+            }
+            "textDocument/formatting" => {
+                let uri = params
+                    .pointer("/textDocument/uri")
+                    .and_then(Value::as_str)
+                    .ok_or((INVALID_PARAMS, "no `textDocument.uri`".to_string()))?
+                    .to_string();
+                match self.host.format(&uri) {
+                    Ok(Some(e)) => Ok(json!([text_edit(&e)])),
+                    Ok(None) => Ok(json!([])),
+                    Err(why) => {
+                        // Refused rather than lossy (§5.5): say why, and change nothing.
+                        self.notices.push(why);
+                        Ok(Value::Null)
+                    }
+                }
+            }
+            "textDocument/codeAction" => {
+                let uri = params
+                    .pointer("/textDocument/uri")
+                    .and_then(Value::as_str)
+                    .ok_or((INVALID_PARAMS, "no `textDocument.uri`".to_string()))?
+                    .to_string();
+                let r = params
+                    .get("range")
+                    .and_then(parse_range)
+                    .ok_or((INVALID_PARAMS, "no `range`".to_string()))?;
+                Ok(Value::Array(
+                    self.host
+                        .actions(&uri, r)
+                        .into_iter()
+                        .map(|a| {
+                            json!({
+                                "title": a.title,
+                                "kind": "quickfix",
+                                "edit": { "changes": {
+                                    uri.clone(): a.edits.iter().map(text_edit).collect::<Vec<_>>()
+                                } },
                             })
                         })
                         .collect(),
@@ -432,6 +522,7 @@ where
         deadline: None,
         debounce: Duration::from_millis(config.check_debounce_ms),
         log,
+        notices: Vec::new(),
     };
     loop {
         let next = match s.deadline {
