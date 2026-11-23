@@ -18,11 +18,9 @@ testbed (D-T12) and agent runs, arms (a) to (d). Until it runs, the design of in
 untested against an agent, and rule TQ's catch rate, now over statistics as well as windows, is a
 property of `examples/oko_ledger`'s planted quotes rather than of a model's.
 
-**The real-data runs.** GE-I3 on RCAEval's real incidents, which decides whether a detector
-built from `mi/1` and `perm/1` is worth an RFC. GE-M1 on a cluster observed for seven days
-(I-1), the Zabbix fixtures (I-2), GE-M2 and GE-M5 on DeathStarBench at production-like load,
-GE-M8 on GE-M7's corpus and RCAEval. Each simulated verdict names the run on real data that
-could overturn it.
+**The real-data runs.** GE-M1 on a cluster observed for seven days (I-1), the Zabbix fixtures
+(I-2), GE-M2 and GE-M5 on DeathStarBench at production-like load, GE-M8 on GE-M7's corpus and
+RCAEval. Each simulated verdict names the run on real data that could overturn it.
 
 **OKO's own ledger.** `examples/oko_ledger` runs smysl's side through the library API; OKO
 writing a rotation ledger is TL-P6's criterion, and it is OKO's code.
@@ -35,6 +33,25 @@ SMYSL-3 §17.1 and not planned until a ledger that size needs it.
 stated in tokens, the sizing residual on German, the Ollama arm's model size; questions still
 unread, a subject by a name the store does not write, GE-T7 on a thousand real works, and the
 ones only people can close. None of it moved in 1.18.
+
+### GE-I3 on real incidents: RCAEval's faults are all seen by a level detector (SMYSL-5 R7)
+
+`crates/smysl-tel/examples/ge_i3_rcaeval.rs` runs GE-I3's real-data arm over RCAEval RE2-SS
+(Sock Shop, 90 labelled faults of six types, one sample a second; CC BY 4.0, read from a
+download and not kept in the repository). Each case gives a normal pair of six-minute windows
+before the injection and a faulty pair across it.
+
+- **The first reading was degenerate.** It held the statistics to MAD's false-alarm rate with
+  the detectors at their shipped defaults, and on second data those defaults flag 90 % (MAD)
+  and 100 % (CUSUM, PELT) of fault-free windows. Amended before the rerun: every arm, detectors
+  included, is scored and held to 10 % false alarms.
+- **At 10 %, MAD flags 93 to 100 % of every fault type,** CUSUM 80 to 93 % and PELT 80 to 100 %.
+  `jsd/1` flags 60 to 93 %, the other statistics little. No faulty window is flagged by a
+  statistic and by no detector.
+- **The simulated verdict stands, on simulated kinds.** RCAEval labels no variance-at-constant-
+  median, oscillation or decoupling fault, so this cannot test it; a detector RFC built on the
+  statistics needs real evidence of those kinds. RFC SMYSL-5 records it as R7 (§15).
+- **The detectors' defaults do not carry to one-second data.** Reported, not acted on.
 
 ## 1.18.0 — 2026-11-22
 

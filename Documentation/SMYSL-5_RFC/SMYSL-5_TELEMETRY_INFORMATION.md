@@ -1,12 +1,13 @@
 # RFC SMYSL-5 — information measures over telemetry
 
 **Author:** Vladimir Ulogov
-**Status:** first draft, amended after review (R1, 2026-11-20) and while building (R2 to R6).
+**Status:** first draft, amended after review (R1, 2026-11-20), while building (R2 to R6) and
+after (R7).
 TI-P0 to TI-P4 are built: `ent/1`, `perm/1`, `mi/1`, `jsd/1` and `tent/1`, rule TI in `check`,
 and their recomputation. TI-P5 closed with GE-I5's result: transfer entropy is not released,
-and `te` stays reserved (§10). GE-I1 to GE-I5 have run on simulated data (§15); GE-I3's run on
-RCAEval, and every other real-data run, is still owed, and every other threshold is a proposal
-until the experiment that owns it has run (§17).
+and `te` stays reserved (§10). GE-I1 to GE-I5 have run on simulated data (§15), and GE-I3 on RCAEval's
+RE2-SS, real (R7); every other real-data run is still owed, and every other threshold is a
+proposal until the experiment that owns it has run (§17).
 **Target version:** not fixed. Phases are named (TI-P0 to TI-P5), not numbered by release.
 **Evidence baseline:** `dev/1.18.0` at `3e57160` ("SMYSL-4 BQ-P4"). Every code pointer below
 describes that tree. Re-check them against the tree in hand before starting a phase.
@@ -28,6 +29,7 @@ Part A.
 | R4 | 2026-11-21 | Found while building TI-P3. **R4-1** one window's template units that carry different digests (late events) are separate inputs, and give one `tent/1` unit each, as windows of one key do (§6.4). **R4-2** a metric series given to `tent/1` is `SMY-E701`; a `templates` hash other than the shipped Drain's, with no such templates in the store, is `SMY-W703`, since this build runs one Drain (§6.4). **R4-3** templates `tel info` materialises are committed before the statistic, with their stream's series unit, attested as `tel templates` attests them (§6.4). **R4-4** GE-I4's stop condition failed on 2 of 20 seeds, for a fault that barely moves the entropy, while Drain's share of every boundary move was zero; `tent/1` ships by the author's decision, and the result is recorded in §15. |
 | R6 | 2026-11-22 | TI-P5. **R6-1** GE-I5's reading of its stop condition, fixed before the run, and its result: `te/1` is not released, and TI-P5 closes with no code beyond the experiment (§10, §15). |
 | R5 | 2026-11-21 | Found while building TI-P4. **R5-1** two info units of one key disagree (`SMY-W614`) when they read different sample sets: their `digest`, `with_digest` and `ref_digest` together (§3). **R5-2** recomputation reads a stored recipe text back into a recipe, and one this build would write otherwise, a parameter respelled or missing, is `SMY-E604`, since recomputing it would compute something else; `SMY-W704` is a recipe id this build does not have (§7). **R5-3** rule TI's checks of the fields: `mi` carries `with`, `with_instrument`, `with_digest` and `lag`; a statistic of one series names no second; `jsd` names a reference window; a reference window carries `ref_from_ms`, `ref_to_ms` and `ref_digest` together; a scan's `lags` and `values` are of one length (§3). **R5-4** a `template-entropy` unit is recomputed from the store's templates of its stream, instrument, window and recipe hash; with none, from the events, for the shipped Drain only; with neither, it is `SMY-W605` (§7). **R5-5** the dossier lists the statistics among the evidence an investigation consulted or grounds on, and its open questions include those not re-derivable (§8). **R5-6** GE-I3's reading of its stop condition, fixed before the run, and its result (§15). |
+| R7 | 2026-11-22 | 1.19. **R7-1** GE-I3's real-data arm, on RCAEval RE2-SS: its first reading, held to MAD's false-alarm rate with the detectors at their shipped defaults, was degenerate on one-second data, since those defaults flag 90 to 100 % of normal windows; the reading was amended before the rerun to hold every arm, detectors included, to 10 %. Its result: every fault type is seen by a level detector, and no statistic flags a faulty window none of them does (§15). |
 
 ---
 
@@ -674,8 +676,57 @@ A detector's column is at its own false-alarm rate on normal incidents: MAD's ab
   under this setting, reported and not acted on.
 - The noise is independent from minute to minute. Real series are autocorrelated, which moves
   `perm/1`'s value on normal windows and, as GE-I2 (b) found, weakens what surrogates say. The
-  run on RCAEval (CC BY 4.0, labelled real incidents) is what would test that, and it is still
-  owed: its data is not on this machine.
+  run on RCAEval, below, is the real-data arm.
+
+**GE-I3 on real incidents, run in 1.19 on RCAEval RE2-SS** (R7; `cargo run --release -p
+smysl-tel --example ge_i3_rcaeval -- --data PATH/RE2-SS`). RCAEval (Pham et al., arXiv
+2412.17015; Zenodo 14590730, CC BY 4.0) is not in this repository. RE2-SS is Sock Shop: 90
+cases, six fault types injected into five services three times each, 24 minutes a case at one
+sample a second, the fault at minute 12. Each case gives a **normal** pair of six-minute
+windows, both before the injection, and a **faulty** pair, reference before and test after it.
+The series are the faulty service's columns of `simple_metrics.csv` (up to seven) and its
+container's log lines, through the shipped Drain, for `tent/1`; a pair's score is the largest
+over its series, or its pairs for `mi/1`. Every arm is scored, the detectors by their own code:
+MAD's largest |robust z| in the test window, and the largest CUSUM `h` and PELT `penalty` on a
+grid of 10^(i/8), i = −8 to 160, at which a change point falls in it.
+
+The reading was fixed twice before a run. The first held the statistics to MAD's false-alarm
+rate with the detectors at their shipped defaults, as the simulated run does, and was
+degenerate: on one-second microservice metrics the defaults flag the normal pairs too (MAD
+90.0 %, CUSUM and PELT 100 %), so every type was seen and every threshold sat at the bottom.
+The amended reading holds **every arm to 10 % false alarms** on the 90 normal pairs. A type is
+**unseen** when MAD, CUSUM and PELT each flag under half of it; a statistic **separates** it when
+it flags at least half. (The first rerun's grid stopped at 10⁶, under what metrics in bytes
+need, and CUSUM and PELT scored nothing; it was widened, which cannot change the verdict, since
+MAD alone flags 93 % or more of every type.)
+
+| fault (15 each) | MAD | CUSUM | PELT | `jsd/1` | `perm/1` | `mi/1` | `tent/1` |
+|---|---|---|---|---|---|---|---|
+| cpu | 100 % | 93.3 % | 100 % | 86.7 % | 0 % | 6.7 % | 0 % |
+| mem | 100 % | 93.3 % | 100 % | 93.3 % | 20.0 % | 33.3 % | 13.3 % |
+| disk | 100 % | 86.7 % | 100 % | 86.7 % | 53.3 % | 6.7 % | 26.7 % |
+| delay | 93.3 % | 80.0 % | 80.0 % | 80.0 % | 6.7 % | 6.7 % | 13.3 % |
+| loss | 100 % | 93.3 % | 100 % | 60.0 % | 33.3 % | 13.3 % | 53.3 % |
+| socket | 93.3 % | 93.3 % | 100 % | 80.0 % | 0 % | 20.0 % | 20.0 % |
+
+Normal pairs over each threshold: MAD, the four statistics 9 of 90; CUSUM 6, PELT 7.
+
+- **No type is unseen, and no statistic adds a detection.** RCAEval's faults are resource
+  and network faults, and every one moves a level: MAD at 10 % flags 93 % or more of each type.
+  No faulty pair is flagged by a statistic and by no detector. `jsd/1` is the strongest
+  statistic, at 60 to 93 %, and below MAD on every type.
+- **This does not overturn the simulated verdict.** RCAEval labels none of the three kinds it
+  rests on: variance at a constant median, oscillation, decoupling. What it shows is that on
+  the faults a benchmark injects the statistics are not needed to see them, so a detector RFC
+  built on them needs real evidence of those kinds, which GE-M7's incidents may give and
+  RCAEval cannot.
+- **The detectors' defaults are minute-data defaults.** At one sample a second over about seven
+  series, `mad/1` at 3.5 flags 90 % of fault-free windows, and `cusum/1` and `pelt/1` all of
+  them. Reported and not acted on: a default for second data is its own question.
+- **`mi/1` mostly refused** (362 of its pair computations), most of them pairs with a constant
+  series (sockets, disk I/O of an idle service), which limits what it could show here.
+- One system of three. Online Boutique (RE2-OB) and Train-Ticket (RE2-TT) are the replications,
+  owed only if a reading turns on them.
 
 **GE-I5, run at TI-P5 on simulated data** (`cargo run --release -p smysl-tel --example
 ge_i5`, 300 pairs of each kind, seeds 1 to 5). The estimator is §10's, written in the example
