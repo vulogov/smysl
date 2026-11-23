@@ -1124,7 +1124,7 @@ xtask check-purity (rules A, B)
   dependency tree (--no-default-features): 37 crates, none forbidden
   pure crates: 13 checked, at default features and at --all-features
   source scan: 302 files, 7 symbols, and 28 more in smysl-measure, smysl-tel, smysl-series
-  pure modules: 1 directory, 2 files
+  pure modules: 1 directory, 3 files
   rule A: 2 CLI files reach only the facade
 ok
 ```

@@ -74,8 +74,7 @@ pub struct ParseOutcome {
     /// hazard.
     pub comments: usize,
     /// Where each record was written, parallel to `records`: the record's byte span in the
-    /// text, or `None` for one with no single place (a label binding, a schema declaration, a
-    /// manifest, the view). Empty when the outcome did not come from text. Added in 1.20 for
+    /// text, or `None` for one with no single place (a label binding, a manifest, the view). Empty when the outcome did not come from text. Added in 1.20 for
     /// an editor (RFC SMYSL-6): a check finding names a unit or a record, and this is how it
     /// finds its way back to a line.
     pub spans: Vec<Option<Span>>,
@@ -320,6 +319,7 @@ pub fn parse_surface_with(src: &str, opts: &ParseOptions) -> Result<ParseOutcome
         relations: Vec::new(),
         threads: Vec::new(),
         schemas: Vec::new(),
+        schema_spans: Vec::new(),
         lifecycle: Vec::new(),
         commits: Vec::new(),
         redactions: Vec::new(),
@@ -341,6 +341,8 @@ struct Parser<'a> {
     relations: Vec<RawRelation>,
     threads: Vec<RawThread>,
     schemas: Vec<SchemaDecl>,
+    /// Where each of `schemas` was written, in the same order.
+    schema_spans: Vec<Span>,
     lifecycle: Vec<RawLifecycle>,
     commits: Vec<RawCommit>,
     redactions: Vec<RawRedaction>,
@@ -402,8 +404,11 @@ impl<'a> Parser<'a> {
                     }
                 }
                 LineClass::SchemaStart => {
+                    let start = l.span.start;
                     if let Some(d) = self.schema_decl() {
                         self.schemas.push(d);
+                        let end = self.current_offset().max(start);
+                        self.schema_spans.push(Span::new(start, end));
                     }
                 }
                 LineClass::WithdrawStart | LineClass::ResolveStart => {
@@ -2599,9 +2604,10 @@ impl<'a> Parser<'a> {
         // Declarations first, so a reader of the record stream meets an extension's vocabulary
         // before the relations that use it. The writer emits them in the same place, which is
         // what keeps `parse -> write -> parse` a fixed point.
-        for d in std::mem::take(&mut self.schemas) {
+        let schema_spans = std::mem::take(&mut self.schema_spans);
+        for (i, d) in std::mem::take(&mut self.schemas).into_iter().enumerate() {
             self.out.records.push(Record::SchemaDecl(d));
-            self.out.spans.push(None);
+            self.out.spans.push(schema_spans.get(i).copied());
         }
 
         // Manifests next, before the units. A manifest names nothing by label — its parts are

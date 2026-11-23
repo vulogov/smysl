@@ -1336,7 +1336,10 @@ boundary is recorded and not diffed.
 
 An editor starts `smysl lsp-server` and speaks LSP 3.17 to it (RFC SMYSL-6). For `.smy` and
 `.smysl` documents it publishes what `smysl check FILE` reports, each finding placed on the
-record it names, and for `.sq` documents the query's parse error. It writes nothing to disk, and
+record it names, and for `.sq` documents the query's parse error. Hovering a unit, a reference
+or a `b3:` uid shows its status, effective status, gist and token count, grounds, rebuttals and
+source; go to definition, find references and the outline work within a document. It writes
+nothing to disk, and
 stdout carries the protocol only. Exit 0 after the editor's `shutdown` and `exit`; 1 when the
 editor exits without `shutdown`, closes the stream first, or sends a frame that is not JSON-RPC.
 A build without the `lsp` feature exits 2 and says so. Helix, in `languages.toml`:

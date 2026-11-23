@@ -1,8 +1,8 @@
 # RFC SMYSL-6 — an embedded language server (`smysl-lsp`, `smysl lsp-server`)
 
 **Author:** Vladimir Ulogov
-**Status:** draft, amended in review against the code (R1, 2026-11-23). LS-P1 is built (1.20);
-LS-P2 to LS-P4 are not.
+**Status:** draft, amended in review against the code (R1, 2026-11-23). LS-P1 and LS-P2 are
+built (1.20); LS-P3 and LS-P4 are not.
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged.
 **Crate:** `crates/smysl-lsp`, new, behind the facade's `lsp` feature.
 **Distribution:** one binary. `smysl lsp-server` serves it.
@@ -153,7 +153,14 @@ On a unit's label, on a reference, or on a `b3:` uid in the text:
 - **References.** Every reference to the unit under the cursor.
 - **Document symbols.** The `@doc` header, then each `@schema`, unit (its label or a short uid,
   with its gist), `@rel` and `@thread`, in text order. There is no `@view` record: the view is
-  the `@doc` header (R1-3).
+  the `@doc` header (R1-3). A `@schema` declaration's span was not kept either, and LS-P2 adds
+  it to `ParseOutcome::spans`.
+- **What is under the cursor** is found in the parse, never by guessing at the text: a
+  reference (`ParseOutcome::refs`), the label in a unit's own header, or a `b3:` uid written
+  out, which hovers as "not declared in this document" when it is not. Nothing under the
+  cursor answers `null`. A request without a position is `-32602 InvalidParams`.
+- **Built in LS-P2,** and its gate met: `tests/cmd_lsp_server.rs` asserts the whole of each
+  `hover`, `definition`, `references` and `documentSymbol` answer through the binary.
 
 ### 5.4 Completion — LS-P3
 

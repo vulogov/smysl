@@ -5,6 +5,7 @@
 //! the crate as a whole is not pure.
 
 mod line_index;
+mod nav;
 
 use std::collections::BTreeMap;
 
@@ -14,6 +15,7 @@ use smysl_core::{canonical_uid, Record, Span, Subject, Uid};
 use smysl_graph::Store;
 
 pub use line_index::{Encoding, LineIndex, Position, Range};
+pub use nav::{Hover, Symbol, SymbolKind};
 
 /// What a document is (§4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -160,6 +162,47 @@ impl AnalysisHost {
 
     pub fn document(&self, uri: &str) -> Option<&Document> {
         self.docs.get(uri)
+    }
+
+    /// A surface document's parse, indexed for navigation; `None` for a query, a document
+    /// not open, or one whose header does not parse.
+    fn model(&self, uri: &str) -> Option<nav::Model<'_>> {
+        let doc = self.docs.get(uri)?;
+        if doc.language != Language::Surface {
+            return None;
+        }
+        let out = parse(doc).ok()?;
+        Some(nav::Model::of(doc, out))
+    }
+
+    fn at(&self, uri: &str, pos: Position) -> Option<usize> {
+        Some(nav::offset(self.docs.get(uri)?, pos, self.encoding))
+    }
+
+    /// The card for the unit under `pos` (§5.2).
+    pub fn hover(&self, uri: &str, pos: Position) -> Option<Hover> {
+        self.model(uri)?.hover(self.at(uri, pos)?, self.encoding)
+    }
+
+    /// Where the unit under `pos` is declared, in this document (§5.3).
+    pub fn definition(&self, uri: &str, pos: Position) -> Option<Range> {
+        self.model(uri)?
+            .definition(self.at(uri, pos)?, self.encoding)
+    }
+
+    /// Every reference to the unit under `pos`, and its declaration when asked (§5.3).
+    pub fn references(&self, uri: &str, pos: Position, declaration: bool) -> Vec<Range> {
+        match (self.model(uri), self.at(uri, pos)) {
+            (Some(m), Some(at)) => m.references(at, declaration, self.encoding),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The document's outline, in text order (§5.3).
+    pub fn symbols(&self, uri: &str) -> Vec<Symbol> {
+        self.model(uri)
+            .map(|m| m.symbols(self.encoding))
+            .unwrap_or_default()
     }
 
     /// Every finding in an open document, in text order (§5.1); none for one not open.

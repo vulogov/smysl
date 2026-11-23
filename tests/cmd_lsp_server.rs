@@ -126,3 +126,119 @@ fn exit_without_shutdown_is_exit_1() {
     assert!(out.stdout.is_empty());
     assert!(String::from_utf8_lossy(&out.stderr).contains("before `shutdown`"));
 }
+
+/// LS-P2's gate: hover, definition, references and the outline through the binary, each answer
+/// asserted whole.
+#[test]
+fn navigation_through_the_binary_answers_exactly() {
+    let text = "@doc smysl/0.1 { id: v/t }\n\n\
+                @evidence e/a { status: measured, source: { kind: metric, ref: \"p95\" } }\n\
+                ~ Latency rose.\n\n\
+                @claim c/b { status: derived, grounds: [e/a] }\n\
+                ~ It regressed.\n";
+    let out = smysl::surface::parse_surface(text).unwrap();
+    let uid_a = out.uid_of(&"e/a".parse().unwrap()).unwrap();
+    let col =
+        |line: usize, needle: &str| text.lines().nth(line).unwrap().find(needle).unwrap() as u64;
+    let r = |line: u64, a: u64, b: u64| json!({ "start": { "line": line, "character": a }, "end": { "line": line, "character": b } });
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_smysl"))
+        .arg("lsp-server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+    );
+    let caps = receive(&mut stdout)["result"]["capabilities"].clone();
+    for c in [
+        "hoverProvider",
+        "definitionProvider",
+        "referencesProvider",
+        "documentSymbolProvider",
+    ] {
+        assert_eq!(caps[c], true, "{c}");
+    }
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": { "textDocument": {
+            "uri": "file:///w/t.smy", "languageId": "smysl", "version": 1, "text": text } } }),
+    );
+    let _published = receive(&mut stdout);
+    let doc = json!({ "uri": "file:///w/t.smy" });
+    let ref_col = col(5, "e/a");
+    let decl_col = col(2, "e/a");
+
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "textDocument/hover", "params": {
+            "textDocument": doc, "position": { "line": 5, "character": ref_col + 1 } } }),
+    );
+    let hover = receive(&mut stdout)["result"].clone();
+    let tokens = smysl::tokens("Latency rose.");
+    assert_eq!(
+        hover,
+        json!({
+            "contents": { "kind": "markdown", "value": format!(
+                "**e/a** · `@evidence` · measured\n\n`{uid_a}`\n\n> Latency rose.\n\n\
+                 gist: {tokens} tokens of `l0_max` 30\n\nsource: metric `p95`") },
+            "range": r(5, ref_col, ref_col + 3),
+        })
+    );
+
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 3, "method": "textDocument/definition", "params": {
+            "textDocument": doc, "position": { "line": 5, "character": ref_col } } }),
+    );
+    assert_eq!(
+        receive(&mut stdout)["result"],
+        json!({ "uri": "file:///w/t.smy", "range": r(2, decl_col, decl_col + 3) })
+    );
+
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 4, "method": "textDocument/references", "params": {
+            "textDocument": doc, "position": { "line": 2, "character": decl_col },
+            "context": { "includeDeclaration": true } } }),
+    );
+    assert_eq!(
+        receive(&mut stdout)["result"],
+        json!([
+            { "uri": "file:///w/t.smy", "range": r(2, decl_col, decl_col + 3) },
+            { "uri": "file:///w/t.smy", "range": r(5, ref_col, ref_col + 3) },
+        ])
+    );
+
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 5, "method": "textDocument/documentSymbol", "params": {
+            "textDocument": doc } }),
+    );
+    let line_len = |l: usize| text.lines().nth(l).unwrap().len() as u64;
+    let range2 = |a: u64, b: u64, c: u64| json!({ "start": { "line": a, "character": 0 }, "end": { "line": b, "character": c } });
+    assert_eq!(
+        receive(&mut stdout)["result"],
+        json!([
+            { "name": "v/t", "detail": "smysl/0.1", "kind": 1,
+              "range": r(0, 0, line_len(0)), "selectionRange": r(0, 0, line_len(0)) },
+            { "name": "e/a", "detail": "@evidence · measured — Latency rose.", "kind": 19,
+              "range": range2(2, 4, 0), "selectionRange": r(2, decl_col, decl_col + 3) },
+            { "name": "c/b", "detail": "@claim · derived — It regressed.", "kind": 19,
+              "range": range2(5, 6, line_len(6)), "selectionRange": r(5, col(5, "c/b"), col(5, "c/b") + 3) },
+        ])
+    );
+
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 6, "method": "shutdown" }),
+    );
+    let _ = receive(&mut stdout);
+    send(&mut stdin, json!({ "jsonrpc": "2.0", "method": "exit" }));
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+}

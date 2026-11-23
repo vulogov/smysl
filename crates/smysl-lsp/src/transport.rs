@@ -14,13 +14,14 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use crate::analysis::{
-    AnalysisHost, Change, Diagnostic, Encoding, Language, Position, Range, Severity,
+    AnalysisHost, Change, Diagnostic, Encoding, Language, Position, Range, Severity, SymbolKind,
 };
 use crate::{LspConfig, LspError};
 
 /// JSON-RPC's error codes, as LSP 3.17 uses them.
 const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
+const INVALID_PARAMS: i64 = -32602;
 const INTERNAL_ERROR: i64 = -32603;
 
 /// Read one frame; `None` at the end of the stream.
@@ -84,6 +85,30 @@ fn parse_range(v: &Value) -> Option<Range> {
         parse_position(v.get("start")?)?,
         parse_position(v.get("end")?)?,
     ))
+}
+
+/// A text document position request's document and position.
+fn at(params: &Value) -> Result<(String, Position), (i64, String)> {
+    let uri = params
+        .pointer("/textDocument/uri")
+        .and_then(Value::as_str)
+        .ok_or((INVALID_PARAMS, "no `textDocument.uri`".to_string()))?;
+    let pos = params
+        .get("position")
+        .and_then(parse_position)
+        .ok_or((INVALID_PARAMS, "no `position`".to_string()))?;
+    Ok((uri.to_string(), pos))
+}
+
+/// LSP 3.17's `SymbolKind` for each: File, Namespace, Object, Operator, Event.
+fn symbol_kind(k: SymbolKind) -> u32 {
+    match k {
+        SymbolKind::Doc => 1,
+        SymbolKind::Schema => 3,
+        SymbolKind::Unit => 19,
+        SymbolKind::Relation => 25,
+        SymbolKind::Thread => 24,
+    }
 }
 
 fn diagnostic(d: &Diagnostic) -> Value {
@@ -230,6 +255,10 @@ impl<W: Write> Server<W> {
                         "positionEncoding": enc.as_str(),
                         // Open and close, and incremental changes.
                         "textDocumentSync": { "openClose": true, "change": 2 },
+                        "hoverProvider": true,
+                        "definitionProvider": true,
+                        "referencesProvider": true,
+                        "documentSymbolProvider": true,
                     },
                     "serverInfo": { "name": "smysl", "version": env!("CARGO_PKG_VERSION") },
                 }))
@@ -237,6 +266,58 @@ impl<W: Write> Server<W> {
             "shutdown" => {
                 self.shut_down = true;
                 Ok(Value::Null)
+            }
+            "textDocument/hover" => {
+                let (uri, pos) = at(params)?;
+                Ok(match self.host.hover(&uri, pos) {
+                    Some(h) => json!({
+                        "contents": { "kind": "markdown", "value": h.markdown },
+                        "range": range(h.range),
+                    }),
+                    None => Value::Null,
+                })
+            }
+            "textDocument/definition" => {
+                let (uri, pos) = at(params)?;
+                Ok(match self.host.definition(&uri, pos) {
+                    Some(r) => json!({ "uri": uri, "range": range(r) }),
+                    None => Value::Null,
+                })
+            }
+            "textDocument/references" => {
+                let (uri, pos) = at(params)?;
+                let declaration = params
+                    .pointer("/context/includeDeclaration")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                Ok(Value::Array(
+                    self.host
+                        .references(&uri, pos, declaration)
+                        .into_iter()
+                        .map(|r| json!({ "uri": uri, "range": range(r) }))
+                        .collect(),
+                ))
+            }
+            "textDocument/documentSymbol" => {
+                let uri = params
+                    .pointer("/textDocument/uri")
+                    .and_then(Value::as_str)
+                    .ok_or((INVALID_PARAMS, "no `textDocument.uri`".to_string()))?;
+                Ok(Value::Array(
+                    self.host
+                        .symbols(uri)
+                        .into_iter()
+                        .map(|s| {
+                            json!({
+                                "name": s.name,
+                                "detail": s.detail,
+                                "kind": symbol_kind(s.kind),
+                                "range": range(s.range),
+                                "selectionRange": range(s.selection),
+                            })
+                        })
+                        .collect(),
+                ))
             }
             _ => Err((METHOD_NOT_FOUND, format!("`{method}` is not served"))),
         }

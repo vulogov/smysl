@@ -54,8 +54,13 @@ people can close. None of it moved in 1.19.
 - **The parser keeps its places.** `ParseOutcome` gains `spans`, each record's span parallel
   to `records`, and `refs`, every reference that resolved with its span and target. A `@rel`'s
   ends now carry their own spans. Both are additions to a `#[non_exhaustive]` struct.
-- Hover, navigation, completion, formatting, safe code actions and a library's context are
-  LS-P2 to LS-P4. `smysl-lsp` is unpublished until the release that ships them.
+- **Hover and navigation (LS-P2).** Hovering a unit's label, a reference to it or a `b3:` uid
+  shows its schema, declared and effective status, gist and its tokens against `l0_max`, its
+  grounds with their statuses, its deps, how many units rebut it, and its source. Go to
+  definition, find references and the document outline (`@doc`, `@schema`, units, `@rel`,
+  `@thread`) work within a document. `ParseOutcome::spans` now places `@schema` records too.
+- Completion, formatting, safe code actions and a library's context are LS-P3 and LS-P4.
+  `smysl-lsp` is unpublished until the release that ships them.
 
 ### `floor: spread`: PELT's scale on float metrics (SMYSL-3 §21.2, SMYSL-5 R12)
 

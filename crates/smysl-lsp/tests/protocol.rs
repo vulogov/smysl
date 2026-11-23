@@ -206,3 +206,24 @@ fn closing_a_document_clears_its_diagnostics() {
     let (_, out) = run(msgs, LspConfig::default());
     assert_eq!(out[2]["params"]["diagnostics"], json!([]));
 }
+
+#[test]
+fn a_position_request_without_a_position_is_invalid_params() {
+    let msgs = [
+        vec![
+            initialize(json!([])),
+            open(DOC),
+            json!({ "jsonrpc": "2.0", "id": 5, "method": "textDocument/hover",
+                    "params": { "textDocument": { "uri": "file:///t.smy" } } }),
+            json!({ "jsonrpc": "2.0", "id": 6, "method": "textDocument/definition",
+                    "params": { "textDocument": { "uri": "file:///t.smy" },
+                                "position": { "line": 0, "character": 0 } } }),
+        ],
+        end(),
+    ]
+    .concat();
+    let (_, out) = run(msgs, LspConfig::default());
+    assert_eq!(out[2]["error"]["code"], -32602);
+    // Nothing under the cursor is `null`, not an error.
+    assert_eq!(out[3]["result"], Value::Null);
+}
