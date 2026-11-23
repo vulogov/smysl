@@ -536,6 +536,58 @@ pub fn calibrate_on<B: smysl_series::Backend>(
     windows: &[(u64, u64, u64)],
     rate: Decimal,
 ) -> Result<calibrate::Calibrated, String> {
+    let read = read_trials(substrate, series, windows)?;
+    let trials: Vec<Vec<calibrate::Pair<'_>>> = read
+        .iter()
+        .map(|t| {
+            t.values()
+                .map(|(r, x)| calibrate::Pair {
+                    reference: r,
+                    test: x,
+                })
+                .collect()
+        })
+        .collect();
+    calibrate::calibrate(spec, &trials, rate)
+}
+
+/// [`calibrate_on`], per series (`calibrate::calibrate_each`): each `(series, instrument)` its
+/// own value, the rate held over the windows jointly.
+pub fn calibrate_on_each<B: smysl_series::Backend>(
+    spec: &Spec,
+    substrate: &smysl_series::Substrate<B>,
+    series: &[Uid],
+    windows: &[(u64, u64, u64)],
+    rate: Decimal,
+) -> Result<calibrate::CalibratedEach<(Uid, Uid)>, String> {
+    let read = read_trials(substrate, series, windows)?;
+    let trials: Vec<BTreeMap<(Uid, Uid), calibrate::Pair<'_>>> = read
+        .iter()
+        .map(|t| {
+            t.iter()
+                .map(|(k, (r, x))| {
+                    (
+                        *k,
+                        calibrate::Pair {
+                            reference: r,
+                            test: x,
+                        },
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    calibrate::calibrate_each(spec, &trials, rate)
+}
+
+/// Each window's `(reference, test)` points, by `(series, instrument)`.
+type Trial = BTreeMap<(Uid, Uid), (Vec<(u64, f64)>, Vec<(u64, f64)>)>;
+
+fn read_trials<B: smysl_series::Backend>(
+    substrate: &smysl_series::Substrate<B>,
+    series: &[Uid],
+    windows: &[(u64, u64, u64)],
+) -> Result<Vec<Trial>, String> {
     let mut streams = Vec::new();
     for s in series {
         if substrate.row(s).map_err(|e| e.to_string())?.is_none() {
@@ -568,23 +620,11 @@ pub fn calibrate_on<B: smysl_series::Backend>(
                 "a calibration window is REF-FROM-TO with REF < FROM < TO, not {r0}-{t0}-{t1}"
             ));
         }
-        let mut pairs = Vec::new();
+        let mut pairs = Trial::new();
         for (s, i) in &streams {
-            pairs.push((points(s, i, r0, t0)?, points(s, i, t0, t1)?));
+            pairs.insert((*s, *i), (points(s, i, r0, t0)?, points(s, i, t0, t1)?));
         }
         read.push(pairs);
     }
-    let trials: Vec<Vec<calibrate::Pair<'_>>> = read
-        .iter()
-        .map(|pairs| {
-            pairs
-                .iter()
-                .map(|(r, t)| calibrate::Pair {
-                    reference: r,
-                    test: t,
-                })
-                .collect()
-        })
-        .collect();
-    calibrate::calibrate(spec, &trials, rate)
+    Ok(read)
 }

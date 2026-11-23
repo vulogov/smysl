@@ -1036,11 +1036,12 @@ tel        --rate
 tel        --verbose
 tel        --backend
 tel        [possible values: memory, redb]
-tel        --with
+tel        --each
 tel        --shard
+tel        --with
+tel        --seed-check
 tel        --with-instrument
 tel        --during
-tel        --seed-check
 tel        --trigger
 tel        --as
 tel        --rotation

@@ -70,10 +70,26 @@ before the injection and a faulty pair across it.
   to 4 % of RE2-OB's (Online Boutique) fault-free windows. They see its faults at 73 % or more,
   except delays under CUSUM (13 %) and PELT (27 %). MAD sees every RE2-OB fault.
 - **The values are large** (CUSUM `h` 1.5·10¹⁰, PELT `penalty` 4·10¹⁹), set by the series that
-  barely move. Calibrating per series, or flooring the scale at the data's resolution, is
-  recorded in RFC SMYSL-5 §15 and not done.
+  barely move. Per-series calibration answers this (below). Flooring the scale at the data's
+  resolution is recorded in RFC SMYSL-5 §15 and not done.
 - **GE-I3 replicates on RE2-OB.** No fault type is missed by every level detector, and no
   statistic flags a window none of them does. R7's verdict stands on a second system.
+
+### Per-series calibration: `tel calibrate --each` (SMYSL-3 §21.1, SMYSL-5 R9)
+
+- **Each series gets its own value**, so one near-constant series no longer sets the value for
+  all of them. A window still alarms when any series alarms at its own value, so the rate is held
+  over the windows jointly. A series' value is never at or below all of its quiet-window scores,
+  so a series with little evidence does not get a hair trigger. A series that alarmed in no
+  quiet window keeps the recipe's value and is reported as uncalibrated.
+- **Library and CLI:** `detect::calibrate::{calibrate_each, each_from_scores, CalibratedEach,
+  SeriesValue}` and `detect::calibrate_on_each`. `smysl tel calibrate … --each` prints one
+  recipe per series and instrument.
+- **On RCAEval**, keyed by metric kind so that values carry between systems: CUSUM sees every
+  RE2-SS fault type. Carried to RE2-OB, it sees every delay, where one value a trial saw 13 %.
+  PELT's carried values overshoot the rate on RE2-OB (16.7 % against 10 %): tighter values carry
+  less margin, so a carried value needs its rate checked on the new system. GE-I3's verdict
+  holds in all four readings.
 
 ## 1.18.0 — 2026-11-22
 

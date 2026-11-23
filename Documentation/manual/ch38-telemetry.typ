@@ -401,7 +401,10 @@ calibrate cusum/1: 1 of 10 trial(s) fire at 3 (at most 1 at rate 0.1)
 ```
 ]
 
-The calibrated value goes into the recipe, so the recipe hash still records what ran. The rate
+With several series, one value is set by whichever barely moves, since a near-constant series
+alarms on any change at all. `--each` gives each series its own value instead, and still holds
+the 10 % over the windows as a whole. The calibrated value goes into the recipe, so the recipe
+hash still records what ran. The rate
 holds on the windows given. Whether it carries to another system has to be measured; RFC SMYSL-3
 §21.1 has the rule.
 

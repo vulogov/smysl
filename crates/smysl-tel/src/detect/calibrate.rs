@@ -27,6 +27,23 @@
 //! trials given, the false alarms at `v`, and at every ladder value above it, are at most that
 //! many, even where CUSUM's or PELT's alarms are not monotone in their parameter. A rate the
 //! ladder's top cannot meet is refused rather than met approximately.
+//!
+//! **Per series** ([`calibrate_each`]). One value for a whole trial is set by its least-moving
+//! series: a series constant over its reference scores at the ladder's top for any change, and
+//! the value rises until it is quiet, leaving the busy series read far above their noise (RFC
+//! SMYSL-5 §15, R8). Calibrating each series, keyed by the caller, gives each its own value. The
+//! trial still fires when any series fires at its own value, so the rate is held jointly: for a
+//! per-series count `q`, each series takes the least value that at most `q` of its trials score
+//! at or above, and `q` is the largest count at which at most `⌊rate · n⌋` trials then fire at
+//! all. `q = 0` always meets it, so a rate is refused only as above. A series' count is capped one
+//! below the number of trials it scored in, so its value is never at or below all of its scores
+//! (the ladder's foot, a hair trigger no evidence supports); the cap rises with `q`, so the trials
+//! firing rise with `q` and the largest `q` is well defined. A series that never fired keeps the
+//! recipe's value, marked uncalibrated; it fires in no trial at any value. The bound has the same
+//! guarantee as one value's, series by series, and a series absent from a trial cannot fire in
+//! it.
+
+use std::collections::BTreeMap;
 
 use super::{cusum, mad, pelt, Spec};
 use crate::sketch::to_f64;
@@ -192,7 +209,18 @@ pub fn from_scores(
                 ladder().last().expect("a ladder")
             )
         })?;
-    let spec = match spec {
+    Ok(Calibrated {
+        spec: with_value(spec, value),
+        value,
+        trials: n,
+        allowed,
+        over: over(to_f64(value)),
+    })
+}
+
+/// `spec` with its threshold (`mad/1`), `h` (`cusum/1`) or `penalty` (`pelt/1`) set to `value`.
+fn with_value(spec: &Spec, value: Decimal) -> Spec {
+    match spec {
         Spec::Mad(p) => Spec::Mad(mad::Params {
             threshold: value,
             ..*p
@@ -202,14 +230,157 @@ pub fn from_scores(
             penalty: value,
             ..*p
         }),
-        Spec::Episode(_) | Spec::Baro(_) => unreachable!("refused above"),
+        other => other.clone(),
+    }
+}
+
+/// One series' calibrated value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeriesValue {
+    /// The recipe given, its threshold, `h` or `penalty` set to `value`.
+    pub spec: Spec,
+    pub value: Decimal,
+    /// The trials it fires in at `value`.
+    pub fired: usize,
+    /// False when it fired in no trial at any value, so `value` is the recipe's own.
+    pub calibrated: bool,
+}
+
+/// The threshold (`mad/1`), `h` (`cusum/1`) or `penalty` (`pelt/1`) `spec` gives.
+fn value_of(spec: &Spec) -> Decimal {
+    match spec {
+        Spec::Mad(p) => p.threshold,
+        Spec::Cusum(p) => p.h,
+        Spec::Pelt(p) => p.penalty,
+        Spec::Episode(_) | Spec::Baro(_) => Decimal::from_i64(0),
+    }
+}
+
+/// What a per-series calibration found.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CalibratedEach<K> {
+    /// Each series' recipe and value, by key.
+    pub series: BTreeMap<K, SeriesValue>,
+    /// The per-series count the values were set at.
+    pub q: usize,
+    /// The trials, how many of them may fire at `rate`, and how many fire at the values.
+    pub trials: usize,
+    pub allowed: usize,
+    pub over: usize,
+}
+
+/// Calibrate `spec` per series (module comment): each trial is its pairs by key, and fires when
+/// any key's pair fires at that key's value.
+pub fn calibrate_each<K: Ord + Clone>(
+    spec: &Spec,
+    trials: &[BTreeMap<K, Pair<'_>>],
+    rate: Decimal,
+) -> Result<CalibratedEach<K>, String> {
+    if matches!(spec, Spec::Episode(_) | Spec::Baro(_)) {
+        return Err(format!("{} has no threshold to calibrate", spec.id()));
+    }
+    let scores: Vec<BTreeMap<K, Option<Decimal>>> = trials
+        .iter()
+        .map(|t| {
+            t.iter()
+                .map(|(k, p)| (k.clone(), score(spec, std::slice::from_ref(p))))
+                .collect()
+        })
+        .collect();
+    each_from_scores(spec, &scores, rate)
+}
+
+/// [`calibrate_each`] from each trial's per-key [`score`]s.
+pub fn each_from_scores<K: Ord + Clone>(
+    spec: &Spec,
+    scores: &[BTreeMap<K, Option<Decimal>>],
+    rate: Decimal,
+) -> Result<CalibratedEach<K>, String> {
+    if matches!(spec, Spec::Episode(_) | Spec::Baro(_)) {
+        return Err(format!("{} has no threshold to calibrate", spec.id()));
+    }
+    if scores.is_empty() {
+        return Err("calibration needs at least one fault-free trial".into());
+    }
+    let n = scores.len();
+    let allowed = allowed(rate, n)?;
+    let ladder: Vec<(Decimal, f64)> = ladder().into_iter().map(|v| (v, to_f64(v))).collect();
+    // Each key's scores, over the trials it is in.
+    let mut by_key: BTreeMap<K, Vec<f64>> = BTreeMap::new();
+    for t in scores {
+        for (k, s) in t {
+            let e = by_key.entry(k.clone()).or_default();
+            if let Some(s) = s {
+                e.push(to_f64(*s));
+            }
+        }
+    }
+    let top = ladder.last().expect("a ladder").1;
+    if by_key.values().flatten().any(|x| *x >= top) {
+        return Err(format!(
+            "{} fires at the ladder's top, {}, in a fault-free trial",
+            spec.id(),
+            ladder.last().expect("a ladder").0
+        ));
+    }
+    // At count q: each key's least value that at most q of its trials score at or above.
+    let values_at = |q: usize| -> BTreeMap<K, (Decimal, f64)> {
+        by_key
+            .iter()
+            .map(|(k, xs)| {
+                // A series that never fired keeps the recipe's value: nothing calibrates it, and
+                // it fires in no trial at any value. Otherwise its count is capped one below the
+                // trials it scored in, so its value is never at or below all its scores (the
+                // ladder's foot); the cap rises with q, so firing stays monotone in q.
+                let v = if xs.is_empty() {
+                    let v = value_of(spec);
+                    (v, to_f64(v))
+                } else {
+                    let q = q.min(xs.len() - 1);
+                    ladder
+                        .iter()
+                        .find(|(_, f)| xs.iter().filter(|x| **x >= *f).count() <= q)
+                        .copied()
+                        .expect("the ladder's top meets q = 0")
+                };
+                (k.clone(), v)
+            })
+            .collect()
     };
-    Ok(Calibrated {
-        spec,
-        value,
+    let firing = |values: &BTreeMap<K, (Decimal, f64)>| {
+        scores
+            .iter()
+            .filter(|t| {
+                t.iter()
+                    .any(|(k, s)| s.is_some_and(|s| to_f64(s) >= values[k].1))
+            })
+            .count()
+    };
+    let q = (0..=n)
+        .rev()
+        .find(|&q| firing(&values_at(q)) <= allowed)
+        .expect("q = 0 fires in no trial");
+    let values = values_at(q);
+    let over = firing(&values);
+    let series = values
+        .iter()
+        .map(|(k, (v, f))| {
+            let xs = &by_key[k];
+            let value = SeriesValue {
+                spec: with_value(spec, *v),
+                value: *v,
+                fired: xs.iter().filter(|x| **x >= *f).count(),
+                calibrated: !xs.is_empty(),
+            };
+            (k.clone(), value)
+        })
+        .collect();
+    Ok(CalibratedEach {
+        series,
+        q,
         trials: n,
         allowed,
-        over: over(to_f64(value)),
+        over,
     })
 }
 
@@ -310,6 +481,103 @@ mod tests {
             // Calibrating twice gives one answer.
             assert_eq!(calibrate(&spec, &trials, rate).unwrap(), c);
         }
+    }
+
+    #[test]
+    fn per_series_values_follow_each_series_noise_and_hold_the_rate_jointly() {
+        type Points = Vec<(u64, f64)>;
+        // Two series a trial: "busy" with noise of amplitude 1, "idle" almost constant.
+        let busy: Vec<(Points, Points)> = (0..40)
+            .map(|s| {
+                let xs = noise(120, s + 1, 1.0);
+                (points(&xs[..60], 0), points(&xs[60..], 60_000))
+            })
+            .collect();
+        let idle: Vec<(Points, Points)> = (0..40)
+            .map(|s| {
+                let mut xs = vec![7.0; 120];
+                if s % 3 == 0 {
+                    xs[90] = 8.0;
+                }
+                (points(&xs[..60], 0), points(&xs[60..], 60_000))
+            })
+            .collect();
+        let rate = Decimal::parse_token("0.10").unwrap();
+        for text in ["{ detector: cusum/1 }", "{ detector: pelt/1 }"] {
+            let spec = Spec::parse(text).unwrap();
+            let each: Vec<BTreeMap<&str, Pair<'_>>> = (0..40)
+                .map(|i| {
+                    BTreeMap::from([
+                        (
+                            "busy",
+                            Pair {
+                                reference: &busy[i].0,
+                                test: &busy[i].1,
+                            },
+                        ),
+                        (
+                            "idle",
+                            Pair {
+                                reference: &idle[i].0,
+                                test: &idle[i].1,
+                            },
+                        ),
+                    ])
+                })
+                .collect();
+            let c = calibrate_each(&spec, &each, rate).unwrap();
+            assert_eq!(c.allowed, 4);
+            assert!(c.over <= 4, "{text}: {c:?}");
+            let (b, i) = (c.series["busy"].value, c.series["idle"].value);
+            assert!(to_f64(b) < to_f64(i), "{text}: busy {b} below idle {i}");
+            // One value for both is set by the idle series, at or above its per-series value.
+            let joint: Vec<Vec<Pair<'_>>> =
+                each.iter().map(|t| t.values().copied().collect()).collect();
+            let one = calibrate(&spec, &joint, rate).unwrap();
+            assert!(
+                to_f64(one.value) > to_f64(b),
+                "{text}: {} vs {b}",
+                one.value
+            );
+            // The joint bound holds when checked directly.
+            let fired = each
+                .iter()
+                .filter(|t| {
+                    t.iter()
+                        .any(|(k, p)| fires(&spec, std::slice::from_ref(p), c.series[k].value))
+                })
+                .count();
+            assert!(fired <= 4, "{text}: {fired}");
+            assert_eq!(calibrate_each(&spec, &each, rate).unwrap(), c, "twice");
+        }
+    }
+
+    #[test]
+    fn a_series_with_little_evidence_is_not_set_to_a_hair_trigger() {
+        let spec = Spec::parse("{ detector: cusum/1 }").unwrap();
+        let d = |x: &str| Some(Decimal::parse_token(x).unwrap());
+        // "never" scored in no trial; "once" in one, under a q the others allow.
+        let scores: Vec<BTreeMap<&str, Option<Decimal>>> = (0..20)
+            .map(|i| {
+                BTreeMap::from([
+                    ("never", None),
+                    ("once", if i == 0 { d("6") } else { None }),
+                    ("busy", d(["2", "3", "4", "5"][i % 4])),
+                ])
+            })
+            .collect();
+        let c = each_from_scores(&spec, &scores, Decimal::parse_token("0.5").unwrap()).unwrap();
+        assert!(c.q >= 1, "{c:?}");
+        let never = &c.series["never"];
+        assert!(!never.calibrated);
+        assert_eq!(never.value.to_string(), "5", "the recipe's own h");
+        let once = &c.series["once"];
+        assert!(once.calibrated);
+        assert_eq!((once.value.to_string().as_str(), once.fired), ("8", 0));
+        // The rate is used, not collapsed to no alarm at all: busy's 2, 3, 4, 5 give 4, and the
+        // ten trials scoring 4 or 5 are the ten allowed.
+        assert_eq!(c.series["busy"].value.to_string(), "4");
+        assert_eq!((c.over, c.allowed), (10, 10));
     }
 
     #[test]

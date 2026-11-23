@@ -50,6 +50,12 @@
 //! are run on a second system's normal and faulty pairs unchanged, which is what a calibrated
 //! recipe is for; that system is then read at its own calibration as above.
 //!
+//! **Per series** (R9). Each detector is also calibrated per metric kind (`cpu`, `mem`,
+//! `latency-90`, …, the column with its service's prefix taken off) by
+//! `calibrate::each_from_scores`, the rate held over the trials jointly, so the kinds carry
+//! from one system's services to another's. A kind that fired in no fault-free window, or that
+//! the calibrating system does not have, is run at no value.
+//!
 //! ```text
 //! cargo run --release -p smysl-tel --example ge_i3_rcaeval -- --data PATH/RE2-SS [--held PATH/RE2-OB]
 //! ```
@@ -210,6 +216,10 @@ struct Row {
     det: [Option<Decimal>; 3],
     /// Whether each detector fires, at each set of values asked for.
     at: Vec<[bool; 3]>,
+    /// Per series (R9): each detector's score by metric kind (`cpu`, `latency-90`, …).
+    each: [BTreeMap<String, Option<Decimal>>; 3],
+    /// Whether each detector fires, at each set of per-kind values asked for.
+    at_each: Vec<[bool; 3]>,
     jsd: Option<f64>,
     perm: Option<f64>,
     mi: Option<f64>,
@@ -222,6 +232,14 @@ fn max(a: Option<f64>, b: Option<f64>) -> Option<f64> {
         (x, None) => x,
         (None, y) => y,
     }
+}
+
+/// Per-kind values, one map per detector.
+type Values = [BTreeMap<String, Decimal>; 3];
+
+fn cmp_dec(a: &Decimal, b: &Decimal) -> std::cmp::Ordering {
+    let f = |d: &Decimal| d.to_string().parse::<f64>().unwrap_or(f64::NAN);
+    f(a).total_cmp(&f(b))
 }
 
 /// One stream's `(ts_ms, value)` points in a window.
@@ -245,10 +263,11 @@ fn row(
     case: &Case,
     (r0, t0, t1): (u64, u64, u64),
     at: &[[Decimal; 3]],
+    at_each: &[Values],
     refused: &mut Refused,
 ) -> Row {
     let mut out = Row::default();
-    let mut pairs: Vec<(Points, Points)> = Vec::new();
+    let mut pairs: Vec<(String, Points, Points)> = Vec::new();
     let jsd = Spec::parse(&format!(
         r#"{{ stat: jsd/1, step: 1000, bins: "baseline:4", ref: "{r0}-{t0}", min_n: 50 }}"#
     ))
@@ -284,7 +303,12 @@ fn row(
             .any(|&i| i >= split);
 
         let (base, test) = points.split_at(split);
-        pairs.push((base.to_vec(), test.to_vec()));
+        let kind = case.series[i]
+            .0
+            .strip_prefix(&format!("{}_", case.service))
+            .unwrap_or(&case.series[i].0)
+            .to_string();
+        pairs.push((kind, base.to_vec(), test.to_vec()));
 
         let st = stream(i, "gauge");
         let (r, t) = (read(s, r0, t0), read(s, t0, t1));
@@ -295,18 +319,47 @@ fn row(
         let p = refused.note("perm/1", pr.zip(pt).map(|(a, b)| (b - a).abs()));
         out.perm = max(out.perm, p);
     }
-    let trial: Vec<calibrate::Pair<'_>> = pairs
+    let trial: Vec<(&str, calibrate::Pair<'_>)> = pairs
         .iter()
-        .map(|(r, t)| calibrate::Pair {
-            reference: r,
-            test: t,
+        .map(|(kind, r, t)| {
+            (
+                kind.as_str(),
+                calibrate::Pair {
+                    reference: r,
+                    test: t,
+                },
+            )
         })
         .collect();
     let specs = specs();
-    out.det = std::array::from_fn(|k| calibrate::score(&specs[k], &trial));
+    // A trial's score is the largest of its series' scores, so one pass gives both.
+    out.each = std::array::from_fn(|k| {
+        trial
+            .iter()
+            .map(|(kind, p)| {
+                (
+                    kind.to_string(),
+                    calibrate::score(&specs[k], std::slice::from_ref(p)),
+                )
+            })
+            .collect()
+    });
+    out.det = std::array::from_fn(|k| out.each[k].values().flatten().copied().max_by(cmp_dec));
+    let all: Vec<calibrate::Pair<'_>> = trial.iter().map(|(_, p)| *p).collect();
     out.at = at
         .iter()
-        .map(|v| std::array::from_fn(|k| calibrate::fires(&specs[k], &trial, v[k])))
+        .map(|v| std::array::from_fn(|k| calibrate::fires(&specs[k], &all, v[k])))
+        .collect();
+    out.at_each = at_each
+        .iter()
+        .map(|v| {
+            std::array::from_fn(|k| {
+                trial.iter().any(|(kind, p)| {
+                    v[k].get(*kind)
+                        .is_some_and(|x| calibrate::fires(&specs[k], std::slice::from_ref(p), *x))
+                })
+            })
+        })
         .collect();
     for a in 0..case.series.len() {
         for b in a + 1..case.series.len() {
@@ -408,13 +461,18 @@ struct Reading {
     faulty: BTreeMap<String, Vec<Row>>,
 }
 
-/// The normal pairs of `cases`, with each detector's firing at each of `at`.
-fn normal_rows(cases: &[Case], at: &[[Decimal; 3]], refused: &mut Refused) -> Vec<Row> {
+/// The normal pairs of `cases`, with each detector's firing at each of `at` and `at_each`.
+fn normal_rows(
+    cases: &[Case],
+    at: &[[Decimal; 3]],
+    at_each: &[Values],
+    refused: &mut Refused,
+) -> Vec<Row> {
     cases
         .iter()
         .map(|c| {
             let t = c.inject_ms;
-            row(c, (t - 2 * HALF, t - HALF, t), at, refused)
+            row(c, (t - 2 * HALF, t - HALF, t), at, at_each, refused)
         })
         .collect()
 }
@@ -422,30 +480,83 @@ fn normal_rows(cases: &[Case], at: &[[Decimal; 3]], refused: &mut Refused) -> Ve
 fn faulty_rows(
     cases: &[Case],
     at: &[[Decimal; 3]],
+    at_each: &[Values],
     refused: &mut Refused,
 ) -> BTreeMap<String, Vec<Row>> {
     let mut out: BTreeMap<String, Vec<Row>> = BTreeMap::new();
     for c in cases {
         let t = c.inject_ms;
-        out.entry(c.fault.clone())
-            .or_default()
-            .push(row(c, (t - HALF, t, t + HALF), at, refused));
+        out.entry(c.fault.clone()).or_default().push(row(
+            c,
+            (t - HALF, t, t + HALF),
+            at,
+            at_each,
+            refused,
+        ));
     }
     out
 }
 
-/// The detectors calibrated on `normal` (`calibrate::from_scores`) at `RATE`.
+fn rate() -> Decimal {
+    Decimal::parse_token(&format!("{RATE}")).expect("a rate")
+}
+
+/// The detectors calibrated on `normal` (`calibrate::from_scores`) at `RATE`, one value a trial.
 fn calibrated(normal: &[Row]) -> [calibrate::Calibrated; 3] {
-    let rate = Decimal::parse_token(&format!("{RATE}")).expect("a rate");
     let specs = specs();
     std::array::from_fn(|k| {
         let scores: Vec<Option<Decimal>> = normal.iter().map(|r| r.det[k]).collect();
-        calibrate::from_scores(&specs[k], &scores, rate).expect("a calibration")
+        calibrate::from_scores(&specs[k], &scores, rate()).expect("a calibration")
+    })
+}
+
+/// The detectors calibrated per metric kind (`calibrate::each_from_scores`) at `RATE`.
+fn calibrated_each(normal: &[Row]) -> [calibrate::CalibratedEach<String>; 3] {
+    let specs = specs();
+    std::array::from_fn(|k| {
+        let scores: Vec<BTreeMap<String, Option<Decimal>>> =
+            normal.iter().map(|r| r.each[k].clone()).collect();
+        calibrate::each_from_scores(&specs[k], &scores, rate()).expect("a calibration")
     })
 }
 
 fn values(c: &[calibrate::Calibrated; 3]) -> [Decimal; 3] {
     std::array::from_fn(|k| c[k].value)
+}
+
+/// The per-kind values of a calibration, uncalibrated kinds left out: they fired in no
+/// fault-free window, so they are run at no value here.
+fn values_each(c: &[calibrate::CalibratedEach<String>; 3]) -> Values {
+    std::array::from_fn(|k| {
+        c[k].series
+            .iter()
+            .filter(|(_, v)| v.calibrated)
+            .map(|(kind, v)| (kind.clone(), v.value))
+            .collect()
+    })
+}
+
+fn print_each(name: &str, c: &[calibrate::CalibratedEach<String>; 3]) {
+    for (k, det) in ["MAD", "CUSUM", "PELT"].iter().enumerate() {
+        let vs: Vec<String> = c[k]
+            .series
+            .iter()
+            .map(|(kind, v)| {
+                if v.calibrated {
+                    format!("{kind} {}", v.value)
+                } else {
+                    format!("{kind} -")
+                }
+            })
+            .collect();
+        println!(
+            "{name} per kind, {det} (q = {}, {} of {} normal pairs fire): {}",
+            c[k].q,
+            c[k].over,
+            c[k].trials,
+            vs.join(", ")
+        );
+    }
 }
 
 /// A statistic's score of a window pair, if it ran.
@@ -458,15 +569,13 @@ const STATS: [(&str, Stat); 4] = [
     ("tent/1", |r| r.tent),
 ];
 
-/// The table of one reading: the detectors as they fire at `at` (an index into each row's
-/// `at`), the statistics at the threshold that at most `RATE` of the normal pairs exceed.
-/// Returns the fault types some statistic separates and the level detectors miss.
-fn table(
-    name: &str,
-    reading: &Reading,
-    at: usize,
-    cal: &[calibrate::Calibrated; 3],
-) -> Vec<String> {
+/// Which detectors fire on a row, under one calibration.
+type Fired<'a> = &'a dyn Fn(&Row) -> [bool; 3];
+
+/// The table of one reading: the detectors as `fired` says, the statistics at the threshold that
+/// at most `RATE` of the normal pairs exceed. Returns the fault types some statistic separates
+/// and the level detectors miss.
+fn table(title: &str, reading: &Reading, fired: Fired<'_>, normal_over: [usize; 3]) -> Vec<String> {
     let thresholds: Vec<Option<f64>> = STATS
         .iter()
         .map(|(_, get)| {
@@ -476,10 +585,7 @@ fn table(
         .collect();
     let over =
         |k: usize, r: &Row| thresholds[k].is_some_and(|t| STATS[k].1(r).is_some_and(|s| s > t));
-    println!(
-        "{name}: detectors at MAD {}, CUSUM h {}, PELT penalty {}",
-        cal[0].value, cal[1].value, cal[2].value
-    );
+    println!("{title}");
     println!(
         "{:<8} {:>3} {:>7} {:>7} {:>7} | {:>7} {:>7} {:>7} {:>7} | {:>9}",
         "fault", "n", "MAD", "CUSUM", "PELT", "jsd/1", "perm/1", "mi/1", "tent/1", "beyond"
@@ -492,14 +598,14 @@ fn table(
             continue;
         }
         let det: Vec<f64> = (0..3)
-            .map(|k| share(rows.iter().map(|r| r.at[at][k])))
+            .map(|k| share(rows.iter().map(|r| fired(r)[k])))
             .collect();
         let stat: Vec<Option<f64>> = (0..4)
             .map(|k| thresholds[k].map(|_| share(rows.iter().map(|r| over(k, r)))))
             .collect();
         let beyond = rows
             .iter()
-            .filter(|r| (0..4).any(|k| over(k, r)) && !r.at[at].iter().any(|f| *f))
+            .filter(|r| (0..4).any(|k| over(k, r)) && !fired(r).iter().any(|f| *f))
             .count();
         println!(
             "{:<8} {:>3} {:>7} {:>7} {:>7} | {:>7} {:>7} {:>7} {:>7} | {:>9}",
@@ -529,21 +635,25 @@ fn table(
         })
         .collect();
     println!(
-        "normal pairs over each threshold (of {}): MAD {}, CUSUM {}, PELT {} (at most); {}",
+        "normal pairs over each threshold (of {}): MAD {}, CUSUM {}, PELT {}; {}",
         reading.normal.len(),
-        cal[0].over,
-        cal[1].over,
-        cal[2].over,
+        normal_over[0],
+        normal_over[1],
+        normal_over[2],
         held.join(", ")
     );
+    separated
+}
+
+fn defaults_line(reading: &Reading) {
     let nf = |i: usize| 100.0 * share(reading.normal.iter().map(|r| r.flags[i]));
     println!(
-        "the shipped defaults' false alarms on them: MAD {:.1} %, CUSUM {:.1} %, PELT {:.1} %",
+        "the shipped defaults' false alarms on the normal pairs: MAD {:.1} %, CUSUM {:.1} %, \
+         PELT {:.1} %",
         nf(0),
         nf(1),
         nf(2)
     );
-    separated
 }
 
 fn verdict(name: &str, separated: &[String]) {
@@ -567,6 +677,17 @@ fn verdict(name: &str, separated: &[String]) {
     }
 }
 
+/// The detectors' firing on `rows` at the `i`th of each calibration, as shares in percent.
+fn transferred(label: &str, rows: &[Row], fired: Fired<'_>) -> String {
+    let d: Vec<f64> = (0..3)
+        .map(|k| 100.0 * share(rows.iter().map(|r| fired(r)[k])))
+        .collect();
+    format!(
+        "{label}: MAD {:>5.1} %  CUSUM {:>5.1} %  PELT {:>5.1} %",
+        d[0], d[1], d[2]
+    )
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let arg = |name: &str| {
@@ -586,32 +707,51 @@ fn main() {
     let cases = load_all(&data);
     let services: std::collections::BTreeSet<&str> =
         cases.iter().map(|c| c.service.as_str()).collect();
+    let name = label(&data);
     println!(
-        "GE-I3 on RCAEval {} (real, CC BY 4.0): {} cases, services {:?}; six-minute \
+        "GE-I3 on RCAEval {name} (real, CC BY 4.0): {} cases, services {:?}; six-minute \
          windows at one sample a second.",
-        label(&data),
         cases.len(),
         services
     );
     println!(
         "Normal pairs end at the injection, faulty pairs start at it. Every arm is held to at \
-         most {:.0} % of the normal pairs: the detectors by `calibrate`, the statistics by their \
-         threshold.\n",
+         most {:.0} % of the normal pairs: the detectors by `calibrate`, one value a trial or \
+         one per metric kind, the statistics by their threshold.\n",
         100.0 * RATE
     );
-    let normal = normal_rows(&cases, &[], &mut refused);
-    let cal = calibrated(&normal);
-    let at = values(&cal);
+    let normal = normal_rows(&cases, &[], &[], &mut refused);
+    let (cal, each) = (calibrated(&normal), calibrated_each(&normal));
+    let (at, at_each) = (values(&cal), values_each(&each));
     let reading = Reading {
-        faulty: faulty_rows(&cases, &[at], &mut refused),
+        faulty: faulty_rows(&cases, &[at], std::slice::from_ref(&at_each), &mut refused),
         normal,
     };
-    let separated = table(&label(&data), &reading, 0, &cal);
+    defaults_line(&reading);
+    println!();
+    let separated = table(
+        &format!(
+            "{name}, one value a trial: MAD {}, CUSUM h {}, PELT penalty {}",
+            at[0], at[1], at[2]
+        ),
+        &reading,
+        &|r| r.at[0],
+        [cal[0].over, cal[1].over, cal[2].over],
+    );
+    println!();
+    print_each(&name, &each);
+    let separated_each = table(
+        &format!("{name}, per metric kind:"),
+        &reading,
+        &|r| r.at_each[0],
+        [each[0].over, each[1].over, each[2].over],
+    );
     println!(
         "refused computations (series or pairs too short or too constant): {:?}\n",
         refused.0
     );
-    verdict(&label(&data), &separated);
+    verdict(&format!("{name}, one value a trial"), &separated);
+    verdict(&format!("{name}, per metric kind"), &separated_each);
 
     let Some(held) = held else {
         return;
@@ -619,65 +759,83 @@ fn main() {
     // The held-out set: the detectors at the values calibrated above, and at its own.
     let mut refused = Refused::default();
     let hcases = load_all(&held);
+    let hname = label(&held);
     let hservices: std::collections::BTreeSet<&str> =
         hcases.iter().map(|c| c.service.as_str()).collect();
     println!(
-        "\nheld out: RCAEval {}, {} cases, services {:?}\n",
-        label(&held),
+        "\nheld out: RCAEval {hname}, {} cases, services {:?}\n",
         hcases.len(),
         hservices
     );
-    let normal = normal_rows(&hcases, &[at], &mut refused);
-    let own = calibrated(&normal);
+    let normal = normal_rows(&hcases, &[at], std::slice::from_ref(&at_each), &mut refused);
+    let (own, own_each) = (calibrated(&normal), calibrated_each(&normal));
     let reading = Reading {
-        faulty: faulty_rows(&hcases, &[at, values(&own)], &mut refused),
+        faulty: faulty_rows(
+            &hcases,
+            &[at, values(&own)],
+            &[at_each.clone(), values_each(&own_each)],
+            &mut refused,
+        ),
         normal,
     };
-    let transferred: Vec<f64> = (0..3)
-        .map(|k| share(reading.normal.iter().map(|r| r.at[0][k])))
+    defaults_line(&reading);
+    let kinds: std::collections::BTreeSet<&String> = reading
+        .normal
+        .iter()
+        .flat_map(|r| r.each[0].keys())
+        .collect();
+    let missing: Vec<&&String> = kinds
+        .iter()
+        .filter(|k| !at_each[0].contains_key(**k))
         .collect();
     println!(
-        "{}'s values on {}'s normal pairs: false alarms MAD {:.1} %, CUSUM {:.1} %, PELT {:.1} % \
-         (calibrated for {:.0} %)",
-        label(&data),
-        label(&held),
-        100.0 * transferred[0],
-        100.0 * transferred[1],
-        100.0 * transferred[2],
-        100.0 * RATE
+        "{hname}'s metric kinds without a {name} value (run at none): {:?}",
+        missing
     );
-    println!(
-        "{}'s values on {}'s faulty pairs:",
-        label(&data),
-        label(&held)
-    );
-    for fault in FAULTS {
-        let rows = reading.faulty.get(fault).map(Vec::as_slice).unwrap_or(&[]);
-        if rows.is_empty() {
-            continue;
-        }
-        let d: Vec<f64> = (0..3)
-            .map(|k| 100.0 * share(rows.iter().map(|r| r.at[0][k])))
-            .collect();
+    for (mode, fired) in [
+        ("one value a trial", &(|r: &Row| r.at[0]) as Fired<'_>),
+        ("per metric kind", &|r: &Row| r.at_each[0]),
+    ] {
+        println!("\n{name}'s values, {mode}, on {hname}:");
         println!(
-            "  {:<8} {:>3}  MAD {:>5.1} %  CUSUM {:>5.1} %  PELT {:>5.1} %",
-            fault,
-            rows.len(),
-            d[0],
-            d[1],
-            d[2]
+            "  {}  (calibrated for {:.0} %)",
+            transferred("normal pairs, false alarms", &reading.normal, fired),
+            100.0 * RATE
         );
+        for fault in FAULTS {
+            let rows = reading.faulty.get(fault).map(Vec::as_slice).unwrap_or(&[]);
+            if !rows.is_empty() {
+                println!(
+                    "  {}",
+                    transferred(&format!("{fault:<8} {:>3}", rows.len()), rows, fired)
+                );
+            }
+        }
     }
     println!();
+    let oat = values(&own);
     let separated = table(
-        &format!("{} at its own calibration", label(&held)),
+        &format!(
+            "{hname} at its own calibration, one value a trial: MAD {}, CUSUM h {}, PELT \
+             penalty {}",
+            oat[0], oat[1], oat[2]
+        ),
         &reading,
-        1,
-        &own,
+        &|r| r.at[1],
+        [own[0].over, own[1].over, own[2].over],
+    );
+    println!();
+    print_each(&hname, &own_each);
+    let separated_each = table(
+        &format!("{hname} at its own calibration, per metric kind:"),
+        &reading,
+        &|r| r.at_each[1],
+        [own_each[0].over, own_each[1].over, own_each[2].over],
     );
     println!(
         "refused computations (series or pairs too short or too constant): {:?}\n",
         refused.0
     );
-    verdict(&label(&held), &separated);
+    verdict(&format!("{hname}, one value a trial"), &separated);
+    verdict(&format!("{hname}, per metric kind"), &separated_each);
 }

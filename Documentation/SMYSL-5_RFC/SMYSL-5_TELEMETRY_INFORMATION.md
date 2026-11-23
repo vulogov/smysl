@@ -2,11 +2,11 @@
 
 **Author:** Vladimir Ulogov
 **Status:** first draft, amended after review (R1, 2026-11-20), while building (R2 to R6) and
-after (R7, R8).
+after (R7 to R9).
 TI-P0 to TI-P4 are built: `ent/1`, `perm/1`, `mi/1`, `jsd/1` and `tent/1`, rule TI in `check`,
 and their recomputation. TI-P5 closed with GE-I5's result: transfer entropy is not released,
 and `te` stays reserved (§10). GE-I1 to GE-I5 have run on simulated data (§15), and GE-I3 on RCAEval's
-RE2-SS and RE2-OB, real (R7, R8); every other real-data run is still owed, and every other threshold is a
+RE2-SS and RE2-OB, real (R7 to R9); every other real-data run is still owed, and every other threshold is a
 proposal until the experiment that owns it has run (§17).
 **Target version:** not fixed. Phases are named (TI-P0 to TI-P5), not numbered by release.
 **Evidence baseline:** `dev/1.18.0` at `3e57160` ("SMYSL-4 BQ-P4"). Every code pointer below
@@ -31,6 +31,7 @@ Part A.
 | R5 | 2026-11-21 | Found while building TI-P4. **R5-1** two info units of one key disagree (`SMY-W614`) when they read different sample sets: their `digest`, `with_digest` and `ref_digest` together (§3). **R5-2** recomputation reads a stored recipe text back into a recipe, and one this build would write otherwise, a parameter respelled or missing, is `SMY-E604`, since recomputing it would compute something else; `SMY-W704` is a recipe id this build does not have (§7). **R5-3** rule TI's checks of the fields: `mi` carries `with`, `with_instrument`, `with_digest` and `lag`; a statistic of one series names no second; `jsd` names a reference window; a reference window carries `ref_from_ms`, `ref_to_ms` and `ref_digest` together; a scan's `lags` and `values` are of one length (§3). **R5-4** a `template-entropy` unit is recomputed from the store's templates of its stream, instrument, window and recipe hash; with none, from the events, for the shipped Drain only; with neither, it is `SMY-W605` (§7). **R5-5** the dossier lists the statistics among the evidence an investigation consulted or grounds on, and its open questions include those not re-derivable (§8). **R5-6** GE-I3's reading of its stop condition, fixed before the run, and its result (§15). |
 | R7 | 2026-11-22 | 1.19. **R7-1** GE-I3's real-data arm, on RCAEval RE2-SS: its first reading, held to MAD's false-alarm rate with the detectors at their shipped defaults, was degenerate on one-second data, since those defaults flag 90 to 100 % of normal windows; the reading was amended before the rerun to hold every arm, detectors included, to 10 %. Its result: every fault type is seen by a level detector, and no statistic flags a faulty window none of them does (§15). |
 | R8 | 2026-11-22 | 1.19. **R8-1** The detectors are calibrated rather than scored on a grid: `detect::calibrate` (3 §21.1) sets MAD's threshold, CUSUM's `h` and PELT's `penalty` on RE2-SS's normal pairs to 10 %, and the values are run unchanged on RE2-OB, held out. **R8-2** GE-I3's real-data arm is replicated on RE2-OB. Its result: RE2-SS's values hold on RE2-OB (1 to 4 % false alarms) and miss only CUSUM's and PELT's delays there, and RE2-OB gives R7's verdict (§15). |
+| R9 | 2026-11-22 | 1.19. **R9-1** The detectors are also calibrated per series (3 §21.1, `calibrate_each`), keyed by metric kind so that values carry between systems, the rate held jointly over the trials. **R9-2** Run on RE2-SS and held out on RE2-OB beside R8's one value a trial. Its result: per series, CUSUM sees every RE2-SS fault and, carried to RE2-OB, its delays (100 % against 13 %); PELT's carried values overshoot their rate there (16.7 %); R7's verdict holds in all four readings (§15). |
 
 ---
 
@@ -769,8 +770,8 @@ On RE2-SS, calibration gives R7's table within two pairs a cell (CUSUM's cpu and
   scores astronomically. A trial fires when any of its series does, so its score is set by its
   least-moving series, and the calibrated value rises until those series are quiet. The busy
   series are then read at a value far above their own noise, which is the likely reason
-  CUSUM misses delays. Calibrating per series rather than per trial, or flooring the scale
-  at the data's resolution, would answer that. Both are recorded here, not done.
+  CUSUM misses delays. Calibrating per series rather than per trial is R9, below; flooring the
+  scale at the data's resolution is recorded, not done.
 - **R7's verdict replicates.** On RE2-OB at its own calibration no type is unseen (MAD flags
   every one), no faulty pair is flagged by a statistic and by no detector, and no statistic
   separates a type. `jsd/1` is again the strongest statistic (33 to 100 %). The simulated verdict
@@ -778,6 +779,41 @@ On RE2-SS, calibration gives R7's table within two pairs a cell (CUSUM's cpu and
 - **Refused:** `mi/1` 151 and `tent/1` 42 of RE2-OB's computations, the latter windows with
   no log line from the service. The downloads (RE2-SS 246 MB and RE2-OB 1.2 GB zipped) are
   not kept.
+
+**Per-series calibration, run in 1.19** (R9; the same command). Each detector is also
+calibrated per series by `calibrate::each_from_scores` (3 §21.1). The rate is held jointly over
+the 90 normal pairs, since a pair still fires when any series fires at its own value. The key is
+the **metric kind**: the column with the service's prefix taken off (`cpu`, `mem`, `diskio`,
+`socket`, `workload`, `latency-50`, `latency-90`, `error`). Keyed that way, a value carries from
+one system's services to another's, which a key per service could not do. RE2-OB has no kind
+that RE2-SS lacks. The reading is R8's, with the same question asked beforehand.
+
+| detector | RE2-SS, one value / per kind | RE2-SS's values on RE2-OB normal, one / per kind | RE2-SS's values on RE2-OB delay, one / per kind |
+|---|---|---|---|
+| MAD | 93–100 % / 93–100 % (normal: 8 / 9 of 90) | 4.4 % / 6.7 % | 100 % / 100 % |
+| CUSUM | 80–93 % / **100 %** every type (9 / 6) | 2.2 % / 4.4 % | 13.3 % / **100 %** |
+| PELT | 80–100 % / 87–100 % (7 / 6) | 1.1 % / **16.7 %** | 26.7 % / 73.3 % |
+
+Carried per kind to RE2-OB, every other fault type is seen at 100 % by all three, except delay
+under PELT. At RE2-OB's own per-kind calibration, all three see every type at 93 % or more, with
+4, 9 and 8 of 90 normal pairs firing.
+
+- **Per series is the better calibration where it holds.** CUSUM goes from missing most of
+  RE2-OB's delays to seeing all of them, at 4.4 % false alarms, and sees every RE2-SS fault.
+  The busy series are no longer read at a value set by the idle ones. Delays move latency,
+  which is a busy series, and that is where per-trial calibration lost them.
+- **Tighter values carry less margin.** PELT's per-kind values alarm on 16.7 % of RE2-OB's
+  fault-free windows, over the 10 % they were set for: a calibration holds on the windows it was
+  set on, and per series it is fitted closer to them. A value carried to another system needs
+  its rate checked there, or it should be set with margin. One value a trial stayed under the
+  rate on transfer, at the cost of the delays.
+- **Some kinds still sit at the scale floor.** `cpu` takes CUSUM `h` 8·10¹⁶ and PELT `penalty`
+  4·10²⁰ on RE2-SS, because a CPU series that is flat over a reference window still meets the
+  `10⁻⁹` floor. Per series contains that to the kind instead of letting it set every value, but
+  it does not remove it. Flooring the scale at the data's resolution remains the fix, recorded
+  and not done.
+- **R7's verdict holds in all four readings** (each system, each calibration). No faulty pair is
+  flagged by a statistic and by no detector, and no statistic separates a type.
 
 **GE-I5, run at TI-P5 on simulated data** (`cargo run --release -p smysl-tel --example
 ge_i5`, 300 pairs of each kind, seeds 1 to 5). The estimator is §10's, written in the example

@@ -237,3 +237,54 @@ fn what_calibration_needs_is_required() {
         );
     }
 }
+
+#[test]
+fn each_series_gets_its_own_value_and_the_rate_holds_jointly() {
+    let dir = library("each");
+    let cusum = fixture("cusum.hjson");
+    let all: Vec<String> = ["cpu", "latency", "queue"].map(series).to_vec();
+    let ws = windows();
+    let mut args = vec![
+        "tel",
+        "calibrate",
+        cusum.as_str(),
+        "--rate",
+        "0.2",
+        "--each",
+    ];
+    for s in &all {
+        args.extend(["--series", s.as_str()]);
+    }
+    for w in &ws {
+        args.extend(["--window", w.as_str()]);
+    }
+    args.extend(["-s", "lib"]);
+    let o = run(&dir, &args);
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    let text = String::from_utf8_lossy(&o.stdout).into_owned();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 4, "{text}");
+    for l in &lines[..3] {
+        assert!(
+            l.starts_with("{ detector: cusum/1,") && l.contains("  series b3:"),
+            "{l}"
+        );
+    }
+    let summary = lines[3];
+    let over: usize = summary
+        .split_whitespace()
+        .nth(3)
+        .and_then(|n| n.parse().ok())
+        .expect("a count");
+    assert!(over <= 2, "{summary}");
+    assert_eq!(
+        String::from_utf8_lossy(&run(&dir, &args).stdout),
+        text,
+        "twice"
+    );
+}

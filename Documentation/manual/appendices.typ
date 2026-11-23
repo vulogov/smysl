@@ -1206,8 +1206,11 @@ the `h` of `cusum/1` or the `penalty` of `pelt/1` from fault-free windows (RFC S
 Each `--window` is one trial, a reference `[REF, FROM)` and a test `[FROM, TO)` over every
 series. The answer is the least value on a decimal ladder (1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8 ×
 10^e) at which at most `⌊R · n⌋` of the `n` trials alarm. It is printed as a recipe `tel detect`
-takes, and nothing is written. An argument not admitted is exit 2, and a rate the ladder cannot
-meet is exit 1.
+takes, and nothing is written. With `--each`, every series and instrument gets its own value,
+one recipe line each followed by the series and instrument. The rate is then held over the
+windows jointly, and a series that alarmed in none of them keeps the recipe's value and is
+reported as uncalibrated. An argument not admitted is exit 2, and a rate the ladder cannot meet
+is exit 1.
 
 `tel info RECIPE --series S… --during FROM-TO` computes an information measure (RFC SMYSL-5)
 over each series and its instruments, or `--instrument I` alone. `RECIPE` is an HJSON file, for

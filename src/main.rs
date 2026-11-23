@@ -2706,6 +2706,15 @@ fn cli() -> Command {
                         .help("calibrate: the false-alarm rate to hold the trials to, in (0, 1)"),
                 )
                 .arg(
+                    Arg::new("each")
+                        .long("each")
+                        .action(ArgAction::SetTrue)
+                        .help(
+                            "calibrate: a value per series and instrument, the rate held over \
+                             the windows jointly",
+                        ),
+                )
+                .arg(
                     Arg::new("with")
                         .long("with")
                         .value_name("SERIES")
@@ -16510,13 +16519,15 @@ fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
 /// per instrument, read as reference `[REF, FROM)` and test `[FROM, TO)`, firing when any of them
 /// does. The answer is the least value on the calibration ladder of MAD's `threshold`, CUSUM's
 /// `h` or PELT's `penalty` that at most `⌊R · n⌋` of the `n` trials fire at; it is printed as a
-/// recipe `tel detect` takes, with how many trials fire at it. Nothing is written. A recipe or
+/// recipe `tel detect` takes, with how many trials fire at it. With `--each`, every series and
+/// instrument gets its own value (`calibrate_each`), printed as one line each, recipe then series
+/// and instrument, the rate held over the windows jointly. Nothing is written. A recipe or
 /// argument that is not admitted is exit 2; a rate the ladder cannot meet is exit 1.
 #[cfg(feature = "tel")]
 fn tel_calibrate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
     use smysl::series::redb::RedbBackend;
     use smysl::series::Substrate;
-    use smysl::tel::detect::{calibrate_on, Spec};
+    use smysl::tel::detect::{calibrate_on, calibrate_on_each, Spec};
 
     let (Some(recipe_path), None) = (args.first(), args.get(1)) else {
         eprintln!("smysl tel calibrate: `RECIPE`, an HJSON detector recipe");
@@ -16603,7 +16614,47 @@ fn tel_calibrate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitC
             return ExitCode::Failure;
         }
     };
-    match calibrate_on(&spec, &Substrate::new(backend), &series, &windows, rate) {
+    let substrate = Substrate::new(backend);
+    let usage_or_failure = |e: String| {
+        eprintln!("smysl tel calibrate: {e}");
+        if e.contains("rate is in") {
+            ExitCode::Usage
+        } else {
+            ExitCode::Failure
+        }
+    };
+    if m.get_flag("each") {
+        return match calibrate_on_each(&spec, &substrate, &series, &windows, rate) {
+            Ok(c) => {
+                for ((s, i), v) in &c.series {
+                    println!(
+                        "{}  series {}  instrument {}  {}",
+                        v.spec.hjson(),
+                        s.canonical(),
+                        i.canonical(),
+                        if v.calibrated {
+                            format!("fires in {}", v.fired)
+                        } else {
+                            "uncalibrated: fired in no window".to_string()
+                        }
+                    );
+                }
+                println!(
+                    "calibrate {} --each: {} of {} trial(s) fire (at most {} at rate {rate}), {} \
+                     series at most {} each",
+                    spec.id(),
+                    c.over,
+                    c.trials,
+                    c.allowed,
+                    c.series.len(),
+                    c.q
+                );
+                ExitCode::Success
+            }
+            Err(e) => usage_or_failure(e),
+        };
+    }
+    match calibrate_on(&spec, &substrate, &series, &windows, rate) {
         Ok(c) => {
             println!("{}", c.spec.hjson());
             println!(
@@ -16616,14 +16667,7 @@ fn tel_calibrate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitC
             );
             ExitCode::Success
         }
-        Err(e) => {
-            eprintln!("smysl tel calibrate: {e}");
-            if e.contains("rate is in") {
-                ExitCode::Usage
-            } else {
-                ExitCode::Failure
-            }
-        }
+        Err(e) => usage_or_failure(e),
     }
 }
 

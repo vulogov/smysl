@@ -1205,11 +1205,25 @@ parameter, so the recipe hash still says exactly what ran. The defaults are unch
   trial that fires at or above `v` scores at least `v`, so on the given trials the bound holds at
   `v` and at every value above it, even where CUSUM's and PELT's alarms are not monotone in their
   parameter. A rate the ladder's top cannot meet is refused.
+- **Per series.** One value per trial is set by the trial's least-moving series. A series that
+  is constant over its reference window scores at the ladder's top for any change at all
+  (SMYSL-5 §15, R8). Calibrating **per series** gives each `(series, instrument)` its own value,
+  with the rate still held jointly over the trials, since a trial fires when any series fires at
+  its own value:
+  - for a per-series count `q`, each series takes the least value that at most `q` of its trials
+    score at or above;
+  - `q` is the largest count at which at most `⌊rate · n⌋` trials fire;
+  - a series' count is capped one below the number of trials it scored in, so its value is never
+    at or below all of its scores (the ladder's foot, a hair trigger no evidence supports);
+  - a series that fired in no trial keeps the recipe's value and is reported as uncalibrated.
+
+  None of these can add an alarm on the given trials.
 - **Scope.** Calibration applies to `mad/1`, `cusum/1` and `pelt/1`. `episode/1` and `baro/1`
   have no threshold to calibrate, and are refused.
 
-The library API is `smysl_tel::detect::calibrate` and `detect::calibrate_on` (over a substrate).
-`smysl tel calibrate` prints the calibrated recipe and writes nothing. The rate holds on the
+The library API is `smysl_tel::detect::calibrate` and `detect::calibrate_on` (over a substrate),
+with `calibrate_each` and `calibrate_on_each` per series. `smysl tel calibrate` prints the
+calibrated recipe, or one per series with `--each`, and writes nothing. The rate holds on the
 trials given; whether it carries to another system is an empirical question (SMYSL-5 §15, R8).
 
 ## 22. Query and dossiers
@@ -1257,7 +1271,7 @@ The facade gains feature `tel` and one command group:
 | `smysl tel read <reader> <files…> --profile P [--at T]` | read into parts, series and change units (staged, as `ingest` is) |
 | `smysl tel window <series> <from> <to> [--sketch α] [--instrument I]` | materialise evidence |
 | `smysl tel detect <recipe.hjson> --series … --during …` | run detectors, stage their units |
-| `smysl tel calibrate <recipe.hjson> --series … --window REF-FROM-TO… --rate R` | a level detector's parameter from fault-free windows (§21.1); writes nothing |
+| `smysl tel calibrate <recipe.hjson> --series … --window REF-FROM-TO… --rate R [--each]` | a level detector's parameter from fault-free windows (§21.1), or one per series; writes nothing |
 | `smysl tel at <series> <t>` | value in force at t, from the substrate |
 | `smysl tel investigate open\|consult\|hypothesis\|probe\|action\|close` | the ledger operations, for scripts and OKO |
 | `smysl tel evict --older-than <dur>` | rule TL eviction |
