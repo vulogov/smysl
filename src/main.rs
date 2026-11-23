@@ -16532,7 +16532,7 @@ fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
 /// instrument gets its own value (`calibrate_each`), printed as one line each, recipe then series
 /// and instrument, the rate held over the windows jointly. `--margin M` holds the trials to
 /// `rate / M` instead, room for values carried to other data. The recipe may carry `floor:
-/// resolution` (§21.2), which the printed recipes keep. Nothing is written. A recipe or
+/// resolution` or `floor: spread` (§21.2), which the printed recipes keep. Nothing is written. A recipe or
 /// argument that is not admitted is exit 2; a rate the ladder cannot meet is exit 1.
 #[cfg(feature = "tel")]
 fn tel_calibrate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {

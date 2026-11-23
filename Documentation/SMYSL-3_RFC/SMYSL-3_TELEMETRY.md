@@ -1176,7 +1176,7 @@ measures already do.
   ChaCha20, keyed by `BLAKE3("smysl/tel-minhash/1\0" ‖ recipe ‖ seed)` with the seed as eight
   little-endian bytes. Similarity is the number of equal minima out of 128. `tel similar` prints
   it beside the exact Jaccard index and the neighbours' labels, and writes nothing. GE-M8 found
-  it model-independent on simulated episodes, so a label shown from similar episodes is a
+  it model-independent on simulated episodes and on RCAEval's real incidents, so a label shown from similar episodes is a
   reading of the store, never a unit.
 - A detector that fails GE-M3 stays off the pure path until fixed.
 
@@ -1267,6 +1267,27 @@ about one scale unit, not by 10⁹.
   metrics, the smallest gap between distinct values is noise-sized, so the floor never binds.
   On RCAEval it brought CUSUM's values from 10¹⁰ to 10⁵ and left PELT's at 10¹⁹ (SMYSL-5 §15,
   R10).
+
+A recipe may carry **`floor: spread`** instead (1.20). The scale is then at least a tenth of the
+standard deviation of the same values, `√(Σ(x − x̄)² / n) / 10`, summed in order, so it replays to
+the byte. It is zero only for a constant series, where the shipped floor applies. It reaches the
+float-valued metrics that the resolution floor does not.
+
+- **Recorded** as `floor=spread`, read by the same `Spec::parse_with_options`. The API is
+  `detect::Floor::Spread` and `detect::spread`; `Floor` is `#[non_exhaustive]` for this.
+- **Where it binds.** On a noisy series, the scale from differences is near the standard
+  deviation, and the floor does not bind. It binds on step-like series, whose differences are
+  mostly zero.
+- **A ceiling.** Where it binds on a series without noise, the floor grows with the change it is
+  measuring. Take PELT on `n` values at two levels `Δ` apart, a share `p` at one. Splitting them
+  saves `n·p(1−p)·Δ²` of cost, and the floor's variance is `p(1−p)·Δ² / 100`, so the change is
+  worth exactly `100·n` of `penalty`, whatever its size or place. A penalty at or above `100·n`
+  silences every such step. On RCAEval's twelve-minute trials (`n = 720`), a calibrated
+  `penalty: 80000` saw nothing where `60000` saw every fault type (SMYSL-5 §15, R12). For robust
+  z, the window's values are in the floor, so a fault raises the scale it is measured against.
+- **On RCAEval** it brought PELT's values from 10¹⁷–10²⁰ to 10⁴–10⁵. Calibrated on Sock Shop
+  and carried unchanged, they held 10 % on Online Boutique and Train Ticket: 1.1 and 5.6 % at
+  one value a trial, 4.4 and 6.7 % per metric kind (R12).
 
 ## 22. Query and dossiers
 
@@ -1382,7 +1403,7 @@ Each experiment has a stop condition, stated before it runs.
 | **GE-M5** | Does causal order catch skew? | Inject 1–500 ms skew on chosen hosts; derive constraints from spans | §10.4 | Detection below 90 % at ≥ 5 ms skew means the constraint is not worth a rule E change. **Run on simulated traces (TL-P9, `make ge-m5`): fails; rule E unchanged.** Detection as fixed (the skewed host named): 20.1 % at ≥ 5 ms, and 26.0 % with the response constraint, because two clocks that disagree do not say which is wrong. Seen at all (post hoc: an edge of the host violated by ≥ 2 ms): 63.6 % for §10.4's start-only constraint, which cannot see a leaf service running ahead or the root running behind; 100 % with the response constraint at ≥ 2 ms. With no skew, ±0.25 ms offsets violate 1.3 % of edges at ms resolution (18 of 20 runs). |
 | **GE-M6** | Do independent instruments change conclusions? | The same faults seen through duplicated scrapers and through independent sources | D-T10 | If witness counting never changes a ranking, it stays a report |
 | **GE-M7** | **Does smysl make agent RCA better?** | Train-Ticket (D-T12) with scripted deploys and config edits, faults injected after some of them. Arms: (a) agent alone; (b) agent writing into smysl with TQ, consulted and kind 6; (c) BARO-style derived ranking; (d) (b)+(c). Local models; one hosted arm, labelled (D-T13). | the design of §11 | Measured on top-k accuracy, **fabrications caught** (TQ failures that were real errors), and **unused-evidence rate**. If (b) does not reduce fabricated evidence relative to (a), §11 is wrong and is redesigned before TL-P7. |
-| **GE-M8** | Do episodes recur detectably? | MinHash over typed feature sets against embeddings, on GE-M7's corpus and RCAEval | similarity labelling | If MinHash recall@5 < 0.6 where embeddings exceed 0.8, similarity is model-dependent by default. **Run on simulated episodes (TL-P9, `make ge-m8`): does not fire; similarity is model-independent.** 120 episodes of twelve fault types, two per service sharing half their core. recall@5: MinHash **0.970**, exact Jaccard 0.982, Model2Vec `potion-base-8M` 0.898. Over five other seeds: 0.968–0.987, 0.972–0.985 and 0.880–0.945. The corpus is made of shared identifiers, which favours sets by construction: renamed series and paraphrased alerts are what GE-M7's corpus and RCAEval would test. |
+| **GE-M8** | Do episodes recur detectably? | MinHash over typed feature sets against embeddings, on GE-M7's corpus and RCAEval | similarity labelling | If MinHash recall@5 < 0.6 where embeddings exceed 0.8, similarity is model-dependent by default. **Run on simulated episodes (TL-P9, `make ge-m8`): does not fire; similarity is model-independent.** 120 episodes of twelve fault types, two per service sharing half their core. recall@5: MinHash **0.970**, exact Jaccard 0.982, Model2Vec `potion-base-8M` 0.898. Over five other seeds: 0.968–0.987, 0.972–0.985 and 0.880–0.945. The corpus is made of shared identifiers, which favours sets by construction: renamed series and paraphrased alerts are what GE-M7's corpus and RCAEval would test. **Run on RCAEval (1.20, `examples/ge_m8_rcaeval`): does not fire on any of three systems; similarity stays model-independent, and is far weaker on real data.** recall@5 by fault type: MinHash 0.26–0.34, Model2Vec 0.26–0.40, against 0.16 by chance. A case's two repetitions in its top five: MinHash 0.36–0.56 without log templates, against 0.06. |
 | **GE-M9** | Does retention keep the round trip? | 6 months of GE-M1-scale data, compressed into a test; evict per rule TL; export, import, merge with an unevicted peer | rule TL | Any P1 failure over records, or any substrate resurrection that changes a unit, blocks TL-P8. **Run on simulated data (TL-P8): held.** 20 gauges, 182 days, 5.2 M samples, 152 days evicted. No record changed at any step, and every window recomputed to the unit it is after the merge. A control peer with one sample more was caught as `SMY-E604`. |
 
 **GE-M2 and GE-M5 on simulated traces (TL-P9 step 4).** The measures, fixed before the runs:
@@ -1426,6 +1447,44 @@ Each experiment has a stop condition, stated before it runs.
   the 120. Ties go to the smaller uid.
 - **The stop condition** is the table's: MinHash below 0.6 where embeddings exceed 0.8 makes
   similarity model-dependent by default.
+
+**GE-M8 on RCAEval (1.20).** Fixed before the run, in `examples/ge_m8_rcaeval`:
+- **The corpus.** RCAEval RE2-SS, RE2-OB and RE2-TT, 90 cases each: six fault types injected into
+  five services, three times each. The repetitions are the recurrences.
+- **A case's episode** is what its faulty window `[t, t+6m)` shows:
+  - `mad/1` anomalies under `floor: resolution` on every metric column of every service, since a
+    search does not know the root cause. Each column's threshold is calibrated to 10 % on its
+    own fault-free windows;
+  - the log templates new in the faulty window, per container: one Drain fed the six minutes
+    before and then the window, and what the window added.
+- **The same three arms** rank the other 89 episodes of the system.
+- **Two readings:**
+  - *recurrence*: the share of a case's two repetitions in its top five;
+  - *type*: the simulated run's recall@5, the share of the top five of its fault type.
+- **The stop condition** is the table's, read on the type reading in each system.
+
+| | RE2-SS | RE2-OB | RE2-TT |
+|---|---|---|---|
+| features per episode (median) | 393 | 40 | 217 |
+| recurrence: MinHash / Jaccard / Model2Vec | 0.239 / 0.367 / 0.333 | 0.500 / 0.556 / 0.333 | 0.250 / 0.339 / 0.250 |
+| type: MinHash / Jaccard / Model2Vec | 0.260 / 0.264 / 0.351 | 0.284 / 0.302 / 0.298 | 0.256 / 0.313 / 0.398 |
+| without templates, recurrence | 0.561 / 0.561 / 0.428 | 0.539 / 0.561 / 0.411 | 0.356 / 0.411 / 0.239 |
+| without templates, type | 0.304 / 0.304 / 0.282 | 0.300 / 0.311 / 0.260 | 0.344 / 0.349 / 0.380 |
+
+Chance is 0.056 for recurrence and 0.157 for type.
+
+- **The stop condition does not fire.** No system has embeddings over 0.8. On the type reading
+  MinHash trails them by at most 0.14, and on recurrence without templates it leads them
+  everywhere: similarity stays model-independent.
+- **But real episodes are far less alike than simulated ones.** A case finds about half of its
+  repetitions in its top five, ten times chance, where simulated episodes scored 0.97.
+- **The type reading is hard by construction.** Features name series, so one fault type in two
+  services shares almost none of them.
+- **The log templates, as read, cost more than they gave.** RE2-SS and RE2-TT gave a median of
+  369 and 139 "new" templates a case, which is Drain's templates drifting between two windows
+  rather than new behaviour. Without them (`--no-templates`, chosen after the run), MinHash's
+  recurrence on RE2-SS goes from 0.24 to 0.56. Which templates count as new is the open
+  question, not the measure.
 
 **Order:**
 1. GE-M1, and GE-M3's harness. The harness exists from TL-P0, runs first on TL-P4's summaries, and

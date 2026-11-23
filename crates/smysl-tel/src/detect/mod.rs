@@ -49,6 +49,11 @@ pub enum Floor {
     /// positive gap between two of its distinct values in what the detector reads, so a series
     /// that moves by one step of its own quantum is not read as an astronomical change.
     Resolution,
+    /// `floor: spread`: the scale is at least a tenth of the **spread** of what the detector
+    /// reads, its standard deviation, so a step-like float series, whose differences are
+    /// mostly zero and whose resolution is noise-sized, is read on its own scale. It is zero
+    /// only for a constant series, where the shipped floor applies.
+    Spread,
 }
 
 /// What a recipe may carry beside its detector's parameters (§21.2). The default is what a
@@ -71,15 +76,18 @@ impl Options {
         match self.floor {
             Floor::Tiny => recipe,
             Floor::Resolution => recipe.with("floor", "resolution"),
+            Floor::Spread => recipe.with("floor", "spread"),
         }
     }
 
     /// The scale floor these options put under `values`, if any: their resolution under
-    /// [`Floor::Resolution`], none under the shipped floor or when no two values differ.
+    /// [`Floor::Resolution`], their spread under [`Floor::Spread`], none under the shipped
+    /// floor or when no two values differ.
     pub fn floor_of(&self, values: impl Iterator<Item = f64>) -> Option<f64> {
         match self.floor {
             Floor::Tiny => None,
             Floor::Resolution => resolution(values),
+            Floor::Spread => spread(values),
         }
     }
 }
@@ -93,6 +101,20 @@ pub fn resolution(values: impl Iterator<Item = f64>) -> Option<f64> {
         .map(|w| w[1] - w[0])
         .filter(|d| *d > 0.0)
         .reduce(f64::min)
+}
+
+/// A tenth of the standard deviation of the finite values, `√(Σ(x − x̄)² / n) / 10`, summed in
+/// order so it replays to the byte; none when fewer than two values differ.
+pub fn spread(values: impl Iterator<Item = f64>) -> Option<f64> {
+    let v: Vec<f64> = values.filter(|x| x.is_finite()).collect();
+    if v.len() < 2 {
+        return None;
+    }
+    let n = v.len() as f64;
+    let mean = v.iter().sum::<f64>() / n;
+    let var = v.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / n;
+    let sd = var.sqrt() / 10.0;
+    (sd > 0.0).then_some(sd)
 }
 
 /// A detector's recipe (§21): which detector, its parameters, and what it ran over.
@@ -293,8 +315,8 @@ impl Spec {
         Spec::parse_inner(text, false).map(|(s, _)| s)
     }
 
-    /// [`Spec::parse`], also admitting the [`Options`] keys (§21.2): `floor: resolution` (or
-    /// `tiny`, the default) on `cusum/1`, `pelt/1` and `mad/1`. A recipe without them parses to
+    /// [`Spec::parse`], also admitting the [`Options`] keys (§21.2): `floor: resolution`,
+    /// `floor: spread` (or `tiny`, the default) on `cusum/1`, `pelt/1` and `mad/1`. A recipe without them parses to
     /// the default options, so it means what it always has.
     pub fn parse_with_options(text: &str) -> Result<(Spec, Options), String> {
         Spec::parse_inner(text, true)
@@ -338,8 +360,9 @@ impl Spec {
             Some(HValue::Str(s)) if s == "resolution" => {
                 Options::default().with_floor(Floor::Resolution)
             }
+            Some(HValue::Str(s)) if s == "spread" => Options::default().with_floor(Floor::Spread),
             Some(HValue::Str(s)) if s == "tiny" => Options::default(),
-            Some(_) => return Err("`floor` is `resolution` or `tiny`".into()),
+            Some(_) => return Err("`floor` is `resolution`, `spread` or `tiny`".into()),
         };
         let decimal = |k: &str| -> Result<Option<Decimal>, String> {
             match get(k) {
@@ -440,6 +463,7 @@ impl Spec {
         let floor = match opts.floor {
             Floor::Tiny => "",
             Floor::Resolution => ", floor: resolution",
+            Floor::Spread => ", floor: spread",
         };
         format!("{{ detector: {}, {body}{floor} }}", self.id())
     }
@@ -466,6 +490,10 @@ mod spec_tests {
         assert_eq!(resolution([2.0, 2.0].into_iter()), None);
         assert_eq!(resolution(std::iter::empty()), None);
         assert_eq!(resolution([1.0, f64::NAN, 4.0].into_iter()), Some(3.0));
+        // The spread: a tenth of the standard deviation, none for a constant series.
+        assert_eq!(spread([1.0, 3.0, 1.0, 3.0].into_iter()), Some(0.1));
+        assert_eq!(spread([2.0, 2.0, f64::NAN].into_iter()), None);
+        assert_eq!(spread([5.0].into_iter()), None);
     }
 
     #[test]
@@ -563,6 +591,14 @@ mod spec_tests {
         assert!(Spec::parse(r).is_err(), "plain parse refuses an option");
         let (s, o) = Spec::parse_with_options(r).unwrap();
         assert_eq!(o.floor, Floor::Resolution);
+        assert_eq!(Spec::parse_with_options(&s.hjson(&o)).unwrap(), (s, o));
+        let (s, o) = Spec::parse_with_options("{ detector: pelt/1, floor: spread }").unwrap();
+        assert_eq!(o.floor, Floor::Spread);
+        assert!(
+            s.hjson(&o).ends_with(", floor: spread }"),
+            "{}",
+            s.hjson(&o)
+        );
         assert_eq!(Spec::parse_with_options(&s.hjson(&o)).unwrap(), (s, o));
         assert_eq!(
             Spec::parse_with_options("{ detector: pelt/1 }").unwrap().1,

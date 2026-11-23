@@ -721,6 +721,67 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_spread_floor_reads_a_step_like_float_series_on_its_own_scale() {
+        // A float level with jitter at the last digits, so its resolution is noise-sized, and in
+        // a third of the fault-free trials a brief plateau a hundredth up.
+        type Points = Vec<(u64, f64)>;
+        let level = |i: usize| 0.25 + 1e-9 * (i % 2) as f64;
+        let normal: Vec<(Points, Points)> = (0..40)
+            .map(|s| {
+                let xs: Vec<f64> = (0..120)
+                    .map(|i| {
+                        level(i)
+                            + if s % 3 == 0 && (80..90).contains(&i) {
+                                0.01
+                            } else {
+                                0.0
+                            }
+                    })
+                    .collect();
+                (points(&xs[..60], 0), points(&xs[60..], 60_000))
+            })
+            .collect();
+        let trials: Vec<Vec<Pair<'_>>> = normal
+            .iter()
+            .map(|(r, t)| {
+                vec![Pair {
+                    reference: r,
+                    test: t,
+                }]
+            })
+            .collect();
+        let spec = Spec::parse("{ detector: pelt/1 }").unwrap();
+        let value = |floor| {
+            let opts = Options::default().with_floor(floor);
+            let c = calibrate(&spec, &opts, &trials, target("0.1")).unwrap();
+            assert!(c.over <= c.allowed);
+            (opts, c)
+        };
+        let (_, tiny) = value(crate::detect::Floor::Tiny);
+        let (_, res) = value(crate::detect::Floor::Resolution);
+        let (spread, c) = value(crate::detect::Floor::Spread);
+        assert!(to_f64(tiny.value) > 1e12, "tiny floor {}", tiny.value);
+        assert!(
+            to_f64(res.value) > 1e12,
+            "the resolution is noise-sized: {}",
+            res.value
+        );
+        assert!(to_f64(c.value) < 1e6, "spread floor {}", c.value);
+        // A sustained step, one change, is still seen at that value; the plateau is two.
+        let step: Points = normal[1]
+            .1
+            .iter()
+            .enumerate()
+            .map(|(i, (t, _))| (*t, level(i) + 0.05))
+            .collect();
+        let fault = [Pair {
+            reference: &normal[1].0,
+            test: &step,
+        }];
+        assert!(fires(&c.spec, &spread, &fault, c.value), "at {}", c.value);
+    }
+
     /// A series that fires at the ladder's top in a few fault-free trials is held there, those
     /// trials counting against the rate jointly; only more of them than the rate allows refuse
     /// (SMYSL-5 §15, R11: `pelt/1` on RE2-TT).

@@ -39,6 +39,32 @@ in tokens, the sizing residual on German, the Ollama arm's model size; questions
 subject by a name the store does not write, GE-T7 on a thousand real works, and the ones only
 people can close. None of it moved in 1.19.
 
+### `floor: spread`: PELT's scale on float metrics (SMYSL-3 §21.2, SMYSL-5 R12)
+
+- **`floor: spread`** in a `cusum/1`, `pelt/1` or `mad/1` recipe keeps the detector's scale at
+  least a tenth of the standard deviation of what it reads. It reaches float-valued metrics,
+  whose resolution is noise-sized, and is zero only for a constant series. The recipe text gains
+  `floor=spread`; a recipe without the key gives the same bytes as before. Library:
+  `detect::Floor::Spread` (`Floor` is `#[non_exhaustive]`) and `detect::spread`. `tel detect`
+  and `tel calibrate` read it.
+- **On RCAEval**, PELT's calibrated penalty falls from 10¹⁷–10²⁰ to 10⁴–10⁵. Carried from Sock
+  Shop it holds 10 % on Online Boutique and Train Ticket (1.1 and 5.6 % one value a trial, 4.4
+  and 6.7 % per kind), where it overshot to every fault-free window before. CUSUM under the
+  floor carries at every setting. MAD should keep `floor: resolution`: its window is in the
+  floor, so a fault raises its own scale.
+- **A ceiling, stated.** On a noise-free step the floor grows with the step, so a change is
+  worth exactly `100·n` of PELT's `penalty`, whatever its size. At margin 2 one value a trial
+  passed it (80,000 against 72,000) and saw nothing.
+
+### GE-M8 on RCAEval's repeated faults (SMYSL-3 §26)
+
+`examples/ge_m8_rcaeval` ranks RCAEval's 90 cases a system by episode similarity. Each (service,
+fault) is injected three times, and the repetitions are the recurrences. The stop condition does
+not fire on any system, so similarity stays model-independent. On real incidents it is weak,
+though: a case finds about half its repetitions in its top five, ten times chance, against 0.97
+on simulated episodes. Log templates read as "new in the window" were mostly Drain's drift, and
+without them MinHash's recurrence on Sock Shop rises from 0.24 to 0.56.
+
 ## 1.19.0 — 2026-11-23
 
 One question 1.18 left, answered on real data: is a level detector's alarm worth anything on

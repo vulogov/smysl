@@ -61,6 +61,10 @@
 //! margin of 2 (`calibrate::Target::with_margin`, at most `⌊rate · n / 2⌋` normal pairs) beside
 //! 1. Each is run on the calibrating set and, unchanged, on the held-out one.
 //!
+//! **The spread floor** (R12). Every calibration is also made under `floor: spread` (RFC
+//! SMYSL-3 §21.2), a scale at least a tenth of the series' standard deviation, which reaches
+//! float metrics that the resolution floor does not. Run with `--held` RE2-OB and then RE2-TT.
+//!
 //! **A third system** (R11). `--held` takes any RCAEval RE2 system; RE2-TT (Train Ticket) is
 //! read as RE2-OB is.
 //!
@@ -247,11 +251,13 @@ enum Ask {
     Each(usize, Values),
 }
 
-/// The detector options compared: the shipped floor, and `floor: resolution` (R10).
-fn opts() -> [DetOptions; 2] {
+/// The detector options compared: the shipped floor, `floor: resolution` (R10) and
+/// `floor: spread` (R12).
+fn opts() -> [DetOptions; 3] {
     [
         DetOptions::default(),
         DetOptions::default().with_floor(Floor::Resolution),
+        DetOptions::default().with_floor(Floor::Spread),
     ]
 }
 
@@ -521,7 +527,7 @@ struct Config {
     each: bool,
 }
 
-const CONFIGS: [Config; 4] = [
+const CONFIGS: [Config; 6] = [
     Config {
         opt: 0,
         each: false,
@@ -532,6 +538,11 @@ const CONFIGS: [Config; 4] = [
         each: false,
     },
     Config { opt: 1, each: true },
+    Config {
+        opt: 2,
+        each: false,
+    },
+    Config { opt: 2, each: true },
 ];
 
 /// The transfer margins compared (R10).
@@ -541,7 +552,7 @@ impl Config {
     fn label(&self) -> String {
         format!(
             "{}, {}",
-            ["tiny floor", "resolution floor"][self.opt],
+            ["tiny floor", "resolution floor", "spread floor"][self.opt],
             if self.each { "per kind" } else { "one a trial" }
         )
     }

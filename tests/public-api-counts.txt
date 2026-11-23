@@ -39,6 +39,6 @@ smysl-query      4029
 smysl-measure    3608
 smysl-lib        1651
 smysl-embed-candle 140
-smysl-tel        3147
+smysl-tel        3149
 smysl-series     1089
 smysl-bund       540

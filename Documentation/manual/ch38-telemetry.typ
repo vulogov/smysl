@@ -405,12 +405,13 @@ With several series, one value is set by whichever barely moves, since a near-co
 alarms on any change at all. `--each` gives each series its own value instead, and still holds
 the 10 % over the windows as a whole. Adding `floor: resolution` to the recipe goes further: it
 keeps a flat window's scale at the series' own step instead of near zero, so the value stays in a
-sane range. `--margin 2` holds the windows to half the rate, leaving room for when the values are
+sane range. On float-valued metrics, whose smallest step is noise-sized, `floor: spread` holds
+the scale at a tenth of the series' spread instead. `--margin 2` holds the windows to half the rate, leaving room for when the values are
 used somewhere they were not set. The calibrated value goes into the recipe, so the recipe
 hash still records what ran. The rate
 holds on the windows given. Whether it carries to another system has to be measured; RFC SMYSL-3
-§21.1 has the rule. On three systems of one benchmark, the value that carried was one value with
-`floor: resolution`; values set `--each` fitted their own system too closely (RFC SMYSL-5 §15).
+§21.1 has the rule. On three systems of one benchmark, CUSUM and PELT carried with `floor:
+spread` and MAD with `floor: resolution` (RFC SMYSL-5 §15).
 
 *Replayed to the byte.* A detector here uses only addition, subtraction, multiplication,
 division and square roots, which every machine rounds the same way. It never uses a logarithm or

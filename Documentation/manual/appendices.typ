@@ -1212,8 +1212,9 @@ windows jointly, and a series that alarmed in none of them keeps the recipe's va
 reported as uncalibrated. `--margin M` holds the windows to `R / M`, leaving room for values
 carried to other data. A `cusum/1`, `pelt/1` or `mad/1` recipe, for `tel detect` or `tel
 calibrate`, may carry `floor: resolution`: the detector's scale is then at least the smallest
-step between the series' distinct values, so a flat stretch is not read as infinitely precise
-(RFC SMYSL-3 §21.2). An argument not admitted is exit 2, and a rate the ladder cannot meet is
+step between the series' distinct values, so a flat stretch is not read as infinitely precise.
+`floor: spread` holds it at a tenth of the series' standard deviation instead, for float-valued
+series (RFC SMYSL-3 §21.2). An argument not admitted is exit 2, and a rate the ladder cannot meet is
 exit 1.
 
 `tel info RECIPE --series S… --during FROM-TO` computes an information measure (RFC SMYSL-5)

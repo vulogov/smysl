@@ -205,6 +205,12 @@ required-features = ["tel"]
 name              = "ge_m8"
 required-features = ["tel", "semantic"]
 
+# GE-M8 on RCAEval's repeated faults (real data, read from a download). The run is recorded in
+# RFC SMYSL-3 §26.
+[[example]]
+name              = "ge_m8_rcaeval"
+required-features = ["tel", "semantic"]
+
 [[bin]]
 name              = "smysl"
 path              = "src/main.rs"

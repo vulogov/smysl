@@ -383,4 +383,21 @@ fn a_margin_tightens_and_a_floor_travels_into_detect() {
         staged.contains("floor=resolution"),
         "the recipe records the floor"
     );
+
+    // `floor: spread` travels the same way into the printed recipe.
+    let spread = dir.join("spread.hjson");
+    std::fs::write(&spread, "{ detector: pelt/1, floor: spread }").unwrap();
+    let o = base(&[], spread.to_str().unwrap());
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    let recipe = String::from_utf8_lossy(&o.stdout)
+        .lines()
+        .next()
+        .unwrap()
+        .to_string();
+    assert!(recipe.ends_with(", floor: spread }"), "{recipe}");
 }
