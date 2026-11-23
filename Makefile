@@ -113,9 +113,9 @@ doc-gate: ## Rustdoc with warnings denied, as docs.rs would show it
 # red job saying nothing about the API. 0.10.0 and 0.12.0 were never published and never will
 # be; everything in them shipped in the release after.
 # 1.12.0, 1.13.0 and 1.14.0 were cut and never published; 1.15.0 reached the registry on
-# 2026-11-14, 1.16.0 on 2026-11-16, 1.17.0 on 2026-11-19 and 1.18.0 on 2026-11-22, so the baseline
-# moves with each.
-BASELINE  := 1.18.0
+# 2026-11-14, 1.16.0 on 2026-11-16, 1.17.0 on 2026-11-19, 1.18.0 on 2026-11-22 and 1.19.0 on
+# 2026-11-23, so the baseline moves with each.
+BASELINE  := 1.19.0
 # The baseline is taken from **this repository's tag**, not from the registry index, and that
 # is a reproducibility fix rather than a preference. `--baseline-version` resolves the version
 # through `index.crates.io` on every run even when the rustdoc for it is already cached, so a
