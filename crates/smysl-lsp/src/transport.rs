@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use crate::analysis::{
     AnalysisHost, Change, CompletionKind, Diagnostic, Encoding, Language, Position, Range,
-    Severity, SymbolKind, TextEdit,
+    Severity, SymbolKind, TextEdit, Workspace,
 };
 use crate::{LspConfig, LspError};
 
@@ -165,6 +165,8 @@ struct Server<W: Write> {
     log: Log,
     /// Messages for `window/showMessage`, sent after the reply that produced them.
     notices: Vec<String>,
+    /// `--library`, which wins over the editor's root folder.
+    root: Option<std::path::PathBuf>,
 }
 
 /// What handling one message decided.
@@ -278,6 +280,22 @@ impl<W: Write> Server<W> {
                     Encoding::Utf16
                 };
                 self.host = AnalysisHost::new(enc);
+                // The workspace: `--library`, else the editor's root folder (§4.4).
+                let root = self.root.clone().or_else(|| {
+                    params
+                        .get("rootUri")
+                        .and_then(Value::as_str)
+                        .or_else(|| {
+                            params
+                                .pointer("/workspaceFolders/0/uri")
+                                .and_then(Value::as_str)
+                        })
+                        .and_then(uri_to_path)
+                });
+                if let Some(root) = root {
+                    let ws = load_workspace(&root, &mut self.log);
+                    self.host.set_workspace(ws);
+                }
                 Ok(json!({
                     "capabilities": {
                         "positionEncoding": enc.as_str(),
@@ -311,7 +329,7 @@ impl<W: Write> Server<W> {
             "textDocument/definition" => {
                 let (uri, pos) = at(params)?;
                 Ok(match self.host.definition(&uri, pos) {
-                    Some(r) => json!({ "uri": uri, "range": range(r) }),
+                    Some(l) => json!({ "uri": l.uri, "range": range(l.range) }),
                     None => Value::Null,
                 })
             }
@@ -325,7 +343,7 @@ impl<W: Write> Server<W> {
                     self.host
                         .references(&uri, pos, declaration)
                         .into_iter()
-                        .map(|r| json!({ "uri": uri, "range": range(r) }))
+                        .map(|l| json!({ "uri": l.uri, "range": range(l.range) }))
                         .collect(),
                 ))
             }
@@ -488,6 +506,112 @@ impl<W: Write> Server<W> {
     }
 }
 
+/// The path of a `file:` URI.
+fn uri_to_path(uri: &str) -> Option<std::path::PathBuf> {
+    let rest = uri.strip_prefix("file://")?;
+    let bytes = rest.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok()?;
+            if let Ok(b) = u8::from_str_radix(hex, 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    Some(std::path::PathBuf::from(String::from_utf8(out).ok()?))
+}
+
+/// The `file:` URI of a path, as an editor writes one: everything but unreserved bytes and
+/// `/` percent-encoded.
+fn path_to_uri(path: &std::path::Path) -> String {
+    let mut out = String::from("file://");
+    for b in path.to_string_lossy().bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// How far a folder is read for its documents.
+const MAX_DEPTH: usize = 8;
+const MAX_FILES: usize = 2_000;
+const MAX_BYTES: u64 = 4 << 20;
+
+/// Read the workspace at `root`: a library's records when it is one, else the `.smy` and
+/// `.smysl` documents under it. Read only; what cannot be read is logged and left out.
+fn load_workspace(root: &std::path::Path, log: &mut Log) -> Workspace {
+    let mut ws = Workspace::new();
+    if root.join(smysl_text::library::MARKER).is_file() {
+        match smysl_text::Library::read_only(root) {
+            Ok(lib) => {
+                if !lib.skipped.is_empty() {
+                    log.line(&format!(
+                        "library {}: shards primary in the unit store were not read: {}",
+                        root.display(),
+                        lib.skipped.join(", ")
+                    ));
+                }
+                ws.skipped = lib.skipped;
+                ws.add_records(lib.records);
+            }
+            Err(e) => log.line(&format!("library {}: {e}", root.display())),
+        }
+        return ws;
+    }
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    let mut files = Vec::new();
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut entries: Vec<_> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
+        entries.sort();
+        for p in entries {
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if name.starts_with('.') || name == "target" || name == "node_modules" {
+                continue;
+            }
+            if p.is_dir() {
+                if depth < MAX_DEPTH {
+                    stack.push((p, depth + 1));
+                }
+            } else if (name.ends_with(".smy") || name.ends_with(".smysl"))
+                && p.metadata().is_ok_and(|m| m.len() <= MAX_BYTES)
+            {
+                files.push(p);
+            }
+        }
+    }
+    files.sort();
+    if files.len() > MAX_FILES {
+        log.line(&format!(
+            "workspace {}: {} documents, reading the first {MAX_FILES}",
+            root.display(),
+            files.len()
+        ));
+        files.truncate(MAX_FILES);
+    }
+    for p in files {
+        match std::fs::read_to_string(&p) {
+            Ok(text) => ws.add_text(&path_to_uri(&p), text),
+            Err(e) => log.line(&format!("{}: {e}", p.display())),
+        }
+    }
+    ws
+}
+
 /// Serve over `input` and `output` until `exit` or the end of `input`.
 pub(crate) fn serve<R, W>(input: R, output: W, config: LspConfig) -> Result<(), LspError>
 where
@@ -523,6 +647,7 @@ where
         debounce: Duration::from_millis(config.check_debounce_ms),
         log,
         notices: Vec::new(),
+        root: config.workspace_root.clone(),
     };
     loop {
         let next = match s.deadline {

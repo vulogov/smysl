@@ -66,7 +66,14 @@ people can close. None of it moved in 1.19.
   ground's status (Rule M), correct a label within edit distance 2, and declare an undeclared
   `x.` relation kind. A property test over 400 generated documents finds no fix that raises a
   status, removes a rebuttal or writes a `@resolve`.
-- A library's context is LS-P4. `smysl-lsp` is unpublished until the release that ships it.
+- **The workspace (LS-P4).** `--library DIR`, or the editor's root folder: a `b3:` reference into
+  another document or the library resolves in `check`, hover, definition and references, and
+  `.sq` documents are planned against it. A library is read by the new
+  `smysl_text::Library::read_only`, which reads the marker and the shard logs and nothing else,
+  so the server leaves it byte-identical even with a redaction `Library::open` would enforce.
+  Editor recipes for Helix, Neovim, VS Code and Zed are in
+  `Documentation/SMYSL-6_RFC/EDITORS.md`. RFC SMYSL-6 is built to its last phase.
+- `smysl-lsp` is unpublished until the release that ships it.
 
 ### `floor: spread`: PELT's scale on float metrics (SMYSL-3 §21.2, SMYSL-5 R12)
 

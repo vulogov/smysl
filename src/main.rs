@@ -2542,7 +2542,7 @@ fn cli() -> Command {
                     Arg::new("library")
                         .long("library")
                         .value_name("DIR")
-                        .help("A library whose records resolve cross-file references (LS-P4)"),
+                        .help("A library to read, without opening it, for references into it"),
                 )
                 .arg(
                     Arg::new("debounce-ms")

@@ -11,7 +11,14 @@ use smysl_core::surface::ParseOutcome;
 use smysl_core::{canonical_uid, Record, RelKind, Span, Uid, UnitCore};
 use smysl_graph::{effective_status, RetractionPolicy, Store};
 
-use super::{Document, Encoding, Position, Range};
+use super::{Document, Encoding, Position, Range, Workspace};
+
+/// A place in some document.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Location {
+    pub uri: String,
+    pub range: Range,
+}
 
 /// What [`super::AnalysisHost::hover`] shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,8 +54,11 @@ pub struct Symbol {
 
 /// One document's parse, indexed for navigation.
 pub(crate) struct Model<'a> {
+    uri: &'a str,
     doc: &'a Document,
     out: ParseOutcome,
+    /// What surrounds the document, when a workspace is loaded (LS-P4).
+    ws: Option<&'a Workspace>,
     /// Each unit's record span.
     decls: BTreeMap<Uid, Span>,
     /// The label written in each unit's own header, and its span.
@@ -61,6 +71,12 @@ fn first_line(text: &str, s: Span) -> Span {
         .find(['\n', '\r'])
         .map_or(s.end, |i| s.start + i);
     Span::new(s.start, end)
+}
+
+/// Where a definition of the record at `record` goes: the label in its header, or its first
+/// line.
+pub(crate) fn selection(text: &str, record: Span) -> Span {
+    header_label(text, record).map_or_else(|| first_line(text, record), |(_, s)| s)
 }
 
 /// In `@claim c/b { … }`, the span of `c/b`.
@@ -84,10 +100,17 @@ fn header_label(text: &str, record: Span) -> Option<(String, Span)> {
 
 impl<'a> Model<'a> {
     /// A document with errors in some records still has the others.
-    pub(crate) fn of(doc: &'a Document, out: ParseOutcome) -> Model<'a> {
+    pub(crate) fn of(
+        uri: &'a str,
+        doc: &'a Document,
+        out: ParseOutcome,
+        ws: Option<&'a Workspace>,
+    ) -> Model<'a> {
         let mut m = Model {
+            uri,
             doc,
             out,
+            ws,
             decls: BTreeMap::new(),
             label_at: BTreeMap::new(),
         };
@@ -104,8 +127,22 @@ impl<'a> Model<'a> {
         m
     }
 
-    fn unit(&self, uid: &Uid) -> Option<&UnitCore> {
-        self.out.units().find(|u| canonical_uid(u) == *uid)
+    /// A unit by uid: this document's, or the workspace's.
+    fn unit(&self, uid: &Uid) -> Option<UnitCore> {
+        self.out
+            .units()
+            .find(|u| canonical_uid(u) == *uid)
+            .cloned()
+            .or_else(|| self.ws?.unit(uid, self.uri))
+    }
+
+    /// Every record this document can see: its own, and the workspace's.
+    fn all_records(&self) -> Vec<Record> {
+        let mut r = self.out.records.clone();
+        if let Some(ws) = self.ws {
+            r.extend(ws.records(self.uri));
+        }
+        r
     }
 
     /// How a uid reads in this document: its label, or a short uid.
@@ -157,40 +194,76 @@ impl<'a> Model<'a> {
         self.decls.get(uid).map(|s| first_line(self.doc.text(), *s))
     }
 
-    pub(crate) fn definition(&self, at: usize, enc: Encoding) -> Option<Range> {
+    pub(crate) fn definition(&self, at: usize, enc: Encoding) -> Option<Location> {
         let (_, uid) = self.target(at)?;
-        Some(self.doc.range(self.definition_span(&uid)?, enc))
+        if let Some(s) = self.definition_span(&uid) {
+            return Some(Location {
+                uri: self.uri.to_string(),
+                range: self.doc.range(s, enc),
+            });
+        }
+        let (uri, doc, s) = self.ws?.declaration(&uid, self.uri)?;
+        Some(Location {
+            uri: uri.to_string(),
+            range: doc.range(s, enc),
+        })
     }
 
-    pub(crate) fn references(&self, at: usize, declaration: bool, enc: Encoding) -> Vec<Range> {
+    pub(crate) fn references(&self, at: usize, declaration: bool, enc: Encoding) -> Vec<Location> {
         let Some((_, uid)) = self.target(at) else {
             return Vec::new();
         };
-        let mut spans: Vec<Span> = self
+        let here = |s: Span| Location {
+            uri: self.uri.to_string(),
+            range: self.doc.range(s, enc),
+        };
+        let mut out: Vec<Location> = self
             .out
             .refs
             .iter()
             .filter(|(_, u)| *u == uid)
-            .map(|(s, _)| *s)
+            .map(|(s, _)| here(*s))
             .collect();
         if declaration {
-            spans.extend(self.definition_span(&uid));
+            out.extend(self.definition_span(&uid).map(here));
         }
-        spans.sort_by_key(|s| (s.start, s.end));
-        spans.dedup();
-        spans.into_iter().map(|s| self.doc.range(s, enc)).collect()
+        if let Some(ws) = self.ws {
+            for (uri, doc, s) in ws.references(&uid, self.uri) {
+                out.push(Location {
+                    uri: uri.to_string(),
+                    range: doc.range(s, enc),
+                });
+            }
+            if declaration {
+                if let Some((uri, doc, s)) = ws.declaration(&uid, self.uri) {
+                    out.push(Location {
+                        uri: uri.to_string(),
+                        range: doc.range(s, enc),
+                    });
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
     }
 
     pub(crate) fn hover(&self, at: usize, enc: Encoding) -> Option<Hover> {
         let (span, uid) = self.target(at)?;
         let range = self.doc.range(span, enc);
         let Some(u) = self.unit(&uid) else {
+            let where_ = if self.ws.is_some() {
+                "Not declared in this document or its workspace."
+            } else {
+                "Not declared in this document."
+            };
             return Some(Hover {
                 range,
-                markdown: format!("`{uid}`\n\nNot declared in this document."),
+                markdown: format!("`{}`\n\n{where_}", uid.canonical()),
             });
         };
-        let store = Store::from_records(self.out.records.clone());
+        let records = self.all_records();
+        let store = Store::from_records(records.clone());
         let effective = effective_status(&store, RetractionPolicy::default()).get(&uid);
         let profile = smysl_check::store_granularity(&store);
         let tokens = profile
@@ -200,7 +273,7 @@ impl<'a> Model<'a> {
         if let Some(e) = effective.filter(|e| *e != u.status) {
             md.push_str(&format!(" (effective: **{e}**)"));
         }
-        md.push_str(&format!("\n\n`{uid}`\n\n> {}\n\n", u.gist));
+        md.push_str(&format!("\n\n`{}`\n\n> {}\n\n", uid.canonical(), u.gist));
         let over = if tokens > profile.l0_max {
             " — over"
         } else {
@@ -225,9 +298,7 @@ impl<'a> Model<'a> {
         if !u.deps.is_empty() {
             md.push_str(&format!("deps: {}\n\n", list(&u.deps)));
         }
-        let rebutted = self
-            .out
-            .records
+        let rebutted = records
             .iter()
             .filter(
                 |r| matches!(r, Record::Relation(x) if x.kind == RelKind::Rebuts && x.to == uid),
@@ -241,6 +312,12 @@ impl<'a> Model<'a> {
         }
         if let Some(s) = &u.source {
             md.push_str(&format!("source: {} `{}`\n\n", s.kind, s.reference));
+        }
+        if !self.decls.contains_key(&uid) {
+            match self.ws.and_then(|w| w.declaration(&uid, self.uri)) {
+                Some((uri, _, _)) => md.push_str(&format!("declared in `{uri}`\n\n")),
+                None => md.push_str("from the library\n\n"),
+            }
         }
         Some(Hover {
             range,
@@ -358,12 +435,13 @@ mod tests {
         let h = host();
         // `e/a` in `grounds: [e/a]` is the second `e/a` in the text.
         let def = h.definition("file:///n.smy", pos_of("e/a", 1, 1)).unwrap();
-        assert_eq!(def.start, pos_of("e/a", 0, 0));
-        assert_eq!(def.end.character - def.start.character, 3);
+        assert_eq!(def.range.start, pos_of("e/a", 0, 0));
+        assert_eq!(def.range.end.character - def.range.start.character, 3);
         // From the declaration itself, too; and a `@rel` end.
         assert_eq!(
             h.definition("file:///n.smy", pos_of("c/b", 2, 0))
                 .unwrap()
+                .range
                 .start,
             pos_of("c/b", 0, 0)
         );
@@ -377,7 +455,7 @@ mod tests {
         assert_eq!(refs.len(), 2, "{refs:?}");
         let with = h.references("file:///n.smy", pos_of("e/a", 0, 0), true);
         assert_eq!(with.len(), 3);
-        assert_eq!(with[0].start, pos_of("e/a", 0, 0));
+        assert_eq!(with[0].range.start, pos_of("e/a", 0, 0));
     }
 
     #[test]

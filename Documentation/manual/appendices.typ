@@ -1328,7 +1328,7 @@ boundary is recorded and not diffed.
   (
     ([Flag], [Value], [Meaning]),
     ([`--stdio`], [—], [Serve over stdin and stdout: the only transport, and the default.]),
-    ([`--library`], [`DIR`], [A library whose records resolve cross-file references (LS-P4).]),
+    ([`--library`], [`DIR`], [A library to read, without opening it, for references into it; else the editor's root folder.]),
     ([`--debounce-ms`], [`N`], [Check a document this long after the last of a burst of changes; 150.]),
     ([`--log-file`], [`PATH`], [Log here instead of stderr.]),
   ),
@@ -1342,7 +1342,10 @@ source; go to definition, find references and the outline work within a document
 record types, header keys, statuses, labels and relation kinds, formats as `smysl fmt` does but
 refuses (and says why) when a comment or a record would be lost, and offers three quick fixes:
 lower a status to satisfy rule M, correct a misspelt label, declare an extension relation kind.
-None raises a status. It writes nothing to disk, and
+None raises a status. A `b3:` reference into the workspace, `--library` or else the editor's
+folder of documents, resolves in all of these, and a `.sq` query is planned against it. A
+library is read without being opened, so nothing in it changes. Editor recipes are in
+`Documentation/SMYSL-6_RFC/EDITORS.md`. It writes nothing to disk, and
 stdout carries the protocol only. Exit 0 after the editor's `shutdown` and `exit`; 1 when the
 editor exits without `shutdown`, closes the stream first, or sends a frame that is not JSON-RPC.
 A build without the `lsp` feature exits 2 and says so. Helix, in `languages.toml`:

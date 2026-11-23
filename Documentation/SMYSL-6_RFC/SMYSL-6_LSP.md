@@ -1,8 +1,8 @@
 # RFC SMYSL-6 — an embedded language server (`smysl-lsp`, `smysl lsp-server`)
 
 **Author:** Vladimir Ulogov
-**Status:** draft, amended in review against the code (R1, 2026-11-23). LS-P1 to LS-P3 are
-built (1.20); LS-P4 is not.
+**Status:** amended in review against the code (R1, 2026-11-23). All four phases, LS-P1 to
+LS-P4, are built (1.20).
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged.
 **Crate:** `crates/smysl-lsp`, new, behind the facade's `lsp` feature.
 **Distribution:** one binary. `smysl lsp-server` serves it.
@@ -119,10 +119,23 @@ Open documents live in `AnalysisHost`, a `BTreeMap` from URI to text and version
 `didOpen`, `didChange` (full or incremental) and `didClose`. Nothing is read from or written to
 disk for an open document.
 
-**The workspace (LS-P4)** is a read-only snapshot. `Library::open` is not read-only: it settles
-migrations and runs `enforce_z`, which may unlink objects (`crates/smysl-text/src/library.rs`).
-LS-P4 adds a read path that only reads the marker and the shard logs into a `Store`, and the
-server uses that (R1-7).
+**The workspace (LS-P4)** is a read-only snapshot, taken when the editor starts the server:
+`--library`, else the editor's root folder.
+
+- **A library.** `Library::open` is not read-only: it settles migrations and runs `enforce_z`,
+  which may unlink objects (`crates/smysl-text/src/library.rs`). LS-P4 adds
+  `Library::read_only`, which reads the marker and each shard's CBOR log and nothing else (R1-7).
+  A shard migrated to redb as primary would need the unit store opened, which takes its lock,
+  so it is left unread and logged.
+- **A folder.** Its `.smy` and `.smysl` documents, to depth 8, at most 2,000, each at most
+  4 MiB; hidden directories, `target` and `node_modules` skipped.
+- **What it gives.** `check` sees the workspace's records, so a `b3:` reference into another
+  document or the library resolves, and only findings placed in the open document are shown.
+  Hover, definition and references cross documents. Labels stay a document's own: the parser
+  resolves them within it. An open document's file on disk is left out of what it sees.
+- **`.sq`** is planned against the workspace's store. A stage or scope that needs the library
+  layer (`from library`, `text`, …) is `SMY-E461` there, which is the read-only server's limit
+  and not the query's error, so it is not shown (R1-11).
 
 ## 5. What the server does
 
@@ -271,8 +284,10 @@ args = ["lsp-server"]
 - **LS-P3 — completion, formatting, code actions.** **Gate:** a property test over generated
   documents finds no action that raises a status, and no formatting that drops a comment.
 - **LS-P4 — the workspace.** The read-only library read, cross-file resolution, `.sq` planning
-  against it, and editor recipes in `Documentation/`. **Gate:** a library opened by the
-  server is byte-identical afterwards, objects included.
+  against it, and editor recipes in `Documentation/SMYSL-6_RFC/EDITORS.md`. **Gate:** a library
+  opened by the server is byte-identical afterwards, objects included. **Met:** the gate's
+  library holds a redaction whose objects are still on disk, which `Library::open` would unlink;
+  after the server has read it and resolved a uid into it, every file is byte for byte as before.
 
 ## 9. Amendments
 
@@ -299,5 +314,7 @@ args = ["lsp-server"]
   so the protocol can be tested without a process.
 - **R1-9.** `sq/1`'s filter fields are `kind`, `schema`, `status`, `commitment` and `lang`, not
   the draft's `label` and `tag`; its clauses include `with`, `expand`, `said` and `observed`.
+- **R1-11.** Planning a query needs a scope. The server's is the workspace's store, which answers
+  `from store:` only; what needs the library layer is not reported (§4.4).
 - **R1-10.** Rule M constrains `derived` and `inferred` only. A quick fix that lowered a
   `measured` unit over a speculative ground would answer a finding `check` never makes.

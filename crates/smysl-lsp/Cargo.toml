@@ -23,5 +23,7 @@ smysl-core  = { workspace = true }
 smysl-graph = { workspace = true }
 smysl-check = { workspace = true }
 smysl-query = { workspace = true }
+# A library's records, read without opening it (`Library::read_only`, LS-P4).
+smysl-text  = { workspace = true }
 # JSON-RPC, and nothing else of the protocol (R1-5): the transport's alone.
 serde_json  = { workspace = true }

@@ -185,8 +185,9 @@ fn navigation_through_the_binary_answers_exactly() {
         hover,
         json!({
             "contents": { "kind": "markdown", "value": format!(
-                "**e/a** · `@evidence` · measured\n\n`{uid_a}`\n\n> Latency rose.\n\n\
-                 gist: {tokens} tokens of `l0_max` 30\n\nsource: metric `p95`") },
+                "**e/a** · `@evidence` · measured\n\n`{}`\n\n> Latency rose.\n\n\
+                 gist: {tokens} tokens of `l0_max` 30\n\nsource: metric `p95`",
+                uid_a.canonical()) },
             "range": r(5, ref_col, ref_col + 3),
         })
     );
@@ -354,4 +355,209 @@ fn completion_formatting_and_a_quick_fix_through_the_binary() {
     let _ = receive(&mut stdout);
     send(&mut stdin, json!({ "jsonrpc": "2.0", "method": "exit" }));
     assert_eq!(child.wait().unwrap().code(), Some(0));
+}
+
+fn scratch(what: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("smysl-lsp-{what}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// Every file under `root`, with its bytes.
+fn snapshot(root: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                stack.push(p);
+            } else {
+                out.insert(p.clone(), std::fs::read(&p).unwrap());
+            }
+        }
+    }
+    out
+}
+
+fn session(
+    args: &[&str],
+) -> (
+    std::process::Child,
+    std::process::ChildStdin,
+    BufReader<std::process::ChildStdout>,
+) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_smysl"))
+        .arg("lsp-server")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdin = child.stdin.take().unwrap();
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    (child, stdin, stdout)
+}
+
+fn finish(
+    mut child: std::process::Child,
+    mut stdin: std::process::ChildStdin,
+    mut stdout: BufReader<std::process::ChildStdout>,
+) {
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 99, "method": "shutdown" }),
+    );
+    let _ = receive(&mut stdout);
+    send(&mut stdin, json!({ "jsonrpc": "2.0", "method": "exit" }));
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+}
+
+/// LS-P4's gate: a library the server reads is byte-identical afterwards, objects included,
+/// and a document resolves a uid into it.
+#[test]
+fn a_library_is_read_and_left_byte_identical() {
+    use smysl::text::library::{AddSpec, Library};
+    use smysl::text::limits::Caps;
+    use smysl::text::readers::Input;
+
+    let dir = scratch("library");
+    let root = dir.join("lib");
+    let mut lib = Library::create(&root).unwrap();
+    let added = lib
+        .add(
+            &Input::new(b"the pool wait rose\n"),
+            &AddSpec::new("txt/1", "notes/pool", "CC0-1.0")
+                .with_lang(smysl::LangTag::new("en").unwrap())
+                .with_carry(smysl::Carry::Text),
+            &Caps::DEFAULT,
+        )
+        .unwrap();
+    let source = smysl::SourceRef::new(
+        smysl::SourceKind::Doc,
+        format!("{}#L1", added.parts[0].canonical()),
+    );
+    let unit = smysl::UnitCoreBuilder::new(
+        smysl::KernelType::Evidence,
+        "Pool wait rose.",
+        smysl::Status::Cited,
+    )
+    .source(source)
+    .build()
+    .unwrap();
+    let uid = smysl::canonical_uid(&unit);
+    // And a second text, redacted by a record appended as another writer would leave it: its
+    // objects are still on disk, and `Library::open` would unlink them (`enforce_z`). The
+    // server must not, so this is what makes the gate able to fail.
+    let other = lib
+        .add(
+            &Input::new(b"a note to be redacted\n"),
+            &AddSpec::new("txt/1", "notes/gone", "CC0-1.0")
+                .with_lang(smysl::LangTag::new("en").unwrap())
+                .with_carry(smysl::Carry::Text),
+            &Caps::DEFAULT,
+        )
+        .unwrap();
+    let agent = smysl::AgentId::new("tool:reviewer").unwrap();
+    let redaction =
+        smysl::Redaction::new(other.parts[0], agent.clone(), smysl::Hlc::new(1, 0, agent));
+    lib.append_records(&[
+        smysl::Record::Unit(unit),
+        smysl::Record::Redaction(redaction),
+    ])
+    .unwrap();
+    drop(lib);
+    let before = snapshot(&root);
+    assert!(
+        before
+            .keys()
+            .any(|p| p.to_string_lossy().contains("objects")),
+        "objects exist"
+    );
+
+    let (child, mut stdin, mut stdout) = session(&["--library", root.to_str().unwrap()]);
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+    );
+    let _ = receive(&mut stdout);
+    let text = format!(
+        "@doc smysl/0.1 {{ id: v/t }}\n\n@claim c/b {{ status: inferred, grounds: [{}] }}\n~ The pool is starved.\n",
+        uid.canonical()
+    );
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": { "textDocument": {
+            "uri": "file:///w/t.smy", "languageId": "smysl", "version": 1, "text": text } } }),
+    );
+    let published = receive(&mut stdout);
+    assert_eq!(
+        published["params"]["diagnostics"],
+        json!([]),
+        "the uid resolves into the library"
+    );
+    let col = text.lines().nth(2).unwrap().find("b3:").unwrap() as u64 + 4;
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "textDocument/hover", "params": {
+            "textDocument": { "uri": "file:///w/t.smy" }, "position": { "line": 2, "character": col } } }),
+    );
+    let card = receive(&mut stdout)["result"]["contents"]["value"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(card.contains("> Pool wait rose."), "{card}");
+    assert!(card.contains("from the library"), "{card}");
+    finish(child, stdin, stdout);
+
+    assert_eq!(
+        snapshot(&root),
+        before,
+        "the library is byte-identical, objects included"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A folder's documents: definition goes into another file, found from the editor's root.
+#[test]
+fn a_folder_is_the_workspace_when_no_library_is_named() {
+    let dir = scratch("folder");
+    let base = "@doc smysl/0.1 { id: v/base }\n\n@evidence e/a { status: measured, source: { kind: metric, ref: \"p95\" } }\n~ Latency rose.\n";
+    std::fs::write(dir.join("base.smy"), base).unwrap();
+    let uid = smysl::surface::parse_surface(base)
+        .unwrap()
+        .uid_of(&"e/a".parse().unwrap())
+        .unwrap();
+    let text = format!(
+        "@doc smysl/0.1 {{ id: v/use }}\n\n@claim c/b {{ status: derived, grounds: [{}] }}\n~ It regressed.\n",
+        uid.canonical()
+    );
+    std::fs::write(dir.join("use.smy"), &text).unwrap();
+    let root_uri = format!("file://{}", dir.display());
+    let (child, mut stdin, mut stdout) = session(&[]);
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "rootUri": root_uri } }),
+    );
+    let _ = receive(&mut stdout);
+    let uri = format!("{root_uri}/use.smy");
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": { "textDocument": {
+            "uri": uri, "languageId": "smysl", "version": 1, "text": text } } }),
+    );
+    assert_eq!(receive(&mut stdout)["params"]["diagnostics"], json!([]));
+    let col = text.lines().nth(2).unwrap().find("b3:").unwrap() as u64 + 4;
+    send(
+        &mut stdin,
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "textDocument/definition", "params": {
+            "textDocument": { "uri": uri }, "position": { "line": 2, "character": col } } }),
+    );
+    let def = receive(&mut stdout)["result"].clone();
+    assert_eq!(def["uri"], format!("{root_uri}/base.smy"));
+    assert_eq!(def["range"]["start"], json!({ "line": 2, "character": 10 }));
+    finish(child, stdin, stdout);
+    let _ = std::fs::remove_dir_all(&dir);
 }

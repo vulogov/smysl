@@ -7,6 +7,7 @@
 mod edit;
 mod line_index;
 mod nav;
+mod workspace;
 
 use std::collections::BTreeMap;
 
@@ -17,7 +18,8 @@ use smysl_graph::Store;
 
 pub use edit::{Action, Completion, CompletionKind, TextEdit};
 pub use line_index::{Encoding, LineIndex, Position, Range};
-pub use nav::{Hover, Symbol, SymbolKind};
+pub use nav::{Hover, Location, Symbol, SymbolKind};
+pub use workspace::Workspace;
 
 /// What a document is (§4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -126,6 +128,8 @@ impl Document {
 pub struct AnalysisHost {
     docs: BTreeMap<String, Document>,
     encoding: Encoding,
+    /// What surrounds the open documents (LS-P4), when one was loaded.
+    workspace: Option<Workspace>,
 }
 
 impl AnalysisHost {
@@ -133,11 +137,21 @@ impl AnalysisHost {
         AnalysisHost {
             docs: BTreeMap::new(),
             encoding,
+            workspace: None,
         }
     }
 
     pub fn encoding(&self) -> Encoding {
         self.encoding
+    }
+
+    /// Set what surrounds the open documents (§4.4). Every answer after reads it.
+    pub fn set_workspace(&mut self, ws: Workspace) {
+        self.workspace = Some(ws);
+    }
+
+    pub fn workspace(&self) -> Option<&Workspace> {
+        self.workspace.as_ref()
     }
 
     pub fn open(&mut self, uri: &str, language: Language, version: i64, text: String) {
@@ -168,13 +182,13 @@ impl AnalysisHost {
 
     /// A surface document's parse, indexed for navigation; `None` for a query, a document
     /// not open, or one whose header does not parse.
-    fn model(&self, uri: &str) -> Option<nav::Model<'_>> {
+    fn model<'a>(&'a self, uri: &'a str) -> Option<nav::Model<'a>> {
         let doc = self.docs.get(uri)?;
         if doc.language != Language::Surface {
             return None;
         }
         let out = parse(doc).ok()?;
-        Some(nav::Model::of(doc, out))
+        Some(nav::Model::of(uri, doc, out, self.workspace.as_ref()))
     }
 
     fn at(&self, uri: &str, pos: Position) -> Option<usize> {
@@ -186,14 +200,15 @@ impl AnalysisHost {
         self.model(uri)?.hover(self.at(uri, pos)?, self.encoding)
     }
 
-    /// Where the unit under `pos` is declared, in this document (§5.3).
-    pub fn definition(&self, uri: &str, pos: Position) -> Option<Range> {
+    /// Where the unit under `pos` is declared: this document, or another of the workspace
+    /// (§5.3).
+    pub fn definition(&self, uri: &str, pos: Position) -> Option<Location> {
         self.model(uri)?
             .definition(self.at(uri, pos)?, self.encoding)
     }
 
     /// Every reference to the unit under `pos`, and its declaration when asked (§5.3).
-    pub fn references(&self, uri: &str, pos: Position, declaration: bool) -> Vec<Range> {
+    pub fn references(&self, uri: &str, pos: Position, declaration: bool) -> Vec<Location> {
         match (self.model(uri), self.at(uri, pos)) {
             (Some(m), Some(at)) => m.references(at, declaration, self.encoding),
             _ => Vec::new(),
@@ -217,7 +232,13 @@ impl AnalysisHost {
             Language::Surface => parse(doc).ok(),
             Language::Query => None,
         };
-        edit::complete(doc, out.as_ref(), at, self.encoding)
+        edit::complete(
+            doc,
+            out.as_ref(),
+            self.workspace.as_ref(),
+            at,
+            self.encoding,
+        )
     }
 
     /// The document's canonical form as one edit, `None` when it already is, or why it is not
@@ -250,9 +271,10 @@ impl AnalysisHost {
         let Some(doc) = self.docs.get(uri) else {
             return Vec::new();
         };
+        let ws = self.workspace.as_ref();
         let mut out = match doc.language {
-            Language::Surface => surface_diagnostics(doc, self.encoding),
-            Language::Query => query_diagnostics(doc, self.encoding),
+            Language::Surface => surface_diagnostics(uri, doc, self.encoding, ws),
+            Language::Query => query_diagnostics(uri, doc, self.encoding, ws),
         };
         out.sort();
         out.dedup();
@@ -319,7 +341,12 @@ pub fn parse(doc: &Document) -> Result<ParseOutcome, smysl_core::error::ParseErr
     parse_surface(&doc.text)
 }
 
-fn surface_diagnostics(doc: &Document, enc: Encoding) -> Vec<Diagnostic> {
+fn surface_diagnostics(
+    uri: &str,
+    doc: &Document,
+    enc: Encoding,
+    ws: Option<&Workspace>,
+) -> Vec<Diagnostic> {
     let out = match parse(doc) {
         Ok(o) => o,
         Err(e) => {
@@ -331,8 +358,14 @@ fn surface_diagnostics(doc: &Document, enc: Encoding) -> Vec<Diagnostic> {
             return vec![placed(doc, enc, &d, span)];
         }
     };
-    // As `smysl check FILE` does: the document's records, its labels, its parse findings.
-    let store = Store::from_records(out.records.clone());
+    // As `smysl check FILE` does: the document's records, its labels, its parse findings. With
+    // a workspace its records are in the store too, so a `b3:` reference into another document
+    // or the library resolves; only findings placed in this document are reported.
+    let mut records = out.records.clone();
+    if let Some(ws) = ws {
+        records.extend(ws.records(uri));
+    }
+    let store = Store::from_records(records);
     let mut report = check(
         &store,
         CheckOptions::default().with_labels(out.labels.clone()),
@@ -344,16 +377,52 @@ fn surface_diagnostics(doc: &Document, enc: Encoding) -> Vec<Diagnostic> {
     report
         .diagnostics
         .iter()
-        .map(|d| {
-            let span = places.span(&d.subject).unwrap_or_else(|| first_line(doc));
-            placed(doc, enc, d, span)
+        .filter_map(|d| {
+            let span = match places.span(&d.subject) {
+                Some(s) => s,
+                // About the workspace, not this document.
+                None if ws.is_some() => return None,
+                None => first_line(doc),
+            };
+            Some(placed(doc, enc, d, span))
         })
         .collect()
 }
 
-fn query_diagnostics(doc: &Document, enc: Encoding) -> Vec<Diagnostic> {
+fn query_diagnostics(
+    uri: &str,
+    doc: &Document,
+    enc: Encoding,
+    ws: Option<&Workspace>,
+) -> Vec<Diagnostic> {
     match smysl_query::parse(&doc.text) {
-        Ok(_) => Vec::new(),
+        // Planned against the workspace when there is one (LS-P4): its stages, scopes and
+        // fields are then checked as `smysl q` would check them.
+        Ok(parsed) => match ws {
+            None => Vec::new(),
+            Some(ws) => {
+                let store = Store::from_records(ws.records(uri));
+                let scope = smysl_query::StoreScope::new("workspace", &store);
+                let env = smysl_query::Env::new(&store, &scope);
+                match smysl_query::plan(&parsed.query, &env, &smysl_query::PlanOptions::default()) {
+                    Ok(_) => Vec::new(),
+                    // `SMY-E461` says a stage or scope needs the library layer, which a
+                    // read-only workspace does not open (`from library`, `text`, …): the
+                    // server's limit, not the query's error, so it is not reported.
+                    Err(ds) => ds
+                        .iter()
+                        .filter(|d| d.code != smysl_core::Code::E461)
+                        .map(|d| {
+                            let span = match d.subject {
+                                Subject::Span(s) => s,
+                                _ => first_line(doc),
+                            };
+                            placed(doc, enc, d, span)
+                        })
+                        .collect(),
+                }
+            }
+        },
         Err(d) => {
             let span = match d.subject {
                 Subject::Span(s) => s,

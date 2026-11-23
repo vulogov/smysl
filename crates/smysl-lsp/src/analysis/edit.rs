@@ -123,6 +123,7 @@ fn labelled(out: &ParseOutcome) -> Vec<(String, Option<&UnitCore>)> {
 pub(crate) fn complete(
     doc: &Document,
     out: Option<&ParseOutcome>,
+    ws: Option<&super::Workspace>,
     at: usize,
     enc: Encoding,
 ) -> Vec<Completion> {
@@ -152,6 +153,15 @@ pub(crate) fn complete(
         }
         for f in SQ_FIELDS {
             items.push((f.into(), "field".into(), CompletionKind::Keyword));
+        }
+        if let Some(ws) = ws {
+            for id in ws.schemas() {
+                items.push((
+                    id,
+                    "schema in the workspace".into(),
+                    CompletionKind::Keyword,
+                ));
+            }
         }
     } else if before.trim_start() == "@" {
         // `@` at the start of a line: a record.
