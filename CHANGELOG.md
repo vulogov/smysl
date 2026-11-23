@@ -91,6 +91,29 @@ before the injection and a faulty pair across it.
   less margin, so a carried value needs its rate checked on the new system. GE-I3's verdict
   holds in all four readings.
 
+### `floor: resolution` and a transfer margin (SMYSL-3 §21.1–21.2, SMYSL-5 R10)
+
+- **`floor: resolution`** in a `cusum/1`, `pelt/1` or `mad/1` recipe keeps the detector's scale
+  at least the smallest gap between the series' distinct values. A flat window is then no
+  longer read as infinitely precise. The floor is applied after the shipped one, so it can only
+  raise the scale. The recipe text gains `floor=resolution`. A recipe without the key gives the
+  same bytes and uids as before.
+- **Semver.** `cusum::Params`, `pelt::Params`, `mad::Params` and `Spec` are exhaustive, so the
+  option travels beside them as `detect::Options` / `detect::Floor`, both `#[non_exhaustive]`.
+  The additions are `Spec::parse_with_options`, `run_on_with`, `cusum::run_with` /
+  `change_points_with`, `pelt::run_with` / `change_points_with`, `mad::run_with` /
+  `centre_and_scale_floored`, and `detect::resolution`. `Spec::parse` still refuses the key.
+  `tel detect` and `tel calibrate` read it.
+- **`tel calibrate --margin M`** holds the windows to `rate / M`. Library: `calibrate::Target`
+  (`new`, `with_margin`, `allowed`). The calibration API is new in 1.19, so its functions take
+  `&Options` and a `Target` directly.
+- **On RCAEval**, the floor fixes CUSUM. Its one-value `h` falls from 1.5·10¹⁰ to 1.2·10⁵, and
+  carried to RE2-OB it sees every delay (100 % against 13 %) at 3.3 % false alarms. It does
+  nothing for PELT on float metrics, where the resolution is noise-sized. A margin of 2 halves an
+  overshoot that is sampling (PELT per kind 24 → 12 %), but not one that is the two systems
+  differing (16.7 % stays), and it costs detections. MAD holds its rate in every configuration.
+  GE-I3's verdict holds.
+
 ## 1.18.0 — 2026-11-22
 
 Two RFCs, each built to its last phase: SMYSL-4, which runs Bund2 scripts over a library, and

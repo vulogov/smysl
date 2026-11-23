@@ -1218,13 +1218,52 @@ parameter, so the recipe hash still says exactly what ran. The defaults are unch
   - a series that fired in no trial keeps the recipe's value and is reported as uncalibrated.
 
   None of these can add an alarm on the given trials.
+- **Margin.** A calibration may be held to `rate / margin` instead of `rate`, with `margin ≥ 1`:
+  at most `⌊rate · n / margin⌋` trials fire, in integer arithmetic. The bound is only proven on
+  the trials given. A value carried to other data (another system, a later week) has nothing
+  bounding its rate there, and a margin is room left for that (SMYSL-5 §15, R10).
 - **Scope.** Calibration applies to `mad/1`, `cusum/1` and `pelt/1`. `episode/1` and `baro/1`
   have no threshold to calibrate, and are refused.
 
 The library API is `smysl_tel::detect::calibrate` and `detect::calibrate_on` (over a substrate),
 with `calibrate_each` and `calibrate_on_each` per series. `smysl tel calibrate` prints the
-calibrated recipe, or one per series with `--each`, and writes nothing. The rate holds on the
+calibrated recipe, or one per series with `--each`, and writes nothing. It takes `--margin M`, and
+a recipe with `floor` (§21.2), which the printed recipe keeps. The rate holds on the
 trials given; whether it carries to another system is an empirical question (SMYSL-5 §15, R8).
+
+### 21.2 The scale floor
+
+A level detector divides by a scale: CUSUM by each regime's `σ`, PELT's penalty by `σ̂²`, robust z
+by the baseline's MAD. A series that is constant over its estimation window has a scale of zero.
+The shipped detectors then use a tiny floor (`10⁻⁹` of the level, `10⁻¹⁸` for PELT's variance),
+so any departure from a constant counts as a change. On one-second telemetry, an idle service's
+CPU or sockets are often constant over a reference window. Any later movement then scores near
+the calibration ladder's top, and calibrating them yields values like `h = 8·10¹⁶` (SMYSL-5 §15,
+R9).
+
+A recipe may instead carry **`floor: resolution`**. The scale is then at least the series'
+**resolution**: the smallest positive gap between two distinct values among those the detector
+reads. For CUSUM and PELT that is the whole series run over. For robust z it is the baseline and
+the window together. A series that moves by one step of its own quantum is then read as moving by
+about one scale unit, not by 10⁹.
+
+- **Recorded.** The recipe text gains `floor=resolution`, so the recipe hash and the output uids
+  differ from a run without it. A recipe without the key (or with `floor: tiny`) means exactly
+  what it always has, byte for byte.
+- **Beside the parameters, not among them.** `cusum::Params`, `pelt::Params`, `mad::Params` and
+  `Spec` are public and exhaustive, and a field or variant added to them would break 1.x. So the
+  option travels as `detect::Options` beside the `Spec`:
+  - `Spec::parse_with_options` admits the key, and `Spec::parse` still refuses it;
+  - the detectors and `run_on` gain `_with` forms;
+  - `smysl tel detect` and `tel calibrate` read recipes with it.
+- **A limit.** The resolution comes from the values the detector reads, test window included. A
+  series that has only ever taken two values therefore reads a jump between them as one quantum.
+  Robust z cannot flag that jump, though CUSUM still sees it if it is sustained.
+- **Where it binds.** The floor only ever raises the shipped scale; it is applied after it. It
+  helps quantized series: counts, and values recorded at a fixed precision. For float-valued
+  metrics, the smallest gap between distinct values is noise-sized, so the floor never binds.
+  On RCAEval it brought CUSUM's values from 10¹⁰ to 10⁵ and left PELT's at 10¹⁹ (SMYSL-5 §15,
+  R10).
 
 ## 22. Query and dossiers
 
@@ -1271,7 +1310,7 @@ The facade gains feature `tel` and one command group:
 | `smysl tel read <reader> <files…> --profile P [--at T]` | read into parts, series and change units (staged, as `ingest` is) |
 | `smysl tel window <series> <from> <to> [--sketch α] [--instrument I]` | materialise evidence |
 | `smysl tel detect <recipe.hjson> --series … --during …` | run detectors, stage their units |
-| `smysl tel calibrate <recipe.hjson> --series … --window REF-FROM-TO… --rate R [--each]` | a level detector's parameter from fault-free windows (§21.1), or one per series; writes nothing |
+| `smysl tel calibrate <recipe.hjson> --series … --window REF-FROM-TO… --rate R [--margin M] [--each]` | a level detector's parameter from fault-free windows (§21.1), or one per series; writes nothing |
 | `smysl tel at <series> <t>` | value in force at t, from the substrate |
 | `smysl tel investigate open\|consult\|hypothesis\|probe\|action\|close` | the ledger operations, for scripts and OKO |
 | `smysl tel evict --older-than <dur>` | rule TL eviction |

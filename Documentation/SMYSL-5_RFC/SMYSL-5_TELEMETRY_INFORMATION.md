@@ -2,11 +2,11 @@
 
 **Author:** Vladimir Ulogov
 **Status:** first draft, amended after review (R1, 2026-11-20), while building (R2 to R6) and
-after (R7 to R9).
+after (R7 to R10).
 TI-P0 to TI-P4 are built: `ent/1`, `perm/1`, `mi/1`, `jsd/1` and `tent/1`, rule TI in `check`,
 and their recomputation. TI-P5 closed with GE-I5's result: transfer entropy is not released,
 and `te` stays reserved (§10). GE-I1 to GE-I5 have run on simulated data (§15), and GE-I3 on RCAEval's
-RE2-SS and RE2-OB, real (R7 to R9); every other real-data run is still owed, and every other threshold is a
+RE2-SS and RE2-OB, real (R7 to R10); every other real-data run is still owed, and every other threshold is a
 proposal until the experiment that owns it has run (§17).
 **Target version:** not fixed. Phases are named (TI-P0 to TI-P5), not numbered by release.
 **Evidence baseline:** `dev/1.18.0` at `3e57160` ("SMYSL-4 BQ-P4"). Every code pointer below
@@ -32,6 +32,7 @@ Part A.
 | R7 | 2026-11-22 | 1.19. **R7-1** GE-I3's real-data arm, on RCAEval RE2-SS: its first reading, held to MAD's false-alarm rate with the detectors at their shipped defaults, was degenerate on one-second data, since those defaults flag 90 to 100 % of normal windows; the reading was amended before the rerun to hold every arm, detectors included, to 10 %. Its result: every fault type is seen by a level detector, and no statistic flags a faulty window none of them does (§15). |
 | R8 | 2026-11-22 | 1.19. **R8-1** The detectors are calibrated rather than scored on a grid: `detect::calibrate` (3 §21.1) sets MAD's threshold, CUSUM's `h` and PELT's `penalty` on RE2-SS's normal pairs to 10 %, and the values are run unchanged on RE2-OB, held out. **R8-2** GE-I3's real-data arm is replicated on RE2-OB. Its result: RE2-SS's values hold on RE2-OB (1 to 4 % false alarms) and miss only CUSUM's and PELT's delays there, and RE2-OB gives R7's verdict (§15). |
 | R9 | 2026-11-22 | 1.19. **R9-1** The detectors are also calibrated per series (3 §21.1, `calibrate_each`), keyed by metric kind so that values carry between systems, the rate held jointly over the trials. **R9-2** Run on RE2-SS and held out on RE2-OB beside R8's one value a trial. Its result: per series, CUSUM sees every RE2-SS fault and, carried to RE2-OB, its delays (100 % against 13 %); PELT's carried values overshoot their rate there (16.7 %); R7's verdict holds in all four readings (§15). |
+| R10 | 2026-11-22 | 1.19. **R10-1** Every calibration is also made under `floor: resolution` (3 §21.2) and at a transfer margin of 2 (3 §21.1). **R10-2** Its result: the floor brings CUSUM's values to sane ranges and with them RE2-OB's delays at one value a trial (100 % against 13 %), and does nothing for PELT on float-valued metrics; a margin of 2 halves an overshoot that is sampling and not one that is the systems differing. R7's verdict holds, with one RE2-OB pair under the floor flagged by a statistic and no detector (§15). |
 
 ---
 
@@ -810,10 +811,54 @@ under PELT. At RE2-OB's own per-kind calibration, all three see every type at 93
 - **Some kinds still sit at the scale floor.** `cpu` takes CUSUM `h` 8·10¹⁶ and PELT `penalty`
   4·10²⁰ on RE2-SS, because a CPU series that is flat over a reference window still meets the
   `10⁻⁹` floor. Per series contains that to the kind instead of letting it set every value, but
-  it does not remove it. Flooring the scale at the data's resolution remains the fix, recorded
-  and not done.
+  it does not remove it. Flooring the scale at the data's resolution is R10, below.
 - **R7's verdict holds in all four readings** (each system, each calibration). No faulty pair is
   flagged by a statistic and by no detector, and no statistic separates a type.
+
+**The scale floor and a transfer margin, run in 1.19** (R10; the same command). Every R9
+calibration (one value a trial or one per metric kind) is made twice: under the shipped floor,
+and under `floor: resolution` (3 §21.2), where a detector's scale is at least the smallest gap
+between the series' distinct values. Each is made at a margin of 1 and of 2 (3 §21.1: at most
+`⌊10 % · 90 / margin⌋` normal pairs, so 9 and 4). All are run on RE2-SS and carried unchanged to
+RE2-OB. The question was fixed before the run: does the floor bring the values to sane ranges and
+keep the detections, and does a margin keep a carried value under its rate?
+
+| calibration on RE2-SS | CUSUM `h` | RE2-OB false alarms, MAD / CUSUM / PELT | RE2-OB delay, MAD / CUSUM / PELT |
+|---|---|---|---|
+| tiny floor, one a trial, margin 1 (R8) | 1.5·10¹⁰ | 4.4 / 2.2 / 1.1 % | 100 / 13.3 / 26.7 % |
+| resolution floor, one a trial, margin 1 | 1.2·10⁵ | 5.6 / 3.3 / 1.1 % | 100 / **100** / 13.3 % |
+| tiny floor, per kind, margin 1 (R9) | `cpu` 8·10¹⁶ | 6.7 / 4.4 / 16.7 % | 100 / 100 / 73.3 % |
+| tiny floor, per kind, margin 2 | `cpu` 5·10¹⁷ | 2.2 / 3.3 / **16.7 %** | 100 / 100 / 73.3 % |
+| resolution floor, per kind, margin 1 | `cpu` 6000 | 6.7 / **11.1** / **24.4 %** | 100 / 100 / 80.0 % |
+| resolution floor, per kind, margin 2 | `cpu` 8·10¹⁶ | 2.2 / 6.7 / **12.2 %** | 100 / 100 / 33.3 % |
+
+On RE2-SS itself, every calibration holds its rate (at most 9, or 4, of 90). MAD flags 87 to
+100 % of every type under all of them, and CUSUM 80 to 100 %. PELT under the floor at one value a
+trial drops to 53 % on `loss`. At RE2-OB's own calibrations, every configuration sees every type
+at 87 % or more, except CUSUM under the tiny floor at one value a trial (delay 20 %, loss 73 %).
+
+- **The floor fixes CUSUM.** At one value a trial its `h` falls from 1.5·10¹⁰ to 1.2·10⁵. Carried
+  to RE2-OB it sees every delay at 3.3 % false alarms, which R8's value missed (13.3 %). That
+  was what per-series calibration was needed for in R9. Per kind, `cpu`'s `h` falls from
+  8·10¹⁶ to 6000 at margin 1.
+- **The floor does nothing for PELT on float metrics.** Its values stay at 10¹⁷ to 10²⁰.
+  RCAEval's metrics are floats whose smallest gap between distinct values is noise-sized, so
+  their resolution is far under any real scale and the floor never binds. PELT's `σ̂`, from the
+  median first difference, is zero for step-like series anyway. The floor helps quantized
+  series (counts, rounded values) and not these. That is a limit of the definition, not a bug,
+  and it is recorded in 3 §21.2.
+- **A margin halves an overshoot that is sampling, not one that is the systems differing.** At
+  margin 2, the per-kind overshoots under the floor fall by about half (CUSUM 11.1 → 6.7 %, PELT
+  24.4 → 12.2 %). PELT's under the tiny floor stays at 16.7 %: RE2-OB's fault-free windows score
+  above anything RE2-SS's did, and no tightening on RE2-SS can see that. Margins cost
+  detections: PELT's delays on RE2-OB fall from 80 % to 33 % at margin 2.
+- **What to run, from this data.** CUSUM with `floor: resolution` held its rate when carried, at
+  one value a trial (3.3 %) or per kind at margin 2 (6.7 %), and saw at least 86.7 % of every
+  type. MAD held its rate in every configuration. PELT's carried values are not to be trusted
+  without checking their rate on the new system. Two systems of one benchmark are what this
+  rests on.
+- **R7's verdict holds.** Under the floor on RE2-OB, one faulty pair is flagged by a statistic and
+  by no detector. No statistic separates a type in any configuration on either system.
 
 **GE-I5, run at TI-P5 on simulated data** (`cargo run --release -p smysl-tel --example
 ge_i5`, 300 pairs of each kind, seeds 1 to 5). The estimator is §10's, written in the example

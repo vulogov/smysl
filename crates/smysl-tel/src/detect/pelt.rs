@@ -18,7 +18,7 @@
 //! series without noise (`σ̂ = 0`) takes `σ̂² = 10⁻¹⁸·max(1, mean²)`: any change of level is
 //! then worth its penalty.
 
-use super::{segment, Input, Recipe};
+use super::{segment, Input, Options, Recipe};
 use smysl_core::{Decimal, UnitCore};
 
 /// The detector and its version.
@@ -66,20 +66,41 @@ pub fn median(xs: &[f64]) -> Option<f64> {
 }
 
 /// The noise variance `σ̂²` from first differences.
+#[cfg(test)]
 fn noise_variance(xs: &[f64]) -> f64 {
+    noise_variance_floored(xs, None)
+}
+
+/// [`noise_variance`] with `σ̂` at least `floor`.
+fn noise_variance_floored(xs: &[f64], floor: Option<f64>) -> f64 {
     let diffs: Vec<f64> = xs.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
     let sigma = median(&diffs).unwrap_or(0.0) / (0.6745 * std::f64::consts::SQRT_2);
     let var = sigma * sigma;
-    if var > 0.0 {
+    let var = if var > 0.0 {
         var
     } else {
         let mean = xs.iter().sum::<f64>() / xs.len().max(1) as f64;
         1e-18 * (mean * mean).max(1.0)
+    };
+    // The resolution floor only ever raises the shipped variance.
+    match floor {
+        Some(f) => var.max(f * f),
+        None => var,
     }
 }
 
 /// The change points of `xs`: indices where a new segment begins, after the first.
 pub fn change_points(xs: &[f64], p: &Params) -> Vec<usize> {
+    change_points_floored(xs, p, None)
+}
+
+/// [`change_points`] under `opts` (§21.2): with `floor: resolution`, `σ̂` is at least the
+/// resolution of `xs`.
+pub fn change_points_with(xs: &[f64], p: &Params, opts: &Options) -> Vec<usize> {
+    change_points_floored(xs, p, opts.floor_of(xs.iter().copied()))
+}
+
+fn change_points_floored(xs: &[f64], p: &Params, floor: Option<f64>) -> Vec<usize> {
     let n = xs.len();
     let min = p.min_size.max(1);
     if n < 2 * min {
@@ -97,7 +118,7 @@ pub fn change_points(xs: &[f64], p: &Params) -> Vec<usize> {
         let sum = s1[b] - s1[a];
         (s2[b] - s2[a] - sum * sum / len).max(0.0)
     };
-    let beta = crate::sketch::to_f64(p.penalty) * noise_variance(xs);
+    let beta = crate::sketch::to_f64(p.penalty) * noise_variance_floored(xs, floor);
 
     let mut f = vec![f64::INFINITY; n + 1];
     let mut last = vec![0usize; n + 1];
@@ -144,14 +165,25 @@ pub fn change_points(xs: &[f64], p: &Params) -> Vec<usize> {
 
 /// Run PELT over `input` in `[from_ms, to_ms)`: one segment per regime.
 pub fn run(input: &Input<'_>, from_ms: u64, to_ms: u64, p: &Params) -> Vec<UnitCore> {
+    run_with(input, from_ms, to_ms, p, &Options::default())
+}
+
+/// [`run`] under `opts` (§21.2), recorded in each segment's recipe.
+pub fn run_with(
+    input: &Input<'_>,
+    from_ms: u64,
+    to_ms: u64,
+    p: &Params,
+    opts: &Options,
+) -> Vec<UnitCore> {
     let points = input.points();
     if points.is_empty() {
         return Vec::new();
     }
     let xs: Vec<f64> = points.iter().map(|x| x.1).collect();
-    let recipe = p.recipe(from_ms, to_ms);
+    let recipe = opts.stamp(p.recipe(from_ms, to_ms));
     let mut bounds = vec![0usize];
-    bounds.extend(change_points(&xs, p));
+    bounds.extend(change_points_with(&xs, p, opts));
     bounds.push(points.len());
     bounds
         .windows(2)

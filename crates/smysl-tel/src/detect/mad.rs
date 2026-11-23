@@ -20,7 +20,7 @@
 //! spread at all takes `10⁻⁹·max(1, |median|)`, so any departure from a constant is anomalous.
 //! An empty baseline scores nothing.
 
-use super::{anomaly, Direction, Input, Recipe};
+use super::{anomaly, Direction, Input, Options, Recipe};
 use crate::detect::pelt::median;
 use crate::evidence::counted;
 use crate::sketch::to_f64;
@@ -62,6 +62,20 @@ impl Params {
 
 /// The baseline's centre and scale: its median, and the MAD (or its fallbacks).
 pub fn centre_and_scale(baseline: &[f64]) -> Option<(f64, f64)> {
+    centre_and_scale_floored(baseline, None)
+}
+
+/// [`centre_and_scale`] with the scale at least `floor` (§21.2): a scale under it, a fallback
+/// included, is raised to it.
+pub fn centre_and_scale_floored(baseline: &[f64], floor: Option<f64>) -> Option<(f64, f64)> {
+    let (med, scale) = centre_and_scale_tiny(baseline)?;
+    Some(match floor {
+        Some(f) if f > scale => (med, f),
+        _ => (med, scale),
+    })
+}
+
+fn centre_and_scale_tiny(baseline: &[f64]) -> Option<(f64, f64)> {
     let med = median(baseline)?;
     let dev: Vec<f64> = baseline.iter().map(|b| (b - med).abs()).collect();
     let mad = median(&dev).unwrap_or(0.0);
@@ -84,21 +98,35 @@ pub fn run(
     to_ms: u64,
     p: &Params,
 ) -> Vec<UnitCore> {
+    run_with(input, baseline, from_ms, to_ms, p, &Options::default())
+}
+
+/// [`run`] under `opts` (§21.2), recorded in each anomaly's recipe: with `floor: resolution`, the
+/// scale is at least the resolution of the baseline's and the window's values together.
+pub fn run_with(
+    input: &Input<'_>,
+    baseline: &[Sample],
+    from_ms: u64,
+    to_ms: u64,
+    p: &Params,
+    opts: &Options,
+) -> Vec<UnitCore> {
     let base: Vec<f64> = baseline
         .iter()
         .filter(|s| counted(s) && (p.baseline_from..p.baseline_to).contains(&s.ts_ms()))
         .map(|s| to_f64(s.value_dec()))
         .collect();
-    let Some((med, scale)) = centre_and_scale(&base) else {
-        return Vec::new();
-    };
-    let threshold = to_f64(p.threshold);
-    let recipe = p.recipe(from_ms, to_ms);
     let points: Vec<(u64, f64)> = input
         .points()
         .into_iter()
         .filter(|(t, _)| (from_ms..to_ms).contains(t))
         .collect();
+    let floor = opts.floor_of(base.iter().copied().chain(points.iter().map(|x| x.1)));
+    let Some((med, scale)) = centre_and_scale_floored(&base, floor) else {
+        return Vec::new();
+    };
+    let threshold = to_f64(p.threshold);
+    let recipe = opts.stamp(p.recipe(from_ms, to_ms));
 
     let mut out = Vec::new();
     // The open run: its first index, direction and largest |z|.

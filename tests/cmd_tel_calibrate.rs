@@ -288,3 +288,99 @@ fn each_series_gets_its_own_value_and_the_rate_holds_jointly() {
         "twice"
     );
 }
+
+#[test]
+fn a_margin_tightens_and_a_floor_travels_into_detect() {
+    let dir = library("margin");
+    let cusum = fixture("cusum.hjson");
+    let cpu = series("cpu");
+    let ws = windows();
+    let base = |extra: &[&str], recipe: &str| {
+        let mut args = vec![
+            "tel",
+            "calibrate",
+            recipe,
+            "--series",
+            cpu.as_str(),
+            "--rate",
+            "0.3",
+        ];
+        for w in &ws {
+            args.extend(["--window", w.as_str()]);
+        }
+        args.extend(extra);
+        args.extend(["-s", "lib"]);
+        run(&dir, &args)
+    };
+    let allowed = |o: &Output| -> usize {
+        let text = String::from_utf8_lossy(&o.stdout).into_owned();
+        let line = text.lines().nth(1).expect("a summary").to_string();
+        let at = line.find("at most ").expect("at most") + 8;
+        line[at..]
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let plain = base(&[], &cusum);
+    let tight = base(&["--margin", "3"], &cusum);
+    assert_eq!(plain.status.code(), Some(0));
+    assert_eq!(
+        tight.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&tight.stderr)
+    );
+    assert_eq!((allowed(&plain), allowed(&tight)), (3, 1));
+    assert!(String::from_utf8_lossy(&tight.stdout).contains("margin 3"));
+    for bad in ["0.5", "x"] {
+        assert_eq!(
+            base(&["--margin", bad], &cusum).status.code(),
+            Some(2),
+            "{bad}"
+        );
+    }
+
+    let floored = dir.join("floored.hjson");
+    std::fs::write(&floored, "{ detector: cusum/1, floor: resolution }").unwrap();
+    let o = base(&[], floored.to_str().unwrap());
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    let recipe = String::from_utf8_lossy(&o.stdout)
+        .lines()
+        .next()
+        .unwrap()
+        .to_string();
+    assert!(recipe.ends_with(", floor: resolution }"), "{recipe}");
+    let path = dir.join("floored-calibrated.hjson");
+    std::fs::write(&path, &recipe).unwrap();
+    let o = run(
+        &dir,
+        &[
+            "tel",
+            "detect",
+            path.to_str().unwrap(),
+            "--series",
+            &cpu,
+            "--during",
+            "1768550400000-1768564800000",
+            "-s",
+            "lib",
+        ],
+    );
+    assert!(
+        matches!(o.status.code(), Some(0 | 10)),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    let staged = std::fs::read_to_string(dir.join(".smysl/staged.smy")).unwrap_or_default();
+    assert!(
+        staged.contains("floor=resolution"),
+        "the recipe records the floor"
+    );
+}

@@ -37,6 +37,64 @@ pub mod episode;
 pub mod mad;
 pub mod pelt;
 
+/// How a level detector floors its scale (RFC SMYSL-3 §21.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum Floor {
+    /// The shipped floor: a scale of zero becomes `10⁻⁹` (CUSUM, MAD) or `10⁻¹⁸` (PELT's
+    /// variance) of the level, so any departure from a constant is a change. No recipe key.
+    #[default]
+    Tiny,
+    /// `floor: resolution`: the scale is at least the series' **resolution**, the smallest
+    /// positive gap between two of its distinct values in what the detector reads, so a series
+    /// that moves by one step of its own quantum is not read as an astronomical change.
+    Resolution,
+}
+
+/// What a recipe may carry beside its detector's parameters (§21.2). The default is what a
+/// recipe without these keys has always meant, so its text and uids do not change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct Options {
+    pub floor: Floor,
+}
+
+impl Options {
+    /// The options with `floor` set.
+    pub fn with_floor(mut self, floor: Floor) -> Options {
+        self.floor = floor;
+        self
+    }
+
+    /// `recipe` with these options' keys: none for the defaults.
+    pub fn stamp(&self, recipe: Recipe) -> Recipe {
+        match self.floor {
+            Floor::Tiny => recipe,
+            Floor::Resolution => recipe.with("floor", "resolution"),
+        }
+    }
+
+    /// The scale floor these options put under `values`, if any: their resolution under
+    /// [`Floor::Resolution`], none under the shipped floor or when no two values differ.
+    pub fn floor_of(&self, values: impl Iterator<Item = f64>) -> Option<f64> {
+        match self.floor {
+            Floor::Tiny => None,
+            Floor::Resolution => resolution(values),
+        }
+    }
+}
+
+/// The smallest positive gap between two distinct values, by total order; none when fewer than
+/// two values differ.
+pub fn resolution(values: impl Iterator<Item = f64>) -> Option<f64> {
+    let mut v: Vec<f64> = values.filter(|x| x.is_finite()).collect();
+    v.sort_by(f64::total_cmp);
+    v.windows(2)
+        .map(|w| w[1] - w[0])
+        .filter(|d| *d > 0.0)
+        .reduce(f64::min)
+}
+
 /// A detector's recipe (§21): which detector, its parameters, and what it ran over.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recipe {
@@ -232,6 +290,17 @@ pub enum Spec {
 
 impl Spec {
     pub fn parse(text: &str) -> Result<Spec, String> {
+        Spec::parse_inner(text, false).map(|(s, _)| s)
+    }
+
+    /// [`Spec::parse`], also admitting the [`Options`] keys (§21.2): `floor: resolution` (or
+    /// `tiny`, the default) on `cusum/1`, `pelt/1` and `mad/1`. A recipe without them parses to
+    /// the default options, so it means what it always has.
+    pub fn parse_with_options(text: &str) -> Result<(Spec, Options), String> {
+        Spec::parse_inner(text, true)
+    }
+
+    fn parse_inner(text: &str, options: bool) -> Result<(Spec, Options), String> {
         let o = smysl_core::surface::parse_object(text, 0)
             .map_err(|e| e.to_string())?
             .value;
@@ -257,11 +326,21 @@ impl Spec {
                 ))
             }
         };
+        let level = matches!(detector, cusum::ID | pelt::ID | mad::ID);
         for (k, _) in o.iter() {
-            if k.value != "detector" && !known.contains(&k.value.as_str()) {
+            let option = options && level && k.value == "floor";
+            if k.value != "detector" && !known.contains(&k.value.as_str()) && !option {
                 return Err(format!("`{}` is not a parameter of {detector}", k.value));
             }
         }
+        let opts = match get("floor") {
+            None => Options::default(),
+            Some(HValue::Str(s)) if s == "resolution" => {
+                Options::default().with_floor(Floor::Resolution)
+            }
+            Some(HValue::Str(s)) if s == "tiny" => Options::default(),
+            Some(_) => return Err("`floor` is `resolution` or `tiny`".into()),
+        };
         let decimal = |k: &str| -> Result<Option<Decimal>, String> {
             match get(k) {
                 None => Ok(None),
@@ -288,7 +367,7 @@ impl Spec {
                 other => Ok(other),
             }
         };
-        Ok(match detector {
+        let spec = match detector {
             cusum::ID => {
                 let d = cusum::Params::default();
                 Spec::Cusum(cusum::Params {
@@ -337,12 +416,14 @@ impl Spec {
                     top: count("top")?.map_or(d.top, |n| n as usize),
                 })
             }
-        })
+        };
+        Ok((spec, opts))
     }
 
-    /// The recipe as HJSON that [`Spec::parse`] reads back to this `Spec`, every parameter
-    /// written; a decimal is quoted, so it is read as written.
-    pub fn hjson(&self) -> String {
+    /// The recipe as HJSON that [`Spec::parse_with_options`] reads back to this `Spec` and
+    /// `opts`, every parameter written and the options only when not the default (so that
+    /// [`Spec::parse`] reads it too); a decimal is quoted, so it is read as written.
+    pub fn hjson(&self, opts: &Options) -> String {
         let body = match self {
             Spec::Cusum(p) => format!(r#"k: "{}", h: "{}", baseline: {}"#, p.k, p.h, p.baseline),
             Spec::Pelt(p) => format!(r#"penalty: "{}", min_size: {}"#, p.penalty, p.min_size),
@@ -356,7 +437,11 @@ impl Spec {
                 p.at_ms, p.pre_ms, p.post_ms, p.top
             ),
         };
-        format!("{{ detector: {}, {body} }}", self.id())
+        let floor = match opts.floor {
+            Floor::Tiny => "",
+            Floor::Resolution => ", floor: resolution",
+        };
+        format!("{{ detector: {}, {body}{floor} }}", self.id())
     }
 
     /// The detector's id.
@@ -374,6 +459,75 @@ impl Spec {
 #[cfg(test)]
 mod spec_tests {
     use super::*;
+
+    #[test]
+    fn resolution_is_the_smallest_gap_between_distinct_values() {
+        assert_eq!(resolution([3.0, 1.0, 1.0, 1.5, 7.0].into_iter()), Some(0.5));
+        assert_eq!(resolution([2.0, 2.0].into_iter()), None);
+        assert_eq!(resolution(std::iter::empty()), None);
+        assert_eq!(resolution([1.0, f64::NAN, 4.0].into_iter()), Some(3.0));
+    }
+
+    #[test]
+    fn the_default_options_change_no_byte_and_a_floor_is_recorded() {
+        use smysl_series::Sample;
+        // Flat, then one quantum up for a stretch.
+        let values: Vec<f64> = (0..60)
+            .map(|i| if (30..45).contains(&i) { 6.0 } else { 5.0 })
+            .collect();
+        let samples: Vec<Sample> = values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                Sample::new(1_000 * i as u64, None, Decimal::from_f64(*v).unwrap(), 0).unwrap()
+            })
+            .collect();
+        let input = Input {
+            series: Uid::from_bytes([1; 32]),
+            scheme: "prom",
+            key: "flat",
+            instrument: Uid::from_bytes([2; 32]),
+            samples: &samples,
+        };
+        let floor = Options::default().with_floor(Floor::Resolution);
+        let uids = |us: &[UnitCore]| us.iter().map(canonical_uid).collect::<Vec<_>>();
+        let (c, p) = (cusum::Params::default(), pelt::Params::default());
+        let m = mad::Params::new(0, 30_000);
+        assert_eq!(
+            uids(&cusum::run(&input, 0, 60_000, &c)),
+            uids(&cusum::run_with(&input, 0, 60_000, &c, &Options::default()))
+        );
+        assert_eq!(
+            uids(&pelt::run(&input, 0, 60_000, &p)),
+            uids(&pelt::run_with(&input, 0, 60_000, &p, &Options::default()))
+        );
+        assert_eq!(
+            uids(&mad::run(&input, &samples, 30_000, 60_000, &m)),
+            uids(&mad::run_with(
+                &input,
+                &samples,
+                30_000,
+                60_000,
+                &m,
+                &Options::default()
+            ))
+        );
+        let stamped = cusum::run_with(&input, 0, 60_000, &c, &floor);
+        assert!(!stamped.is_empty());
+        for u in &stamped {
+            let bytes = u.payload.as_deref().unwrap();
+            let text = String::from_utf8_lossy(bytes);
+            assert!(text.contains("floor=resolution"), "{text}");
+        }
+        assert_ne!(uids(&stamped), uids(&cusum::run(&input, 0, 60_000, &c)));
+        // One quantum is one robust z under the floor, not 10⁹.
+        let z = mad::run_with(&input, &samples, 30_000, 60_000, &m, &floor);
+        assert!(
+            z.is_empty(),
+            "a one-quantum move is under 3.5 z at the resolution floor"
+        );
+        assert!(!mad::run(&input, &samples, 30_000, 60_000, &m).is_empty());
+    }
 
     #[test]
     fn recipes_parse_with_defaults_and_refuse_what_nobody_reads() {
@@ -400,7 +554,25 @@ mod spec_tests {
             "{ detector: baro/1, at: 1000 }",
         ] {
             let s = Spec::parse(text).unwrap();
-            assert_eq!(Spec::parse(&s.hjson()).unwrap(), s, "{}", s.hjson());
+            let h = s.hjson(&Options::default());
+            assert_eq!(Spec::parse(&h).unwrap(), s, "{h}");
+        }
+        // The options: admitted only by parse_with_options, on the level detectors, and
+        // written back.
+        let r = r#"{ detector: cusum/1, h: 3, floor: resolution }"#;
+        assert!(Spec::parse(r).is_err(), "plain parse refuses an option");
+        let (s, o) = Spec::parse_with_options(r).unwrap();
+        assert_eq!(o.floor, Floor::Resolution);
+        assert_eq!(Spec::parse_with_options(&s.hjson(&o)).unwrap(), (s, o));
+        assert_eq!(
+            Spec::parse_with_options("{ detector: pelt/1 }").unwrap().1,
+            Options::default()
+        );
+        for bad in [
+            "{ detector: episode/1, floor: resolution }",
+            "{ detector: mad/1, baseline: \"1-2\", floor: coarse }",
+        ] {
+            assert!(Spec::parse_with_options(bad).is_err(), "{bad}");
         }
         for bad in [
             "{ }",
@@ -437,6 +609,30 @@ pub struct Detected {
 /// function of the arguments too.
 pub fn run_on<B: smysl_series::Backend>(
     spec: &Spec,
+    substrate: &smysl_series::Substrate<B>,
+    series: &[Uid],
+    from_ms: u64,
+    to_ms: u64,
+    members: &[UnitCore],
+    trigger: Option<Uid>,
+) -> Result<Detected, String> {
+    run_on_with(
+        spec,
+        &Options::default(),
+        substrate,
+        series,
+        from_ms,
+        to_ms,
+        members,
+        trigger,
+    )
+}
+
+/// [`run_on`] under `opts` (§21.2), which reach CUSUM, PELT and robust z.
+#[allow(clippy::too_many_arguments)]
+pub fn run_on_with<B: smysl_series::Backend>(
+    spec: &Spec,
+    opts: &Options,
     substrate: &smysl_series::Substrate<B>,
     series: &[Uid],
     from_ms: u64,
@@ -505,11 +701,11 @@ pub fn run_on<B: smysl_series::Backend>(
             samples: &samples,
         };
         let units = match spec {
-            Spec::Cusum(p) => cusum::run(&input, from_ms, to_ms, p),
-            Spec::Pelt(p) => pelt::run(&input, from_ms, to_ms, p),
+            Spec::Cusum(p) => cusum::run_with(&input, from_ms, to_ms, p, opts),
+            Spec::Pelt(p) => pelt::run_with(&input, from_ms, to_ms, p, opts),
             Spec::Mad(p) => {
                 let base = read(s, i, p.baseline_from, p.baseline_to)?;
-                mad::run(&input, &base, from_ms, to_ms, p)
+                mad::run_with(&input, &base, from_ms, to_ms, p, opts)
             }
             Spec::Episode(_) | Spec::Baro(_) => unreachable!("handled above"),
         };
@@ -531,10 +727,11 @@ pub fn run_on<B: smysl_series::Backend>(
 /// test_to)`. The windows are ones the caller holds fault-free.
 pub fn calibrate_on<B: smysl_series::Backend>(
     spec: &Spec,
+    opts: &Options,
     substrate: &smysl_series::Substrate<B>,
     series: &[Uid],
     windows: &[(u64, u64, u64)],
-    rate: Decimal,
+    target: calibrate::Target,
 ) -> Result<calibrate::Calibrated, String> {
     let read = read_trials(substrate, series, windows)?;
     let trials: Vec<Vec<calibrate::Pair<'_>>> = read
@@ -548,17 +745,18 @@ pub fn calibrate_on<B: smysl_series::Backend>(
                 .collect()
         })
         .collect();
-    calibrate::calibrate(spec, &trials, rate)
+    calibrate::calibrate(spec, opts, &trials, target)
 }
 
 /// [`calibrate_on`], per series (`calibrate::calibrate_each`): each `(series, instrument)` its
 /// own value, the rate held over the windows jointly.
 pub fn calibrate_on_each<B: smysl_series::Backend>(
     spec: &Spec,
+    opts: &Options,
     substrate: &smysl_series::Substrate<B>,
     series: &[Uid],
     windows: &[(u64, u64, u64)],
-    rate: Decimal,
+    target: calibrate::Target,
 ) -> Result<calibrate::CalibratedEach<(Uid, Uid)>, String> {
     let read = read_trials(substrate, series, windows)?;
     let trials: Vec<BTreeMap<(Uid, Uid), calibrate::Pair<'_>>> = read
@@ -577,7 +775,7 @@ pub fn calibrate_on_each<B: smysl_series::Backend>(
                 .collect()
         })
         .collect();
-    calibrate::calibrate_each(spec, &trials, rate)
+    calibrate::calibrate_each(spec, opts, &trials, target)
 }
 
 /// Each window's `(reference, test)` points, by `(series, instrument)`.

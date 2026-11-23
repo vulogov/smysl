@@ -1209,8 +1209,12 @@ series. The answer is the least value on a decimal ladder (1, 1.2, 1.5, 2, 2.5, 
 takes, and nothing is written. With `--each`, every series and instrument gets its own value,
 one recipe line each followed by the series and instrument. The rate is then held over the
 windows jointly, and a series that alarmed in none of them keeps the recipe's value and is
-reported as uncalibrated. An argument not admitted is exit 2, and a rate the ladder cannot meet
-is exit 1.
+reported as uncalibrated. `--margin M` holds the windows to `R / M`, leaving room for values
+carried to other data. A `cusum/1`, `pelt/1` or `mad/1` recipe, for `tel detect` or `tel
+calibrate`, may carry `floor: resolution`: the detector's scale is then at least the smallest
+step between the series' distinct values, so a flat stretch is not read as infinitely precise
+(RFC SMYSL-3 §21.2). An argument not admitted is exit 2, and a rate the ladder cannot meet is
+exit 1.
 
 `tel info RECIPE --series S… --during FROM-TO` computes an information measure (RFC SMYSL-5)
 over each series and its instruments, or `--instrument I` alone. `RECIPE` is an HJSON file, for
