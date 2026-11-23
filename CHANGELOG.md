@@ -7,6 +7,126 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.19.0 — 2026-11-23
+
+One question 1.18 left, answered on real data: is a level detector's alarm worth anything on
+someone else's system, and can a threshold set on one system be carried to another? The kernel
+did not change, no schema moved, the registry is 176, and `smysl/1.0` holds.
+
+**GE-I3 on real incidents (SMYSL-5 R7).** On RCAEval RE2-SS, with every arm held to 10 % false
+alarms, the level detectors see every fault type, and no statistic separates one they miss. The
+simulated verdict stands, on simulated kinds that RCAEval does not label.
+
+**Calibration (SMYSL-3 §21.1–21.2, SMYSL-5 R8 to R11).** The shipped defaults flag 90 to 100 %
+of fault-free one-second windows, so `smysl tel calibrate` sets MAD's `threshold`, CUSUM's `h` or
+PELT's `penalty` from windows the caller holds fault-free, at a stated rate. Values are one per
+window or `--each` series, under `floor: resolution` and a transfer `--margin`. Carried from
+RE2-SS to RE2-OB and RE2-TT unchanged, CUSUM under `floor: resolution` at one value a window
+held its rate on both (3.3 and 6.7 %). Per-series values fit their own system too closely to
+carry.
+
+**Still open.** GE-M7 has not run: it needs the Train-Ticket testbed (D-T12) and agent runs, arms
+(a) to (d), and until then the design of investigations is untested against an agent. PELT has
+no usable scale on step-like float series, which `floor: resolution` does not reach. The other
+real-data runs (GE-M1 on a seven-day cluster, the Zabbix fixtures, GE-M2 and GE-M5 on
+DeathStarBench, GE-M8 on GE-M7's corpus and RCAEval), OKO's own ledger, the range index's tables,
+and what 1.16 and 1.14 left did not move.
+
+### GE-I3 on real incidents: RCAEval's faults are all seen by a level detector (SMYSL-5 R7)
+
+`crates/smysl-tel/examples/ge_i3_rcaeval.rs` runs GE-I3's real-data arm over RCAEval RE2-SS
+(Sock Shop, 90 labelled faults of six types, one sample a second; CC BY 4.0, read from a
+download and not kept in the repository). Each case gives a normal pair of six-minute windows
+before the injection and a faulty pair across it.
+
+- **The first reading was degenerate.** It held the statistics to MAD's false-alarm rate with
+  the detectors at their shipped defaults, and on second data those defaults flag 90 % (MAD)
+  and 100 % (CUSUM, PELT) of fault-free windows. Amended before the rerun: every arm, detectors
+  included, is scored and held to 10 % false alarms.
+- **At 10 %, MAD flags 93 to 100 % of every fault type,** CUSUM 80 to 93 % and PELT 80 to 100 %.
+  `jsd/1` flags 60 to 93 %, the other statistics little. No faulty window is flagged by a
+  statistic and by no detector.
+- **The simulated verdict stands, on simulated kinds.** RCAEval labels no variance-at-constant-
+  median, oscillation or decoupling fault, so this cannot test it; a detector RFC built on the
+  statistics needs real evidence of those kinds. RFC SMYSL-5 records it as R7 (§15).
+- **The detectors' defaults do not carry to one-second data.** Acted on below.
+
+### `tel calibrate`: a level detector's threshold from fault-free windows (SMYSL-3 §21.1, SMYSL-5 R8)
+
+- **Calibration states a false-alarm rate instead of a default.** `smysl tel calibrate RECIPE
+  --series S… --window REF-FROM-TO… --rate R` takes windows the caller holds fault-free, each a
+  reference and the test window after it. It returns the least value of MAD's `threshold`,
+  CUSUM's `h` or PELT's `penalty` at which at most `⌊R · n⌋` of the `n` windows alarm. The answer
+  is printed as a recipe `tel detect` takes, and nothing is written. Values come from a fixed
+  decimal ladder (1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8 × 10^e), so the recipe reads as written and
+  no libm `pow` is involved. The bound holds at the value and at every value above it, even
+  where CUSUM's and PELT's alarms are not monotone. The shipped defaults are unchanged.
+- **Library:** `smysl_tel::detect::calibrate` (`ladder`, `score`, `fires`, `calibrate`,
+  `from_scores`), `detect::calibrate_on` over a substrate, and `detect::Spec::hjson`, which
+  writes a recipe that `Spec::parse` reads back.
+- **Held out on a second system.** Calibrated to 10 % on RCAEval RE2-SS, the values alarm on 1
+  to 4 % of RE2-OB's (Online Boutique) fault-free windows. They see its faults at 73 % or more,
+  except delays under CUSUM (13 %) and PELT (27 %). MAD sees every RE2-OB fault.
+- **The values are large** (CUSUM `h` 1.5·10¹⁰, PELT `penalty` 4·10¹⁹), set by the series that
+  barely move. Per-series calibration answers this (below). Flooring the scale at the data's
+  resolution is recorded in RFC SMYSL-5 §15 and not done.
+- **GE-I3 replicates on RE2-OB.** No fault type is missed by every level detector, and no
+  statistic flags a window none of them does. R7's verdict stands on a second system.
+
+### Per-series calibration: `tel calibrate --each` (SMYSL-3 §21.1, SMYSL-5 R9)
+
+- **Each series gets its own value**, so one near-constant series no longer sets the value for
+  all of them. A window still alarms when any series alarms at its own value, so the rate is held
+  over the windows jointly. A series' value is never at or below all of its quiet-window scores,
+  so a series with little evidence does not get a hair trigger. A series that alarmed in no
+  quiet window keeps the recipe's value and is reported as uncalibrated.
+- **Library and CLI:** `detect::calibrate::{calibrate_each, each_from_scores, CalibratedEach,
+  SeriesValue}` and `detect::calibrate_on_each`. `smysl tel calibrate … --each` prints one
+  recipe per series and instrument.
+- **On RCAEval**, keyed by metric kind so that values carry between systems: CUSUM sees every
+  RE2-SS fault type. Carried to RE2-OB, it sees every delay, where one value a trial saw 13 %.
+  PELT's carried values overshoot the rate on RE2-OB (16.7 % against 10 %): tighter values carry
+  less margin, so a carried value needs its rate checked on the new system. GE-I3's verdict
+  holds in all four readings.
+
+### `floor: resolution` and a transfer margin (SMYSL-3 §21.1–21.2, SMYSL-5 R10)
+
+- **`floor: resolution`** in a `cusum/1`, `pelt/1` or `mad/1` recipe keeps the detector's scale
+  at least the smallest gap between the series' distinct values. A flat window is then no
+  longer read as infinitely precise. The floor is applied after the shipped one, so it can only
+  raise the scale. The recipe text gains `floor=resolution`. A recipe without the key gives the
+  same bytes and uids as before.
+- **Semver.** `cusum::Params`, `pelt::Params`, `mad::Params` and `Spec` are exhaustive, so the
+  option travels beside them as `detect::Options` / `detect::Floor`, both `#[non_exhaustive]`.
+  The additions are `Spec::parse_with_options`, `run_on_with`, `cusum::run_with` /
+  `change_points_with`, `pelt::run_with` / `change_points_with`, `mad::run_with` /
+  `centre_and_scale_floored`, and `detect::resolution`. `Spec::parse` still refuses the key.
+  `tel detect` and `tel calibrate` read it.
+- **`tel calibrate --margin M`** holds the windows to `rate / M`. Library: `calibrate::Target`
+  (`new`, `with_margin`, `allowed`). The calibration API is new in 1.19, so its functions take
+  `&Options` and a `Target` directly.
+- **On RCAEval**, the floor fixes CUSUM. Its one-value `h` falls from 1.5·10¹⁰ to 1.2·10⁵, and
+  carried to RE2-OB it sees every delay (100 % against 13 %) at 3.3 % false alarms. It does
+  nothing for PELT on float metrics, where the resolution is noise-sized. A margin of 2 halves an
+  overshoot that is sampling (PELT per kind 24 → 12 %), but not one that is the two systems
+  differing (16.7 % stays), and it costs detections. MAD holds its rate in every configuration.
+  GE-I3's verdict holds.
+
+### A third system: RE2-TT (SMYSL-5 R11)
+
+- **Per-series calibration no longer refuses at the ladder's top.** A series that fires at the
+  top in a fault-free window used to refuse the whole `calibrate_each` / `tel calibrate --each`.
+  It now takes the top, the windows it fires in count against the rate jointly, and only more of
+  them than the rate allows refuse, as for one value. RE2-TT's PELT found it.
+- **On RE2-TT (Train Ticket)**, with values calibrated on RE2-SS and carried unchanged, one
+  configuration held its rate on both held-out systems: CUSUM with `floor: resolution` at one
+  value a trial (3.3 % on RE2-OB, 6.7 % on RE2-TT). On RE2-TT it sees every type at 67 % or more,
+  as well as RE2-TT's own calibration does.
+- **Per-kind values do not carry reliably.** CUSUM per kind under the floor overshoots on RE2-TT
+  (23.3 %, and 12.2 % at margin 2), and PELT per kind fires on every fault-free window. MAD
+  overshoots slightly at margin 1 (up to 15.6 %) and holds at margin 2. GE-I3's verdict holds on
+  a third system.
+
 ## 1.18.0 — 2026-11-22
 
 Two RFCs, each built to its last phase: SMYSL-4, which runs Bund2 scripts over a library, and

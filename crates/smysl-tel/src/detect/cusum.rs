@@ -23,7 +23,7 @@
 //! the window's end, with `level` the mean of its samples. A window with no change is one
 //! segment. The arithmetic is `+ − × ÷` and one `sqrt` per regime, in sample order.
 
-use super::{segment, Input, Recipe};
+use super::{segment, Input, Options, Recipe};
 use smysl_core::{Decimal, UnitCore};
 
 /// The detector and its version.
@@ -60,6 +60,16 @@ impl Params {
 
 /// The change points of `points`: indices where a new regime begins, after the first.
 pub fn change_points(points: &[(u64, f64)], p: &Params) -> Vec<usize> {
+    change_points_floored(points, p, None)
+}
+
+/// [`change_points`] under `opts` (§21.2): with `floor: resolution`, each regime's `σ` is at
+/// least the resolution of `points`.
+pub fn change_points_with(points: &[(u64, f64)], p: &Params, opts: &Options) -> Vec<usize> {
+    change_points_floored(points, p, opts.floor_of(points.iter().map(|x| x.1)))
+}
+
+fn change_points_floored(points: &[(u64, f64)], p: &Params, floor: Option<f64>) -> Vec<usize> {
     let k = crate::sketch::to_f64(p.k);
     let h = crate::sketch::to_f64(p.h);
     let base = p.baseline.max(2);
@@ -72,6 +82,10 @@ pub fn change_points(points: &[(u64, f64)], p: &Params) -> Vec<usize> {
         let mut sigma = var.sqrt();
         if sigma == 0.0 {
             sigma = 1e-9 * mean.abs().max(1.0);
+        }
+        // The resolution floor only ever raises the shipped scale.
+        if let Some(f) = floor {
+            sigma = sigma.max(f);
         }
         let (mut up, mut down) = (0.0f64, 0.0f64);
         let (mut up_from, mut down_from) = (start, start);
@@ -99,13 +113,24 @@ pub fn change_points(points: &[(u64, f64)], p: &Params) -> Vec<usize> {
 
 /// Run CUSUM over `input` in `[from_ms, to_ms)`: one segment per regime.
 pub fn run(input: &Input<'_>, from_ms: u64, to_ms: u64, p: &Params) -> Vec<UnitCore> {
+    run_with(input, from_ms, to_ms, p, &Options::default())
+}
+
+/// [`run`] under `opts` (§21.2), recorded in each segment's recipe.
+pub fn run_with(
+    input: &Input<'_>,
+    from_ms: u64,
+    to_ms: u64,
+    p: &Params,
+    opts: &Options,
+) -> Vec<UnitCore> {
     let points = input.points();
     if points.is_empty() {
         return Vec::new();
     }
-    let recipe = p.recipe(from_ms, to_ms);
+    let recipe = opts.stamp(p.recipe(from_ms, to_ms));
     let mut bounds = vec![0usize];
-    bounds.extend(change_points(&points, p));
+    bounds.extend(change_points_with(&points, p, opts));
     bounds.push(points.len());
     bounds
         .windows(2)

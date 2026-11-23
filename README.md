@@ -28,14 +28,14 @@ As a library:
 
 ```toml
 [dependencies]
-smysl = "1.18"
+smysl = "1.19"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.18.0` and the format is `smysl/1.0`.** The crate version means the API is
+**The crate is `1.19.0` and the format is `smysl/1.0`.** The crate version means the API is
 frozen: every public item moves only with a 2.0, enforced per crate by `cargo-semver-checks` on
 every push. [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise
 written down. The format version means nothing about the format changed incompatibly:
@@ -44,26 +44,24 @@ Python, JavaScript and Go written from the specification alone — and `smysl/1.
 record rather than a change. SMYSL-2's library records and SMYSL-3's `x.tel/v1`, at revision 2 since 1.18, are additions a
 1.0 reader skips.
 
-## Release 1.18.0
+## Release 1.19.0
 
-Two RFCs, each built to its last phase: SMYSL-4, Bund2 scripts over a library, and SMYSL-5,
-information measures over telemetry. The kernel did not change. The full account, with every
-figure measured, is in [`CHANGELOG.md`](CHANGELOG.md).
+Detector thresholds set from data instead of defaults, and checked on real incidents across three
+systems. The kernel did not change. The full account, with every figure measured, is in
+[`CHANGELOG.md`](CHANGELOG.md).
 
-- **Programmable queries, in another process.** `smysl bund` runs a Bund2 script, with logic
-  and CLP(FD), over a disposable snapshot of a store or a library, and returns a typed value.
-  It never links Bund2. The boundary is an operating-system sandbox on macOS and Linux, tested
-  in CI by running each attack trusted and then sandboxed.
-- **Information measures that replay to the byte.** `smysl tel info` states the entropy of a
-  series and of its ordinal patterns, mutual information with lag scans and surrogates,
-  divergence between windows, and the entropy of a log stream's templates, as units whose
-  recipe and sample digest let `tel check` recompute them.
-- **Statistics are evidence.** Rule TI holds an info unit to its shape, a recomputation that
-  differs is `SMY-E604`, and rule TQ catches a wrong quote of one in an investigation.
-- **Five experiments, on simulated data, and said so.** The estimators' defaults hold, the
-  statistics see a decoupling and an oscillation that the level detectors miss, and transfer
-  entropy names a direction where there is none too often to be released. GE-I3 on RCAEval's
-  real incidents, and every real-data run 1.17 left, are still owed. The registry is 176.
+- **A threshold is a false-alarm rate.** `smysl tel calibrate` takes windows held fault-free and
+  returns the least MAD `threshold`, CUSUM `h` or PELT `penalty` at which at most a stated share
+  of them alarm, written into the recipe so its hash still records what ran. `--each` sets one
+  value per series and holds the rate jointly.
+- **For values that travel.** `floor: resolution` keeps a flat window's scale at the series' own
+  step instead of near zero, and `--margin` leaves room for a value used where it was not set.
+  A recipe without them gives the same bytes as before.
+- **Checked on RCAEval's real incidents.** At 10 % false alarms the level detectors see every
+  labelled fault type on Sock Shop, and no information measure sees one they miss. Values set on
+  Sock Shop and carried to Online Boutique and Train Ticket hold their rate for CUSUM under
+  `floor: resolution`, and do not reliably per series. GE-M7 on agents is still owed. The
+  registry is 176.
 
 Building from source:
 
@@ -291,6 +289,7 @@ cargo install smysl --features tel
 | **Traces and logs** | `tel trace`, `tel templates`, `tel similar`: spans, Drain templates, MinHash over episodes |
 | **Retention** | `tel evict`, and `lib export --with-substrate` |
 | **Information** | `tel info` (1.18): `ent/1`, `perm/1`, `mi/1`, `jsd/1`, `tent/1` as `x.tel/info` units, recomputed by `tel check` |
+| **Calibration** | `tel calibrate` (1.19): a detector's threshold, `h` or `penalty` from fault-free windows at a stated false-alarm rate; `--each`, `--margin`, `floor: resolution` |
 
 The design is RFC SMYSL-3, in
 [`Documentation/SMYSL-3_RFC/`](Documentation/SMYSL-3_RFC/SMYSL-3_TELEMETRY.md); its phases
@@ -423,7 +422,7 @@ and `cargo run --example information_theory` for the library layer. See
 
 ## Status
 
-Crate `1.18.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.19.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 
@@ -465,9 +464,11 @@ say so; the runs on real data, and GE-M7 on agents, are owed.
 | TL-P6 – P7 | investigations, rule TQ, kinds 6 and 7, the timeline thread, instruments and witnesses | **done** |
 | TL-P8 – P9 | retention and exchange, traces and logs, similar episodes | **done** |
 | AC-8 | a store's check kept as derived state | **done** |
+| §21 | calibration at a stated false-alarm rate, the scale floor, on RCAEval (1.19) | **done** |
 
 RFC SMYSL-4, Bund2 queries, and RFC SMYSL-5, information measures, are built to their last
-phases. SMYSL-5's experiments ran on simulated data; GE-I3 on RCAEval is owed.
+phases. SMYSL-5's experiments ran on simulated data, and GE-I3 also on RCAEval's real incidents
+(1.19).
 
 | Phase | Delivers | State |
 |---|---|---|

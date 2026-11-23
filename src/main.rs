@@ -2592,6 +2592,7 @@ fn cli() -> Command {
                             "window",
                             "check",
                             "detect",
+                            "calibrate",
                             "investigate",
                             "declare",
                             "witnesses",
@@ -2605,7 +2606,7 @@ fn cli() -> Command {
                         .help(
                             "read exports with a reader into a library, the value in force at \
                              an instant, materialise window evidence, recompute it, run a \
-                             detector, evict old substrate, materialise a trace's spans or a \
+                             detector or calibrate one, evict old substrate, materialise a trace's spans or a \
                              log window's templates, rank episodes like one, compute an \
                              information measure (SMYSL-5), or check a profile and print its \
                              hash",
@@ -2620,7 +2621,7 @@ fn cli() -> Command {
                             "`read READER FILE...` (k8s/1, zabbix/1, prom/1, otlp/1, \
                              otlp-json/1, otlp-traces/1, otlp-traces-json/1, journald/1, \
                              cloudevents/1); `at SERIES MS`; `window SERIES FROM TO`; `check`; \
-                             `detect RECIPE`; `investigate open|consult|hypothesis|probe|action|\
+                             `detect RECIPE`; `calibrate RECIPE`; `investigate open|consult|hypothesis|probe|action|\
                              close|show …`; `declare instrument|measured-by|via|same-quantity …`; `witnesses SERIES`; \
                              `evict --older-than DUR`; `trace TRACE-ID`; `templates STREAM FROM TO`; `similar EPISODE`; `info RECIPE`; `profile check FILE|NAME`",
                         ),
@@ -2686,7 +2687,41 @@ fn cli() -> Command {
                         .long("series")
                         .value_name("SERIES")
                         .action(ArgAction::Append)
-                        .help("detect, info: a series to run over (uid or `<scheme>:<key>`); repeatable"),
+                        .help("detect, calibrate, info: a series to run over (uid or `<scheme>:<key>`); repeatable"),
+                )
+                .arg(
+                    Arg::new("window")
+                        .long("window")
+                        .value_name("REF-FROM-TO")
+                        .action(ArgAction::Append)
+                        .help(
+                            "calibrate: a fault-free trial, reference [REF, FROM) and test \
+                             [FROM, TO), epoch ms; repeatable",
+                        ),
+                )
+                .arg(
+                    Arg::new("rate")
+                        .long("rate")
+                        .value_name("R")
+                        .help("calibrate: the false-alarm rate to hold the trials to, in (0, 1)"),
+                )
+                .arg(
+                    Arg::new("margin")
+                        .long("margin")
+                        .value_name("M")
+                        .help(
+                            "calibrate: hold the trials to rate / M (M at least 1), room for \
+                             values carried to other data",
+                        ),
+                )
+                .arg(
+                    Arg::new("each")
+                        .long("each")
+                        .action(ArgAction::SetTrue)
+                        .help(
+                            "calibrate: a value per series and instrument, the rate held over \
+                             the windows jointly",
+                        ),
                 )
                 .arg(
                     Arg::new("with")
@@ -14113,6 +14148,7 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "window" => tel_window(m, global, &args),
         "check" => tel_check(m, global),
         "detect" => tel_detect(m, global, &args),
+        "calibrate" => tel_calibrate(m, global, &args),
         "investigate" => tel_investigate(m, global, &args),
         "declare" => tel_declare(m, global, &args),
         "witnesses" => tel_witnesses(m, global, &args),
@@ -16485,6 +16521,192 @@ fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
     ExitCode::Success
 }
 
+/// `smysl tel calibrate RECIPE --series S… --window REF-FROM-TO… --rate R -s LIB`: a level
+/// detector's threshold from fault-free windows (RFC SMYSL-3 §21.1).
+///
+/// `RECIPE` names `mad/1`, `cusum/1` or `pelt/1`. Each `--window` is one trial: every `--series`,
+/// per instrument, read as reference `[REF, FROM)` and test `[FROM, TO)`, firing when any of them
+/// does. The answer is the least value on the calibration ladder of MAD's `threshold`, CUSUM's
+/// `h` or PELT's `penalty` that at most `⌊R · n⌋` of the `n` trials fire at; it is printed as a
+/// recipe `tel detect` takes, with how many trials fire at it. With `--each`, every series and
+/// instrument gets its own value (`calibrate_each`), printed as one line each, recipe then series
+/// and instrument, the rate held over the windows jointly. `--margin M` holds the trials to
+/// `rate / M` instead, room for values carried to other data. The recipe may carry `floor:
+/// resolution` (§21.2), which the printed recipes keep. Nothing is written. A recipe or
+/// argument that is not admitted is exit 2; a rate the ladder cannot meet is exit 1.
+#[cfg(feature = "tel")]
+fn tel_calibrate(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    use smysl::series::redb::RedbBackend;
+    use smysl::series::Substrate;
+    use smysl::tel::detect::calibrate::Target;
+    use smysl::tel::detect::{calibrate_on, calibrate_on_each, Spec};
+
+    let (Some(recipe_path), None) = (args.first(), args.get(1)) else {
+        eprintln!("smysl tel calibrate: `RECIPE`, an HJSON detector recipe");
+        return ExitCode::Usage;
+    };
+    let recipe_text = match std::fs::read_to_string(recipe_path.as_str()) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("smysl tel calibrate: {recipe_path}: {e}");
+            return ExitCode::Failure;
+        }
+    };
+    let (spec, opts) = match Spec::parse_with_options(&recipe_text) {
+        Ok((s, o)) if matches!(s, Spec::Mad(_) | Spec::Cusum(_) | Spec::Pelt(_)) => (s, o),
+        Ok((s, _)) => {
+            eprintln!(
+                "smysl tel calibrate: {} has no threshold to calibrate; mad/1, cusum/1 or pelt/1",
+                s.id()
+            );
+            return ExitCode::Usage;
+        }
+        Err(e) => {
+            eprintln!("smysl tel calibrate: {recipe_path}: {e}");
+            return ExitCode::Usage;
+        }
+    };
+    let mut series = Vec::new();
+    for s in m.get_many::<String>("series").into_iter().flatten() {
+        match tel_series_arg(s) {
+            Ok(u) => series.push(u),
+            Err(e) => {
+                eprintln!("smysl tel calibrate: --series {e}");
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if series.is_empty() {
+        eprintln!("smysl tel calibrate: name at least one --series");
+        return ExitCode::Usage;
+    }
+    let mut windows = Vec::new();
+    for w in m.get_many::<String>("window").into_iter().flatten() {
+        let parts: Vec<Option<u64>> = w.split('-').map(|x| x.parse::<u64>().ok()).collect();
+        match parts.as_slice() {
+            [Some(r), Some(f), Some(t)] if r < f && f < t => windows.push((*r, *f, *t)),
+            _ => {
+                eprintln!(
+                    "smysl tel calibrate: --window is REF-FROM-TO, epoch ms, REF < FROM < TO, not {w}"
+                );
+                return ExitCode::Usage;
+            }
+        }
+    }
+    if windows.is_empty() {
+        eprintln!("smysl tel calibrate: name at least one fault-free --window");
+        return ExitCode::Usage;
+    }
+    let target = match m
+        .get_one::<String>("rate")
+        .map(|r| smysl::Decimal::parse_token(r))
+    {
+        Some(Ok(r)) => match Target::new(r) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("smysl tel calibrate: --rate: {e}");
+                return ExitCode::Usage;
+            }
+        },
+        _ => {
+            eprintln!("smysl tel calibrate: --rate R, a false-alarm rate in (0, 1)");
+            return ExitCode::Usage;
+        }
+    };
+    let target = match m
+        .get_one::<String>("margin")
+        .map(|r| smysl::Decimal::parse_token(r))
+    {
+        None => target,
+        Some(Ok(mg)) => match target.with_margin(mg) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("smysl tel calibrate: --margin: {e}");
+                return ExitCode::Usage;
+            }
+        },
+        Some(Err(_)) => {
+            eprintln!("smysl tel calibrate: --margin M, a decimal of at least 1");
+            return ExitCode::Usage;
+        }
+    };
+    let held_to = if target.margin() == smysl::Decimal::from_i64(1) {
+        format!("rate {}", target.rate())
+    } else {
+        format!("rate {} / margin {}", target.rate(), target.margin())
+    };
+    let root = match library_root(m, global, "tel") {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    let path = tel_series_path(&root);
+    if !path.exists() {
+        eprintln!(
+            "smysl tel calibrate: {} has no series substrate; `tel read --yes` writes one",
+            root.display()
+        );
+        return ExitCode::Failure;
+    }
+    let backend = match RedbBackend::open(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("smysl tel calibrate: {}: {e}", path.display());
+            return ExitCode::Failure;
+        }
+    };
+    let substrate = Substrate::new(backend);
+    let usage_or_failure = |e: String| {
+        eprintln!("smysl tel calibrate: {e}");
+        ExitCode::Failure
+    };
+    if m.get_flag("each") {
+        return match calibrate_on_each(&spec, &opts, &substrate, &series, &windows, target) {
+            Ok(c) => {
+                for ((s, i), v) in &c.series {
+                    println!(
+                        "{}  series {}  instrument {}  {}",
+                        v.spec.hjson(&opts),
+                        s.canonical(),
+                        i.canonical(),
+                        if v.calibrated {
+                            format!("fires in {}", v.fired)
+                        } else {
+                            "uncalibrated: fired in no window".to_string()
+                        }
+                    );
+                }
+                println!(
+                    "calibrate {} --each: {} of {} trial(s) fire (at most {} at {held_to}), {} \
+                     series at most {} each",
+                    spec.id(),
+                    c.over,
+                    c.trials,
+                    c.allowed,
+                    c.series.len(),
+                    c.q
+                );
+                ExitCode::Success
+            }
+            Err(e) => usage_or_failure(e),
+        };
+    }
+    match calibrate_on(&spec, &opts, &substrate, &series, &windows, target) {
+        Ok(c) => {
+            println!("{}", c.spec.hjson(&opts));
+            println!(
+                "calibrate {}: {} of {} trial(s) fire at {} (at most {} at {held_to})",
+                spec.id(),
+                c.over,
+                c.trials,
+                c.value,
+                c.allowed
+            );
+            ExitCode::Success
+        }
+        Err(e) => usage_or_failure(e),
+    }
+}
+
 /// `smysl tel detect RECIPE --series S… --during FROM-TO -s LIB [--trigger UID] [--at MS --yes]`:
 /// run a detector (RFC SMYSL-3 §21, §23).
 ///
@@ -16500,7 +16722,7 @@ fn tel_info(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
 fn tel_detect(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
     use smysl::series::redb::RedbBackend;
     use smysl::series::{MemBackend, Substrate};
-    use smysl::tel::detect::{run_on, Spec};
+    use smysl::tel::detect::{run_on_with, Spec};
     use smysl::text::library::Library;
 
     let (Some(recipe_path), None) = (args.first(), args.get(1)) else {
@@ -16514,7 +16736,7 @@ fn tel_detect(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode
             return ExitCode::Failure;
         }
     };
-    let spec = match Spec::parse(&recipe_text) {
+    let (spec, opts) = match Spec::parse_with_options(&recipe_text) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("smysl tel detect: {recipe_path}: {e}");
@@ -16605,8 +16827,9 @@ fn tel_detect(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode
     let path = tel_series_path(&root);
     let detected = if path.exists() {
         match RedbBackend::open(&path) {
-            Ok(b) => run_on(
+            Ok(b) => run_on_with(
                 &spec,
+                &opts,
                 &Substrate::new(b),
                 &series,
                 from,
@@ -16620,8 +16843,9 @@ fn tel_detect(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode
             }
         }
     } else if is_episode {
-        run_on(
+        run_on_with(
             &spec,
+            &opts,
             &Substrate::new(MemBackend::default()),
             &series,
             from,

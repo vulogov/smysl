@@ -1010,7 +1010,7 @@ migrate    --shard
 migrate    --seed-check
 migrate    --help
 tel        <ACTION>
-tel        [possible values: read, at, window, check, detect, investigate, declare, witnesses, evict, trace, templates, similar, info, profile]
+tel        [possible values: read, at, window, check, detect, calibrate, investigate, declare, witnesses, evict, trace, templates, similar, info, profile]
 tel        [ARG]
 tel        --config
 tel        --profile
@@ -1031,16 +1031,20 @@ tel        --qs
 tel        --json
 tel        --series
 tel        --quiet
-tel        --with
+tel        --window
+tel        --rate
 tel        --verbose
-tel        --with-instrument
 tel        --backend
 tel        [possible values: memory, redb]
-tel        --during
+tel        --margin
+tel        --each
 tel        --shard
+tel        --seed-check
+tel        --with
+tel        --with-instrument
+tel        --during
 tel        --trigger
 tel        --as
-tel        --seed-check
 tel        --rotation
 tel        --explains
 tel        --target

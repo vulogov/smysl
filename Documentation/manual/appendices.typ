@@ -1201,6 +1201,21 @@ and an unknown one is refused. The detectors are:
 Every output is `derived`. Without `--yes` the outputs are staged for review (exit 10), and with
 `--yes --at MS` they are committed with their edges.
 
+`tel calibrate RECIPE --series S… --window REF-FROM-TO… --rate R` sets the threshold of `mad/1`,
+the `h` of `cusum/1` or the `penalty` of `pelt/1` from fault-free windows (RFC SMYSL-3 §21.1).
+Each `--window` is one trial, a reference `[REF, FROM)` and a test `[FROM, TO)` over every
+series. The answer is the least value on a decimal ladder (1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8 ×
+10^e) at which at most `⌊R · n⌋` of the `n` trials alarm. It is printed as a recipe `tel detect`
+takes, and nothing is written. With `--each`, every series and instrument gets its own value,
+one recipe line each followed by the series and instrument. The rate is then held over the
+windows jointly, and a series that alarmed in none of them keeps the recipe's value and is
+reported as uncalibrated. `--margin M` holds the windows to `R / M`, leaving room for values
+carried to other data. A `cusum/1`, `pelt/1` or `mad/1` recipe, for `tel detect` or `tel
+calibrate`, may carry `floor: resolution`: the detector's scale is then at least the smallest
+step between the series' distinct values, so a flat stretch is not read as infinitely precise
+(RFC SMYSL-3 §21.2). An argument not admitted is exit 2, and a rate the ladder cannot meet is
+exit 1.
+
 `tel info RECIPE --series S… --during FROM-TO` computes an information measure (RFC SMYSL-5)
 over each series and its instruments, or `--instrument I` alone. `RECIPE` is an HJSON file, for
 example `{ stat: mi/1, step: 60000, bins: "rank:4", lag: "-10..10", null: 200 }`. The statistics
