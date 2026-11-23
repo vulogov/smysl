@@ -7,6 +7,38 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.20.0
+
+What 1.19 leaves open, by what it blocks rather than the order it is easiest. 1.19 put the level
+detectors on real incidents and gave them thresholds set from data, and what it found is where the
+work starts.
+
+**GE-M7 is still the reason for all of this, and it has not run.** It needs the Train-Ticket
+testbed (D-T12) and agent runs, arms (a) to (d). Until it runs, the design of investigations is
+untested against an agent, and rule TQ's catch rate is a property of `examples/oko_ledger`'s
+planted quotes rather than of a model's. RCAEval's RE2-TT is a recording of that system, not the
+testbed: it has no deploys, no config edits and no agent.
+
+**PELT's scale.** Its `σ̂`, from the median first difference, is zero on step-like series, and
+`floor: resolution` does not reach float metrics, whose gaps are noise-sized. PELT's carried values
+alarmed on up to every fault-free window of a second system (SMYSL-5 §15, R11). A floor at a share
+of the reference window's spread is one candidate, as another `detect::Floor`, which is
+`#[non_exhaustive]` for that reason.
+
+**Calibration beyond one benchmark.** Three systems of RCAEval at one sample a second are what
+SMYSL-5 R11's advice rests on. Calibration has not been tested at a coarser cadence, on a
+production system, or for a value kept across weeks of one system.
+
+**The real-data runs.** GE-M1 on a cluster observed for seven days (I-1), the Zabbix fixtures
+(I-2), GE-M2 and GE-M5 on DeathStarBench at production-like load, GE-M8 on GE-M7's corpus and
+RCAEval. Each simulated verdict names the run on real data that could overturn it.
+
+**And what earlier releases left.** OKO's own ledger, which is OKO's code; the range index's
+tables (RFC SMYSL-3 §17.1); the cache's written share, the repair a cut would do, the bound stated
+in tokens, the sizing residual on German, the Ollama arm's model size; questions still unread, a
+subject by a name the store does not write, GE-T7 on a thousand real works, and the ones only
+people can close. None of it moved in 1.19.
+
 ## 1.19.0 — 2026-11-23
 
 One question 1.18 left, answered on real data: is a level detector's alarm worth anything on
