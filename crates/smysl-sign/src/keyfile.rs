@@ -20,7 +20,7 @@ use std::fmt;
 use smysl_core::surface::hjson::{self, HObject, HValue, Spanned};
 use smysl_core::{AgentId, Status};
 
-use crate::key::{KeyId, KeyStatus, MemoryKeyResolver, ResolvedKey};
+use crate::key::{KeyId, KeyStatus, MemoryKeyResolver, ResolvedKey, SigningKey};
 
 /// The DER prefix of an Ed25519 SubjectPublicKeyInfo (RFC 8410 §4), as
 /// `openssl pkey -pubout -outform DER` writes it; the 32-byte key follows.
@@ -132,6 +132,71 @@ impl KeyFile {
         }
         s.push_str(" }");
         s
+    }
+
+    /// A signing key's file: its agent, its secret, and its id, as `smysl keygen` writes it.
+    /// The text holds the secret; it is wiped when the returned value is dropped.
+    pub fn secret(key: &SigningKey) -> zeroize::Zeroizing<String> {
+        let seed = key.seed();
+        zeroize::Zeroizing::new(format!(
+            "# A smysl signing key (RFC SMYSL-7). Keep it private: whoever reads it signs as \
+             {agent}.\n{{ agent: {q}, ed25519_secret: \"hex:{secret}\", kid: \"{kid}\" }}\n",
+            agent = key.agent(),
+            q = quote(key.agent().as_str()),
+            secret = zeroize::Zeroizing::new(hex(&seed[..])).as_str(),
+            kid = key.kid(),
+        ))
+    }
+
+    /// Read a signing key's file. `kid`, when present, must be the key's.
+    pub fn parse_secret(text: &str) -> Result<SigningKey, KeyFileError> {
+        let err = |at: usize, message: String| KeyFileError {
+            at,
+            line: text[..at.min(text.len())].matches('\n').count() + 1,
+            message,
+        };
+        let o = hjson::parse_object(text, 0).map_err(|e| err(e.at, e.message))?;
+        if let Some((k, _)) = o
+            .value
+            .iter()
+            .find(|(k, _)| !["agent", "ed25519_secret", "kid"].contains(&k.value.as_str()))
+        {
+            return Err(err(k.span.start, format!("unknown key `{}`", k.value)));
+        }
+        let at = o.span.start;
+        let (agent_s, a_at) = string(&o.value, "agent")
+            .map_err(|(at, m)| err(at, m))?
+            .ok_or_else(|| err(at, "no `agent`".into()))?;
+        let agent: AgentId = agent_s
+            .parse()
+            .map_err(|e| err(a_at, format!("`agent`: {e}")))?;
+        let (secret, s_at) = string(&o.value, "ed25519_secret")
+            .map_err(|(at, m)| err(at, m))?
+            .ok_or_else(|| err(at, "no `ed25519_secret`".into()))?;
+        let seed: zeroize::Zeroizing<[u8; 32]> = secret
+            .strip_prefix("hex:")
+            .and_then(unhex)
+            .and_then(|v| {
+                let v = zeroize::Zeroizing::new(v);
+                <[u8; 32]>::try_from(&v[..]).ok()
+            })
+            .map(zeroize::Zeroizing::new)
+            .ok_or_else(|| {
+                err(
+                    s_at,
+                    "`ed25519_secret` is not `hex:` and 64 hex digits".into(),
+                )
+            })?;
+        let key = SigningKey::from_seed(agent, *seed);
+        if let Some((k, k_at)) = string(&o.value, "kid").map_err(|(at, m)| err(at, m))? {
+            if k.to_ascii_lowercase() != key.kid().to_string() {
+                return Err(err(
+                    k_at,
+                    format!("`kid` is {k}; the key's id is {}", key.kid()),
+                ));
+            }
+        }
+        Ok(key)
     }
 }
 

@@ -295,7 +295,7 @@ bund      = ["dep:smysl-bund", "text", "cli"]
 # over stdio, with `serde_json` and `std` threads: no async runtime.
 lsp       = ["dep:smysl-lsp", "cli"]
 # Detached attestation signatures (RFC SMYSL-7), reached as `smysl::sign`. Pure Rust Ed25519;
-# no C compiler. The commands arrive with SG-P3.
+# no C compiler. `keygen`, `sign` and `verify`, and the `--sign` flags, are the CLI's (SG-P3).
 sign      = ["dep:smysl-sign"]
 # The substrate index's backing store (SMYSL-2.4 §3.8). Off by default, and the default is the
 # decision rather than an oversight: it puts `redb` in the tree of a binary that runs perfectly

@@ -80,7 +80,7 @@ people can close. None of it moved in 1.19.
   named exactly `LIBRARY`. With that, every request works through Neovim's own client.
 - `smysl-lsp` is unpublished until the release that ships it.
 
-### `smysl-sign`: detached attestation signatures (RFC SMYSL-7, SG-P1 and SG-P2)
+### `smysl-sign`: detached attestation signatures (RFC SMYSL-7, SG-P1 to SG-P3)
 
 An `AgentId` has been a string its writer chose, and the code said so: corroboration could be
 inflated and Origin authority typed by anyone. RFC SMYSL-7 signs what an agent attested with
@@ -113,6 +113,17 @@ Ed25519 (RFC 8032), in a detached `COSE_Sign1` envelope (RFC 9052) kept beside t
   `Strict`, except the kid's bytes, which name an unknown key, a warning in `Advisory` as §6 says.
   An attestation changed after signing is judged against the leftover signature that names its
   agent and unit, and the unprotected subject uid is checked against the attestation.
+- **SG-P3: the commands.** `smysl keygen --agent A --out FILE` writes an owner-only signing
+  key and prints its `keys.hjson` entry. `smysl sign STORE --key FILE` signs the store's
+  attestations by the key's agent into `STORE.sig` (`<library>/log/sigs.cbor` for a library).
+  `smysl verify STORE --mode advisory|selective|strict` exits 0 when the store passes, 1 when it
+  does not, and 2 on a usage error or a missing or malformed key file; `--json` gives one object
+  with the findings. `merge` carries its inputs' signature files to the output's, in one order
+  whichever order the inputs came in, and `merge --staged --sign --key K` signs the batch it
+  commits. `retract --as A --sign --key K` records `A`'s attestation on the retraction and signs
+  it. `check --verify-sigs MODE` adds the findings as `sign/<verdict>` diagnostics. The phase's
+  gate: two agents sign overlapping attestations in two stores, and the store merged either way
+  verifies under `Strict` with the same signature file (`tests/cmd_sign.rs`).
 - **A golden vector**, `fixtures/sign/`: RFC 8032's first test key signs an attestation. Rust
   rebuilds it and verifies it over a `Sig_structure` written out by hand; the Go and Node
   conformance tests verify it with their standard libraries' Ed25519 and their own BLAKE3.

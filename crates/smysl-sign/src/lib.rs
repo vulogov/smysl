@@ -33,6 +33,9 @@
 
 #![forbid(unsafe_code)]
 
+/// A value wiped when dropped: what [`SigningKey::seed`] and [`KeyFile::secret`] return.
+pub use zeroize::Zeroizing;
+
 mod cose;
 mod key;
 mod keyfile;

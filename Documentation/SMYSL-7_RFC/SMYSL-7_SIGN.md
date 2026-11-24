@@ -1,7 +1,7 @@
 # RFC SMYSL-7 — detached attestation signatures (`smysl-sign`)
 
 **Author:** Vladimir Ulogov
-**Status:** amended in review against the code (R1, 2026-11-23). SG-P1 and SG-P2 are built; SG-P3 is next (1.20).
+**Status:** amended in review against the code (R1, 2026-11-23). SG-P1 to SG-P3 are built; SG-P4 is next (1.20).
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged.
 **Crate:** `crates/smysl-sign`, new, behind the facade's `sign` feature, on by default.
 **Cryptographic profile:** Ed25519 (RFC 8032) in detached `COSE_Sign1` envelopes (RFC 9052).
@@ -300,6 +300,10 @@ smysl verify -s notes.store --keys .smysl/keys.hjson --mode strict
 
 `keygen` draws the seed with `getrandom`, which the CLI already links; the crate never does.
 
+The signature file is a CBOR sequence of envelopes, written whole in one order (by target hash,
+then key id, then bytes) with duplicates dropped, so merging the same stores in either order
+writes the same file (R1-16). `merge` carries its inputs' files to `<output>.sig`.
+
 ## 9. Compatibility and risks
 
 - **Readers.** A signature file is a file the readers do not open. Uids, records and views are
@@ -401,3 +405,27 @@ smysl verify -s notes.store --keys .smysl/keys.hjson --mode strict
   take, a key listed twice, or one key bound to two agents is an error. A typo in
   `revoked_after_ms` that dropped a revocation would fail open. An entry may carry `kid`, checked
   against the key; `KeyFile::entry` writes it. Points off the curve or of small order are refused.
+
+**R1, continued, 2026-11-24: SG-P3 built.**
+
+- **R1-16.** What §8 left open, settled in the CLI.
+  - A signing key file is HJSON like the key file: `{ agent, ed25519_secret: "hex:…", kid }`
+    under a comment that says whose key it is. `KeyFile::secret` writes it and
+    `KeyFile::parse_secret` reads it, both pure. `keygen` creates it owner-only (0600 on Unix)
+    and refuses a file that exists.
+  - The signature file is written whole, sorted and without duplicates, through a temporary
+    file and a rename. A file that does not read fails `verify` (exit 1): a damaged signature
+    is not an absent one. Exit 2 stays for usage and the key file, as §8 says.
+  - `sign` signs every attestation by the key's agent that this key has not signed. Other
+    agents' attestations are left to their keys.
+  - `merge --sign` needs `--staged` and `-o`: it signs the staged batch, and a signature file
+    goes beside a named output. A merge to stdout whose inputs carry signatures says it did not
+    write them.
+  - `retract --sign` needs the key's agent among `--as`. The attestation it records on the
+    edge is `op: attested`, `rung: document`, at the wall clock, and is written with the edge
+    in one append. A surface store cannot hold an attestation, so it refuses both.
+  - `check --verify-sigs` reports each finding as a diagnostic with the code
+    `sign/<verdict>` (`sign/unsigned`, `sign/invalid-signature`, …) and fails with exit 3, as
+    `check`'s other errors do.
+  - `sign` and `verify` take the store positionally or with `-s`. The default key file is
+    `.smysl/keys.hjson` beside the store, or inside a library.

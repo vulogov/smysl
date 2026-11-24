@@ -556,3 +556,23 @@ fn the_key_file_refuses_what_it_does_not_understand() {
     let e = KeyFile::parse(&format!("{{ keys: [\n{{ {a} }}\n{{ {a} }} ] }}")).unwrap_err();
     assert_eq!(e.line, 3, "{e}");
 }
+
+#[test]
+fn a_signing_key_file_reads_back_as_the_key() {
+    let k = key("human:alice", 7);
+    let text = KeyFile::secret(&k);
+    assert!(text.starts_with('#'), "{}", &*text);
+    let back = KeyFile::parse_secret(&text).unwrap();
+    assert_eq!((back.agent(), back.kid()), (k.agent(), k.kid()));
+    assert_eq!(*back.seed(), *k.seed());
+    let wrong_kid = text.replace(&k.kid().to_string(), &"0".repeat(32));
+    assert!(KeyFile::parse_secret(&wrong_kid)
+        .unwrap_err()
+        .message
+        .contains("the key's id is"));
+    assert!(KeyFile::parse_secret("{ agent: \"human:a\", ed25519_secret: \"hex:00\" }").is_err());
+    assert!(KeyFile::parse_secret("{ agent: \"human:a\", seed: \"x\" }").is_err());
+    // A public key file is not a signing key file.
+    let public = KeyFile::entry(&ResolvedKey::active(k.agent().clone(), k.public_key()));
+    assert!(KeyFile::parse_secret(&public).is_err());
+}
