@@ -275,13 +275,43 @@ pub(crate) fn print_report(
     json: bool,
     quiet: bool,
 ) {
+    print_report_carried(path, store, report, None, json, quiet);
+}
+
+/// Which inputs of a merge carried each record, by record hash (RFC SMYSL-8 §8).
+pub(crate) type Carriers = std::collections::BTreeMap<[u8; 32], Vec<String>>;
+
+/// [`print_report`], each finding naming the inputs that carried its record when `carriers` is
+/// given: ` (in a.cbor, b.cbor)` in text, an `inputs` list in JSON.
+pub(crate) fn print_report_carried(
+    path: &str,
+    store: &Store,
+    report: &VerificationReport,
+    carriers: Option<&Carriers>,
+    json: bool,
+    quiet: bool,
+) {
     let found = findings(store, report);
+    let carried = |h: &[u8; 32]| -> Option<&Vec<String>> { carriers.and_then(|c| c.get(h)) };
     if json {
         let items: Vec<String> = found
             .iter()
             .map(|(h, err, r, v)| {
+                let inputs = match carriers {
+                    None => String::new(),
+                    Some(_) => format!(
+                        ",\"inputs\":[{}]",
+                        carried(h)
+                            .map(|v| v
+                                .iter()
+                                .map(|p| smysl::json_escape(p))
+                                .collect::<Vec<_>>()
+                                .join(","))
+                            .unwrap_or_default()
+                    ),
+                };
                 format!(
-                    "{{\"record\":\"{}\",\"severity\":\"{}\",\"verdict\":\"{}\",\"subject\":{},\"message\":{}}}",
+                    "{{\"record\":\"{}\",\"severity\":\"{}\",\"verdict\":\"{}\",\"subject\":{},\"message\":{}{inputs}}}",
                     hex(h),
                     if *err { "error" } else { "warning" },
                     verdict_name(v),
@@ -304,12 +334,15 @@ pub(crate) fn print_report(
         );
         return;
     }
-    for (_, err, r, v) in &found {
+    for (h, err, r, v) in &found {
         if quiet && !err {
             continue;
         }
+        let inputs = carried(h)
+            .map(|v| format!(" (in {})", v.join(", ")))
+            .unwrap_or_default();
         println!(
-            "{path}: {}: {}: {}",
+            "{path}: {}: {}{inputs}: {}",
             if *err { "error" } else { "warning" },
             r.map(describe).unwrap_or_default(),
             verdict_text(v)
@@ -1256,4 +1289,69 @@ impl CommitSigner {
         let (signed, _) = sign_into(&sigs, &self.key, &new).map_err(fail)?;
         Ok(signed)
     }
+}
+
+// ---- RFC SMYSL-8 §8: `merge --require-sigs` ----------------------------------------------
+
+/// `merge --require-sigs MODE`'s mode and keys, resolved before anything is merged, so a bad
+/// mode or a missing key file exits 2 having read no input. The key file is `--keys`, else
+/// `.smysl/keys.hjson` beside the output (the working directory's for stdout).
+pub(crate) fn require_policy(
+    m: &ArgMatches,
+    out: Option<&str>,
+) -> Result<Option<(VerificationMode, MemoryKeyResolver)>, ExitCode> {
+    let Some(name) = m.get_one::<String>("require-sigs") else {
+        if m.get_one::<String>("keys").is_some()
+            || m.get_many::<String>("agent-prefix").is_some()
+            || m.get_one::<String>("status-at-least").is_some()
+        {
+            eprintln!(
+                "smysl merge: --keys, --agent-prefix and --status-at-least go with --require-sigs"
+            );
+            return Err(ExitCode::Usage);
+        }
+        return Ok(None);
+    };
+    let mode = mode_of(m, name).map_err(|e| {
+        eprintln!("smysl merge: --require-sigs: {e}");
+        ExitCode::Usage
+    })?;
+    let keys = load_keys(m, out.unwrap_or("-")).map_err(|e| {
+        eprintln!("smysl merge: --require-sigs: {e}");
+        ExitCode::Usage
+    })?;
+    Ok(Some((mode, keys)))
+}
+
+/// Judge the merged store and its merged signatures under the mode, before the output is
+/// written. A failure prints `verify`'s report, each finding naming the inputs that carried its
+/// record, and is exit 1; a pass is one line on stderr unless `quiet`.
+pub(crate) fn require_sigs(
+    store: &Store,
+    sigs: &[DetachedSignature],
+    (mode, keys): &(VerificationMode, MemoryKeyResolver),
+    carriers: &Carriers,
+    label: &str,
+    json: bool,
+    quiet: bool,
+) -> Result<(), ExitCode> {
+    let report = verify_store(store, sigs, keys, mode);
+    if !report.passed {
+        print_report_carried(label, store, &report, Some(carriers), json, quiet);
+        eprintln!(
+            "smysl merge: --require-sigs {}: nothing written",
+            mode_name(mode)
+        );
+        return Err(ExitCode::Failure);
+    }
+    if !quiet {
+        eprintln!(
+            "smysl merge: --require-sigs {}: {} verified, {} unsigned, {} warning(s); passed",
+            mode_name(mode),
+            report.verified_count,
+            report.unsigned_count,
+            report.warning_count
+        );
+    }
+    Ok(())
 }

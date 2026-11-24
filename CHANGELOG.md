@@ -84,6 +84,14 @@ and `attest` writes nothing to sign.
   `tel read --yes` signs the attestations the run committed. The key's agent must be the one
   the command attests as — `tool:smysl-ingest`, `tool:smysl-tel` — and that is checked before
   any provider is called, so a wrong key exits 2 and costs nothing.
+- **TR-P4: `merge --require-sigs MODE`.** The merged store, with every input's signatures and
+  the staged batch after `--sign`, is judged under the mode before the output is written. A
+  failure prints `verify`'s report, each finding naming the inputs that carried its record
+  (`(in day.cbor)`, or `inputs` in `--json`), writes nothing and exits 1. The union is what is
+  judged, so a signed and an unsigned copy of one attestation pass together. `--keys`,
+  `--agent-prefix` and `--status-at-least` as on `verify`; a mode that cannot be applied exits
+  2 before any input is read. The manual's chapter 21 gains a section on signatures that act,
+  replayed by `doc-output` against committed fixtures.
 
 ## 1.20.0 — 2026-11-24
 

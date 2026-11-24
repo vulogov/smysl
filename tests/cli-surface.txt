@@ -115,25 +115,30 @@ pack       [possible values: advisory, selective, strict]
 pack       --help
 merge      <STORE>
 merge      --config
-merge      --policy
-merge      [possible values: latest, all, contend]
-merge      --retraction
-merge      [possible values: strict, advisory, ignore]
+merge      --require-sigs
+merge      [possible values: advisory, selective, strict]
+merge      --keys
 merge      --store
+merge      --agent-prefix
 merge      --output
-merge      --staged
 merge      --format
 merge      [possible values: surface, cbor, pack]
-merge      --sign
-merge      --key
+merge      --status-at-least
+merge      --policy
+merge      [possible values: latest, all, contend]
 merge      --strict
-merge      --fail-on-contention
 merge      --offline
-merge      --max-contentions-per-agent
+merge      --retraction
+merge      [possible values: strict, advisory, ignore]
 merge      --no-color
+merge      --staged
 merge      --noprogress
+merge      --sign
 merge      --json
+merge      --key
+merge      --fail-on-contention
 merge      --quiet
+merge      --max-contentions-per-agent
 merge      --verbose
 merge      --backend
 merge      [possible values: memory, redb]

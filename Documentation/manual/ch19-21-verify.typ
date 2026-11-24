@@ -686,6 +686,79 @@ readings.cbor: 6 records, 2 units, 0 diagnostic(s)
 ```
 ]
 
+#subsection("Signatures that act: `--trust-sigs`, `keys`, `merge --require-sigs`")
+
+Everything so far *reports*. From 1.21 a policy can also *act* (RFC SMYSL-8), in three places.
+
+*Counting.* `--trust-sigs MODE` on `salience`, `pack`, `thread`, `q`, `ask`, `ui`, `retract`
+and `withdraw` counts only the attestations that `MODE` would not fail. Corroboration then
+counts independent groups of *verified* attesters, so four invented agents agreeing with each
+other count for nothing under `strict`. Under the same policy, `retract --as A` needs a `--key`
+that proves `A`. A `trust:` block in `.smysl/config.hjson`, with the same fields as `verify`'s
+options, applies the policy without the flag. A policy never changes a unit's status, and never
+removes a record from a store. It changes what is *counted*.
+
+*Keys.* `smysl keys` edits `.smysl/keys.hjson` instead of leaving it to a text editor. Its
+subcommands are `add --entry` (with `keygen`'s line), `revoke --kid`, `rotate --agent` and
+`list`. `rotate` makes a new key and revokes the old one from now on, so what the old key signed
+before stays valid. `revoke --compromised` refuses every signature the key ever made. `check`
+counts a store's signatures by key:
+
+#screen(caption: "$ smysl keys check ops.cbor")[
+```
+f6633d8a0b7796fc684dfc4036f56d49  tool:smysl-import  active  2 signature(s)
+ops.cbor: 2 signature(s), 1 key(s), 0 signed nothing, 0 unknown key(s)
+```
+]
+
+`ingest --yes`, `ingest --text` and `tel read --yes` take `--sign --key K` as well, and sign what
+they commit as they commit it. A key for an agent other than the one the command attests as is
+refused before anything is read.
+
+*Merging.* `ops.cbor` was signed, into `ops.cbor.sig`, with the one key this project's
+`.smysl/keys.hjson` holds. `keys add` wrote that file:
+
+```
+# smysl's public keys (RFC SMYSL-7 §5), written by `smysl keys`.
+{
+  keys: [
+    { agent: "tool:smysl-import", ed25519: "hex:d777c0751f8b656e98a1f2067387ae191e83447ca2a260c37235a78cc41bae7b", kid: "f6633d8a0b7796fc684dfc4036f56d49" }
+  ]
+}
+```
+
+`day.cbor` came from the same importer, and nobody signed it.
+`merge --require-sigs strict` judges the merged store, with every input's signatures, *before*
+it writes anything. If any attestation fails, it prints `verify`'s report, naming the input
+that carried each failing record, writes nothing, and exits 1:
+
+#screen(caption: "$ smysl merge ops.cbor day.cbor -o week.cbor --require-sigs strict")[
+```
+week.cbor: error: attestation by tool:smysl-import on b3:nphzhrs3svcg6p5lryieg32ei4 (in day.cbor): no signature
+week.cbor: error: attestation by tool:smysl-import on b3:ffotwngc77c5f7tfxbdv2a3sdg (in day.cbor): no signature
+week.cbor: strict: 2 verified, 2 unsigned, 0 warning(s), 2 error(s); failed
+smysl merge: --require-sigs strict: nothing written
+```
+]
+
+`ops-copy.cbor` holds the same records as `ops.cbor`, copied without its signature file. Alone, it
+fails `strict`. Merged with the signed original, it passes, because a record's verdict is its
+best valid signature. Judging each input on its own would have refused the very merge that
+brings the proof:
+
+#screen(caption: "$ smysl merge ops.cbor ops-copy.cbor -o both.cbor --require-sigs strict")[
+```
+smysl merge: --require-sigs strict: 2 verified, 0 unsigned, 0 warning(s); passed
+```
+]
+
+`--agent-prefix` and `--status-at-least` set `selective`'s scope here as they do on `verify`.
+`--keys` names the key file, which is otherwise `.smysl/keys.hjson` beside the output. With
+`--staged --sign --key K`, the staged batch is signed first and then judged, so
+`merge --staged --sign --key K --require-sigs strict` commits only a batch that verifies. A mode
+that cannot be applied, such as `selective` with no scope or a missing key file, exits 2 before
+any input is read.
+
 #whatsnext[
   A document that checks clean on all seven implemented passes is
   internally consistent — every reference resolves, every status is earned,

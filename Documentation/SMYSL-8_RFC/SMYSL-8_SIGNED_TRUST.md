@@ -1,7 +1,7 @@
 # RFC SMYSL-8 — trust that reads signatures
 
 **Author:** Vladimir Ulogov
-**Status:** amended in review against the code (R1, 2026-11-24). TR-P1 to TR-P3 built (1.21).
+**Status:** amended in review against the code (R1, 2026-11-24). TR-P1 to TR-P4 built (1.21): complete.
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged.
 **Crates:** `smysl-graph` and `smysl-thread` (an admission filter, additive), `smysl-sign` (an
 admission function, key-file editing), the CLI (`--trust-sigs`, `smysl keys`, `--sign` at commit,
@@ -441,3 +441,23 @@ All five were answered by reading the code; the answers are R1-1 to R1-9 below.
   library that passes `strict` with its signatures inside it; `ingest --text --sign` signs every
   attestation it made; a key for `human:alice` exits 2 on `ingest --text`, `ingest FILE` and
   `tel read` with the loopback provider's connection count unchanged).
+
+**R2, continued: TR-P4 as built.**
+
+- **R2-13. When the policy is read.** `--require-sigs`'s mode and key file are resolved before
+  any input is read, so a bad mode or a missing key file exits 2 having read nothing. The key
+  file defaults to `.smysl/keys.hjson` beside the output, or the working directory's when the
+  output is stdout. `--keys`, `--agent-prefix` or `--status-at-least` without `--require-sigs`
+  is a usage error rather than ignored. `--sigs` is not taken: a merge's signatures are its
+  inputs'.
+- **R2-14. Naming the inputs.** Each finding names every input that carried its record, in the
+  order given, and `staged` for the staged batch: ` (in a.cbor, b.cbor)` in text, an `inputs`
+  list in `--json`. The report's store is the output's name, or `merged` for stdout. A pass is
+  one line on stderr, since stdout may be the merged store.
+- **R2-15. The gate** is `tests/cmd_merge_require_sigs.rs`: an unsigned input under `strict`
+  writes neither the output nor its `.sig` and exits 1; a signed and an unsigned copy of the
+  same attestations pass in either order, to identical bytes; two inputs carrying one unsigned
+  record are both named; a staged batch fails unsigned and passes once `--sign` signs it; a
+  policy that cannot be applied exits 2 before the absent input is read. The manual's new
+  section (chapter 21, "Signatures that act") is replayed by `doc-output` against fixtures
+  committed under `fixtures/tutorial/ch19-21-verify/`; no secret key is committed.

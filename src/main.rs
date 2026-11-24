@@ -1347,7 +1347,7 @@ fn cli() -> Command {
                         .help("Records of a type this build cannot interpret (rule X)"),
                 )
                 .arg(Arg::new("store").value_name("PATH")),
-            "merge" => sub
+            "merge" => require_sigs_args(sub)
                 .arg(
                     Arg::new("policy")
                         .long("policy")
@@ -4760,6 +4760,21 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     // RFC SMYSL-7: the inputs' signature files travel with their records, and `--sign` signs
     // the staged attestations by the key's agent. Read and signed before anything is merged, so
     // a missing key or a damaged signature file fails before the output is written.
+    // RFC SMYSL-8 §8: `--require-sigs` is resolved before any input is read, so a bad mode or a
+    // missing key file is a usage error that has read nothing.
+    #[cfg(feature = "sign")]
+    let required =
+        match sign::require_policy(m, global.get_one::<String>("output").map(String::as_str)) {
+            Ok(r) => r,
+            Err(c) => return c,
+        };
+    #[cfg(not(feature = "sign"))]
+    if m.get_one::<String>("require-sigs").is_some() {
+        return no_sign("merge --require-sigs");
+    }
+    #[cfg(feature = "sign")]
+    let mut carriers = sign::Carriers::new();
+
     #[cfg(feature = "sign")]
     let signatures = {
         let mut sigs = match sign::input_sigs(&inputs) {
@@ -4855,6 +4870,17 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             }
         };
         labels.push(l);
+        #[cfg(feature = "sign")]
+        if required.is_some() {
+            for r in s.records() {
+                if matches!(&*r, Record::Attestation(_)) {
+                    carriers
+                        .entry(Store::record_hash(&r))
+                        .or_default()
+                        .push(path.clone());
+                }
+            }
+        }
         opts.labels = labels.clone();
         let outcome = merge(&mut store, &s, opts.clone());
         bar.suspend();
@@ -4884,6 +4910,18 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     finish_over(bar, merged, "merged");
 
     if !staged_records.is_empty() {
+        #[cfg(feature = "sign")]
+        if required.is_some() {
+            for r in staged_records
+                .iter()
+                .filter(|r| matches!(r, Record::Attestation(_)))
+            {
+                carriers
+                    .entry(Store::record_hash(r))
+                    .or_default()
+                    .push("staged".to_string());
+            }
+        }
         let n = staged_records.len();
         let staged = Store::from_records(staged_records);
         match merge(&mut store, &staged, opts.clone()) {
@@ -4904,6 +4942,23 @@ fn cmd_merge(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     }
 
     let out = global.get_one::<String>("output");
+
+    // The merged result is judged, not each input: a record signed in one input and unsigned in
+    // another verifies once merged, and refusing that union would refuse the proof (§8).
+    #[cfg(feature = "sign")]
+    if let Some(policy) = &required {
+        if let Err(c) = sign::require_sigs(
+            &store,
+            &signatures,
+            policy,
+            &carriers,
+            out.map_or("merged", String::as_str),
+            global.get_flag("json"),
+            global.get_flag("quiet"),
+        ) {
+            return c;
+        }
+    }
 
     // `--format` is global and means the same thing here as everywhere else: the *shape*
     // of the output. Emitting the log unconditionally made a merged store the one artifact
@@ -13465,6 +13520,37 @@ fn authority_admission(
     cmd: &str,
 ) -> Result<smysl::AttestationAdmission, ExitCode> {
     admission_for(m, global, path, store, cmd)
+}
+
+/// `merge --require-sigs MODE` and the scope and keys it reads (RFC SMYSL-8 §8): `verify`'s
+/// options less `--sigs`, since a merge's signatures are its inputs'.
+fn require_sigs_args(cmd: Command) -> Command {
+    cmd.arg(
+        Arg::new("require-sigs")
+            .long("require-sigs")
+            .value_name("MODE")
+            .value_parser(["advisory", "selective", "strict"])
+            .help("Judge the merged store under MODE first; write nothing if it fails"),
+    )
+    .arg(
+        Arg::new("keys")
+            .long("keys")
+            .value_name("FILE")
+            .help("--require-sigs: the key file (default: .smysl/keys.hjson beside the output)"),
+    )
+    .arg(
+        Arg::new("agent-prefix")
+            .long("agent-prefix")
+            .value_name("PREFIX")
+            .action(ArgAction::Append)
+            .help("--require-sigs selective: require signatures from agents whose ids start with PREFIX"),
+    )
+    .arg(
+        Arg::new("status-at-least")
+            .long("status-at-least")
+            .value_name("STATUS")
+            .help("--require-sigs selective: require signatures on attestations of units at or above STATUS"),
+    )
 }
 
 /// The arguments `verify` and `check --verify-sigs` share. Registered in every build, as every
