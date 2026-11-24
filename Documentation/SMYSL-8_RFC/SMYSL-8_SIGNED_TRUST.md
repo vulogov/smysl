@@ -1,14 +1,14 @@
 # RFC SMYSL-8 — trust that reads signatures
 
 **Author:** Vladimir Ulogov
-**Status:** draft (2026-11-24). Not yet read against the code as built (R1 is owed before TR-P1).
+**Status:** amended in review against the code (R1, 2026-11-24). Ready for TR-P1.
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged.
 **Crates:** `smysl-graph` and `smysl-thread` (an admission filter, additive), `smysl-sign` (an
 admission function, key-file editing), the CLI (`--trust-sigs`, `smysl keys`, `--sign` at commit,
 `merge --require-sigs`).
 **Depends on:** RFC SMYSL-7 (`smysl-sign`), built to SG-P4 in 1.20.
 **License:** MPL-2.0.
-**Evidence baseline:** `dev/1.21.0` at `7d6ba97`. Every code pointer below was read there.
+**Evidence baseline:** `dev/1.21.0` at `a65932d`. Every code pointer below was read there.
 
 ---
 
@@ -29,8 +29,8 @@ anything reads either. Its §1 named three gaps, and after 1.20 all three are st
    id. `Quorum(n)` counts distinct `--as` strings.
 3. **Nothing enforces a trust boundary.** `merge` accepts any input. Signatures are made only by
    `smysl sign` after the fact, or by `merge --staged --sign`; the commands that create
-   attestations at a trust boundary (`ingest --yes`, `ingest --text`, `attest`, `tel read`) cannot
-   sign what they commit. Keys are edited by hand in `.smysl/keys.hjson`.
+   attestations at a trust boundary (`ingest --yes`, `ingest --text`, `tel read`) cannot sign what
+   they commit. Keys are edited by hand in `.smysl/keys.hjson`.
 
 This RFC closes them with one rule and four uses of it:
 
@@ -42,7 +42,8 @@ This RFC closes them with one rule and four uses of it:
   authority looks only at admitted attesters. The CLI proves requesting agents with their keys.
 - **A2, `smysl keys` (§6).** List, add, revoke, rotate and check keys, so `.smysl/keys.hjson` is
   no longer hand-edited.
-- **A3, signing at the commit (§7).** `--sign --key K` on the commands that commit attestations.
+- **A3, signing at the commit (§7).** `--sign --key K` on `ingest --yes`, `ingest --text` and
+  `tel read`.
 - **A4, a merge policy (§8).** `merge --require-sigs MODE` refuses inputs that fail the mode.
 
 With no mode chosen, every result is bit-for-bit what it is today.
@@ -82,29 +83,34 @@ counting.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Admission {
-    /// Attestations not to count, by record hash (the `target_hash` SMYSL-7 signs).
-    /// Empty admits everything: today's behaviour.
-    pub excluded: BTreeSet<[u8; 32]>,
+    /// Attestations judged, by record hash (`Store::record_hash`, the `target_hash` SMYSL-7
+    /// signs), and whether each is admitted.
+    pub judged: BTreeMap<[u8; 32], bool>,
+    /// The answer for an attestation not judged: `true` under no policy and `Advisory`,
+    /// `false` under `Selective` and `Strict` (R1-2).
+    pub unjudged: bool,
 }
 impl Admission {
+    /// No policy: everything admitted. The `Default`.
     pub fn all() -> Admission;
-    pub fn excluding(hashes: impl IntoIterator<Item = [u8; 32]>) -> Admission;
     pub fn admits(&self, a: &Attestation) -> bool;
 }
 
 // smysl-sign: the one place admission is decided.
 pub fn admission<R: KeyResolver>(
-    store: &(impl StoreRead + ?Sized),
-    sigs: &[Signature],
+    store: &Store,
+    sigs: &[DetachedSignature],
     resolver: &R,
     mode: &VerificationMode,
 ) -> Admission;
 ```
 
-`admission` runs the same `judge()` as `verify_store`, including R1-14's matching of a changed
-attestation to its leftover signature, so an attestation edited after signing is forged here
-too. The set holds exclusions rather than admissions because the default must be "everything",
-and an empty set is the only value that means that without a store to enumerate.
+`admission` runs the same `judge()` as `verify_store`, including SMYSL-7 R1-14's matching of a
+changed attestation to its leftover signature, so an attestation edited after signing is forged
+here too. It judges every attestation the store's units and edges hold, not only those with a
+record in the log, and anything it still did not see is decided by `unjudged`: a policy fails
+closed (R1-2). `admits` hashes `Record::Attestation(a)` with `Store::record_hash`, the function
+`judge` already uses, so the two crates cannot disagree on identity (R1-1).
 
 `verified_attesters` stays as it is. It is the `Strict` view keyed by agent, and a caller that
 wants names rather than counts still uses it.
@@ -114,17 +120,20 @@ wants names rather than counts still uses it.
 ### 4.1 Corroboration
 
 `SalienceRequest` gains `admission: Admission` (default: all). `corroboration` builds its groups
-from admitted attestations only; a group whose every attestation is excluded is not formed. The
-report's terms gain `excluded: Vec<String>`, the group keys that would have been counted but for
-admission, so `smysl salience --explain` shows what a signature policy removed and why a unit
-fell.
+from admitted attestations only; a group whose every attestation is excluded is not formed.
+`SalienceTerms` (`#[non_exhaustive]`, beside `groups` and `dependent_groups`) gains
+`excluded_groups: Vec<String>`, the group keys that would have been formed but for admission, so
+`smysl salience --explain` shows what a signature policy removed and why a unit fell (R1-3).
 
 Ancestry collapse (D-8) runs after admission: an excluded attestation's parents claim nothing.
 Otherwise a forged attestation could still knock an honest group out by claiming its ancestry.
 
-`smysl-thread`'s `derive` builds its own `SalienceRequest` (`crates/smysl-thread/src/derive.rs`);
-its options gain the same `admission`, passed through. `smysl-pack` takes a `SalienceReport` from
-its caller and needs nothing.
+`smysl-thread`'s `derive_thread` builds its own `SalienceRequest`
+(`crates/smysl-thread/src/derive.rs:111`); `DeriveOptions` (`#[non_exhaustive]`) gains the same
+`admission`, passed through. `smysl-pack` takes a `SalienceReport` from its caller and needs
+nothing. `smysl-query`'s executor and dossiers (`exec.rs`, `dossier/mod.rs`) and the TUI build
+default requests; they take an `admission` from their callers the same way (R1-4). The graph
+measures in `smysl-measure` stay unadmitted: they measure the graph as written.
 
 ### 4.2 Origin authority
 
@@ -150,8 +159,12 @@ backed. Under `--trust-sigs M`, each `--as A` that M puts in scope needs a `--ke
 is A (`--key` becomes repeatable), and `Quorum(n)` needs n such keys. With the keys in hand,
 `retract --sign` (SMYSL-7 SG-P3) already writes and signs each agent's attestation on the
 retraction edge, so the proof is recorded, not only checked. Under `Advisory`, as today, an
-unproven `--as` is accepted with a warning. `withdraw`, which takes `--as` and `--authority` the
-same way, follows the same rule.
+unproven `--as` is accepted with a warning.
+
+`withdraw` takes `--as` and `--authority` the same way, but its origin check is written in the
+CLI, against the edge's attestations (`cmd_withdraw`, `src/main.rs`). It moves to `smysl-graph`
+as `withdrawal_authorised(edge, agents, authority, &Admission)`, so retraction and withdrawal
+read one rule and the CLI stays dispatch (R1-5).
 
 ### 4.3 What admission does not touch
 
@@ -163,7 +176,8 @@ same way, follows the same rule.
   rewrites.
 - **Merge.** Merge never adjudicates. Admission filters counts at read time and never removes a
   record from a store.
-- **Views and rendering** show every attestation. `render` may mark excluded ones (TR-P2 decides).
+- **Views and rendering** show every attestation. Neither reads salience (R1-4), so neither
+  takes the policy.
 
 ## 5. Choosing a policy
 
@@ -178,8 +192,8 @@ A flag, or the project's configuration, both resolved once per command:
 ```
 
 These are SMYSL-7's `verify` options under one more name, since `--verify-sigs` on `check` *reports*
-and `--trust-sigs` *acts*. They apply to `salience`, `pack`, `thread`, `render`, `view` (wherever
-salience orders output), `retract` and `withdraw`.
+and `--trust-sigs` *acts*. They apply to the commands that read salience or authority:
+`salience`, `pack`, `thread`, `q`, the dossier commands, `ui`, `retract` and `withdraw` (R1-4).
 
 ```hjson
 # .smysl/config.hjson
@@ -190,7 +204,9 @@ trust: {
 }
 ```
 
-A flag overrides the configuration. When a mode is chosen and the key file is missing or
+The provider configuration (`crates/smysl-provider/src/config.rs`) reads its keys by name, so
+`trust:` is read beside it by a pure `TrustConfig::parse` in `smysl-sign`, from the same file's
+text (R1-8). A flag overrides the configuration. When a mode is chosen and the key file is missing or
 malformed, the command exits 2 before reading the store, as `verify` does: a policy that cannot
 be applied is not silently dropped.
 
@@ -220,8 +236,8 @@ to an equal resolver (a property test). HJSON comments do not survive a render, 
 comments other than the leading `#` block is refused unless `--rewrite` is given, and the refusal
 names the first comment's line.
 
-`MemoryKeyResolver` gains `insert`, `set_status` and `entries`, so editing is a library operation
-and the command only reads and writes the file.
+`MemoryKeyResolver` already has `insert` and `keys`; it gains `set_status`, so editing is a
+library operation and the command only reads and writes the file (R1-9).
 
 ## 7. A3: signing at the commit
 
@@ -229,17 +245,22 @@ and the command only reads and writes the file.
 
 | Command | Commits | Attestation agent |
 |---|---|---|
-| `ingest … --yes` | the staged batch | the run's model agent (`model:<provider>/<model>`) |
-| `ingest --text` | each window as it is staged | the run's model agent |
-| `attest` | judgements | the judging model's agent |
+| `ingest … --yes` | the staged batch | `tool:smysl-ingest` (`IngestOptions`' default, `crates/smysl-ingest/src/lib.rs:636`) |
+| `ingest --text` | each window as it is staged | `tool:smysl-ingest` (`text/run.rs:331`) |
 | `tel read` | snapshots and series units | `tool:smysl-tel` |
 
 The key's agent must be the attestation agent. A key for `human:alice` cannot sign attestations
-by `model:ollama/llama3.1:8b` (SMYSL-7 would give `AgentMismatch`). That is checked before
-anything is read or any provider is called, and fails with exit 2, so a wrong key costs no tokens.
-A key bound to a model agent belongs to whoever runs that model. Its signature says that this
-attestation came from a run on the key holder's side, and nothing about whether the model was
-right.
+by `tool:smysl-ingest` (SMYSL-7 would give `AgentMismatch`). That is checked before anything is
+read or any provider is called, and fails with exit 2, so a wrong key costs no tokens.
+
+Ingest attests as the tool, not as the model, whichever provider ran; the provider, model and
+prompt are in the recipe, which is what corroboration groups by (R1-6). So a key for
+`tool:smysl-ingest` belongs to whoever operates that installation, and its signature says that
+this attestation came from their ingest, and nothing about whether the model was right. One key
+covers every model the operator runs.
+
+`attest` is not on the list: it prints its judgements and writes nothing (`cmd_attest`,
+`src/main.rs`), so there is nothing to sign (R1-7).
 
 Signatures are written after the commit, with SMYSL-7's writer (sorted, deduplicated, `.tmp` and
 rename). If the commit succeeds and signing fails, the command exits 1 and names the store, which
@@ -270,11 +291,12 @@ supplies the proof.
 
 | Crate | Addition |
 |---|---|
-| `smysl-graph` | `Admission`; `SalienceRequest::admission`; `SalienceTerms::excluded`; `plan_retraction_admitted` |
-| `smysl-thread` | the derive options' `admission` |
-| `smysl-sign` | `admission`; `KeyFile::render`; `MemoryKeyResolver::{insert, set_status, entries}` |
+| `smysl-graph` | `Admission`; `SalienceRequest::admission`; `SalienceTerms::excluded_groups`; `plan_retraction_admitted`; `withdrawal_authorised` |
+| `smysl-thread` | `DeriveOptions::admission` |
+| `smysl-query` | an `admission` on the executor's and dossiers' salience |
+| `smysl-sign` | `admission`; `TrustConfig::parse`; `KeyFile::render`; `MemoryKeyResolver::set_status` |
 | facade | re-exports under `smysl::sign` and the existing paths |
-| CLI | `--trust-sigs` and its options; `smysl keys` (45 commands); repeatable `--key` on `retract` and `withdraw`; `--sign --key` on `ingest`, `attest`, `tel read`; `merge --require-sigs` |
+| CLI | `--trust-sigs` and its options; `smysl keys` (45 commands); repeatable `--key` on `retract` and `withdraw`; `--sign --key` on `ingest --yes`, `ingest --text`, `tel read`; `merge --require-sigs` |
 
 ## 10. Compatibility and risks
 
@@ -296,14 +318,15 @@ supplies the proof.
   salience, thread and retraction test and determinism golden is unchanged; a store where four
   invented agents corroborate a unit has corroboration 1.0 under no policy and the signed groups'
   share under `Strict`; a forged attestation claiming an honest group's ancestry collapses nothing;
-  Origin refuses an agent whose only attestation is forged.
+  Origin refuses an agent whose only attestation is forged; under `Strict`, an edge attestation
+held in memory with no log record is excluded, and under `Advisory` admitted.
 - **TR-P2 — the policy in the CLI.** `--trust-sigs` and `trust:` on `salience`, `pack`, `thread`,
-  `render`, `view`, `retract`, `withdraw`; repeatable `--key` proving `--as`; `--explain` shows
+  `q`, the dossier commands, `ui`, `retract`, `withdraw`; `withdrawal_authorised`; repeatable `--key` proving `--as`; `--explain` shows
   exclusions. **Gate:** the same store packed under no policy and under `Strict` differs only in
   units whose corroboration came from unsigned attestations, and `retract --as human:mallory`
   with origin claimed by an unsigned attestation is refused under `Strict`.
 - **TR-P3 — keys and signing at the commit.** `smysl keys`, `KeyFile::render`, `--sign` on
-  `ingest --yes`, `ingest --text`, `attest`, `tel read`. **Gate:** `render` then `parse` gives an
+  `ingest --yes`, `ingest --text`, `tel read`. **Gate:** `render` then `parse` gives an
   equal resolver over generated key sets; `rotate` leaves earlier signatures valid and later ones
   by the old key refused; `tel read --sign` gives a store that passes `verify --mode strict`; a key
   for another agent exits 2 before any provider call (asserted with a provider that records calls).
@@ -313,19 +336,37 @@ supplies the proof.
 
 ## 12. Questions for R1
 
-To be settled by reading the draft against the code before TR-P1:
-
-1. Whether every attestation is reachable as a record with the hash SMYSL-7 signs. An attestation
-   held inside a unit's record rather than as its own record needs the hash derived in
-   `smysl-graph` exactly as `smysl-sign` derives it, and the two must share one function.
-2. Whether `SalienceTerms` (or whatever the per-unit terms type is) is `#[non_exhaustive]`, so
-   `excluded` is additive.
-3. The thread derive options' type, and whether it is `#[non_exhaustive]`.
-4. Whether `view`'s ordering reads salience, and whether `render` should mark excluded
-   attestations or only report them.
-5. Where `ingest`'s model agent id is formed, so the key check in §7 can run before the provider
-   is built.
+All five were answered by reading the code; the answers are R1-1 to R1-9 below.
 
 ## 13. Amendments
 
-None yet.
+**R1, 2026-11-24: the draft read against the code.**
+
+- **R1-1. Identity.** A unit's attestations are the logged `Attestation` values, attached
+  unchanged (`attach`, `crates/smysl-graph/src/store/mod.rs:1236`), and `Store::record_hash`
+  (`:1124`), which `judge` already uses, lives in `smysl-graph`. So `Admission::admits` hashes
+  with the same function and needs no shared helper. The draft's `admission` signature is
+  corrected to what `verify_store` takes: `&Store` and `&[DetachedSignature]`. `load_memory`
+  gives a `Store` for a library too, as `verify` does.
+- **R1-2. Fail closed.** `judge` walks the log, and an edge can hold attestations in memory that
+  have no record of their own (`store/mod.rs:480`). An exclusion set would admit any attestation
+  it never saw, so `Strict` would fail open. `Admission` now records what it judged and decides
+  the rest by `unjudged`: admitted under `Advisory`, excluded under `Selective` and `Strict`.
+  `admission` also judges the attestations the units and edges hold, not only the log's.
+- **R1-3.** `SalienceTerms` is `#[non_exhaustive]` and already has `groups` and
+  `dependent_groups`; the new field is `excluded_groups`, beside them.
+- **R1-4. Who reads salience.** Not `render` or `view`. Callers are `salience` and `pack` in the
+  CLI, `derive_thread`, `smysl-query`'s executor and dossiers, the TUI, and `smysl-measure`'s
+  graph measures. The policy reaches all but the measures, which measure the graph as written.
+  `DeriveOptions` is `#[non_exhaustive]`, so its `admission` is additive.
+- **R1-5. Withdrawal.** `withdraw`'s origin check is in the CLI, not the library. It moves to
+  `smysl-graph` as `withdrawal_authorised`, so one rule reads admission for both.
+- **R1-6. Ingest's agent.** `ingest` and `ingest --text` attest as `tool:smysl-ingest`, the
+  `IngestOptions` default, which the CLI never overrides; the draft's "model agent" was wrong.
+  The model is in the recipe. One operator key signs every model's ingest.
+- **R1-7. `attest` writes nothing.** It prints judgements and exits, so `--sign` on it is
+  dropped. Should `attest` ever commit its attestations, it takes `--sign` then.
+- **R1-8. Configuration.** `.smysl/config.hjson` is parsed by `smysl-provider`, by key. `trust:`
+  is read beside it by `TrustConfig::parse` in `smysl-sign`, from the same text, rather than by
+  adding signature policy to the provider crate.
+- **R1-9.** `MemoryKeyResolver` already has `insert` and `keys`; only `set_status` is new.
