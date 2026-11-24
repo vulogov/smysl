@@ -7,6 +7,36 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.21.0
+
+What 1.20 leaves open, by what it blocks rather than the order it is easiest. 1.20 built two RFCs
+to their last phase; what they did not settle, and what earlier releases left, is where the work
+starts.
+
+**GE-M7 is still the reason for the telemetry work, and it has not run.** It needs the
+Train-Ticket testbed (D-T12) and agent runs, arms (a) to (d). Until it runs, the design of
+investigations is untested against an agent, and rule TQ's catch rate is a property of
+`examples/oko_ledger`'s planted quotes rather than of a model's.
+
+**Signatures stop at the report.** `verify_store` and `verified_attesters` say which attestations
+verify, but corroboration and origin authority still count every `AgentId` as written; a caller
+filters by hand. Keys are distributed as a file beside the store, with no rotation beyond
+`revoked` and bounds, and `Attestation.sig` stays reserved.
+
+**The language server in more editors.** Neovim is the recipe that was run in an editor; the
+Helix, VS Code and Zed recipes are read against their documentation, not run.
+
+**Episode similarity on real incidents.** On RCAEval a case finds about half its repetitions in
+its top five, against 0.97 on simulated episodes (GE-M8). Calibration has been tested on one
+benchmark at one sample a second, not at a coarser cadence or on a production system.
+
+**And what earlier releases left.** The real-data runs (GE-M1 on a cluster observed for seven
+days, the Zabbix fixtures, GE-M2 and GE-M5 on DeathStarBench at production-like load); OKO's own
+ledger, which is OKO's code; the range index's tables (RFC SMYSL-3 §17.1); the cache's written
+share, the repair a cut would do, the bound stated in tokens, the sizing residual on German, the
+Ollama arm's model size; questions still unread, a subject by a name the store does not write,
+GE-T7 on a thousand real works, and the ones only people can close. None of it moved in 1.20.
+
 ## 1.20.0 — 2026-11-24
 
 Two RFCs built from first phase to last, and one gap 1.19 named closed. `smysl` gains a language
