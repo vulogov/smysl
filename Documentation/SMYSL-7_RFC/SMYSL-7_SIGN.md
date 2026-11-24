@@ -1,7 +1,7 @@
 # RFC SMYSL-7 — detached attestation signatures (`smysl-sign`)
 
 **Author:** Vladimir Ulogov
-**Status:** amended in review against the code (R1, 2026-11-23). SG-P1 to SG-P3 are built; SG-P4 is next (1.20).
+**Status:** amended in review against the code (R1, 2026-11-23). Built to its last phase, SG-P4 (1.20).
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged.
 **Crate:** `crates/smysl-sign`, new, behind the facade's `sign` feature, on by default.
 **Cryptographic profile:** Ed25519 (RFC 8032) in detached `COSE_Sign1` envelopes (RFC 9052).
@@ -429,3 +429,14 @@ writes the same file (R1-16). `merge` carries its inputs' files to `<output>.sig
     `check`'s other errors do.
   - `sign` and `verify` take the store positionally or with `-s`. The default key file is
     `.smysl/keys.hjson` beside the store, or inside a library.
+
+**R1, continued, 2026-11-24: SG-P4 built.**
+
+- **R1-17.** The gates. `check-purity` passes with `smysl-sign` on the pure list. `cargo
+  semver-checks` against 1.19.0 finds no change requiring a bump in any of the twenty
+  published crates; `smysl-sign` and `smysl-lsp` have no published baseline until 1.20.0 ships
+  them. The manual gains a section in Chapter 21 ("Signatures — who made an attestation"), with
+  transcripts taken from a run, and Appendix A entries for `keygen`, `sign` and `verify` and
+  for the new flags on `check`, `merge` and `retract`. Appendix A's claim to cover "all
+  twenty-five" commands had gone stale at forty-one; it now says which thirty-eight it covers
+  and where the other six are documented.

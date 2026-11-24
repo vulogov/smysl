@@ -576,6 +576,116 @@ just on anything outright broken — a `w` code is not wrong, but it may be
 exactly the threshold a particular team or a particular document's stakes
 call for.
 
+#section("Signatures — who made an attestation")
+
+Every pass above takes an attestation's `agent` at its word. An agent id is a string its
+writer chose, so a store can say `tool:smysl-import` measured something that no import ever
+read. From 1.20 an agent can sign what it attested (RFC SMYSL-7): Ed25519 over the record's
+canonical bytes, in a `COSE_Sign1` envelope kept *beside* the store, in `<store>.sig` (or
+`<library>/log/sigs.cbor`). Nothing in the store changes, no uid moves, and a reader that has
+never heard of signatures reads a signed store as it always did. A signature says who
+attested a record. It never raises a status.
+
+`import` attests the units it writes as `tool:smysl-import`. Nobody signed them, so a strict
+verifier refuses the store:
+
+#screen(caption: "$ smysl verify --mode strict readings.cbor")[
+```
+readings.cbor: error: attestation by tool:smysl-import on b3:atpav5i6th4qt6ss3vm2pdllrh: no signature
+readings.cbor: error: attestation by tool:smysl-import on b3:7jviu2warbabnpgbjvgg6wz6se: no signature
+readings.cbor: strict: 0 verified, 2 unsigned, 0 warning(s), 2 error(s); failed
+```
+]
+
+`keygen` makes a key for one agent. The secret goes to `--out`, readable by its owner alone,
+and a file that is already there is refused. The public half is printed as the line to add to
+`.smysl/keys.hjson`; your key and its id will differ, since the 32 bytes are drawn fresh:
+
+#screen(caption: "$ smysl keygen --agent tool:smysl-import --out keys/import.key")[
+```
+{ agent: "tool:smysl-import", ed25519: "hex:3e120bb7a3c2f349c5fcd14c56bace59490b67a794ad490dc3031eb603fbb793", kid: "533576e1d6312bb9658169e6b63f66d8" }
+```
+]
+
+The key file lists the keys a verifier trusts. An entry may be `revoked` (from a time, or
+always, for a key that leaked) or `bounded` to a window, and `max_status` caps what a key may
+vouch for: a key capped at `cited` that signs an attestation on a `measured` unit fails, in
+every mode. The parser is strict on purpose: a misspelt field is an error, because a typo that
+silently dropped `revoked_after_ms` would trust a key it was meant to stop trusting.
+
+```
+{
+  keys: [
+    { agent: "tool:smysl-import", ed25519: "hex:3e12…b793", kid: "533576e1…66d8" }
+    { agent: "human:alice", ed25519: "hex:9125…bef7", kid: "42aa8508…c45e", max_status: "cited" }
+  ]
+}
+```
+
+`sign` signs every attestation in the store by the key's agent that this key has not already
+signed. Signing is deterministic, so signing twice writes nothing new:
+
+#screen(caption: "$ smysl sign --key keys/import.key readings.cbor")[
+```
+readings.cbor: signed 2 attestation(s) by tool:smysl-import into readings.cbor.sig; 0 already signed
+```
+]
+
+#screen(caption: "$ smysl verify --mode strict readings.cbor")[
+```
+readings.cbor: strict: 2 verified, 0 unsigned, 0 warning(s), 0 error(s); passed
+```
+]
+
+#subsection("Three modes, and the one thing none of them forgives")
+
+`advisory`, the default, warns about an attestation that is unsigned or signed with a key the
+key file does not hold, and passes. `strict` requires every attestation to verify.
+`selective` is strict for the attestations in scope, given by `--agent-prefix` (an agent id's
+prefix, repeatable) and `--status-at-least` (a unit status), and advisory for the rest. That is
+how a team says "anything measured must be signed" without signing every speculative note.
+
+What no mode forgives is a signature that is present and wrong. Flip one byte of the
+signature file and even `advisory` fails:
+
+#screen(caption: "$ smysl verify readings.cbor")[
+```
+readings.cbor: error: attestation by tool:smysl-import on b3:7jviu2warbabnpgbjvgg6wz6se: the signature by tool:smysl-import with key 533576e1d6312bb9658169e6b63f66d8 does not verify over this record
+readings.cbor: advisory: 1 verified, 0 unsigned, 0 warning(s), 1 error(s); failed
+```
+]
+
+Editing the attestation instead fails the same way. A signature that names the attestation's
+agent and unit, but not its bytes, is judged against it. `verify` exits 0 when the store
+passes, 1 when it does not (a signature file that will not parse is a failure, not an empty
+list), and 2 on a usage error or a key file that is missing or malformed. `--json` prints one
+object with the counts and the findings.
+
+#subsection("Signing as you write: `--sign`")
+
+Three writers sign as they go. `merge --staged --sign --key K -o OUT` signs the staged batch it
+commits. `retract --as A --sign --key K` records `A`'s attestation on the retraction edge and
+signs it, so who withdrew a unit is as checkable as who asserted it:
+
+#screen(caption: "$ smysl retract b3:7jviu2warbabnpgbjvgg6wz6se --as human:alice --authority any --sign --key keys/alice.key readings.cbor")[
+```
+readings.cbor: retracting b3:7jviu2warbabnpgbjvgg6wz6se would leave 1 unit(s) unfounded, 0 of them orphaned
+readings.cbor: 1 unit(s) now read as unfounded
+```
+]
+
+And `merge` carries every input's signature file to its output's, sorted and without
+duplicates, so `merge a b` and `merge b a` write the same signatures. Finally, `check`
+takes the same verification as one more set of findings, coded `sign/<verdict>`, failing
+with exit 3 as its other errors do:
+
+#screen(caption: "$ smysl check --verify-sigs strict readings.cbor")[
+```
+readings.cbor: signatures (strict): 3 verified, 0 unsigned, 0 warning(s), 0 error(s)
+readings.cbor: 6 records, 2 units, 0 diagnostic(s)
+```
+]
+
 #whatsnext[
   A document that checks clean on all seven implemented passes is
   internally consistent — every reference resolves, every status is earned,
