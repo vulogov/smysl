@@ -12,6 +12,7 @@
 #![deny(rust_2018_idioms)]
 
 pub mod adjacency;
+pub mod admission;
 pub mod compact;
 pub mod labels;
 pub mod lineage;
@@ -28,6 +29,7 @@ pub mod store;
 pub mod traverse;
 
 pub use adjacency::{Adjacency, Edge, EdgeKind, EdgeSet, NodeId};
+pub use admission::AttestationAdmission;
 pub use labels::{label_bindings, label_index, labels_of, resolve_label, LabelError};
 pub use lineage::{
     dependents, dependents_trace, dependents_via, diff, hop_diff, membership, rests_on, trace,
@@ -38,9 +40,9 @@ pub use lineage::{
 // in the facade twice.
 pub use merge::review::{review, review_with};
 pub use merge::{
-    effective_status, merge, plan_retraction, DetectionContext, EffectiveStatus, MergeOptions,
-    MergeReport, RetractionAuthority, RetractionPlan, RetractionPolicy, ReviewItem, ReviewOptions,
-    ReviewSubject, SupersessionPolicy,
+    effective_status, merge, plan_retraction, plan_retraction_admitted, DetectionContext,
+    EffectiveStatus, MergeOptions, MergeReport, RetractionAuthority, RetractionPlan,
+    RetractionPolicy, ReviewItem, ReviewOptions, ReviewSubject, SupersessionPolicy,
 };
 pub use salience::{
     salience, view_roots, SalienceReport, SalienceRequest, SalienceTerms, SalienceWeights,

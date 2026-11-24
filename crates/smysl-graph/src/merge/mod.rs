@@ -32,7 +32,9 @@ use crate::store::{Store, StoreRead};
 
 pub use contention::DetectionContext;
 pub use policy::{RetractionAuthority, RetractionPolicy, SupersessionPolicy};
-pub use retraction::{effective_status, plan_retraction, EffectiveStatus, RetractionPlan};
+pub use retraction::{
+    effective_status, plan_retraction, plan_retraction_admitted, EffectiveStatus, RetractionPlan,
+};
 pub use review::{review, review_with, ReviewItem, ReviewOptions, ReviewSubject};
 
 /// How to merge.

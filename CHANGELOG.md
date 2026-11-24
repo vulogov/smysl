@@ -37,6 +37,33 @@ share, the repair a cut would do, the bound stated in tokens, the sizing residua
 Ollama arm's model size; questions still unread, a subject by a name the store does not write,
 GE-T7 on a thousand real works, and the ones only people can close. None of it moved in 1.20.
 
+### Trust that reads signatures (RFC SMYSL-8, TR-P1)
+
+RFC SMYSL-7 made signatures and stopped at the report: corroboration and origin authority still
+counted every `AgentId` as written. RFC SMYSL-8 specifies what changes when they read
+signatures; RFC SMYSL-9, beside it, plans three measurements 1.20 left open. Both were read
+against the code first (SMYSL-8 R1): an exclusion set would have let a strict policy fail open
+on an attestation it never saw, ingest attests as `tool:smysl-ingest` rather than as the model,
+and `attest` writes nothing to sign.
+
+- **Admission.** Under a verification mode, an attestation is admitted when the mode would not
+  fail it, so exactly what `smysl verify --mode M` reports as an error is what stops counting.
+  `smysl::sign::admission` computes it; `smysl_graph::AttestationAdmission` carries it down, by
+  record hash, and decides an attestation it did not judge by the mode: admitted under
+  `Advisory`, excluded under `Selective` and `Strict`.
+- **Corroboration.** `SalienceRequest::with_admission`: only admitted attestations form groups,
+  and before ancestry is compared, so a forged attestation cannot knock out an honest group by
+  naming its parents. `SalienceTerms::excluded_groups` says what a policy removed.
+  `DeriveOptions::with_admission` passes it to thread derivation.
+- **Origin authority.** `plan_retraction_admitted`: an origin claimed only by an excluded
+  attestation does not authorise, and the refusal says so. `plan_retraction` is unchanged.
+- **`verify` sees attestations held without a record.** An edge can hold attestations in memory
+  that have no log record of their own; `verify_store`, `verified_attesters` and `admission` now
+  judge them too (SMYSL-8 R2-2).
+- With no policy, every salience, thread and retraction result is what it was. The new type is
+  `AttestationAdmission` because `smysl::Admission` is already a view's granularity. The CLI
+  takes a policy in TR-P2.
+
 ## 1.20.0 — 2026-11-24
 
 Two RFCs built from first phase to last, and one gap 1.19 named closed. `smysl` gains a language

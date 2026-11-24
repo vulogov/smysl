@@ -14,6 +14,9 @@
 //! - Three modes ([`VerificationMode`]): `Advisory` warns about what is unsigned, `Selective`
 //!   requires signatures from some agents or on some statuses, `Strict` requires them all. A
 //!   signature that is present and wrong fails every mode.
+//! - Trust that reads signatures (RFC SMYSL-8): [`admission`] turns a mode into the
+//!   `smysl_graph::AttestationAdmission` that salience's corroboration and origin authority
+//!   count by. Exactly what `verify_store` fails under a mode is what it excludes.
 //!
 //! ```
 //! use smysl_core::{AgentId, Attestation, Hlc, Op, Record, Rung, Uid};
@@ -50,6 +53,6 @@ pub use key::{
 };
 pub use keyfile::{parse_public_key, KeyFile, KeyFileError, ED25519_SPKI_PREFIX};
 pub use verify::{
-    sign_record, verified_attesters, verify_record, verify_store, RecordVerdict, VerificationMode,
-    VerificationReport,
+    admission, sign_record, verified_attesters, verify_record, verify_store, RecordVerdict,
+    VerificationMode, VerificationReport,
 };

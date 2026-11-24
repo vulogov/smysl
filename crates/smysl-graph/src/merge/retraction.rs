@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::diag::{Code, Diagnostic, Report};
 use smysl_core::{AgentId, RelKind, Status, Uid};
 
+use crate::admission::AttestationAdmission;
 use crate::merge::policy::{RetractionAuthority, RetractionPolicy};
 use crate::store::StoreRead;
 
@@ -178,12 +179,39 @@ impl RetractionPlan {
 /// Nothing is mutated. The blast radius this returns is exactly what applying the
 /// retraction produces - a property the SM-P6 gate asserts directly, because a dry run
 /// that disagrees with the real thing is worse than no dry run.
+///
+/// Every attestation counts toward origin authority; [`plan_retraction_admitted`] is the same
+/// plan under a signature policy.
 pub fn plan_retraction(
     store: &(impl StoreRead + ?Sized),
     target: Uid,
     agents: &[AgentId],
     policy: RetractionPolicy,
     authority: RetractionAuthority,
+) -> RetractionPlan {
+    plan_retraction_admitted(
+        store,
+        target,
+        agents,
+        policy,
+        authority,
+        &AttestationAdmission::all(),
+    )
+}
+
+/// [`plan_retraction`], with origin authority read from the attestations `admission` admits
+/// only (RFC SMYSL-8 §4.2).
+///
+/// An origin claimed by an attestation a signature policy excludes — forged under any mode,
+/// unsigned under `Strict` — does not authorise. Quorum counts the requesting agents as given:
+/// proving them is the caller's part, with their keys.
+pub fn plan_retraction_admitted(
+    store: &(impl StoreRead + ?Sized),
+    target: Uid,
+    agents: &[AgentId],
+    policy: RetractionPolicy,
+    authority: RetractionAuthority,
+    admission: &AttestationAdmission,
 ) -> RetractionPlan {
     let mut refusal = None;
     let distinct: BTreeSet<&AgentId> = agents.iter().collect();
@@ -196,15 +224,32 @@ pub fn plan_retraction(
             distinct.len()
         ));
     } else if authority.requires_origin() {
-        let attestors: BTreeSet<AgentId> = store
-            .get(&target)
+        let unit = store.get(&target);
+        let all: BTreeSet<AgentId> = unit
+            .as_ref()
             .map(|u| u.attestations.iter().map(|a| a.agent.clone()).collect())
             .unwrap_or_default();
+        let attestors: BTreeSet<AgentId> = unit
+            .as_ref()
+            .map(|u| {
+                u.attestations
+                    .iter()
+                    .filter(|a| admission.admits(a))
+                    .map(|a| a.agent.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
         if !distinct.iter().any(|a| attestors.contains(*a)) {
-            refusal = Some(format!(
-                "origin authority: none of the {} requesting agent(s) attested this unit",
-                distinct.len()
-            ));
+            refusal = Some(if distinct.iter().any(|a| all.contains(*a)) {
+                "origin authority: the requesting agent's attestation on this unit is not \
+                 admitted under the signature policy"
+                    .to_string()
+            } else {
+                format!(
+                    "origin authority: none of the {} requesting agent(s) attested this unit",
+                    distinct.len()
+                )
+            });
         }
     }
 

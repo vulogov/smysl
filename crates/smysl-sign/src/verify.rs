@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{AgentId, Record, Status, Uid};
-use smysl_graph::Store;
+use smysl_graph::{AttestationAdmission, Store};
 
 use crate::cose::{protected, sig_structure, DetachedSignature, SignError, TargetKind};
 use crate::key::{KeyError, KeyId, KeyResolver, KeyStatus, SigningKey};
@@ -317,10 +317,30 @@ struct Judged<'a> {
     verdict: RecordVerdict,
 }
 
-/// Judge every attestation in `store`, and every other record a signature names; and count
-/// the signatures left over.
+/// The attestations a store's units and edges hold that have no record of their own in its log
+/// (RFC SMYSL-8 R1-2): an edge held in memory can carry attestations its encoding does not.
+/// Judged beside the log's, so nothing salience or retraction reads goes unjudged.
+fn held_attestations(store: &Store) -> Vec<Record> {
+    let mut out = BTreeMap::new();
+    let held = store
+        .units()
+        .flat_map(|(_, u)| u.attestations.iter())
+        .chain(store.relations().flat_map(|r| r.attestations.iter()));
+    for a in held {
+        let r = Record::Attestation(a.clone());
+        let h = Store::record_hash(&r);
+        if !store.contains_record(&h) {
+            out.entry(h).or_insert(r);
+        }
+    }
+    out.into_values().collect()
+}
+
+/// Judge every attestation in `store` (its log's, and `held`), and every other record a
+/// signature names; and count the signatures left over.
 fn judge<'a, R: KeyResolver>(
     store: &'a Store,
+    held: &'a [Record],
     signatures: &[DetachedSignature],
     resolver: &R,
 ) -> (Vec<Judged<'a>>, usize) {
@@ -332,7 +352,7 @@ fn judge<'a, R: KeyResolver>(
     let mut matched = BTreeSet::new();
     let mut unsigned = Vec::new();
     let mut out = Vec::new();
-    for r in store.iter() {
+    for r in store.iter().chain(held) {
         let h = Store::record_hash(r);
         let sigs = by_target.get(&h);
         if !matches!(r, Record::Attestation(_)) && sigs.is_none() || !seen.insert(h) {
@@ -410,7 +430,8 @@ pub fn verify_store<R: KeyResolver>(
     resolver: &R,
     mode: &VerificationMode,
 ) -> VerificationReport {
-    let (judged, unmatched_count) = judge(store, signatures, resolver);
+    let held = held_attestations(store);
+    let (judged, unmatched_count) = judge(store, &held, signatures, resolver);
     let mut verdicts = BTreeMap::new();
     let mut failing = BTreeSet::new();
     for j in judged {
@@ -450,7 +471,8 @@ pub fn verified_attesters<R: KeyResolver>(
     resolver: &R,
 ) -> BTreeMap<Uid, BTreeSet<(AgentId, KeyId)>> {
     let mut out: BTreeMap<Uid, BTreeSet<(AgentId, KeyId)>> = BTreeMap::new();
-    for j in judge(store, signatures, resolver).0 {
+    let held = held_attestations(store);
+    for j in judge(store, &held, signatures, resolver).0 {
         let Record::Attestation(a) = j.record else {
             continue;
         };
@@ -465,4 +487,31 @@ pub fn verified_attesters<R: KeyResolver>(
         }
     }
     out
+}
+
+/// Which attestations a trust decision counts under `mode` (RFC SMYSL-8 §3).
+///
+/// An attestation is admitted when `mode` would not fail it: exactly what [`verify_store`]
+/// reports as an error is what this excludes. Every attestation the store holds is judged, and
+/// the answer for one it does not hold is `mode`'s own default: admitted under `Advisory`,
+/// excluded under `Selective` and `Strict`, so a policy fails closed (R1-2).
+pub fn admission<R: KeyResolver>(
+    store: &Store,
+    signatures: &[DetachedSignature],
+    resolver: &R,
+    mode: &VerificationMode,
+) -> AttestationAdmission {
+    let held = held_attestations(store);
+    let mut judged = BTreeMap::new();
+    for j in judge(store, &held, signatures, resolver).0 {
+        if !matches!(j.record, Record::Attestation(_)) {
+            continue;
+        }
+        let in_scope = j
+            .agent
+            .as_ref()
+            .is_some_and(|a| mode.in_scope(a, j.subject_status));
+        judged.insert(j.hash, !mode.fails(&j.verdict, in_scope));
+    }
+    AttestationAdmission::new(judged, matches!(mode, VerificationMode::Advisory))
 }

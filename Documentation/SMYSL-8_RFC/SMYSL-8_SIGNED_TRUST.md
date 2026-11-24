@@ -1,7 +1,7 @@
 # RFC SMYSL-8 — trust that reads signatures
 
 **Author:** Vladimir Ulogov
-**Status:** amended in review against the code (R1, 2026-11-24). Ready for TR-P1.
+**Status:** amended in review against the code (R1, 2026-11-24). TR-P1 built (1.21).
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged.
 **Crates:** `smysl-graph` and `smysl-thread` (an admission filter, additive), `smysl-sign` (an
 admission function, key-file editing), the CLI (`--trust-sigs`, `smysl keys`, `--sign` at commit,
@@ -370,3 +370,22 @@ All five were answered by reading the code; the answers are R1-1 to R1-9 below.
   is read beside it by `TrustConfig::parse` in `smysl-sign`, from the same text, rather than by
   adding signature policy to the provider crate.
 - **R1-9.** `MemoryKeyResolver` already has `insert` and `keys`; only `set_status` is new.
+
+**R2, 2026-11-24: TR-P1 as built.**
+
+- **R2-1. The name.** The type is `AttestationAdmission`, not `Admission`:
+  `smysl_core::Admission` is a view's granularity (`SingleAssertion`, `Topical`), and the facade
+  flattens `smysl-core` and `smysl-graph` into one namespace. §3's `Admission` reads as
+  `AttestationAdmission` throughout; the module is `smysl_graph::admission`.
+- **R2-2. `verify` sees held attestations too.** R1-2's judging of attestations a unit or edge
+  holds with no log record of their own is in `judge`, which `verify_store` and
+  `verified_attesters` share with `admission`. So `smysl verify --mode strict` now fails a store
+  whose edge carries an unsigned attestation held in memory, where before it did not see it; a
+  store read from disk has none, since its edges' attestations come from records.
+- **R2-3. The gate** is `crates/smysl-sign/tests/admission.rs`: no policy gives an identical
+  report; four attesters, two invented, give corroboration 1.0 with no policy and 0.5 under
+  `Strict` and under `Selective` over `model:`; what `verify_store` fails is exactly what
+  `admission` excludes, in each mode; a forged `human:aaron` that displaced an honest
+  `human:alice` group with no policy is excluded under `Advisory`, and alice's group counts;
+  origin authority refuses an agent whose only attestation is forged; an edge attestation with no
+  log record is excluded under `Strict` and admitted under `Advisory`.
