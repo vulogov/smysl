@@ -9,35 +9,35 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.20.0
 
-What 1.19 leaves open, by what it blocks rather than the order it is easiest. 1.19 put the level
-detectors on real incidents and gave them thresholds set from data, and what it found is where the
-work starts.
+Two RFCs built from first phase to last, and one gap 1.19 named closed. `smysl` gains a language
+server and signatures on what an agent attested, two new crates, `smysl-lsp` and `smysl-sign`,
+published for the first time. The wire format did not change, the registry is 176, and
+`smysl/1.0` holds.
 
-**GE-M7 is still the reason for all of this, and it has not run.** It needs the Train-Ticket
-testbed (D-T12) and agent runs, arms (a) to (d). Until it runs, the design of investigations is
-untested against an agent, and rule TQ's catch rate is a property of `examples/oko_ledger`'s
-planted quotes rather than of a model's. RCAEval's RE2-TT is a recording of that system, not the
-testbed: it has no deploys, no config edits and no agent.
+**A language server (RFC SMYSL-6, LS-P1 to LS-P4).** `smysl lsp-server`, in the same binary, gives
+an editor `check`'s findings while you type, hover, go to definition, references, the outline,
+completion, `fmt` as formatting, and three quick fixes that never raise a status. With a library
+open, `b3:` references resolve across documents, and the library is only read. It was run in
+Neovim, which found a hang on a case-insensitive disk, now bounded.
 
-**PELT's scale.** Its `σ̂`, from the median first difference, is zero on step-like series, and
-`floor: resolution` does not reach float metrics, whose gaps are noise-sized. PELT's carried values
-alarmed on up to every fault-free window of a second system (SMYSL-5 §15, R11). A floor at a share
-of the reference window's spread is one candidate, as another `detect::Floor`, which is
-`#[non_exhaustive]` for that reason.
+**Who made an attestation (RFC SMYSL-7, SG-P1 to SG-P4).** An `AgentId` was a string its writer
+chose. `smysl keygen`, `sign` and `verify` sign attestations with Ed25519 in a detached
+`COSE_Sign1` beside the store, and check them in `Advisory`, `Selective` or `Strict`. A forged,
+revoked or over-cap signature fails every mode, and so did every byte flipped in a signed
+attestation or its envelope. `merge`, `retract` and `check` carry, make and report signatures.
 
-**Calibration beyond one benchmark.** Three systems of RCAEval at one sample a second are what
-SMYSL-5 R11's advice rests on. Calibration has not been tested at a coarser cadence, on a
-production system, or for a value kept across weeks of one system.
+**PELT's scale on float metrics (SMYSL-3 §21.2, SMYSL-5 R12).** `floor: spread` keeps a detector's
+scale at least a tenth of the standard deviation of what it
+reads. Calibrated on Sock Shop, PELT holds 10 % on Online Boutique and
+Train Ticket, where it overshot to every fault-free window in 1.19.
 
-**The real-data runs.** GE-M1 on a cluster observed for seven days (I-1), the Zabbix fixtures
-(I-2), GE-M2 and GE-M5 on DeathStarBench at production-like load, GE-M8 on GE-M7's corpus and
-RCAEval. Each simulated verdict names the run on real data that could overturn it.
-
-**And what earlier releases left.** OKO's own ledger, which is OKO's code; the range index's
-tables (RFC SMYSL-3 §17.1); the cache's written share, the repair a cut would do, the bound stated
-in tokens, the sizing residual on German, the Ollama arm's model size; questions still unread, a
-subject by a name the store does not write, GE-T7 on a thousand real works, and the ones only
-people can close. None of it moved in 1.19.
+**Still open.** GE-M7 has not run: it needs the Train-Ticket testbed (D-T12) and agent runs, arms
+(a) to (d). On real incidents episode similarity is weak (GE-M8 on RCAEval). The other real-data
+runs (GE-M1 on a seven-day cluster, the Zabbix fixtures, GE-M2 and GE-M5 on DeathStarBench),
+calibration beyond one benchmark at one sample a second, OKO's own ledger, the range index's
+tables, and what earlier releases left did not move. Signatures are read beside a store, not
+yet by corroboration or origin authority themselves: `verified_attesters` gives a caller the
+filter.
 
 ### `smysl lsp-server`: a language server in the same binary (RFC SMYSL-6, LS-P1)
 
@@ -78,7 +78,7 @@ people can close. None of it moved in 1.19.
   `initialize` hung while the folder scan walked the disk. The scan is now bounded at 20,000
   entries, skips links to directories and the filesystem root; the Neovim recipe matches a file
   named exactly `LIBRARY`. With that, every request works through Neovim's own client.
-- `smysl-lsp` is unpublished until the release that ships it.
+- `smysl-lsp` is published for the first time with 1.20.0.
 
 ### `smysl-sign`: detached attestation signatures (RFC SMYSL-7, SG-P1 to SG-P4)
 
@@ -134,7 +134,7 @@ Ed25519 (RFC 8032), in a detached `COSE_Sign1` envelope (RFC 9052) kept beside t
   rebuilds it and verifies it over a `Sig_structure` written out by hand; the Go and Node
   conformance tests verify it with their standard libraries' Ed25519 and their own BLAKE3.
 - `ed25519-dalek` 2.2 (default features off) and `zeroize` are new workspace dependencies.
-  `smysl-sign` is unpublished until the release that ships it.
+  `smysl-sign` is published for the first time with 1.20.0.
 
 ### `floor: spread`: PELT's scale on float metrics (SMYSL-3 §21.2, SMYSL-5 R12)
 

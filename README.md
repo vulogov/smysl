@@ -28,14 +28,14 @@ As a library:
 
 ```toml
 [dependencies]
-smysl = "1.19"
+smysl = "1.20"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.19.0` and the format is `smysl/1.0`.** The crate version means the API is
+**The crate is `1.20.0` and the format is `smysl/1.0`.** The crate version means the API is
 frozen: every public item moves only with a 2.0, enforced per crate by `cargo-semver-checks` on
 every push. [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise
 written down. The format version means nothing about the format changed incompatibly:
@@ -44,24 +44,25 @@ Python, JavaScript and Go written from the specification alone — and `smysl/1.
 record rather than a change. SMYSL-2's library records and SMYSL-3's `x.tel/v1`, at revision 2 since 1.18, are additions a
 1.0 reader skips.
 
-## Release 1.19.0
+## Release 1.20.0
 
-Detector thresholds set from data instead of defaults, and checked on real incidents across three
-systems. The kernel did not change. The full account, with every figure measured, is in
+A language server and signed attestations, two RFCs built to their last phase, and two new crates,
+`smysl-lsp` and `smysl-sign`. The wire format did not change. The full account is in
 [`CHANGELOG.md`](CHANGELOG.md).
 
-- **A threshold is a false-alarm rate.** `smysl tel calibrate` takes windows held fault-free and
-  returns the least MAD `threshold`, CUSUM `h` or PELT `penalty` at which at most a stated share
-  of them alarm, written into the recipe so its hash still records what ran. `--each` sets one
-  value per series and holds the rate jointly.
-- **For values that travel.** `floor: resolution` keeps a flat window's scale at the series' own
-  step instead of near zero, and `--margin` leaves room for a value used where it was not set.
-  A recipe without them gives the same bytes as before.
-- **Checked on RCAEval's real incidents.** At 10 % false alarms the level detectors see every
-  labelled fault type on Sock Shop, and no information measure sees one they miss. Values set on
-  Sock Shop and carried to Online Boutique and Train Ticket hold their rate for CUSUM under
-  `floor: resolution`, and do not reliably per series. GE-M7 on agents is still owed. The
-  registry is 176.
+- **Your editor speaks smysl.** `smysl lsp-server` (RFC SMYSL-6) gives any LSP editor `check`'s
+  findings as you type, hover with a unit's status, grounds and rebuttals, definition, references,
+  the outline, completion, `fmt` as formatting, and quick fixes that never raise a status. Open a
+  library and `b3:` references resolve across documents. Recipes for Helix, Neovim, VS Code and
+  Zed are in [`Documentation/SMYSL-6_RFC/EDITORS.md`](Documentation/SMYSL-6_RFC/EDITORS.md).
+- **Who made an attestation.** `smysl keygen`, `sign` and `verify` (RFC SMYSL-7) sign what an agent
+  attested with Ed25519, in a detached `COSE_Sign1` beside the store, and check it in `advisory`,
+  `selective` or `strict` mode. A forged, revoked or over-cap signature fails every mode.
+  `merge --sign`, `retract --sign` and `check --verify-sigs` make and report signatures where the
+  work happens.
+- **PELT on float metrics.** `floor: spread` gives the change-point detector a scale on series whose
+  steps are noise-sized; calibrated on one RCAEval system, it now holds its false-alarm rate on the
+  other two. GE-M7 on agents is still owed.
 
 Building from source:
 
@@ -422,7 +423,7 @@ and `cargo run --example information_theory` for the library layer. See
 
 ## Status
 
-Crate `1.19.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.20.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 
@@ -464,7 +465,7 @@ say so; the runs on real data, and GE-M7 on agents, are owed.
 | TL-P6 – P7 | investigations, rule TQ, kinds 6 and 7, the timeline thread, instruments and witnesses | **done** |
 | TL-P8 – P9 | retention and exchange, traces and logs, similar episodes | **done** |
 | AC-8 | a store's check kept as derived state | **done** |
-| §21 | calibration at a stated false-alarm rate, the scale floor, on RCAEval (1.19) | **done** |
+| §21 | calibration at a stated false-alarm rate, the scale floor, on RCAEval (1.19); `floor: spread` (1.20) | **done** |
 
 RFC SMYSL-4, Bund2 queries, and RFC SMYSL-5, information measures, are built to their last
 phases. SMYSL-5's experiments ran on simulated data, and GE-I3 also on RCAEval's real incidents
@@ -476,6 +477,16 @@ phases. SMYSL-5's experiments ran on simulated data, and GE-I3 also on RCAEval's
 | TI-P0 – P2 | `x.tel/v1` revision 2, `ent/1`, `perm/1`, `mi/1`, `jsd/1`, `tel info` | **done** |
 | TI-P3 – P4 | `tent/1`; rule TI, recomputation in `tel check`, statistics in investigations | **done** |
 | TI-P5 | transfer entropy: not released, by GE-I5 | **closed** |
+
+RFC SMYSL-6, the language server, and RFC SMYSL-7, attestation signatures, are built to their
+last phases in 1.20.
+
+| Phase | Delivers | State |
+|---|---|---|
+| LS-P1 – P2 | `smysl-lsp`, `smysl lsp-server`: diagnostics as you type, hover, definition, references, outline | **done** |
+| LS-P3 – P4 | completion, formatting, safe quick fixes; the workspace, a library read only | **done** |
+| SG-P1 – P2 | `smysl-sign`: Ed25519 in detached `COSE_Sign1`, three modes, status caps, the key file | **done** |
+| SG-P3 – P4 | `keygen`, `sign`, `verify`, the `--sign` flags, `check --verify-sigs`; the manual | **done** |
 
 Model providers, and how far each has actually been proven — an untested mapper is a
 reading of a vendor's documentation, not a fact about their API:
@@ -522,6 +533,8 @@ crates/smysl-lib       library export, import and verify
 crates/smysl-tel       SMYSL-3 telemetry: readers, diff, evidence, detectors, investigations
 crates/smysl-series    SMYSL-3 series substrate: samples, window digests, chunks
 crates/smysl-bund      SMYSL-4 Bund2 bridge: word gate, snapshot, runner, sandbox
+crates/smysl-lsp       SMYSL-6 language server: diagnostics, navigation, safe edits
+crates/smysl-sign      SMYSL-7 attestation signatures: Ed25519, COSE_Sign1, key files
 crates/smysl-tui       seven-pane terminal UI, with a live pack simulator
 crates/smysl-eval      evaluation harness E1-E9 (not published)
 examples/              simple_demo and information_theory
