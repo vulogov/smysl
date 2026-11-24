@@ -20,12 +20,12 @@ use progress::{Bar, Spinner, Style};
 use smysl::ExitCode;
 use smysl::{
     check, conformance, effective_status, fidelity, granularity_distribution, merge, parse_surface,
-    plan_retraction, write_surface, AgentId, AnyStore, BuildOptions, CheckOptions, Code,
-    ConformanceClass, ConsumerProfile, Contentions, DeriveOptions, Estimator, Hlc, Lod,
-    MergeOptions, PackRequest, Pass, Profile, ProfileEstimator, Record, RelKind, Relation,
-    RetractionAuthority, RetractionPolicy, Role, SalienceRequest, SalienceWeights, SchemaId,
-    Severity, Store, StoreOptions, StoreRead, SupersessionPolicy, Target, TokenEstimator,
-    TraceKind, Uid, UidPrefix, View, ViewId, WriteContext,
+    write_surface, AgentId, AnyStore, BuildOptions, CheckOptions, Code, ConformanceClass,
+    ConsumerProfile, Contentions, DeriveOptions, Estimator, Hlc, Lod, MergeOptions, PackRequest,
+    Pass, Profile, ProfileEstimator, Record, RelKind, Relation, RetractionAuthority,
+    RetractionPolicy, Role, SalienceRequest, SalienceWeights, SchemaId, Severity, Store,
+    StoreOptions, StoreRead, SupersessionPolicy, Target, TokenEstimator, TraceKind, Uid, UidPrefix,
+    View, ViewId, WriteContext,
 };
 
 /// Purity classification of a command (§23). `Pure` commands are bit-reproducible
@@ -1440,7 +1440,8 @@ fn cli() -> Command {
                     Arg::new("key")
                         .long("key")
                         .value_name("FILE")
-                        .help("The signing key for --sign"),
+                        .action(ArgAction::Append)
+                        .help("A signing key: for --sign, and to prove an --as under --trust-sigs (repeatable)"),
                 )
                 .arg(
                     Arg::new("store")
@@ -1533,6 +1534,13 @@ fn cli() -> Command {
                         .long("dry-run")
                         .help("Report what it would release without writing anything")
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("key")
+                        .long("key")
+                        .value_name("FILE")
+                        .action(ArgAction::Append)
+                        .help("A signing key proving an --as under --trust-sigs (repeatable)"),
                 )
                 .arg(
                     Arg::new("store")
@@ -2981,6 +2989,9 @@ fn cli() -> Command {
                     .hide(true),
             ),
         };
+        if TRUST_COMMANDS.contains(&c.name) {
+            sub = trust_args(sub);
+        }
         cmd = cmd.subcommand(sub);
     }
     cmd
@@ -4977,25 +4988,23 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .unwrap_or_default();
     let policy = RetractionPolicy::default();
 
-    // `--sign` (RFC SMYSL-7 R1-2): the edge carries no attestation, so the key's agent records
-    // one on it, whose uid is the edge's, and signs that.
+    // `--sign` (RFC SMYSL-7 R1-2): the edge carries no attestation, so each key's agent records
+    // one on it, whose uid is the edge's, and signs that. `--key` is repeatable (RFC SMYSL-8
+    // §4.2), so a quorum's agents each sign theirs.
     #[cfg(feature = "sign")]
-    let signer = if m.get_flag("sign") {
-        let Some(key_path) = m.get_one::<String>("key") else {
+    let signers = if m.get_flag("sign") {
+        let keys = match sign::signing_keys(m, "retract") {
+            Ok(k) => k,
+            Err(code) => return code,
+        };
+        if keys.is_empty() {
             eprintln!("smysl retract: --sign needs --key");
             return ExitCode::Usage;
-        };
-        let key = match sign::load_signing_key(key_path) {
-            Ok(k) => k,
-            Err(e) => {
-                eprintln!("smysl retract: {e}");
-                return ExitCode::Usage;
-            }
-        };
-        if !agents.contains(key.agent()) {
+        }
+        if let Some(k) = keys.iter().find(|k| !agents.contains(k.agent())) {
             eprintln!(
                 "smysl retract: --sign signs as {}; name it with --as",
-                key.agent()
+                k.agent()
             );
             return ExitCode::Usage;
         }
@@ -5003,16 +5012,27 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             eprintln!("smysl retract: --sign needs a store file to put the signature beside");
             return ExitCode::Usage;
         }
-        Some(key)
+        keys
     } else {
-        None
+        Vec::new()
     };
     #[cfg(not(feature = "sign"))]
     if m.get_flag("sign") {
         return no_sign("retract --sign");
     }
 
-    let plan = plan_retraction(&store, target, &agents, policy, authority);
+    // Under a signature policy, origin is read from admitted attestations, and each `--as` in
+    // the policy's scope is proven by its key (RFC SMYSL-8 §4.2).
+    let subject = Relation::new(RelKind::Retracts, target, target).uid();
+    let status = store.get(&target).map(|u| u.status());
+    let admission = match authority_admission(
+        m, global, &path, &store, &agents, subject, status, "retract",
+    ) {
+        Ok(a) => a,
+        Err(code) => return code,
+    };
+    let plan =
+        smysl::plan_retraction_admitted(&store, target, &agents, policy, authority, &admission);
     if global.get_flag("json") {
         // `authorised` and `refusal` travel too: a caller gating on a retraction needs to
         // know it was refused, and refusal is reported on stderr in the text form where a
@@ -5078,25 +5098,23 @@ fn cmd_retract(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     #[cfg_attr(not(feature = "sign"), allow(unused_mut))]
     let mut written = vec![Record::Relation(edge.clone())];
     #[cfg(feature = "sign")]
-    if let Some(key) = &signer {
-        let ts = Hlc::new(now_millis(), 0, key.agent().clone());
-        written.push(Record::Attestation(smysl::Attestation::new(
-            edge.uid(),
-            key.agent().clone(),
-            smysl::Op::Attested,
-            smysl::Rung::Document,
-            ts,
-        )));
+    {
+        let now = now_millis();
+        for key in &signers {
+            written.push(sign::edge_attestation(edge.uid(), key.agent(), now));
+        }
     }
     if let Err(e) = persist(&path, &written, &store, &labels) {
         eprintln!("smysl retract: {e}");
         return ExitCode::Failure;
     }
     #[cfg(feature = "sign")]
-    if let (Some(key), Some(f)) = (&signer, sign::sig_path(&path)) {
-        if let Err(e) = sign::sign_into(&f, key, &written) {
-            eprintln!("smysl retract: retracted, but not signed: {e}");
-            return ExitCode::Failure;
+    if let Some(f) = sign::sig_path(&path) {
+        for key in &signers {
+            if let Err(e) = sign::sign_into(&f, key, &written) {
+                eprintln!("smysl retract: retracted, but not signed: {e}");
+                return ExitCode::Failure;
+            }
         }
     }
     if let Err(e) = store.append(&written) {
@@ -5551,25 +5569,21 @@ fn cmd_withdraw(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     };
 
     // The same authority rule as retraction, read off the edge: `origin` means an agent that
-    // attested this edge.
-    let refusal = if (agents.len() as u32) < authority.required_agents().max(1) {
-        Some(format!(
-            "{authority} requires {} distinct agent(s), got {}; name them with --as",
-            authority.required_agents().max(1),
-            agents.len()
-        ))
-    } else if authority.requires_origin()
-        && !agents
-            .iter()
-            .any(|a| edge.attestations.iter().any(|x| &x.agent == a))
-    {
-        Some(format!(
-            "origin authority: none of the {} requesting agent(s) attested this edge",
-            agents.len()
-        ))
-    } else {
-        None
+    // attested this edge — under a signature policy, an admitted attestation (RFC SMYSL-8 R1-5).
+    let admission = match authority_admission(
+        m,
+        global,
+        &path,
+        &store,
+        &agents,
+        edge.uid(),
+        None,
+        "withdraw",
+    ) {
+        Ok(a) => a,
+        Err(code) => return code,
     };
+    let refusal = smysl::withdrawal_authorised(&edge, &agents, authority, &admission).err();
 
     let rid = edge.uid();
     let at = record_time(m);
@@ -6139,9 +6153,15 @@ fn cmd_pack(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let exact = req.mode == smysl::PackMode::Exact;
     let mut spin = Spinner::new(progress_style(global), "packing");
 
+    let admission = match admission_for(m, global, &path, &store, "pack") {
+        Ok(a) => a,
+        Err(code) => return code,
+    };
     let sal = smysl::salience(
         &store,
-        &SalienceRequest::default().seeded(smysl::view_roots(&store)),
+        &SalienceRequest::default()
+            .seeded(smysl::view_roots(&store))
+            .with_admission(admission),
     );
     spin.set_label(if exact {
         "searching for the optimum"
@@ -6440,7 +6460,10 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
 
-    let mut req = SalienceRequest::default();
+    let mut req = match admission_for(m, global, &path, &store, "salience") {
+        Ok(a) => SalienceRequest::default().with_admission(a),
+        Err(code) => return code,
+    };
     if let Some(raw) = m.get_one::<String>("weights") {
         let parts: Vec<f32> = raw
             .split(',')
@@ -6512,6 +6535,9 @@ fn cmd_salience(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
         for g in &t.dependent_groups {
             println!("      shared ancestry, not counted: {g}");
+        }
+        for g in &t.excluded_groups {
+            println!("      not admitted by the signature policy: {g}");
         }
         println!("  role            {:.4} x {:.2}", t.role, req.weights.role);
         println!("  raw             {:.4}", t.raw);
@@ -6908,9 +6934,14 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
                 Ok(p) => p,
                 Err(code) => return code,
             };
+            let admission = match admission_for(m, global, &path, library.store(), "q") {
+                Ok(a) => a,
+                Err(code) => return code,
+            };
             let mut env = Env::new(library.store(), &scope)
                 .with_times(&scope)
-                .with_entities(&scope);
+                .with_entities(&scope)
+                .with_admission(admission);
             if let Some(port) = port.as_deref() {
                 env = env.with_semantic(port);
             }
@@ -6943,7 +6974,13 @@ fn cmd_q(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         // The entity port too (TX-P8 step 3): a plain store answers `about entity(…)` from its
         // own `x.text/entity` units and `same-as` classes, which is what lets a dossier slot
         // saved over it be rerun here.
-        let mut env = Env::new(&store, &scope).with_entities(&scope);
+        let admission = match admission_for(m, global, &path, &store, "q") {
+            Ok(a) => a,
+            Err(code) => return code,
+        };
+        let mut env = Env::new(&store, &scope)
+            .with_entities(&scope)
+            .with_admission(admission);
         if let Some(port) = port.as_deref() {
             env = env.with_semantic(port);
         }
@@ -7101,19 +7138,32 @@ fn cmd_ask(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| path.clone());
 
+    // A dossier packs by salience, so under a signature policy it counts what the policy
+    // admits (RFC SMYSL-8 §5).
+    let admission = match &corpus {
+        Corpus::Library(library) => admission_for(m, global, &path, library.store(), "ask"),
+        Corpus::Store(store, _) => admission_for(m, global, &path, store, "ask"),
+    };
+    let admission = match admission {
+        Ok(a) => a,
+        Err(code) => return code,
+    };
     let run = || match &corpus {
         Corpus::Library(library) => {
             let scope = smysl::text::scope::LibraryScope::new(name.clone(), library);
             let env = Env::new(library.store(), &scope)
                 .with_times(&scope)
-                .with_entities(&scope);
+                .with_entities(&scope)
+                .with_admission(admission.clone());
             ask(question, &env, &opts)
         }
         Corpus::Store(store, _) => {
             let scope = smysl::query::StoreScope::new(name.clone(), store);
             // A subject no spelling finds is looked for by its stems, as a library's is.
             let stemmed = smysl::text::scope::Stemmed::new(store, &scope);
-            let env = Env::new(store, &scope).with_entities(&stemmed);
+            let env = Env::new(store, &scope)
+                .with_entities(&stemmed)
+                .with_admission(admission.clone());
             ask(question, &env, &opts)
         }
     };
@@ -11182,7 +11232,10 @@ fn cmd_thread(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         None => AgentId::new("tool:smysl").expect("a valid literal"),
     };
 
-    let mut opts = DeriveOptions::new(id, owner.clone());
+    let mut opts = match admission_for(m, global, &path, &store, "thread") {
+        Ok(a) => DeriveOptions::new(id, owner.clone()).with_admission(a),
+        Err(code) => return code,
+    };
     if let Some(v) = m.get_many::<String>("scope") {
         let mut scope = Vec::new();
         for raw in v {
@@ -13005,7 +13058,11 @@ fn cmd_ui(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         }
     };
 
-    match smysl::tui::run(smysl::tui::App::with_store(store, labels)) {
+    let admission = match admission_for(m, global, &path, &store, "ui") {
+        Ok(a) => a,
+        Err(code) => return code,
+    };
+    match smysl::tui::run(smysl::tui::App::with_store(store, labels).with_admission(admission)) {
         Ok(()) => ExitCode::Success,
         Err(e) => {
             eprintln!("smysl ui: {e}");
@@ -13173,6 +13230,118 @@ fn cmd_lsp_server(m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
             ExitCode::Failure
         }
     }
+}
+
+/// The commands that read salience or authority, and so take a signature policy (RFC SMYSL-8
+/// §5, R1-4). `measure` and `assess` are not among them: they measure the graph as written.
+const TRUST_COMMANDS: [&str; 8] = [
+    "salience", "pack", "thread", "q", "ask", "ui", "retract", "withdraw",
+];
+
+/// `--trust-sigs` and the options it shares with `verify` (RFC SMYSL-8 §5). Registered in every
+/// build, as `verify`'s are; a build without `sign` refuses the flag by name.
+fn trust_args(cmd: Command) -> Command {
+    sign_verify_args(cmd).arg(
+        Arg::new("trust-sigs")
+            .long("trust-sigs")
+            .value_name("MODE")
+            .value_parser(["advisory", "selective", "strict"])
+            .help("Count only attestations MODE would not fail (default: the configuration's trust:, else every one)"),
+    )
+}
+
+/// The attestations a command counts by: `--trust-sigs`, else the configuration's `trust:`,
+/// else every one (RFC SMYSL-8 §5).
+#[cfg(feature = "sign")]
+fn admission_for<S: StoreRead + ?Sized>(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    path: &str,
+    store: &S,
+    cmd: &str,
+) -> Result<smysl::AttestationAdmission, ExitCode> {
+    Ok(sign::trust(m, global, path, store, cmd)?
+        .map(|t| t.admission)
+        .unwrap_or_default())
+}
+
+/// A build without `sign` cannot apply a policy, so it refuses one rather than counting
+/// everything: `--trust-sigs`, or a `trust:` in the configuration, is a usage error.
+#[cfg(not(feature = "sign"))]
+fn admission_for<S: StoreRead + ?Sized>(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    path: &str,
+    _store: &S,
+    cmd: &str,
+) -> Result<smysl::AttestationAdmission, ExitCode> {
+    if m.try_get_one::<String>("trust-sigs")
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        return Err(no_sign(&format!("{cmd} --trust-sigs")));
+    }
+    let config = match global.try_get_one::<String>("config").ok().flatten() {
+        Some(c) => std::path::PathBuf::from(c),
+        None => std::path::Path::new(path)
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .map_or_else(
+                || std::path::PathBuf::from("."),
+                std::path::Path::to_path_buf,
+            )
+            .join(".smysl")
+            .join("config.hjson"),
+    };
+    if let Ok(text) = std::fs::read_to_string(&config) {
+        let has_trust = smysl::surface::hjson::parse_object(&text, 0)
+            .map(|o| o.value.get("trust").is_some())
+            .unwrap_or(false);
+        if has_trust {
+            return Err(no_sign(&format!("{cmd} (the configuration's trust:)")));
+        }
+    }
+    Ok(smysl::AttestationAdmission::all())
+}
+
+/// [`admission_for`], for a command that acts on `--as` agents' authority: under a policy each
+/// agent in its scope must be proven by a `--key` that verifies against the key file (RFC
+/// SMYSL-8 §4.2, R2-5). `subject` is what the agents attest — the retraction or the edge — and
+/// `status` the unit's, for `selective`'s scope.
+#[cfg(feature = "sign")]
+#[allow(clippy::too_many_arguments)]
+fn authority_admission(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    path: &str,
+    store: &Store,
+    agents: &[AgentId],
+    subject: Uid,
+    status: Option<smysl::Status>,
+    cmd: &str,
+) -> Result<smysl::AttestationAdmission, ExitCode> {
+    let Some(t) = sign::trust(m, global, path, store, cmd)? else {
+        return Ok(smysl::AttestationAdmission::all());
+    };
+    let keys = sign::signing_keys(m, cmd)?;
+    sign::prove(&t, agents, &keys, subject, status, now_millis(), cmd)?;
+    Ok(t.admission)
+}
+
+#[cfg(not(feature = "sign"))]
+#[allow(clippy::too_many_arguments)]
+fn authority_admission(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    path: &str,
+    store: &Store,
+    _agents: &[AgentId],
+    _subject: Uid,
+    _status: Option<smysl::Status>,
+    cmd: &str,
+) -> Result<smysl::AttestationAdmission, ExitCode> {
+    admission_for(m, global, path, store, cmd)
 }
 
 /// The arguments `verify` and `check --verify-sigs` share. Registered in every build, as every

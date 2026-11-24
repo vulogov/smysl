@@ -597,3 +597,181 @@ pub(crate) fn sign_staged(
     }
     Ok((sigs, others))
 }
+
+// ---- RFC SMYSL-8: trust that reads signatures --------------------------------------------
+
+/// A command's signature policy, resolved: the mode, the keys, and what it admits.
+pub(crate) struct Trust {
+    pub(crate) mode: VerificationMode,
+    pub(crate) keys: MemoryKeyResolver,
+    pub(crate) admission: smysl::AttestationAdmission,
+}
+
+/// `trust:` in the project's configuration (`-C`, else `.smysl/config.hjson` beside the store),
+/// and the directory a relative `keys:` in it is read against. None when there is no file or
+/// it has no `trust:`; a `trust:` that does not parse is an error, not an absent policy.
+fn config_trust(
+    global: &ArgMatches,
+    store: &str,
+) -> Result<Option<(smysl::sign::TrustConfig, PathBuf)>, String> {
+    let named = global.try_get_one::<String>("config").ok().flatten();
+    let (path, base) = match named {
+        Some(c) => {
+            let p = PathBuf::from(c);
+            let base = p
+                .parent()
+                .filter(|d| !d.as_os_str().is_empty())
+                .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+            (p, base)
+        }
+        None => {
+            let root = Path::new(store)
+                .parent()
+                .filter(|d| !d.as_os_str().is_empty())
+                .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+            (root.join(".smysl").join("config.hjson"), root)
+        }
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && named.is_none() => return Ok(None),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    smysl::sign::TrustConfig::parse(&text)
+        .map(|t| t.map(|t| (t, base)))
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The policy `--trust-sigs` names, else the configuration's `trust:`, applied to `store`;
+/// None for neither, which is every result as it was. A policy that cannot be applied — a
+/// missing or malformed key file, a damaged signature file — is a usage error before anything
+/// is counted (RFC SMYSL-8 §5): it is not silently dropped.
+pub(crate) fn trust<S: smysl::StoreRead + ?Sized>(
+    m: &ArgMatches,
+    global: &ArgMatches,
+    path: &str,
+    store: &S,
+    cmd: &str,
+) -> Result<Option<Trust>, ExitCode> {
+    let fail = |e: String| {
+        eprintln!("smysl {cmd}: {e}");
+        ExitCode::Usage
+    };
+    let scoped = m
+        .try_get_many::<String>("agent-prefix")
+        .ok()
+        .flatten()
+        .is_some()
+        || m.try_get_one::<String>("status-at-least")
+            .ok()
+            .flatten()
+            .is_some();
+    let (mode, keys) = match m.try_get_one::<String>("trust-sigs").ok().flatten() {
+        Some(name) => {
+            let mode = mode_of(m, name).map_err(|e| fail(format!("--trust-sigs: {e}")))?;
+            (mode, load_keys(m, path).map_err(fail)?)
+        }
+        None => {
+            if scoped {
+                return Err(fail(
+                    "--agent-prefix and --status-at-least scope --trust-sigs selective".into(),
+                ));
+            }
+            let Some((cfg, base)) = config_trust(global, path).map_err(fail)? else {
+                return Ok(None);
+            };
+            let keys = match (m.try_get_one::<String>("keys").ok().flatten(), &cfg.keys) {
+                (None, Some(k)) => {
+                    let p = base.join(k);
+                    let text = std::fs::read_to_string(&p)
+                        .map_err(|e| fail(format!("{}: {e}", p.display())))?;
+                    KeyFile::parse(&text).map_err(|e| fail(format!("{}: {e}", p.display())))?
+                }
+                _ => load_keys(m, path).map_err(fail)?,
+            };
+            (cfg.mode, keys)
+        }
+    };
+    let sigs = read_sigs(&sigs_file(m, path, cmd)?).map_err(fail)?;
+    let admission = smysl::sign::admission(store, &sigs, &keys, &mode);
+    Ok(Some(Trust {
+        mode,
+        keys,
+        admission,
+    }))
+}
+
+/// The `--key` files given, each loaded; a key that does not load is a usage error.
+pub(crate) fn signing_keys(m: &ArgMatches, cmd: &str) -> Result<Vec<SigningKey>, ExitCode> {
+    m.try_get_many::<String>("key")
+        .ok()
+        .flatten()
+        .into_iter()
+        .flatten()
+        .map(|p| {
+            load_signing_key(p).map_err(|e| {
+                eprintln!("smysl {cmd}: {e}");
+                ExitCode::Usage
+            })
+        })
+        .collect()
+}
+
+/// The attestation an agent records on a retraction or withdrawal: `op: attested`, rung
+/// `document`, at `now_ms` (RFC SMYSL-7 R1-16).
+pub(crate) fn edge_attestation(subject: smysl::Uid, agent: &AgentId, now_ms: u64) -> Record {
+    Record::Attestation(smysl::Attestation::new(
+        subject,
+        agent.clone(),
+        smysl::Op::Attested,
+        smysl::Rung::Document,
+        smysl::Hlc::new(now_ms, 0, agent.clone()),
+    ))
+}
+
+/// Under a policy, each `--as` agent the mode puts in scope must be proven by a `--key` of
+/// that agent which verifies against the key file (RFC SMYSL-8 §4.2, R2-5): a key file alone is
+/// no proof, since anyone can make a key for any id. The proof is the attestation `--sign`
+/// would record, signed and verified now, so a revoked, out-of-bounds or over-cap key fails
+/// it. An unproven agent out of scope — every agent under `advisory` — is a warning.
+pub(crate) fn prove(
+    trust: &Trust,
+    agents: &[AgentId],
+    keys: &[SigningKey],
+    subject: smysl::Uid,
+    subject_status: Option<Status>,
+    now_ms: u64,
+    cmd: &str,
+) -> Result<(), ExitCode> {
+    for a in agents {
+        match keys.iter().find(|k| k.agent() == a) {
+            Some(k) => {
+                let record = edge_attestation(subject, a, now_ms);
+                let sig = sign_record(k, &record).map_err(|e| {
+                    eprintln!("smysl {cmd}: {e}");
+                    ExitCode::Usage
+                })?;
+                let v = smysl::sign::verify_record(&sig, &record, &trust.keys);
+                if !v.is_verified() {
+                    eprintln!(
+                        "smysl {cmd}: --key for {a} does not prove it: {}",
+                        verdict_text(&v)
+                    );
+                    return Err(ExitCode::Failure);
+                }
+            }
+            None if trust.mode.in_scope(a, subject_status) => {
+                eprintln!(
+                    "smysl {cmd}: --as {a} needs a --key of {a} under --trust-sigs {}",
+                    mode_name(&trust.mode)
+                );
+                return Err(ExitCode::Failure);
+            }
+            None => eprintln!(
+                "smysl {cmd}: warning: --as {a} is not proven by a key ({} tolerates it)",
+                mode_name(&trust.mode)
+            ),
+        }
+    }
+    Ok(())
+}

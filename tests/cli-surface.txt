@@ -106,6 +106,12 @@ pack       --tokenizer
 pack       --mode
 pack       [possible values: greedy, exact]
 pack       --seed-check
+pack       --keys
+pack       --agent-prefix
+pack       --status-at-least
+pack       --sigs
+pack       --trust-sigs
+pack       [possible values: advisory, selective, strict]
 pack       --help
 merge      <STORE>
 merge      --config
@@ -244,11 +250,17 @@ thread     --arity
 thread     --json
 thread     --explain
 thread     --quiet
+thread     --keys
 thread     --verbose
+thread     --agent-prefix
 thread     --backend
 thread     [possible values: memory, redb]
 thread     --shard
+thread     --status-at-least
 thread     --seed-check
+thread     --sigs
+thread     --trust-sigs
+thread     [possible values: advisory, selective, strict]
 thread     --help
 salience   [PATH]
 salience   --config
@@ -261,11 +273,17 @@ salience   [possible values: surface, cbor, pack]
 salience   --weights
 salience   --seed
 salience   --strict
+salience   --keys
 salience   --offline
+salience   --agent-prefix
 salience   --no-color
 salience   --noprogress
+salience   --status-at-least
 salience   --json
+salience   --sigs
 salience   --quiet
+salience   --trust-sigs
+salience   [possible values: advisory, selective, strict]
 salience   --verbose
 salience   --backend
 salience   [possible values: memory, redb]
@@ -317,10 +335,16 @@ retract    --sign
 retract    --strict
 retract    --key
 retract    --offline
+retract    --keys
 retract    --no-color
+retract    --agent-prefix
 retract    --noprogress
 retract    --json
+retract    --status-at-least
 retract    --quiet
+retract    --sigs
+retract    --trust-sigs
+retract    [possible values: advisory, selective, strict]
 retract    --verbose
 retract    --backend
 retract    [possible values: memory, redb]
@@ -339,11 +363,18 @@ withdraw   --format
 withdraw   [possible values: surface, cbor, pack]
 withdraw   --dry-run
 withdraw   --strict
+withdraw   --key
 withdraw   --offline
+withdraw   --keys
 withdraw   --no-color
+withdraw   --agent-prefix
 withdraw   --noprogress
 withdraw   --json
+withdraw   --status-at-least
 withdraw   --quiet
+withdraw   --sigs
+withdraw   --trust-sigs
+withdraw   [possible values: advisory, selective, strict]
 withdraw   --verbose
 withdraw   --backend
 withdraw   [possible values: memory, redb]
@@ -626,11 +657,17 @@ reindex    --seed-check
 reindex    --help
 ui         [PATH]
 ui         --config
+ui         --keys
+ui         --agent-prefix
 ui         --store
 ui         --output
+ui         --status-at-least
 ui         --format
 ui         [possible values: surface, cbor, pack]
+ui         --sigs
 ui         --strict
+ui         --trust-sigs
+ui         [possible values: advisory, selective, strict]
 ui         --offline
 ui         --no-color
 ui         --noprogress
@@ -822,6 +859,12 @@ q          --view
 q          --save
 q          --rerun
 q          --current
+q          --keys
+q          --agent-prefix
+q          --status-at-least
+q          --sigs
+q          --trust-sigs
+q          [possible values: advisory, selective, strict]
 q          --help
 ask        [QUESTION]
 ask        [PATH]
@@ -857,6 +900,12 @@ ask        --shard
 ask        --at
 ask        --seed-check
 ask        --yes
+ask        --keys
+ask        --agent-prefix
+ask        --status-at-least
+ask        --sigs
+ask        --trust-sigs
+ask        [possible values: advisory, selective, strict]
 ask        --help
 measure    <IDS>
 measure    [PATH]

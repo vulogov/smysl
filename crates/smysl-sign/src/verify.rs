@@ -1,9 +1,10 @@
 //! Signing and verifying (RFC SMYSL-7 §4.4, §6).
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::{AgentId, Record, Status, Uid};
-use smysl_graph::{AttestationAdmission, Store};
+use smysl_graph::{AttestationAdmission, Store, StoreRead};
 
 use crate::cose::{protected, sig_structure, DetachedSignature, SignError, TargetKind};
 use crate::key::{KeyError, KeyId, KeyResolver, KeyStatus, SigningKey};
@@ -308,7 +309,7 @@ pub struct VerificationReport {
 /// One record, judged.
 struct Judged<'a> {
     hash: [u8; 32],
-    record: &'a Record,
+    record: Cow<'a, Record>,
     /// The agent a mode's scope reads: the attestation's, or the first signer's.
     agent: Option<AgentId>,
     subject_status: Option<Status>,
@@ -317,30 +318,42 @@ struct Judged<'a> {
     verdict: RecordVerdict,
 }
 
-/// The attestations a store's units and edges hold that have no record of their own in its log
-/// (RFC SMYSL-8 R1-2): an edge held in memory can carry attestations its encoding does not.
-/// Judged beside the log's, so nothing salience or retraction reads goes unjudged.
-fn held_attestations(store: &Store) -> Vec<Record> {
+/// Every attestation a store's units and edges hold, once each, by record hash.
+///
+/// What salience and retraction count, so what [`admission`] judges. An edge held in memory can
+/// carry attestations its encoding does not, with no record of their own in the log (RFC
+/// SMYSL-8 R1-2); they are here too.
+fn held_attestations(store: &(impl StoreRead + ?Sized)) -> BTreeMap<[u8; 32], Record> {
     let mut out = BTreeMap::new();
-    let held = store
-        .units()
-        .flat_map(|(_, u)| u.attestations.iter())
-        .chain(store.relations().flat_map(|r| r.attestations.iter()));
-    for a in held {
-        let r = Record::Attestation(a.clone());
-        let h = Store::record_hash(&r);
-        if !store.contains_record(&h) {
-            out.entry(h).or_insert(r);
+    for (_, u) in store.units() {
+        for a in &u.attestations {
+            let r = Record::Attestation(a.clone());
+            out.entry(Store::record_hash(&r)).or_insert(r);
         }
     }
-    out.into_values().collect()
+    for rel in store.relations() {
+        for a in &rel.attestations {
+            let r = Record::Attestation(a.clone());
+            out.entry(Store::record_hash(&r)).or_insert(r);
+        }
+    }
+    out
 }
 
-/// Judge every attestation in `store` (its log's, and `held`), and every other record a
-/// signature names; and count the signatures left over.
+/// A store's log, and the attestations its units and edges hold with no record in it.
+fn log_and_held(store: &Store) -> Vec<Cow<'_, Record>> {
+    let held = held_attestations(store)
+        .into_iter()
+        .filter(|(h, _)| !store.contains_record(h))
+        .map(|(_, r)| Cow::Owned(r));
+    store.iter().map(Cow::Borrowed).chain(held).collect()
+}
+
+/// Judge every attestation in `records`, and every other record a signature names; and count
+/// the signatures left over. `status_of` gives a unit's status, for status caps and scope.
 fn judge<'a, R: KeyResolver>(
-    store: &'a Store,
-    held: &'a [Record],
+    records: Vec<Cow<'a, Record>>,
+    status_of: &dyn Fn(&Uid) -> Option<Status>,
     signatures: &[DetachedSignature],
     resolver: &R,
 ) -> (Vec<Judged<'a>>, usize) {
@@ -352,10 +365,10 @@ fn judge<'a, R: KeyResolver>(
     let mut matched = BTreeSet::new();
     let mut unsigned = Vec::new();
     let mut out = Vec::new();
-    for r in store.iter().chain(held) {
-        let h = Store::record_hash(r);
+    for r in records {
+        let h = Store::record_hash(&r);
         let sigs = by_target.get(&h);
-        if !matches!(r, Record::Attestation(_)) && sigs.is_none() || !seen.insert(h) {
+        if !matches!(*r, Record::Attestation(_)) && sigs.is_none() || !seen.insert(h) {
             continue;
         }
         if sigs.is_some() {
@@ -363,10 +376,8 @@ fn judge<'a, R: KeyResolver>(
         } else {
             unsigned.push(out.len());
         }
-        let (agent, subject_status) = match r {
-            Record::Attestation(a) => {
-                (Some(a.agent.clone()), store.get(&a.uid).map(|u| u.status()))
-            }
+        let (agent, subject_status) = match &*r {
+            Record::Attestation(a) => (Some(a.agent.clone()), status_of(&a.uid)),
             _ => (
                 sigs.and_then(|s| s.first()).map(|s| s.agent.clone()),
                 r.as_unit().map(|u| u.status),
@@ -375,7 +386,7 @@ fn judge<'a, R: KeyResolver>(
         let each: Vec<_> = sigs
             .into_iter()
             .flatten()
-            .map(|s| verify_with(s, r, resolver, subject_status))
+            .map(|s| verify_with(s, &r, resolver, subject_status))
             .collect();
         out.push(Judged {
             hash: h,
@@ -390,8 +401,14 @@ fn judge<'a, R: KeyResolver>(
     // the record was changed after it was signed, or the signature was. Judged against each
     // other they fail, as they would have had the bytes still matched (R1-14).
     for i in unsigned {
-        let j = &mut out[i];
-        let Record::Attestation(a) = j.record else {
+        let Judged {
+            record,
+            each,
+            verdict,
+            subject_status,
+            ..
+        } = &mut out[i];
+        let Record::Attestation(a) = &**record else {
             continue;
         };
         let suspects: Vec<_> = by_target
@@ -402,10 +419,9 @@ fn judge<'a, R: KeyResolver>(
             .collect();
         for (h, s) in suspects {
             matched.insert(h);
-            j.each
-                .push(verify_with(s, j.record, resolver, j.subject_status));
+            each.push(verify_with(s, record, resolver, *subject_status));
         }
-        j.verdict = worst(&j.each);
+        *verdict = worst(each);
     }
     let unmatched = by_target
         .iter()
@@ -430,8 +446,8 @@ pub fn verify_store<R: KeyResolver>(
     resolver: &R,
     mode: &VerificationMode,
 ) -> VerificationReport {
-    let held = held_attestations(store);
-    let (judged, unmatched_count) = judge(store, &held, signatures, resolver);
+    let status_of = |u: &Uid| store.get(u).map(|u| u.status());
+    let (judged, unmatched_count) = judge(log_and_held(store), &status_of, signatures, resolver);
     let mut verdicts = BTreeMap::new();
     let mut failing = BTreeSet::new();
     for j in judged {
@@ -471,9 +487,9 @@ pub fn verified_attesters<R: KeyResolver>(
     resolver: &R,
 ) -> BTreeMap<Uid, BTreeSet<(AgentId, KeyId)>> {
     let mut out: BTreeMap<Uid, BTreeSet<(AgentId, KeyId)>> = BTreeMap::new();
-    let held = held_attestations(store);
-    for j in judge(store, &held, signatures, resolver).0 {
-        let Record::Attestation(a) = j.record else {
+    let status_of = |u: &Uid| store.get(u).map(|u| u.status());
+    for j in judge(log_and_held(store), &status_of, signatures, resolver).0 {
+        let Record::Attestation(a) = &*j.record else {
             continue;
         };
         if !j.verdict.is_verified() {
@@ -492,19 +508,26 @@ pub fn verified_attesters<R: KeyResolver>(
 /// Which attestations a trust decision counts under `mode` (RFC SMYSL-8 §3).
 ///
 /// An attestation is admitted when `mode` would not fail it: exactly what [`verify_store`]
-/// reports as an error is what this excludes. Every attestation the store holds is judged, and
-/// the answer for one it does not hold is `mode`'s own default: admitted under `Advisory`,
-/// excluded under `Selective` and `Strict`, so a policy fails closed (R1-2).
+/// reports as an error is what this excludes. Every attestation the store's units and edges
+/// hold is judged — what salience and retraction count — and the answer for one it does not
+/// hold is `mode`'s own default: admitted under `Advisory`, excluded under `Selective` and
+/// `Strict`, so a policy fails closed (R1-2).
+///
+/// Over any [`StoreRead`], so a library on disk is judged where it lies (R2-4).
 pub fn admission<R: KeyResolver>(
-    store: &Store,
+    store: &(impl StoreRead + ?Sized),
     signatures: &[DetachedSignature],
     resolver: &R,
     mode: &VerificationMode,
 ) -> AttestationAdmission {
-    let held = held_attestations(store);
+    let held: Vec<Cow<'_, Record>> = held_attestations(store)
+        .into_values()
+        .map(Cow::Owned)
+        .collect();
+    let status_of = |u: &Uid| store.get(u).map(|u| u.status());
     let mut judged = BTreeMap::new();
-    for j in judge(store, &held, signatures, resolver).0 {
-        if !matches!(j.record, Record::Attestation(_)) {
+    for j in judge(held, &status_of, signatures, resolver).0 {
+        if !matches!(*j.record, Record::Attestation(_)) {
             continue;
         }
         let in_scope = j

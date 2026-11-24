@@ -61,8 +61,19 @@ and `attest` writes nothing to sign.
   that have no log record of their own; `verify_store`, `verified_attesters` and `admission` now
   judge them too (SMYSL-8 R2-2).
 - With no policy, every salience, thread and retraction result is what it was. The new type is
-  `AttestationAdmission` because `smysl::Admission` is already a view's granularity. The CLI
-  takes a policy in TR-P2.
+  `AttestationAdmission` because `smysl::Admission` is already a view's granularity.
+- **TR-P2: the policy in the CLI.** `--trust-sigs advisory|selective|strict`, with `verify`'s
+  `--keys`, `--agent-prefix`, `--status-at-least` and `--sigs`, on `salience`, `pack`, `thread`,
+  `q`, `ask`, `ui`, `retract` and `withdraw`; or `trust: { signatures: … }` in
+  `.smysl/config.hjson`, read by `smysl::sign::TrustConfig`. A policy that cannot be applied — no
+  key file, a malformed `trust:` — exits 2 rather than counting everything.
+  `salience --explain` lists the groups a policy removed. `ask` and `q` carry it in
+  `Env::with_admission`, the TUI in `App::with_admission`.
+- **Proving `--as`.** Under a policy, each `--as` agent in its scope needs a `--key` (now
+  repeatable) that verifies against the key file: a key anyone could `keygen` proves nothing
+  (SMYSL-8 R2-5). `retract --sign` signs one attestation per key, so a quorum signs with each.
+  `withdraw`'s authority check moved into the library as `withdrawal_authorised`, one rule with
+  retraction's.
 
 ## 1.20.0 — 2026-11-24
 

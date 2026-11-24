@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::diag::{Code, Diagnostic, Span};
 use smysl_core::ids::Uid;
 use smysl_core::types::{Record, RelKind};
-use smysl_graph::{EdgeKind, EdgeSet, Store};
+use smysl_graph::{AttestationAdmission, EdgeKind, EdgeSet, Store};
 
 use crate::ast::{
     Atom, ClosureItem, Count, Dir, EdgeSpec, Engine, Expr, LangSel, NamedEdge, Ordering, Output,
@@ -64,6 +64,9 @@ pub struct Env<'a> {
     /// `~sem`, `near(…)` and `lang:any` are then refused by name; with it, a plan that uses it
     /// is labelled model-dependent.
     pub semantic: Option<&'a dyn SemanticSource>,
+    /// Which attestations salience's corroboration counts, wherever a query orders or packs by
+    /// salience (RFC SMYSL-8 §4.1). The default admits every one.
+    pub admission: AttestationAdmission,
 }
 
 impl<'a> Env<'a> {
@@ -75,6 +78,7 @@ impl<'a> Env<'a> {
             entities: None,
             reader: std::rc::Rc::new(crate::pred::Reader::new(store)),
             semantic: None,
+            admission: AttestationAdmission::all(),
         }
     }
 
@@ -90,7 +94,14 @@ impl<'a> Env<'a> {
             entities: Some(entities),
             reader: self.reader.clone(),
             semantic: self.semantic,
+            admission: self.admission.clone(),
         }
+    }
+
+    /// Order and pack by salience under a signature policy (RFC SMYSL-8 §4.1).
+    pub fn with_admission(mut self, a: AttestationAdmission) -> Env<'a> {
+        self.admission = a;
+        self
     }
 
     /// Bind effective time, which lowers the `said` and `observed` stages.

@@ -42,6 +42,7 @@ pub use zeroize::Zeroizing;
 mod cose;
 mod key;
 mod keyfile;
+mod trust;
 mod verify;
 
 pub use cose::{
@@ -52,6 +53,7 @@ pub use key::{
     KeyError, KeyId, KeyResolver, KeyStatus, MemoryKeyResolver, ResolvedKey, SigningKey,
 };
 pub use keyfile::{parse_public_key, KeyFile, KeyFileError, ED25519_SPKI_PREFIX};
+pub use trust::TrustConfig;
 pub use verify::{
     admission, sign_record, verified_attesters, verify_record, verify_store, RecordVerdict,
     VerificationMode, VerificationReport,

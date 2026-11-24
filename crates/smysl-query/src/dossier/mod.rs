@@ -891,7 +891,10 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
     let narrow_to: Vec<String> = topic.iter().chain(&forms).cloned().collect();
     let topic_found = !topic.is_empty() && !about(&narrow_to)?.is_empty();
 
-    let salience = smysl_graph::salience(env.store, &SalienceRequest::default());
+    let salience = smysl_graph::salience(
+        env.store,
+        &SalienceRequest::default().with_admission(env.admission.clone()),
+    );
     let mut slot_results = Vec::new();
     let mut records: Vec<Record> = Vec::new();
     let mut warnings: Vec<Diagnostic> = Vec::new();
@@ -1004,7 +1007,9 @@ pub fn ask(question: &str, env: &Env<'_>, opts: &AskOptions) -> Result<Dossier, 
         Some(budget) => {
             let report = smysl_graph::salience(
                 env.store,
-                &SalienceRequest::default().seeded(members.iter().copied()),
+                &SalienceRequest::default()
+                    .seeded(members.iter().copied())
+                    .with_admission(env.admission.clone()),
             );
             // In scope: every slot's units. In focus: each slot's best, which the pack must
             // carry with its closure — rule R's rebuttals among it — and which is what makes a

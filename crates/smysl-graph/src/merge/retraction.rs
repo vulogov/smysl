@@ -16,7 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use smysl_core::diag::{Code, Diagnostic, Report};
-use smysl_core::{AgentId, RelKind, Status, Uid};
+use smysl_core::{AgentId, RelKind, Relation, Status, Uid};
 
 use crate::admission::AttestationAdmission;
 use crate::merge::policy::{RetractionAuthority, RetractionPolicy};
@@ -197,6 +197,50 @@ pub fn plan_retraction(
         authority,
         &AttestationAdmission::all(),
     )
+}
+
+/// Whether `agents` may withdraw `edge` under `authority`, with origin read from the edge's
+/// attestations that `admission` admits (RFC SMYSL-8 §4.2, R1-5): the same rule as retraction,
+/// read off the edge. `Err` carries the refusal.
+///
+/// Withdrawal always needs at least one agent, even under `any`: a withdrawal record is made
+/// by someone.
+pub fn withdrawal_authorised(
+    edge: &Relation,
+    agents: &[AgentId],
+    authority: RetractionAuthority,
+    admission: &AttestationAdmission,
+) -> Result<(), String> {
+    let distinct: BTreeSet<&AgentId> = agents.iter().collect();
+    let needed = authority.required_agents().max(1);
+    if (distinct.len() as u32) < needed {
+        return Err(format!(
+            "{authority} requires {needed} distinct agent(s), got {}; name them with --as",
+            distinct.len()
+        ));
+    }
+    if authority.requires_origin() {
+        let attested = |admitted_only: bool| {
+            distinct.iter().any(|a| {
+                edge.attestations
+                    .iter()
+                    .any(|x| &x.agent == *a && (!admitted_only || admission.admits(x)))
+            })
+        };
+        if !attested(true) {
+            return Err(if attested(false) {
+                "origin authority: the requesting agent's attestation on this edge is not \
+                 admitted under the signature policy"
+                    .to_string()
+            } else {
+                format!(
+                    "origin authority: none of the {} requesting agent(s) attested this edge",
+                    distinct.len()
+                )
+            });
+        }
+    }
+    Ok(())
 }
 
 /// [`plan_retraction`], with origin authority read from the attestations `admission` admits

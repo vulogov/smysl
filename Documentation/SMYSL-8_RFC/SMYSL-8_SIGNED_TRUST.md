@@ -1,7 +1,7 @@
 # RFC SMYSL-8 — trust that reads signatures
 
 **Author:** Vladimir Ulogov
-**Status:** amended in review against the code (R1, 2026-11-24). TR-P1 built (1.21).
+**Status:** amended in review against the code (R1, 2026-11-24). TR-P1 and TR-P2 built (1.21).
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged.
 **Crates:** `smysl-graph` and `smysl-thread` (an admission filter, additive), `smysl-sign` (an
 admission function, key-file editing), the CLI (`--trust-sigs`, `smysl keys`, `--sign` at commit,
@@ -389,3 +389,29 @@ All five were answered by reading the code; the answers are R1-1 to R1-9 below.
   `human:alice` group with no policy is excluded under `Advisory`, and alice's group counts;
   origin authority refuses an agent whose only attestation is forged; an edge attestation with no
   log record is excluded under `Strict` and admitted under `Advisory`.
+
+**R2, continued: TR-P2 as built.**
+
+- **R2-4. `admission` over any store.** Most commands hold an `AnyStore`, a library on disk
+  among them, and copying it into memory to judge it would cost a read of the whole log. Counts
+  read only what units and edges hold, so `admission` takes any `StoreRead` and judges those
+  attestations; `verify_store` still takes a `Store` and judges its log as well. `judge` now takes
+  the records to judge and a status lookup.
+- **R2-5. A key proves an agent only if it verifies.** §4.2 said "a `--key` whose agent is A".
+  Holding a key file proves nothing — anyone can `keygen` a key for any id — so the proof is
+  the attestation `retract --sign` would record, signed with the key and verified against the
+  key file now: an unknown, revoked, out-of-bounds or over-cap key fails it, with the verdict
+  in the message. An `--as` in the mode's scope without such a key exits 1; under `advisory`
+  every agent is out of scope, and an unproven one is a warning.
+- **R2-6. Which commands.** `--trust-sigs` is on `salience`, `pack`, `thread`, `q`, `ask` (the
+  dossier command), `ui`, `retract` and `withdraw`. `ask --recheck` re-runs saved dossiers with
+  no policy, as before; `measure` and `assess` stay unadmitted (R1-4).
+- **R2-7. A build without `sign`** cannot apply a policy, so `--trust-sigs`, or a `trust:` in
+  the configuration, is a usage error there rather than counting everything.
+- **R2-8. The gate** is `tests/cmd_trust.rs`: ranked under `strict`, only the unit an invented
+  agent corroborated moves, and `advisory` ranks as no policy does; a fully signed store ranks
+  and packs identically under every policy; `trust:` applies without the flag, and a bad one
+  exits 2; `retract --as human:mallory`, proven by her key, is refused under `strict` because
+  her origin attestation is unsigned, while alice's signed one authorises; a `keygen`ed key the
+  key file does not hold proves nothing; a quorum of two signs with both keys; `withdraw` reads
+  the same rule.

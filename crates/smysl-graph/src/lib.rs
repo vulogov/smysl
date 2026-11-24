@@ -40,9 +40,9 @@ pub use lineage::{
 // in the facade twice.
 pub use merge::review::{review, review_with};
 pub use merge::{
-    effective_status, merge, plan_retraction, plan_retraction_admitted, DetectionContext,
-    EffectiveStatus, MergeOptions, MergeReport, RetractionAuthority, RetractionPlan,
-    RetractionPolicy, ReviewItem, ReviewOptions, ReviewSubject, SupersessionPolicy,
+    effective_status, merge, plan_retraction, plan_retraction_admitted, withdrawal_authorised,
+    DetectionContext, EffectiveStatus, MergeOptions, MergeReport, RetractionAuthority,
+    RetractionPlan, RetractionPolicy, ReviewItem, ReviewOptions, ReviewSubject, SupersessionPolicy,
 };
 pub use salience::{
     salience, view_roots, SalienceReport, SalienceRequest, SalienceTerms, SalienceWeights,

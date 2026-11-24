@@ -300,5 +300,6 @@ pub use smysl::unit_core_bytes
 pub use smysl::verify
 pub use smysl::verify_pack
 pub use smysl::view_roots
+pub use smysl::withdrawal_authorised
 pub use smysl::write_surface
 pub const smysl::VERSION: &str
