@@ -128,7 +128,8 @@ disk for an open document.
   A shard migrated to redb as primary would need the unit store opened, which takes its lock,
   so it is left unread and logged.
 - **A folder.** Its `.smy` and `.smysl` documents, to depth 8, at most 2,000, each at most
-  4 MiB; hidden directories, `target` and `node_modules` skipped.
+  4 MiB, from at most 20,000 entries looked at; hidden directories, `target`, `node_modules`
+  and links to directories skipped. The filesystem root is not read (R1-12).
 - **What it gives.** `check` sees the workspace's records, so a `b3:` reference into another
   document or the library resolves, and only findings placed in the open document are shown.
   Hover, definition and references cross documents. Labels stay a document's own: the parser
@@ -318,3 +319,9 @@ args = ["lsp-server"]
   `from store:` only; what needs the library layer is not reported (§4.4).
 - **R1-10.** Rule M constrains `derived` and `inferred` only. A quick fix that lowered a
   `measured` unit over a speculative ground would answer a finding `check` never makes.
+- **R1-12.** Run in Neovim 0.12.6 on macOS, the recipe's root marker `LIBRARY` matched
+  `/Library` on the case-insensitive disk, and Neovim sent `file:///` as the root. The folder scan
+  bounded the documents it kept but not the directories it walked, so `initialize` went
+  unanswered while it walked the disk. The scan now stops after 20,000 entries, does not follow
+  links to directories, and does not read the filesystem root; the Neovim recipe looks for a
+  file named exactly `LIBRARY`, and the Helix recipe no longer names it.

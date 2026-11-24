@@ -541,8 +541,11 @@ fn path_to_uri(path: &std::path::Path) -> String {
     out
 }
 
-/// How far a folder is read for its documents.
+/// How far a folder is read for its documents: how deep, how many entries are looked at in
+/// all, how many documents are kept, and how large each may be. The entry bound keeps a root
+/// that is far wider than a project, a home folder say, from holding up `initialize`.
 const MAX_DEPTH: usize = 8;
+const MAX_ENTRIES: usize = 20_000;
 const MAX_FILES: usize = 2_000;
 const MAX_BYTES: u64 = 4 << 20;
 
@@ -567,33 +570,73 @@ fn load_workspace(root: &std::path::Path, log: &mut Log) -> Workspace {
         }
         return ws;
     }
+    // An editor that finds no project sends the filesystem's root; that is no workspace.
+    if root.parent().is_none() {
+        log.line(&format!(
+            "workspace {}: the filesystem root is not read",
+            root.display()
+        ));
+        return ws;
+    }
+    let files = scan_folder(root, MAX_ENTRIES, log);
+    read_files(ws, root, files, log)
+}
+
+/// The `.smy` and `.smysl` documents under `root`, looking at no more than `max_entries`
+/// entries. Hidden directories, `target`, `node_modules` and links to directories are skipped.
+fn scan_folder(
+    root: &std::path::Path,
+    max_entries: usize,
+    log: &mut Log,
+) -> Vec<std::path::PathBuf> {
     let mut stack = vec![(root.to_path_buf(), 0usize)];
     let mut files = Vec::new();
+    let mut seen = 0usize;
     while let Some((dir, depth)) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
-        let mut entries: Vec<_> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
-        entries.sort();
-        for p in entries {
-            let name = p
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
+        let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+        entries.sort_by_key(std::fs::DirEntry::path);
+        for e in entries {
+            seen += 1;
+            if seen > max_entries {
+                log.line(&format!(
+                    "workspace {}: stopped after {max_entries} entries; {} documents found",
+                    root.display(),
+                    files.len()
+                ));
+                return files;
+            }
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
             if name.starts_with('.') || name == "target" || name == "node_modules" {
                 continue;
             }
-            if p.is_dir() {
+            // `file_type` does not follow a link, so a linked directory is not entered.
+            let Ok(ty) = e.file_type() else { continue };
+            if ty.is_dir() {
                 if depth < MAX_DEPTH {
                     stack.push((p, depth + 1));
                 }
             } else if (name.ends_with(".smy") || name.ends_with(".smysl"))
-                && p.metadata().is_ok_and(|m| m.len() <= MAX_BYTES)
+                && p.metadata()
+                    .is_ok_and(|m| m.is_file() && m.len() <= MAX_BYTES)
             {
                 files.push(p);
             }
         }
     }
+    files
+}
+
+/// Read the documents found, the first `MAX_FILES` of them in path order.
+fn read_files(
+    mut ws: Workspace,
+    root: &std::path::Path,
+    mut files: Vec<std::path::PathBuf>,
+    log: &mut Log,
+) -> Workspace {
     files.sort();
     if files.len() > MAX_FILES {
         log.line(&format!(
@@ -680,5 +723,48 @@ where
             Next::Continue => {}
             Next::Exit(r) => return r,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tree(tag: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("smysl-lsp-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for d in ["a", "b", "c"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+            std::fs::write(root.join(d).join("x.smy"), "@doc smysl/0.1 { id: v/x }\n").unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn the_folder_scan_stops_at_its_entry_bound() {
+        let root = tree("bound");
+        let mut log = Log(None);
+        assert_eq!(scan_folder(&root, 100, &mut log).len(), 3);
+        // Three directories and three files: six entries in all.
+        assert_eq!(scan_folder(&root, 6, &mut log).len(), 3);
+        assert!(scan_folder(&root, 5, &mut log).len() < 3);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_directory_is_not_entered() {
+        let root = tree("link");
+        std::os::unix::fs::symlink(root.join("a"), root.join("z")).unwrap();
+        let mut log = Log(None);
+        assert_eq!(scan_folder(&root, 100, &mut log).len(), 3);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_filesystem_root_is_no_workspace() {
+        let mut log = Log(None);
+        let root = std::path::Path::new(if cfg!(windows) { "C:\\" } else { "/" });
+        assert_eq!(load_workspace(root, &mut log).size(), (0, 0));
     }
 }

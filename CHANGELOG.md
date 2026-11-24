@@ -73,6 +73,11 @@ people can close. None of it moved in 1.19.
   so the server leaves it byte-identical even with a redaction `Library::open` would enforce.
   Editor recipes for Helix, Neovim, VS Code and Zed are in
   `Documentation/SMYSL-6_RFC/EDITORS.md`. RFC SMYSL-6 is built to its last phase.
+- **Run in Neovim (R1-12).** The Neovim recipe was run in Neovim 0.12.6 on macOS. Its root marker
+  `LIBRARY` matched `/Library` on the case-insensitive disk, Neovim sent `/` as the root, and
+  `initialize` hung while the folder scan walked the disk. The scan is now bounded at 20,000
+  entries, skips links to directories and the filesystem root; the Neovim recipe matches a file
+  named exactly `LIBRARY`. With that, every request works through Neovim's own client.
 - `smysl-lsp` is unpublished until the release that ships it.
 
 ### `floor: spread`: PELT's scale on float metrics (SMYSL-3 §21.2, SMYSL-5 R12)

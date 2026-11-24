@@ -9,9 +9,14 @@ smysl lsp-server            # stdio; the editor's root folder is the workspace
 smysl lsp-server --library ~/corpus   # a library, read without opening it
 ```
 
-These recipes follow each editor's documented configuration. They are not exercised in CI:
-the server is tested through `tests/cmd_lsp_server.rs`, which speaks the protocol to the binary
-as an editor does.
+The server is tested in CI through `tests/cmd_lsp_server.rs`, which speaks the protocol to the
+binary as an editor does. The Neovim recipe was also run in Neovim 0.12.6 itself, headless, on
+macOS (below). The Helix, VS Code and Zed recipes follow each editor's documented configuration
+and have not been run in the editor.
+
+**On macOS, a marker named `LIBRARY` is not enough.** The disk ignores case, so a root marker
+`LIBRARY` also matches `/Library` and `~/Library`, and the editor takes `/` or the home folder for
+the project. The Neovim recipe looks for a file named exactly `LIBRARY` for that reason.
 
 ## Helix
 
@@ -26,7 +31,6 @@ args = ["lsp-server"]
 name = "smysl"
 scope = "source.smysl"
 file-types = ["smy", "smysl"]
-roots = ["LIBRARY"]
 comment-token = "#"
 language-servers = ["smysl"]
 
@@ -38,6 +42,10 @@ comment-token = "#"
 language-servers = ["smysl"]
 ```
 
+Helix's root is its workspace: the folder holding `.git` or `.helix`, else the folder it was
+started in. To serve a library, start Helix in it, or pass `--library` in `args`. A `roots`
+entry of `LIBRARY` is left out: on macOS it matches `~/Library` (above).
+
 ## Neovim (0.11 or later)
 
 ```lua
@@ -46,10 +54,22 @@ vim.filetype.add({ extension = { smy = "smysl", smysl = "smysl", sq = "smysl-que
 vim.lsp.config("smysl", {
   cmd = { "smysl", "lsp-server" },
   filetypes = { "smysl", "smysl-query" },
-  root_markers = { "LIBRARY", ".git" },
+  -- A library is the folder holding a file named exactly LIBRARY; else the git root.
+  root_dir = function(bufnr, on_dir)
+    local library = vim.fs.root(bufnr, function(name, path)
+      return name == "LIBRARY" and vim.fn.filereadable(path .. "/" .. name) == 1
+    end)
+    on_dir(library or vim.fs.root(bufnr, ".git") or vim.fn.getcwd())
+  end,
 })
 vim.lsp.enable("smysl")
 ```
+
+Run in Neovim 0.12.6 on macOS: the client attaches and agrees on UTF-8; it receives the
+diagnostics, hover, definition and references (also into another document of the folder by
+`b3:` uid), the outline, completion, the label quick fix applied through
+`vim.lsp.util.apply_workspace_edit`, and `vim.lsp.buf.format`, which gives what `smysl fmt` gives
+and, on a document with errors, shows the refusal as a message.
 
 ## VS Code
 
@@ -120,6 +140,8 @@ Each language gets `languages/<name>/config.toml` with its `path_suffixes` (`["s
   else. No migration, no `enforce_z`, no index and no lock, so the library is byte-identical
   afterwards. A shard migrated to redb as primary is left unread, and the log says so.
 - **A folder** contributes its `.smy` and `.smysl` documents, to depth 8, at most 2,000 of them,
-  each at most 4 MiB. Hidden directories, `target` and `node_modules` are skipped.
+  each at most 4 MiB, looking at no more than 20,000 entries in all. Hidden directories,
+  `target`, `node_modules` and links to directories are skipped. The filesystem root, which an
+  editor sends when it finds no project, is not read.
 - **Labels are a document's own.** A reference to a unit in another document or the library is
   its `b3:` uid, which then resolves in `check`, hover, definition and references.
