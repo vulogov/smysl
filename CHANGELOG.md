@@ -80,6 +80,32 @@ people can close. None of it moved in 1.19.
   named exactly `LIBRARY`. With that, every request works through Neovim's own client.
 - `smysl-lsp` is unpublished until the release that ships it.
 
+### `smysl-sign`: detached attestation signatures (RFC SMYSL-7, SG-P1)
+
+An `AgentId` has been a string its writer chose, and the code said so: corroboration could be
+inflated and Origin authority typed by anyone. RFC SMYSL-7 signs what an agent attested with
+Ed25519 (RFC 8032), in a detached `COSE_Sign1` envelope (RFC 9052) kept beside the store.
+
+- **Read against the code first (R1).** The format has reserved `Attestation.sig` (key 7) since
+  0.1; it stays reserved, because a store is append-only and filling it means a second copy of
+  the attestation. The `retracts` edge carries no attestation, so a signed retraction is an
+  attestation on the edge. The crate is pure in every configuration (no `keystore-fs`): a key is
+  made from 32 bytes the caller drew and a key file is parsed from text. It is reached as
+  `smysl::sign`, as Rule A requires, behind `sign`, on by default. No `coset` and no `ciborium`:
+  the envelope is written with `smysl-core`'s deterministic encoder.
+- **SG-P1: the crate.** `SigningKey` (wiped on drop, never printed), `KeyId`, `KeyResolver` and
+  `MemoryKeyResolver`, the envelope and a strict reader, `sign_record`, `verify_record`, and
+  `verify_store` in `Advisory` and `Strict`. A forged signature is an error in every mode; a
+  record with several signatures takes the worst error, else verified. Revocation and bounds
+  read the attestation's clock. The crate builds with `CC=false CXX=false` and for
+  `wasm32-unknown-unknown`, and joins `check-purity`'s pure list with a generator, clock,
+  environment and file ban.
+- **A golden vector**, `fixtures/sign/`: RFC 8032's first test key signs an attestation. Rust
+  rebuilds it and verifies it over a `Sig_structure` written out by hand; the Go and Node
+  conformance tests verify it with their standard libraries' Ed25519 and their own BLAKE3.
+- `ed25519-dalek` 2.2 (default features off) and `zeroize` are new workspace dependencies.
+  `smysl-sign` is unpublished until the release that ships it.
+
 ### `floor: spread`: PELT's scale on float metrics (SMYSL-3 §21.2, SMYSL-5 R12)
 
 - **`floor: spread`** in a `cusum/1`, `pelt/1` or `mad/1` recipe keeps the detector's scale at

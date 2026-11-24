@@ -39,6 +39,7 @@ smysl-tel      = { path = "crates/smysl-tel",      version = "1.20.0" }
 smysl-series   = { path = "crates/smysl-series",   version = "1.20.0" }
 smysl-bund     = { path = "crates/smysl-bund",     version = "1.20.0" }
 smysl-lsp      = { path = "crates/smysl-lsp",      version = "1.20.0" }
+smysl-sign     = { path = "crates/smysl-sign",     version = "1.20.0" }
 
 # `pure` keeps the C SIMD backend out of the build: zero C in the core path (§13).
 blake3                = { version = "1", default-features = false, features = ["std", "pure"] }
@@ -60,6 +61,12 @@ serde_json            = "1"
 # identity anybody re-derives — the key is a secret, and a corpus is reproducible from the key
 # and not from the generator that made it. Declares 1.63, below this workspace's base.
 getrandom             = "0.3"
+# Ed25519 (RFC 8032) for detached attestation signatures (RFC SMYSL-7). Pure Rust: no `cc`, no
+# OpenSSL, no `ring`. Not pinned with `=`: RFC 8032 signing is deterministic and fully specified,
+# so any correct version gives the same bytes, and the golden vector under `fixtures/sign/` is
+# what would catch one that did not. Default features off; `zeroize` wipes a key on drop.
+ed25519-dalek         = { version = "2.2", default-features = false, features = ["std", "zeroize", "fast"] }
+zeroize               = { version = "1", default-features = false, features = ["std"] }
 
 # Reader dependencies, pinned exactly. SMYSL-2.4 §7 requires it: a reader's output *is* a
 # corpus's identity, so a parser that changed its mind between patch releases would change
@@ -223,7 +230,8 @@ required-features = ["cli"]
 # `--features tui` for anyone who wants the browser; free for everyone else.
 # `lsp` is on: an editor finds `smysl lsp-server` in the same binary as `smysl check`, so the
 # two cannot disagree about a version (RFC SMYSL-6). It adds `serde_json`, which `cli` has.
-default   = ["cli", "local", "render-typst", "lsp"]
+# `sign` is on as well: a stock binary can verify a store someone else signed (RFC SMYSL-7 R1-4).
+default   = ["cli", "local", "render-typst", "lsp", "sign"]
 # `text` is the library layer of RFC SMYSL-2.4: a catalog, an object store, and the readers.
 # It is **not** in the library's default tree and arrives only through `cli`, which is what
 # keeps the claim that `--no-default-features` carries no serde stack true (§4.5). `cli` turns
@@ -286,6 +294,9 @@ bund      = ["dep:smysl-bund", "text", "cli"]
 # The language server (RFC SMYSL-6), reached as `smysl::lsp`, and `smysl lsp-server`. JSON-RPC
 # over stdio, with `serde_json` and `std` threads: no async runtime.
 lsp       = ["dep:smysl-lsp", "cli"]
+# Detached attestation signatures (RFC SMYSL-7), reached as `smysl::sign`. Pure Rust Ed25519;
+# no C compiler. The commands arrive with SG-P3.
+sign      = ["dep:smysl-sign"]
 # The substrate index's backing store (SMYSL-2.4 §3.8). Off by default, and the default is the
 # decision rather than an oversight: it puts `redb` in the tree of a binary that runs perfectly
 # well without it, and what it buys shows up on a corpus large enough for 1.1 KB a unit to
@@ -353,6 +364,8 @@ smysl-series   = { workspace = true, optional = true }
 smysl-bund     = { workspace = true, optional = true }
 # The language server (RFC SMYSL-6), for `smysl lsp-server`.
 smysl-lsp      = { workspace = true, optional = true }
+# Detached attestation signatures (RFC SMYSL-7), for `smysl::sign`.
+smysl-sign     = { workspace = true, optional = true }
 smysl-thread   = { workspace = true }
 smysl-render   = { workspace = true }
 smysl-provider = { workspace = true, optional = true }

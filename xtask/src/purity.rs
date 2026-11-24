@@ -197,6 +197,12 @@ const PURE_CRATES: &[&str] = &[
     // `store-redb` as `smysl-graph`'s store is: a window's digest is a function of its
     // samples, so the same ban as `smysl-tel`'s.
     "smysl-series",
+    // Detached attestation signatures (RFC SMYSL-7 §2, G2). Pure in every configuration: a key
+    // is made from bytes the caller drew and a key file is parsed from its text, so the CLI does
+    // the I/O and the randomness. `ed25519-dalek` is pure Rust, with no `cc` and no `ring`.
+    // `CRATE_SYMBOLS` bans a generator, a clock and the environment, because a signature that
+    // drew from any of them would not be the deterministic one RFC 8032 specifies.
+    "smysl-sign",
 ];
 
 /// Symbols forbidden in one pure crate's source beyond [`FORBIDDEN_SYMBOLS`], each list with
@@ -253,6 +259,21 @@ const CRATE_SYMBOLS: &[(&str, &[&str])] = &[
             "SystemTime",
             "Instant",
             "std::env",
+        ],
+    ),
+    (
+        "smysl-sign",
+        &[
+            "thread_rng",
+            "rand::random",
+            "OsRng",
+            "getrandom",
+            "from_entropy",
+            "SigningKey::generate",
+            "SystemTime",
+            "Instant",
+            "std::env",
+            "std::fs",
         ],
     ),
 ];

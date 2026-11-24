@@ -143,8 +143,9 @@ PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-re
 # `smysl-lib` and `smysl-embed-candle`, until `smysl-tel` and `smysl-series` (RFC SMYSL-3) in 1.17,
 # which were published with 1.17.0 and joined PUBLISHED, and `smysl-bund` (RFC SMYSL-4), published
 # with 1.18.0. Empty again from there, until `smysl-lsp` (RFC SMYSL-6), whose first phase is
-# built in 1.20: it joins PUBLISHED at the baseline commit of the release that publishes it.
-UNPUBLISHED := smysl-lsp
+# built in 1.20, and `smysl-sign` (RFC SMYSL-7), from 1.20 too: each joins PUBLISHED at the
+# baseline commit of the release that publishes it.
+UNPUBLISHED := smysl-lsp smysl-sign
 
 # The library crates behind the facade: everything published except the facade itself, plus
 # the ones not published yet. Their *surface* is watched from the first commit — `api-check`

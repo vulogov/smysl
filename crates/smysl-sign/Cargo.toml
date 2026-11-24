@@ -1,0 +1,24 @@
+[package]
+name        = "smysl-sign"
+description = "smysl's detached attestation signatures (RFC SMYSL-7): Ed25519 in COSE_Sign1, verified against a key file"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+# A pure crate (RFC SMYSL-7 §3): no file, clock, environment or randomness. A key is made from
+# thirty-two bytes the caller drew, a key file is parsed from its text, and a store is read from
+# memory; the CLI does the I/O. On `xtask check-purity`'s pure list.
+[features]
+default = []
+
+[dependencies]
+smysl-core    = { workspace = true }
+smysl-graph   = { workspace = true }
+ed25519-dalek = { workspace = true }
+zeroize       = { workspace = true }

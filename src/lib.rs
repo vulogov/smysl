@@ -445,6 +445,11 @@ pub use smysl_bund as bund;
 #[cfg(feature = "lsp")]
 pub use smysl_lsp as lsp;
 
+/// Detached attestation signatures (RFC SMYSL-7): Ed25519 in `COSE_Sign1`, kept beside a store,
+/// verified against a key file. Pure. Behind `sign`.
+#[cfg(feature = "sign")]
+pub use smysl_sign as sign;
+
 /// The crate version, as a convenience for embedders recording provenance.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
