@@ -153,7 +153,7 @@ UNPUBLISHED := smysl-lsp smysl-sign
 # is a crate whose API nobody chose.
 LIBRARIES := $(filter-out smysl,$(PUBLISHED)) $(UNPUBLISHED)
 
-# The twenty-six subcommands, for `cli-surface`. Written out rather than read from `--help`,
+# The forty-four subcommands, for `cli-surface`. Written out rather than read from `--help`,
 # for the same reason `tests/dispatch.rs` writes them out: a list derived from the binary
 # shrinks silently when the binary does, and the regenerated golden would then record the
 # absence as if it were the intent.
