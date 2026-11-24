@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.20.0
+## 1.20.0 — 2026-11-24
 
 Two RFCs built from first phase to last, and one gap 1.19 named closed. `smysl` gains a language
 server and signatures on what an agent attested, two new crates, `smysl-lsp` and `smysl-sign`,
