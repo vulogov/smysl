@@ -32,7 +32,7 @@ jobs:
       - name: cargo install smysl
         run: cargo install smysl --root "$RUNNER_TEMP/install" --no-track
 
-      # `--version` prints `smysl 1.19.0` and nothing else; the format and kernel versions are
+      # `--version` prints `smysl 1.20.0` and nothing else; the format and kernel versions are
       # in the long description, which `--help` prints. The grep below once asked `--version`
       # for the format and failed every week from 1.11.0 on without saying anything about the
       # crate: the line it wanted was never on that output.
