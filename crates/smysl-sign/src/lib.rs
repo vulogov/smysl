@@ -9,7 +9,11 @@
 //!   reader that never heard of signatures reads a signed store as it always did.
 //! - A signature says who attested a record. It never raises a status.
 //! - Pure: no file, clock, environment or randomness. A key is made from thirty-two bytes the
-//!   caller drew ([`SigningKey::from_seed`]); the CLI reads key and signature files.
+//!   caller drew ([`SigningKey::from_seed`]), a key file is parsed from its text
+//!   ([`KeyFile::parse`]), and the CLI reads key and signature files.
+//! - Three modes ([`VerificationMode`]): `Advisory` warns about what is unsigned, `Selective`
+//!   requires signatures from some agents or on some statuses, `Strict` requires them all. A
+//!   signature that is present and wrong fails every mode.
 //!
 //! ```
 //! use smysl_core::{AgentId, Attestation, Hlc, Op, Record, Rung, Uid};
@@ -31,6 +35,7 @@
 
 mod cose;
 mod key;
+mod keyfile;
 mod verify;
 
 pub use cose::{
@@ -40,6 +45,8 @@ pub use cose::{
 pub use key::{
     KeyError, KeyId, KeyResolver, KeyStatus, MemoryKeyResolver, ResolvedKey, SigningKey,
 };
+pub use keyfile::{parse_public_key, KeyFile, KeyFileError, ED25519_SPKI_PREFIX};
 pub use verify::{
-    sign_record, verify_record, verify_store, RecordVerdict, VerificationMode, VerificationReport,
+    sign_record, verified_attesters, verify_record, verify_store, RecordVerdict, VerificationMode,
+    VerificationReport,
 };

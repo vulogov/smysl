@@ -1,7 +1,7 @@
 # RFC SMYSL-7 — detached attestation signatures (`smysl-sign`)
 
 **Author:** Vladimir Ulogov
-**Status:** amended in review against the code (R1, 2026-11-23). SG-P1 is being built (1.20).
+**Status:** amended in review against the code (R1, 2026-11-23). SG-P1 and SG-P2 are built; SG-P3 is next (1.20).
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged.
 **Crate:** `crates/smysl-sign`, new, behind the facade's `sign` feature, on by default.
 **Cryptographic profile:** Ed25519 (RFC 8032) in detached `COSE_Sign1` envelopes (RFC 9052).
@@ -211,6 +211,12 @@ When several signatures name one record, the record's verdict is the worst error
 `Verified`, else `UnknownKey` (R1-11). A signature whose target is not in the store is counted,
 not judged.
 
+A signature names its record twice: by hash, and by agent and subject uid. An unsigned
+attestation and a signature left over that names its agent and its unit are judged against each
+other, so an attestation changed after it was signed fails `Advisory` too (R1-14). The subject
+uid sits in the unprotected header, so the verifier checks it against the attestation's uid; a
+`record` signature carries none.
+
 Corroboration and Origin authority (§1) read verification through `verified_attesters`, which
 gives each unit the agents whose attestations carry a verified signature. `smysl-graph` sits
 below `smysl-sign` and does not call it; the caller filters (R1-8).
@@ -253,9 +259,30 @@ pub fn verified_attesters<R: KeyResolver>(store: &Store, signatures: &[DetachedS
     resolver: &R) -> BTreeMap<Uid, BTreeSet<(AgentId, KeyId)>>;
 ```
 
-`RecordVerdict` is `Verified`, `Unsigned`, `UnknownKey`, `RevokedKey`, `StatusOverCap`,
-`AgentMismatch` or `InvalidSignature`. `VerificationReport` holds the mode, `passed`, a verdict
-per record hash, and the verified, unsigned, error and unmatched counts.
+```rust
+#[non_exhaustive]
+pub enum VerificationMode {
+    Advisory,
+    Selective { agent_prefixes: Vec<String>, require_status_at_least: Option<Status> },
+    Strict,
+}
+
+pub struct KeyFile;
+impl KeyFile {
+    pub fn parse(text: &str) -> Result<MemoryKeyResolver, KeyFileError>;
+    pub fn entry(key: &ResolvedKey) -> String;              // one line, as `parse` reads it
+}
+pub fn parse_public_key(s: &str) -> Result<[u8; 32], String>;
+```
+
+`RecordVerdict` is `Verified`, `Unsigned`, `UnknownKey`, `StatusOverCap`, `RevokedKey`,
+`AgentMismatch` or `InvalidSignature`, ranked in that order. `VerificationReport` holds the mode,
+`passed`, a verdict per record hash, the hashes that fail under the mode, and the verified,
+unsigned, warning, error and unmatched counts.
+
+`verify_record` reads a unit's own status against the key's cap. An attestation's cap is read
+against the unit it names, which only a store holds, so `verify_store` and `verified_attesters`
+apply it and `verify_record` alone does not (R1-9).
 
 ## 8. Command line (`sign` feature)
 
@@ -352,3 +379,25 @@ smysl verify -s notes.store --keys .smysl/keys.hjson --mode strict
 - **R1-13.** `Selective`'s "at or above these statuses" took a set where one status says the
   same: `Status` is ordered, the order rule M compares, so "at or above any of them" is "at or
   above the lowest". The field is `require_status_at_least: Option<Status>`.
+
+**R1, continued, 2026-11-23: SG-P2 built.**
+
+- **R1-14.** Three things the gate's "flipping any byte fails in every mode" needed, and one it
+  cannot have.
+  - A changed attestation no longer hashes to its signature's target, so by hash alone it reads
+    as unsigned, a warning in `Advisory`. A signature left over that names the attestation's
+    agent and subject uid is judged against it, and fails. A signature file that holds another
+    store's signature on the same agent and unit, without its record, reads as a forgery; `merge`
+    moves records and signatures together (SG-P3), so a store's own file does not.
+  - The subject uid is unprotected, so `verify_record` checks it: an attestation's must be its
+    uid, and a `record` signature has none.
+  - A unit signed directly is read against the key's cap by its own status, as an attestation is
+    by its unit's.
+  - A flipped byte of the kid names a key no resolver knows: `UnknownKey`, which `Advisory`
+    warns of and `Selective` (in scope) and `Strict` refuse. A kid nobody has published cannot
+    be told from one not distributed yet, and §6's table keeps the warning. Every other byte of
+    the envelope and the record fails every mode, as `tests/modes.rs` checks byte by byte.
+- **R1-15.** The key file parser is strict: an unknown key, a field the entry's status does not
+  take, a key listed twice, or one key bound to two agents is an error. A typo in
+  `revoked_after_ms` that dropped a revocation would fail open. An entry may carry `kid`, checked
+  against the key; `KeyFile::entry` writes it. Points off the curve or of small order are refused.

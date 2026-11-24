@@ -80,7 +80,7 @@ people can close. None of it moved in 1.19.
   named exactly `LIBRARY`. With that, every request works through Neovim's own client.
 - `smysl-lsp` is unpublished until the release that ships it.
 
-### `smysl-sign`: detached attestation signatures (RFC SMYSL-7, SG-P1)
+### `smysl-sign`: detached attestation signatures (RFC SMYSL-7, SG-P1 and SG-P2)
 
 An `AgentId` has been a string its writer chose, and the code said so: corroboration could be
 inflated and Origin authority typed by anyone. RFC SMYSL-7 signs what an agent attested with
@@ -100,6 +100,19 @@ Ed25519 (RFC 8032), in a detached `COSE_Sign1` envelope (RFC 9052) kept beside t
   read the attestation's clock. The crate builds with `CC=false CXX=false` and for
   `wasm32-unknown-unknown`, and joins `check-purity`'s pure list with a generator, clock,
   environment and file ban.
+- **SG-P2: modes and keys.** `Selective` requires signatures on the attestations in scope: by
+  agents whose ids start with a given prefix, or on units at or above a given status. A key's
+  `max_status` caps what it vouches for, read against the attested unit's status; over the cap is
+  `StatusOverCap`, an error in every mode. `KeyFile::parse` reads `.smysl/keys.hjson` from its
+  text (keys as `hex:` or `base64:`, raw or SubjectPublicKeyInfo DER), strictly: an unknown or
+  misplaced field, a duplicate key, or a key bound to two agents is an error. `verified_attesters`
+  gives each unit the agents whose attestations verify, for corroboration and origin authority to
+  filter by. A report counts warnings and lists the failing records.
+- **Tampering fails every mode (R1-14).** Each byte of a signed attestation and of its envelope
+  was flipped in turn: every change the reader accepts fails `Advisory`, `Selective` and
+  `Strict`, except the kid's bytes, which name an unknown key, a warning in `Advisory` as §6 says.
+  An attestation changed after signing is judged against the leftover signature that names its
+  agent and unit, and the unprotected subject uid is checked against the attestation.
 - **A golden vector**, `fixtures/sign/`: RFC 8032's first test key signs an attestation. Rust
   rebuilds it and verifies it over a `Sig_structure` written out by hand; the Go and Node
   conformance tests verify it with their standard libraries' Ed25519 and their own BLAKE3.

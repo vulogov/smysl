@@ -1,8 +1,8 @@
 //! Signing and verifying (RFC SMYSL-7 §4.4, §6).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use smysl_core::{AgentId, Record};
+use smysl_core::{AgentId, Record, Status, Uid};
 use smysl_graph::Store;
 
 use crate::cose::{protected, sig_structure, DetachedSignature, SignError, TargetKind};
@@ -54,6 +54,13 @@ pub enum RecordVerdict {
         agent: AgentId,
         kid: KeyId,
     },
+    /// The signature verifies, and vouches for a unit above the key's cap (R1-9).
+    StatusOverCap {
+        agent: AgentId,
+        kid: KeyId,
+        status: Status,
+        max_status: Status,
+    },
     /// The key was revoked, or the attestation's clock falls outside its bounds.
     RevokedKey {
         agent: AgentId,
@@ -77,10 +84,15 @@ impl RecordVerdict {
     pub fn is_forged(&self) -> bool {
         matches!(
             self,
-            RecordVerdict::RevokedKey { .. }
+            RecordVerdict::StatusOverCap { .. }
+                | RecordVerdict::RevokedKey { .. }
                 | RecordVerdict::AgentMismatch { .. }
                 | RecordVerdict::InvalidSignature { .. }
         )
+    }
+
+    pub fn is_verified(&self) -> bool {
+        matches!(self, RecordVerdict::Verified { .. })
     }
 
     /// How a record with several signatures is judged (R1-11): the worst error, else
@@ -90,18 +102,34 @@ impl RecordVerdict {
             RecordVerdict::Unsigned => 0,
             RecordVerdict::UnknownKey { .. } => 1,
             RecordVerdict::Verified { .. } => 2,
-            RecordVerdict::RevokedKey { .. } => 3,
-            RecordVerdict::AgentMismatch { .. } => 4,
-            RecordVerdict::InvalidSignature { .. } => 5,
+            RecordVerdict::StatusOverCap { .. } => 3,
+            RecordVerdict::RevokedKey { .. } => 4,
+            RecordVerdict::AgentMismatch { .. } => 5,
+            RecordVerdict::InvalidSignature { .. } => 6,
         }
     }
 }
 
 /// Verify one signature over one record.
+///
+/// A unit's own status is read against the key's cap. An attestation's cap is read against
+/// the unit it names, which only a store holds: [`verify_store`] and [`verified_attesters`]
+/// apply it, and this function, given the attestation alone, does not.
 pub fn verify_record<R: KeyResolver>(
     sig: &DetachedSignature,
     record: &Record,
     resolver: &R,
+) -> RecordVerdict {
+    let status = record.as_unit().map(|u| u.status);
+    verify_with(sig, record, resolver, status)
+}
+
+/// [`verify_record`], with the status of the unit the record vouches for.
+fn verify_with<R: KeyResolver>(
+    sig: &DetachedSignature,
+    record: &Record,
+    resolver: &R,
+    subject_status: Option<Status>,
 ) -> RecordVerdict {
     let invalid = || RecordVerdict::InvalidSignature {
         agent: sig.agent.clone(),
@@ -111,9 +139,14 @@ pub fn verify_record<R: KeyResolver>(
     if smysl_core::hash_bytes(&payload) != sig.target_hash {
         return invalid();
     }
+    // The subject uid sits in the unprotected header, so it is checked against the record
+    // here: a header that names another unit is not this record's.
     let attestation = match (record, sig.target_kind) {
-        (Record::Attestation(a), TargetKind::Attestation) => Some(a),
+        (Record::Attestation(a), TargetKind::Attestation) if sig.subject_uid == Some(a.uid) => {
+            Some(a)
+        }
         (Record::Attestation(_), _) | (_, TargetKind::Attestation) => return invalid(),
+        _ if sig.subject_uid.is_some() => return invalid(),
         _ => None,
     };
     if let Some(a) = attestation {
@@ -179,6 +212,16 @@ pub fn verify_record<R: KeyResolver>(
             _ => return revoked(Some("outside the key's bounds".into())),
         },
     }
+    if let (Some(max_status), Some(status)) = (key.max_status, subject_status) {
+        if status > max_status {
+            return RecordVerdict::StatusOverCap {
+                agent: sig.agent.clone(),
+                kid: sig.kid,
+                status,
+                max_status,
+            };
+        }
+    }
     RecordVerdict::Verified {
         agent: sig.agent.clone(),
         kid: sig.kid,
@@ -193,20 +236,51 @@ pub enum VerificationMode {
     /// warning. A forged signature is an error.
     #[default]
     Advisory,
+    /// `Strict` for the attestations in scope, `Advisory` for the rest. In scope: an
+    /// attestation by an agent whose id starts with one of `agent_prefixes`, or one on a unit
+    /// whose status is at or above `require_status_at_least` (R1-13).
+    Selective {
+        agent_prefixes: Vec<String>,
+        require_status_at_least: Option<Status>,
+    },
     /// Every attestation must carry a signature that verifies.
     Strict,
 }
 
 impl VerificationMode {
-    /// Whether `v` fails a report under this mode.
-    pub fn fails(&self, v: &RecordVerdict) -> bool {
-        if v.is_forged() {
-            return true;
+    /// `Selective` over these agent prefixes and this status.
+    pub fn selective<S: Into<String>>(
+        agent_prefixes: impl IntoIterator<Item = S>,
+        require_status_at_least: Option<Status>,
+    ) -> VerificationMode {
+        VerificationMode::Selective {
+            agent_prefixes: agent_prefixes.into_iter().map(Into::into).collect(),
+            require_status_at_least,
         }
+    }
+
+    /// Whether a record by `agent`, vouching for a unit of `subject_status`, must be signed.
+    pub fn in_scope(&self, agent: &AgentId, subject_status: Option<Status>) -> bool {
         match self {
             VerificationMode::Advisory => false,
-            VerificationMode::Strict => !matches!(v, RecordVerdict::Verified { .. }),
+            VerificationMode::Strict => true,
+            VerificationMode::Selective {
+                agent_prefixes,
+                require_status_at_least,
+            } => {
+                agent_prefixes
+                    .iter()
+                    .any(|p| agent.as_str().starts_with(p.as_str()))
+                    || matches!((require_status_at_least, subject_status),
+                        (Some(min), Some(s)) if s >= *min)
+            }
         }
+    }
+
+    /// Whether `v` fails a report under this mode: a forged signature always, and anything
+    /// short of verified when the record is in scope.
+    pub fn fails(&self, v: &RecordVerdict, in_scope: bool) -> bool {
+        v.is_forged() || (in_scope && !v.is_verified())
     }
 }
 
@@ -220,11 +294,113 @@ pub struct VerificationReport {
     /// One verdict per record, by `Store::record_hash`: every attestation, and every other
     /// record a signature names.
     pub verdicts: BTreeMap<[u8; 32], RecordVerdict>,
+    /// The records whose verdicts fail under `mode`; every other verdict short of verified
+    /// is a warning.
+    pub failing: BTreeSet<[u8; 32]>,
     pub verified_count: usize,
     pub unsigned_count: usize,
+    pub warning_count: usize,
     pub error_count: usize,
     /// Signatures whose record the store does not hold.
     pub unmatched_count: usize,
+}
+
+/// One record, judged.
+struct Judged<'a> {
+    hash: [u8; 32],
+    record: &'a Record,
+    /// The agent a mode's scope reads: the attestation's, or the first signer's.
+    agent: Option<AgentId>,
+    subject_status: Option<Status>,
+    /// Each signature's verdict, in the order given.
+    each: Vec<RecordVerdict>,
+    verdict: RecordVerdict,
+}
+
+/// Judge every attestation in `store`, and every other record a signature names; and count
+/// the signatures left over.
+fn judge<'a, R: KeyResolver>(
+    store: &'a Store,
+    signatures: &[DetachedSignature],
+    resolver: &R,
+) -> (Vec<Judged<'a>>, usize) {
+    let mut by_target: BTreeMap<[u8; 32], Vec<&DetachedSignature>> = BTreeMap::new();
+    for s in signatures {
+        by_target.entry(s.target_hash).or_default().push(s);
+    }
+    let mut seen = BTreeSet::new();
+    let mut matched = BTreeSet::new();
+    let mut unsigned = Vec::new();
+    let mut out = Vec::new();
+    for r in store.iter() {
+        let h = Store::record_hash(r);
+        let sigs = by_target.get(&h);
+        if !matches!(r, Record::Attestation(_)) && sigs.is_none() || !seen.insert(h) {
+            continue;
+        }
+        if sigs.is_some() {
+            matched.insert(h);
+        } else {
+            unsigned.push(out.len());
+        }
+        let (agent, subject_status) = match r {
+            Record::Attestation(a) => {
+                (Some(a.agent.clone()), store.get(&a.uid).map(|u| u.status()))
+            }
+            _ => (
+                sigs.and_then(|s| s.first()).map(|s| s.agent.clone()),
+                r.as_unit().map(|u| u.status),
+            ),
+        };
+        let each: Vec<_> = sigs
+            .into_iter()
+            .flatten()
+            .map(|s| verify_with(s, r, resolver, subject_status))
+            .collect();
+        out.push(Judged {
+            hash: h,
+            record: r,
+            agent,
+            subject_status,
+            verdict: worst(&each),
+            each,
+        });
+    }
+    // An unsigned attestation, and a signature left over that names its agent and its unit:
+    // the record was changed after it was signed, or the signature was. Judged against each
+    // other they fail, as they would have had the bytes still matched (R1-14).
+    for i in unsigned {
+        let j = &mut out[i];
+        let Record::Attestation(a) = j.record else {
+            continue;
+        };
+        let suspects: Vec<_> = by_target
+            .iter()
+            .filter(|(h, _)| !matched.contains(*h))
+            .flat_map(|(h, v)| v.iter().map(move |s| (*h, *s)))
+            .filter(|(_, s)| s.agent == a.agent && s.subject_uid == Some(a.uid))
+            .collect();
+        for (h, s) in suspects {
+            matched.insert(h);
+            j.each
+                .push(verify_with(s, j.record, resolver, j.subject_status));
+        }
+        j.verdict = worst(&j.each);
+    }
+    let unmatched = by_target
+        .iter()
+        .filter(|(h, _)| !matched.contains(*h))
+        .map(|(_, v)| v.len())
+        .sum();
+    (out, unmatched)
+}
+
+/// The worst of several verdicts (R1-11); `Unsigned` for none.
+fn worst(each: &[RecordVerdict]) -> RecordVerdict {
+    each.iter()
+        .max_by_key(|v| v.rank())
+        .cloned()
+        .unwrap_or(RecordVerdict::Unsigned)
 }
 
 /// Verify a store's attestations, and any other record signed, against `signatures`.
@@ -234,46 +410,59 @@ pub fn verify_store<R: KeyResolver>(
     resolver: &R,
     mode: &VerificationMode,
 ) -> VerificationReport {
-    let mut by_target: BTreeMap<[u8; 32], Vec<&DetachedSignature>> = BTreeMap::new();
-    for s in signatures {
-        by_target.entry(s.target_hash).or_default().push(s);
-    }
+    let (judged, unmatched_count) = judge(store, signatures, resolver);
     let mut verdicts = BTreeMap::new();
-    let mut matched = std::collections::BTreeSet::new();
-    for r in store.iter() {
-        let h = Store::record_hash(r);
-        let sigs = by_target.get(&h);
-        if !matches!(r, Record::Attestation(_)) && sigs.is_none() {
-            continue;
+    let mut failing = BTreeSet::new();
+    for j in judged {
+        let in_scope = j
+            .agent
+            .as_ref()
+            .is_some_and(|a| mode.in_scope(a, j.subject_status));
+        if mode.fails(&j.verdict, in_scope) {
+            failing.insert(j.hash);
         }
-        if verdicts.contains_key(&h) {
-            continue;
-        }
-        let v = sigs
-            .into_iter()
-            .flatten()
-            .map(|s| verify_record(s, r, resolver))
-            .max_by_key(RecordVerdict::rank)
-            .unwrap_or(RecordVerdict::Unsigned);
-        if sigs.is_some() {
-            matched.insert(h);
-        }
-        verdicts.insert(h, v);
+        verdicts.insert(j.hash, j.verdict);
     }
-    let unmatched_count = by_target
-        .iter()
-        .filter(|(h, _)| !matched.contains(*h))
-        .map(|(_, v)| v.len())
-        .sum();
     let count = |f: fn(&RecordVerdict) -> bool| verdicts.values().filter(|v| f(v)).count();
-    let error_count = verdicts.values().filter(|v| mode.fails(v)).count();
+    let verified_count = count(RecordVerdict::is_verified);
     VerificationReport {
         mode: mode.clone(),
-        passed: error_count == 0,
-        verified_count: count(|v| matches!(v, RecordVerdict::Verified { .. })),
+        passed: failing.is_empty(),
+        verified_count,
         unsigned_count: count(|v| matches!(v, RecordVerdict::Unsigned)),
-        error_count,
+        warning_count: verdicts.len() - verified_count - failing.len(),
+        error_count: failing.len(),
         unmatched_count,
+        failing,
         verdicts,
     }
+}
+
+/// For each unit, the agents whose attestations on it carry a verified signature, and the
+/// keys that signed them (§6, R1-8).
+///
+/// An attestation counts when its verdict, the worst of its signatures', is verified, so a
+/// forged signature beside a good one withdraws it. Corroboration and origin authority read
+/// this to filter by; `smysl-graph` does not call this crate.
+pub fn verified_attesters<R: KeyResolver>(
+    store: &Store,
+    signatures: &[DetachedSignature],
+    resolver: &R,
+) -> BTreeMap<Uid, BTreeSet<(AgentId, KeyId)>> {
+    let mut out: BTreeMap<Uid, BTreeSet<(AgentId, KeyId)>> = BTreeMap::new();
+    for j in judge(store, signatures, resolver).0 {
+        let Record::Attestation(a) = j.record else {
+            continue;
+        };
+        if !j.verdict.is_verified() {
+            continue;
+        }
+        let keys = out.entry(a.uid).or_default();
+        for v in &j.each {
+            if let RecordVerdict::Verified { agent, kid } = v {
+                keys.insert((agent.clone(), *kid));
+            }
+        }
+    }
+    out
 }
