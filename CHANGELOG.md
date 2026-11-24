@@ -74,6 +74,16 @@ and `attest` writes nothing to sign.
   (SMYSL-8 R2-5). `retract --sign` signs one attestation per key, so a quorum signs with each.
   `withdraw`'s authority check moved into the library as `withdrawal_authorised`, one rule with
   retraction's.
+- **TR-P3: `smysl keys`.** `list`, `add` (from `keygen`'s printed entry, or `--agent` and
+  `--ed25519`), `revoke` (`--after MS`, or `--compromised` for every signature the key made),
+  `rotate` (a new key, and the agent's old keys revoked from now on, in one write) and
+  `check STORE` (signatures per key, unknown keys, keys that signed nothing). The file is
+  rewritten whole by `smysl::sign::KeyFile::render`, which `KeyFile::parse` reads back to an
+  equal resolver; a comment the rewrite would drop is refused without `--rewrite`. 45 commands.
+- **Signing at the commit.** `--sign --key K` on `ingest --yes`, `ingest --text` and
+  `tel read --yes` signs the attestations the run committed. The key's agent must be the one
+  the command attests as — `tool:smysl-ingest`, `tool:smysl-tel` — and that is checked before
+  any provider is called, so a wrong key exits 2 and costs nothing.
 
 ## 1.20.0 — 2026-11-24
 

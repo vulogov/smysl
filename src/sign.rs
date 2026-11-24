@@ -775,3 +775,485 @@ pub(crate) fn prove(
     }
     Ok(())
 }
+
+// ---- RFC SMYSL-8 §6: `smysl keys` ----------------------------------------------------------
+
+/// The key file `keys` edits: `--keys`, else `.smysl/keys.hjson` where the command runs.
+fn keys_path(m: &ArgMatches) -> PathBuf {
+    m.get_one::<String>("keys")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(".smysl").join("keys.hjson"))
+}
+
+/// The key file's text and keys; `None` when it does not exist and `may_create` allows that.
+fn read_key_file(
+    path: &Path,
+    may_create: bool,
+) -> Result<Option<(String, MemoryKeyResolver)>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => {
+            let keys = KeyFile::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            Ok(Some((text, keys)))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && may_create => Ok(None),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// Write the key file whole through `.tmp` and a rename, keeping its permissions. A comment a
+/// rewrite would lose is refused unless `--rewrite` says to drop it (RFC SMYSL-8 §6).
+fn write_key_file(
+    m: &ArgMatches,
+    path: &Path,
+    old: Option<&str>,
+    keys: &MemoryKeyResolver,
+) -> Result<(), String> {
+    if let Some(line) = old.and_then(KeyFile::comment_line) {
+        if !m.get_flag("rewrite") {
+            return Err(format!(
+                "{}: line {line} has a comment, which rewriting the file would drop; \
+                 move it into the leading `#` lines, or pass --rewrite",
+                path.display()
+            ));
+        }
+    }
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let tmp = path.with_extension("hjson.tmp");
+    std::fs::write(&tmp, KeyFile::render(keys)).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    if let Ok(meta) = std::fs::metadata(path) {
+        std::fs::set_permissions(&tmp, meta.permissions())
+            .map_err(|e| format!("{}: {e}", tmp.display()))?;
+    }
+    std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn opt_u64(m: &ArgMatches, name: &str) -> Result<Option<u64>, String> {
+    match m.get_one::<String>(name) {
+        None => Ok(None),
+        Some(s) => s
+            .parse()
+            .map(Some)
+            .map_err(|_| format!("--{name} {s}: milliseconds since the epoch")),
+    }
+}
+
+/// `--agent`, as an agent id.
+fn agent_arg(m: &ArgMatches) -> Result<AgentId, String> {
+    let raw = m.get_one::<String>("agent").ok_or("--agent is required")?;
+    raw.parse().map_err(|e| format!("--agent {raw}: {e}"))
+}
+
+/// A new key's entry from the flags: `--max-status`, and `--not-before` with `--not-after`.
+fn shaped(m: &ArgMatches, key: ResolvedKey) -> Result<ResolvedKey, String> {
+    let mut key = key;
+    if let Some(s) = m.get_one::<String>("max-status") {
+        let st = Status::parse(s).ok_or_else(|| format!("--max-status {s}: no such status"))?;
+        key = key.with_max_status(st);
+    }
+    match (opt_u64(m, "not-before")?, opt_u64(m, "not-after")?) {
+        (None, None) => {}
+        (Some(a), Some(b)) if a <= b => {
+            key = key.with_status(smysl::sign::KeyStatus::Bounded {
+                not_before_ms: a,
+                not_after_ms: b,
+            })
+        }
+        (Some(_), Some(_)) => return Err("--not-before is after --not-after".into()),
+        _ => return Err("--not-before and --not-after go together".into()),
+    }
+    Ok(key)
+}
+
+/// Add `key`, refusing a key id the file already binds.
+fn add_key(keys: &mut MemoryKeyResolver, key: ResolvedKey) -> Result<(), String> {
+    if let Some(k) = keys.keys().find(|k| k.kid == key.kid) {
+        return Err(format!(
+            "key {} is already in the file, for {}",
+            key.kid, k.agent
+        ));
+    }
+    keys.insert(key);
+    Ok(())
+}
+
+/// The key a `--kid` names: its whole id, or a prefix of at least eight digits naming one.
+fn find_kid(keys: &MemoryKeyResolver, raw: &str) -> Result<smysl::sign::KeyId, String> {
+    let want = raw.to_ascii_lowercase();
+    if want.len() < 8 {
+        return Err(format!("--kid {raw}: give at least eight digits"));
+    }
+    let hits: Vec<_> = keys
+        .keys()
+        .filter(|k| k.kid.to_string().starts_with(&want))
+        .collect();
+    match hits.as_slice() {
+        [k] => Ok(k.kid),
+        [] => Err(format!("--kid {raw}: no such key in the file")),
+        _ => Err(format!(
+            "--kid {raw}: names {} keys; give more digits",
+            hits.len()
+        )),
+    }
+}
+
+/// `smysl keys list|add|revoke|rotate|check` (RFC SMYSL-8 §6).
+pub(crate) fn cmd_keys(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
+    let action = m
+        .get_one::<String>("action")
+        .map(String::as_str)
+        .unwrap_or("");
+    let usage = |e: String| {
+        eprintln!("smysl keys {action}: {e}");
+        ExitCode::Usage
+    };
+    let path = keys_path(m);
+    match action {
+        "list" => {
+            let Some((_, keys)) = (match read_key_file(&path, false) {
+                Ok(v) => v,
+                Err(e) => return usage(e),
+            }) else {
+                return usage("no key file".into());
+            };
+            if global.get_flag("json") {
+                let rows: Vec<String> = keys
+                    .keys()
+                    .map(|k| {
+                        format!(
+                            "{{\"agent\":{},\"kid\":\"{}\",\"status\":\"{}\",\"max_status\":{}}}",
+                            smysl::json_escape(k.agent.as_str()),
+                            k.kid,
+                            status_word(&k.status),
+                            k.max_status
+                                .map(|s| format!("\"{}\"", s.as_str()))
+                                .unwrap_or_else(|| "null".into())
+                        )
+                    })
+                    .collect();
+                println!("{{\"keys\":[{}]}}", rows.join(","));
+            } else {
+                for k in keys.keys() {
+                    println!("{}", KeyFile::entry(k));
+                }
+            }
+            ExitCode::Success
+        }
+        "add" => {
+            let (old, mut keys) = match read_key_file(&path, true) {
+                Ok(Some((t, k))) => (Some(t), k),
+                Ok(None) => (None, MemoryKeyResolver::new()),
+                Err(e) => return usage(e),
+            };
+            let new: Vec<ResolvedKey> = if let Some(src) = m.get_one::<String>("entry") {
+                let text = if src == "-" {
+                    let mut s = String::new();
+                    if let Err(e) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut s) {
+                        return usage(format!("stdin: {e}"));
+                    }
+                    s
+                } else {
+                    match std::fs::read_to_string(src) {
+                        Ok(s) => s,
+                        Err(e) => return usage(format!("{src}: {e}")),
+                    }
+                };
+                // `keygen` prints entries, one a line; read them as a key file's `keys`.
+                let wrapped = format!("{{ keys: [\n{}\n] }}", text.trim());
+                match KeyFile::parse(&wrapped) {
+                    Ok(k) => k.keys().cloned().collect(),
+                    Err(e) => return usage(format!("--entry: {e}")),
+                }
+            } else {
+                let agent = match agent_arg(m) {
+                    Ok(a) => a,
+                    Err(e) => return usage(e),
+                };
+                let Some(pk) = m.get_one::<String>("ed25519") else {
+                    return usage("give --ed25519 KEY with --agent, or --entry FILE".into());
+                };
+                let pk = match smysl::sign::parse_public_key(pk) {
+                    Ok(p) => p,
+                    Err(e) => return usage(format!("--ed25519: {e}")),
+                };
+                match shaped(m, ResolvedKey::active(agent, pk)) {
+                    Ok(k) => vec![k],
+                    Err(e) => return usage(e),
+                }
+            };
+            for k in &new {
+                if let Err(e) = add_key(&mut keys, k.clone()) {
+                    return usage(e);
+                }
+            }
+            if let Err(e) = write_key_file(m, &path, old.as_deref(), &keys) {
+                return usage(e);
+            }
+            for k in &new {
+                println!("added {} for {}", k.kid, k.agent);
+            }
+            ExitCode::Success
+        }
+        "revoke" => {
+            let Some((old, mut keys)) = (match read_key_file(&path, false) {
+                Ok(v) => v,
+                Err(e) => return usage(e),
+            }) else {
+                return usage("no key file".into());
+            };
+            let Some(raw) = m.get_one::<String>("kid") else {
+                return usage("--kid is required".into());
+            };
+            let kid = match find_kid(&keys, raw) {
+                Ok(k) => k,
+                Err(e) => return usage(e),
+            };
+            let after_ms = match (opt_u64(m, "after"), m.get_flag("compromised")) {
+                (Ok(Some(t)), false) => Some(t),
+                (Ok(None), true) => None,
+                (Err(e), _) => return usage(e),
+                _ => {
+                    return usage(
+                        "give --after MS, or --compromised to refuse every signature it made"
+                            .into(),
+                    )
+                }
+            };
+            let reason = m.get_one::<String>("reason").cloned();
+            keys.set_status(&kid, smysl::sign::KeyStatus::Revoked { after_ms, reason });
+            if let Err(e) = write_key_file(m, &path, Some(&old), &keys) {
+                return usage(e);
+            }
+            match after_ms {
+                Some(t) => println!("revoked {kid} for attestations at or after {t}"),
+                None => println!("revoked {kid}: every signature it made is refused"),
+            }
+            ExitCode::Success
+        }
+        "rotate" => {
+            let (old, mut keys) = match read_key_file(&path, true) {
+                Ok(Some((t, k))) => (Some(t), k),
+                Ok(None) => (None, MemoryKeyResolver::new()),
+                Err(e) => return usage(e),
+            };
+            let agent = match agent_arg(m) {
+                Ok(a) => a,
+                Err(e) => return usage(e),
+            };
+            let Some(out) = m.get_one::<String>("out") else {
+                return usage("--out is required; a secret key is not written to stdout".into());
+            };
+            // Checked before the new key is made, so a comment that blocks the write leaves no
+            // orphaned secret behind.
+            if let (Some(line), false) = (
+                old.as_deref().and_then(KeyFile::comment_line),
+                m.get_flag("rewrite"),
+            ) {
+                return usage(format!(
+                    "{}: line {line} has a comment, which rewriting the file would drop; \
+                     move it into the leading `#` lines, or pass --rewrite",
+                    path.display()
+                ));
+            }
+            let now = super::now_millis();
+            let mut seed = smysl::sign::Zeroizing::new([0u8; 32]);
+            getrandom::fill(&mut seed[..]).expect("the operating system's randomness");
+            let key = SigningKey::from_seed(agent.clone(), *seed);
+            let entry = match shaped(m, ResolvedKey::active(agent.clone(), key.public_key())) {
+                Ok(k) => k,
+                Err(e) => return usage(e),
+            };
+            if let Err(e) = add_key(&mut keys, entry) {
+                return usage(e);
+            }
+            let retired: Vec<smysl::sign::KeyId> = keys
+                .keys()
+                .filter(|k| {
+                    k.agent == agent
+                        && k.kid != key.kid()
+                        && matches!(k.status, smysl::sign::KeyStatus::Active)
+                })
+                .map(|k| k.kid)
+                .collect();
+            for kid in &retired {
+                keys.set_status(
+                    kid,
+                    smysl::sign::KeyStatus::Revoked {
+                        after_ms: Some(now),
+                        reason: Some(format!("rotated to {}", key.kid())),
+                    },
+                );
+            }
+            let secret = KeyFile::secret(&key);
+            if let Err(e) = write_private(Path::new(out), secret.as_bytes()) {
+                eprintln!("smysl keys rotate: {out}: {e}");
+                return ExitCode::Failure;
+            }
+            if let Err(e) = write_key_file(m, &path, old.as_deref(), &keys) {
+                eprintln!("smysl keys rotate: wrote {out}, but not the key file: {e}");
+                return ExitCode::Failure;
+            }
+            println!("added {} for {agent}; wrote {out}", key.kid());
+            for kid in &retired {
+                println!("revoked {kid} for attestations at or after {now}");
+            }
+            ExitCode::Success
+        }
+        "check" => {
+            let Some(store) = m
+                .get_one::<String>("store")
+                .or_else(|| global.get_one::<String>("store"))
+            else {
+                return usage("name the store: `keys check STORE`".into());
+            };
+            let keys = match load_keys(m, store) {
+                Ok(k) => k,
+                Err(e) => return usage(e),
+            };
+            let sigs = match sigs_file(m, store, "keys check").and_then(|p| {
+                read_sigs(&p).map_err(|e| {
+                    eprintln!("smysl keys check: {e}");
+                    ExitCode::Failure
+                })
+            }) {
+                Ok(s) => s,
+                Err(code) => return code,
+            };
+            let mut per: std::collections::BTreeMap<smysl::sign::KeyId, usize> =
+                keys.keys().map(|k| (k.kid, 0)).collect();
+            let mut unknown: std::collections::BTreeMap<(String, smysl::sign::KeyId), usize> =
+                std::collections::BTreeMap::new();
+            for s in &sigs {
+                match per.get_mut(&s.kid) {
+                    Some(n) => *n += 1,
+                    None => *unknown.entry((s.agent.to_string(), s.kid)).or_default() += 1,
+                }
+            }
+            for k in keys.keys() {
+                println!(
+                    "{}  {}  {}  {} signature(s)",
+                    k.kid,
+                    k.agent,
+                    status_word(&k.status),
+                    per[&k.kid]
+                );
+            }
+            for ((agent, kid), n) in &unknown {
+                println!("{kid}  {agent}  not in the key file  {n} signature(s)");
+            }
+            let idle = per.values().filter(|n| **n == 0).count();
+            println!(
+                "{store}: {} signature(s), {} key(s), {} signed nothing, {} unknown key(s)",
+                sigs.len(),
+                keys.len(),
+                idle,
+                unknown.len()
+            );
+            ExitCode::Success
+        }
+        other => usage(format!(
+            "`{other}` is not an action; they are list, add, revoke, rotate and check"
+        )),
+    }
+}
+
+fn status_word(s: &smysl::sign::KeyStatus) -> &'static str {
+    match s {
+        smysl::sign::KeyStatus::Active => "active",
+        smysl::sign::KeyStatus::Revoked { .. } => "revoked",
+        smysl::sign::KeyStatus::Bounded { .. } => "bounded",
+        _ => "unknown",
+    }
+}
+
+// ---- RFC SMYSL-8 §7: signing at the commit --------------------------------------------------
+
+/// What `--sign --key` on a committing command will sign: the key, the signature file, and the
+/// attestations by the key's agent the store held before the run, so only the run's are signed.
+pub(crate) struct CommitSigner {
+    key: SigningKey,
+    before: std::collections::BTreeSet<[u8; 32]>,
+}
+
+/// Attestations by `agent` in the store at `path`, by record hash; none when it does not exist.
+fn attestations_by(path: &str, agent: &AgentId) -> Result<Vec<Record>, String> {
+    if !Path::new(path).exists() {
+        return Ok(Vec::new());
+    }
+    let (store, _) = super::load_memory(path)?;
+    Ok(store
+        .iter()
+        .filter(|r| matches!(r, Record::Attestation(a) if &a.agent == agent))
+        .cloned()
+        .collect())
+}
+
+/// `--sign --key K` on a command whose attestations are by `agent`, committing to `store`.
+///
+/// Checked before anything is read or any provider is called, so a wrong key costs nothing: the
+/// key's agent must be `agent` (exit 2), and the store must be a file or library to put the
+/// signatures beside. None without `--sign`.
+pub(crate) fn commit_signer(
+    m: &ArgMatches,
+    cmd: &str,
+    agent: &AgentId,
+    store: &str,
+) -> Result<Option<CommitSigner>, ExitCode> {
+    if !m
+        .try_get_one::<bool>("sign")
+        .ok()
+        .flatten()
+        .copied()
+        .unwrap_or(false)
+    {
+        return Ok(None);
+    }
+    let usage = |e: String| {
+        eprintln!("smysl {cmd}: {e}");
+        ExitCode::Usage
+    };
+    let Some(path) = m.try_get_one::<String>("key").ok().flatten() else {
+        return Err(usage("--sign needs --key".into()));
+    };
+    let key = load_signing_key(path).map_err(usage)?;
+    if key.agent() != agent {
+        return Err(usage(format!(
+            "--key signs as {}; {cmd} attests as {agent}, so the signature would not verify",
+            key.agent()
+        )));
+    }
+    // The path itself is chosen after the commit: a library the run creates does not exist
+    // yet, and `sig_path` would take it for a file.
+    if sig_path(store).is_none() {
+        return Err(usage(
+            "--sign needs a store file or library to put the signatures beside".into(),
+        ));
+    }
+    let before = attestations_by(store, agent)
+        .map_err(usage)?
+        .iter()
+        .map(Store::record_hash)
+        .collect();
+    Ok(Some(CommitSigner { key, before }))
+}
+
+impl CommitSigner {
+    /// Sign the attestations by the key's agent that `store` gained since [`commit_signer`].
+    /// Run after the commit: a store that committed and failed to sign is unsigned, not
+    /// wrongly signed, and `smysl sign` finishes the job.
+    pub(crate) fn finish(&self, store: &str, cmd: &str) -> Result<usize, ExitCode> {
+        let fail = |e: String| {
+            eprintln!("smysl {cmd}: committed, but not signed: {e}");
+            ExitCode::Failure
+        };
+        let new: Vec<Record> = attestations_by(store, self.key.agent())
+            .map_err(fail)?
+            .into_iter()
+            .filter(|r| !self.before.contains(&Store::record_hash(r)))
+            .collect();
+        let sigs = sig_path(store).ok_or_else(|| fail("no signature file for stdin".into()))?;
+        let (signed, _) = sign_into(&sigs, &self.key, &new).map_err(fail)?;
+        Ok(signed)
+    }
+}

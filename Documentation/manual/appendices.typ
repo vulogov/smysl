@@ -11,8 +11,8 @@ command surface is declared, and therefore the only place this table can drift o
 sync with the binary. Each subcommand heading repeats three facts from the command table
 in `src/main.rs` (`§23`): its one-line description, its *purity* (`pure` — a bit-reproducible
 function of its inputs; `mixed` — pure except for one option; `model-dependent` — the only
-kind that can reach off the machine), and the delivery phase that wired it up. Thirty-eight
-of the forty-four subcommands have an entry here. The other six are documented where they are
+kind that can reach off the machine), and the delivery phase that wired it up. Thirty-nine
+of the forty-five subcommands have an entry here. The other six are documented where they are
 used: `same-as`, `link`, `summarise`, `q` and `ask` with the library in Part VI and Chapter 18,
 and `bund` in Chapter 39. This paragraph said "all twenty-five" until 1.20, by when there were
 forty-one.
@@ -1418,6 +1418,37 @@ parse, 2 on a usage error or a key file that is missing or malformed. A forged, 
 over-cap or misattributed signature fails every mode; an unsigned attestation, or one signed
 with a key the file does not hold, is a warning in `advisory` and an error in `strict` and in
 `selective`'s scope. Chapter 21 walks through it.
+
+#section("keys")
+
+*List, add, revoke and rotate the key file's keys; check a store's signatures against it.* Pure · TR-P3.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`list`, `add`, `revoke`, `rotate`, or `check STORE`.]),
+    ([`--keys`], [`FILE`], [The key file; `.smysl/keys.hjson` here by default (for `check`, beside the store).]),
+    ([`--entry`], [`FILE`], [`add`: entries as `keygen` prints them, one a line; `-` reads stdin.]),
+    ([`--agent`], [`AGENT`], [`add` with `--ed25519`, and `rotate`: the key's agent.]),
+    ([`--ed25519`], [`KEY`], [`add`: the public key, `hex:` or `base64:`, raw or SubjectPublicKeyInfo DER.]),
+    ([`--max-status`], [`STATUS`], [`add`, `rotate`: the highest status the key vouches for.]),
+    ([`--not-before`, `--not-after`], [`MS`], [`add`: a key valid only for attestations whose clock is in the range.]),
+    ([`--kid`], [`KID`], [`revoke`: the key, by id or an eight-digit prefix.]),
+    ([`--after`], [`MS`], [`revoke`: refuse signatures on attestations at or after `MS`.]),
+    ([`--compromised`], [—], [`revoke`: refuse every signature the key made, since a stolen key can backdate.]),
+    ([`--reason`], [`TEXT`], [`revoke`: why.]),
+    ([`--out`], [`FILE`], [`rotate`: where the new signing key goes, owner-only.]),
+    ([`--rewrite`], [—], [Rewrite a key file whose comments would be lost.]),
+    ([`--sigs`], [`FILE`], [`check`: the signature file, as for `sign`.]),
+  ),
+)
+
+`rotate` makes a key for the agent, adds it, and revokes the agent's active keys for
+attestations from now on, in one write: signatures made before stay valid. The file is
+rewritten whole, through a temporary file and a rename, keeping its permissions; a comment past
+its leading `#` lines would be lost, so that is refused without `--rewrite`, naming the line
+(RFC SMYSL-8 §6).
 
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference

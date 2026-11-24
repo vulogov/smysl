@@ -37,7 +37,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_smysl");
 ///
 /// Hardcoding it costs one thing — the list can go stale when a command is added — and
 /// `the_help_lists_exactly_these_commands` below is what covers that, in both directions.
-const COMMANDS: [&str; 44] = [
+const COMMANDS: [&str; 45] = [
     "fmt",
     "check",
     "pack",
@@ -82,6 +82,7 @@ const COMMANDS: [&str; 44] = [
     "keygen",
     "sign",
     "verify",
+    "keys",
 ];
 
 /// Clap's answer when `cli()` never registered the subcommand.
@@ -156,6 +157,8 @@ fn minimal_args(command: &str) -> Vec<&'static str> {
         "keygen" => vec!["--agent", "not-an-agent", "--out", "k.key"],
         // A key file that is not there is refused after the router is reached.
         "sign" => vec!["--key", "no-such.key"],
+        // A key file that is not there is refused after the router is reached.
+        "keys" => vec!["list", "--keys", "no-such.hjson"],
         _ => vec![],
     }
 }

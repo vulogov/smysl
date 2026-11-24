@@ -1,7 +1,7 @@
 # RFC SMYSL-8 — trust that reads signatures
 
 **Author:** Vladimir Ulogov
-**Status:** amended in review against the code (R1, 2026-11-24). TR-P1 and TR-P2 built (1.21).
+**Status:** amended in review against the code (R1, 2026-11-24). TR-P1 to TR-P3 built (1.21).
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged.
 **Crates:** `smysl-graph` and `smysl-thread` (an admission filter, additive), `smysl-sign` (an
 admission function, key-file editing), the CLI (`--trust-sigs`, `smysl keys`, `--sign` at commit,
@@ -415,3 +415,29 @@ All five were answered by reading the code; the answers are R1-1 to R1-9 below.
   her origin attestation is unsigned, while alice's signed one authorises; a `keygen`ed key the
   key file does not hold proves nothing; a quorum of two signs with both keys; `withdraw` reads
   the same rule.
+
+**R2, continued: TR-P3 as built.**
+
+- **R2-9. `smysl keys`.** Its key file is `--keys`, else `.smysl/keys.hjson` where it runs; for
+  `check`, beside the store, as `verify` reads it. `--kid` takes the id or a prefix of at least
+  eight digits naming one key. `rotate` revokes the agent's active keys with `revoked_after_ms`
+  at the wall clock and the reason "rotated to KID", and refuses a commented file before it makes
+  the new key, so a refusal leaves no orphaned secret. `KeyFile::comment_line` finds the first
+  comment past the leading `#` lines, outside strings. A key id already in the file is refused
+  by `add`.
+- **R2-10. The signature path is chosen after the commit.** `tel read --yes` can create the
+  library it writes; checked before the run, `sig_path` took the not-yet-library for a file and
+  the signatures went to `lib.sig` beside it. Found by the gate's first run.
+- **R2-11. What is signed.** The attestations by the key's agent that the store gained during the
+  run: their record hashes are taken before and compared after. `ingest --sign` needs `--yes`;
+  a staged batch is signed by `merge --staged --sign` when it is committed. `tel read --sign`
+  wraps all four readers, which all attest as `tool:smysl-tel`. `ingest --text` signs what its
+  windows committed even when a later window failed.
+- **R2-12. The gate** is `crates/smysl-sign/tests/keyfile_render.rs` (render and parse are
+  inverses over 300 generated key sets, with quotes, backslashes, `#` and `//` in reasons),
+  `tests/cmd_keys.rs` (a signature before a rotation verifies under `strict`, the old key's after
+  it fails even `advisory`, the new key's verifies; `add`, `list`, `revoke --compromised`,
+  `check`; a commented file refused) and `tests/cmd_commit_sign.rs` (`tel read --sign` gives a
+  library that passes `strict` with its signatures inside it; `ingest --text --sign` signs every
+  attestation it made; a key for `human:alice` exits 2 on `ingest --text`, `ingest FILE` and
+  `tel read` with the loopback provider's connection count unchanged).

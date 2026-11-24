@@ -160,7 +160,7 @@ LIBRARIES := $(filter-out smysl,$(PUBLISHED)) $(UNPUBLISHED)
 COMMAND_NAMES := fmt check pack merge diff trace view bundle thread salience find retract \
                  withdraw resolve review commit render import relink compact ingest attest providers \
                  usage reindex ui text date same-as link summarise q ask measure assess lib schema migrate tel bund lsp-server \
-                 keygen sign verify
+                 keygen sign verify keys
 
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 

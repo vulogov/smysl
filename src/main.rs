@@ -201,6 +201,7 @@ const COMMANDS: &[Cmd] = &[
     Cmd { name: "keygen",    about: "Make a signing key for an agent; print its key file entry", purity: Purity::Pure,  phase: "SG-P3"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "sign",      about: "Sign a store's attestations by a key's agent",          purity: Purity::Pure,  phase: "SG-P3"  , impure_when: None , forms: NO_DOCUMENT },
     Cmd { name: "verify",    about: "Verify a store's signatures against a key file",         purity: Purity::Pure,  phase: "SG-P3"  , impure_when: None , forms: NO_DOCUMENT },
+    Cmd { name: "keys",      about: "List, add, revoke and rotate the key file's keys; check a store's signatures against it", purity: Purity::Pure,  phase: "TR-P3"  , impure_when: None , forms: NO_DOCUMENT },
 ];
 
 fn cli() -> Command {
@@ -2139,6 +2140,18 @@ fn cli() -> Command {
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
+                    Arg::new("sign")
+                        .long("sign")
+                        .help("Sign the attestations --yes commits, by --key's agent (tool:smysl-ingest)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("key")
+                        .long("key")
+                        .value_name("FILE")
+                        .help("The signing key for --sign"),
+                )
+                .arg(
                     Arg::new("cost")
                         .long("cost")
                         .help("With --text: report what the journal says this expression cost, per language; make no call")
@@ -2654,6 +2667,44 @@ fn cli() -> Command {
                         .help("What to require (default: advisory)"),
                 )
                 .arg(Arg::new("path").value_name("PATH").help("The store to verify; or -s")),
+            "keys" => sub
+                .after_help(
+                    "The key file is --keys, else .smysl/keys.hjson here (for check, beside the \
+                     store). It is rewritten whole; a comment past its leading `#` lines would be \
+                     lost, so it is refused without --rewrite (RFC SMYSL-8 §6).",
+                )
+                .arg(
+                    Arg::new("action")
+                        .required(true)
+                        .value_name("ACTION")
+                        .value_parser(["list", "add", "revoke", "rotate", "check"])
+                        .help("list, add, revoke, rotate, or check STORE"),
+                )
+                .arg(Arg::new("store").value_name("STORE").help("check: the store whose signatures to count"))
+                .arg(Arg::new("keys").long("keys").value_name("FILE").help("The key file"))
+                .arg(Arg::new("sigs").long("sigs").value_name("FILE").help("check: the signature file (default: beside the store)"))
+                .arg(Arg::new("agent").long("agent").value_name("AGENT").help("add, rotate: the key's agent"))
+                .arg(Arg::new("ed25519").long("ed25519").value_name("KEY").help("add: the public key, hex: or base64:, raw or SPKI DER"))
+                .arg(Arg::new("entry").long("entry").value_name("FILE").help("add: entries as `keygen` prints them, one a line; - for stdin"))
+                .arg(Arg::new("max-status").long("max-status").value_name("STATUS").help("add, rotate: the highest status the key vouches for"))
+                .arg(Arg::new("not-before").long("not-before").value_name("MS").help("add: valid from this attestation clock"))
+                .arg(Arg::new("not-after").long("not-after").value_name("MS").help("add: valid to this attestation clock"))
+                .arg(Arg::new("kid").long("kid").value_name("KID").help("revoke: the key, by id or an eight-digit prefix"))
+                .arg(Arg::new("after").long("after").value_name("MS").help("revoke: refuse signatures on attestations at or after MS"))
+                .arg(
+                    Arg::new("compromised")
+                        .long("compromised")
+                        .help("revoke: refuse every signature the key made, since a stolen key can backdate")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(Arg::new("reason").long("reason").value_name("TEXT").help("revoke: why"))
+                .arg(Arg::new("out").long("out").value_name("FILE").help("rotate: where the new signing key goes"))
+                .arg(
+                    Arg::new("rewrite")
+                        .long("rewrite")
+                        .help("Rewrite a key file whose comments would be lost")
+                        .action(ArgAction::SetTrue),
+                ),
             "bund" => sub
                 .after_help(
                     "Purity: pure. The script runs over a snapshot of the store in a separate \
@@ -2974,6 +3025,18 @@ fn cli() -> Command {
                         .long("older-than")
                         .value_name("DUR")
                         .help("evict: the policy bound, a whole number and s, m, h, d or w, before --at"),
+                )
+                .arg(
+                    Arg::new("sign")
+                        .long("sign")
+                        .help("read: sign the attestations --yes commits, by --key's agent (tool:smysl-tel)")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("key")
+                        .long("key")
+                        .value_name("FILE")
+                        .help("read: the signing key for --sign"),
                 )
                 .arg(
                     Arg::new("yes")
@@ -11739,6 +11802,22 @@ fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         );
         return ExitCode::Usage;
     }
+    // `--sign --key` (RFC SMYSL-8 §7): checked before the library is opened or a provider
+    // called, so a key for another agent costs nothing.
+    #[cfg(feature = "sign")]
+    let signer = match sign::commit_signer(
+        m,
+        "ingest",
+        &smysl::IngestOptions::at_rung(smysl::Rung::Document).agent,
+        &root.to_string_lossy(),
+    ) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    #[cfg(not(feature = "sign"))]
+    if m.get_flag("sign") {
+        return no_sign("ingest --sign");
+    }
     let mut lib = match Library::open(&root) {
         Ok(l) => l,
         Err(e) => {
@@ -11890,6 +11969,17 @@ fn cmd_ingest_text(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     let spin = Spinner::new(progress_style(global), format!("ingesting {who}"));
     let outcome = smysl::Ingestor::new(&registry, opts).ingest_text(&mut ingest);
     spin.finish("");
+    // Windows are committed as they go, so whatever landed is signed, even when a later window
+    // failed; the library is closed first, so it is read back as it is on disk.
+    drop(ingest);
+    drop(lib);
+    #[cfg(feature = "sign")]
+    if let Some(s) = &signer {
+        match s.finish(&root.to_string_lossy(), "ingest") {
+            Ok(n) => eprintln!("smysl ingest: signed {n} attestation(s)"),
+            Err(code) => return code,
+        }
+    }
 
     let report = match outcome {
         Ok(r) => r,
@@ -12133,6 +12223,32 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
     if m.get_flag("yes") && store_target.is_none() {
         eprintln!("smysl ingest: `--yes` commits the batch, so it needs a store: pass --store");
         return ExitCode::Usage;
+    }
+    // `--sign --key` (RFC SMYSL-8 §7) signs what `--yes` commits; a staged batch is signed when
+    // it is committed, by `merge --staged --sign`. Checked before any provider call.
+    if m.get_flag("sign") && !m.get_flag("yes") {
+        eprintln!(
+            "smysl ingest: --sign signs what --yes commits; without --yes the batch is staged, \
+             and `smysl merge --staged --sign` signs it"
+        );
+        return ExitCode::Usage;
+    }
+    #[cfg(feature = "sign")]
+    let signer = match &store_target {
+        Some(path) => match sign::commit_signer(
+            m,
+            "ingest",
+            &smysl::IngestOptions::at_rung(smysl::Rung::Document).agent,
+            path,
+        ) {
+            Ok(s) => s,
+            Err(code) => return code,
+        },
+        None => None,
+    };
+    #[cfg(not(feature = "sign"))]
+    if m.get_flag("sign") {
+        return no_sign("ingest --sign");
     }
     let (store, store_labels) = match &store_target {
         Some(path) => match load_memory(path) {
@@ -12450,6 +12566,13 @@ fn cmd_ingest(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
             return code;
         }
         println!("{n} unit(s) staged and committed to {path}");
+        #[cfg(feature = "sign")]
+        if let Some(s) = &signer {
+            match s.finish(path, "ingest") {
+                Ok(k) => println!("signed {k} attestation(s)"),
+                Err(code) => return code,
+            }
+        }
         // `--yes` used to return 0 here whatever happened, so the one outcome most worth
         // knowing about - the model over-claimed and was corrected - was the outcome
         // indistinguishable from nothing having happened.
@@ -13375,7 +13498,7 @@ fn sign_verify_args(cmd: Command) -> Command {
 }
 
 #[cfg(feature = "sign")]
-use sign::{cmd_keygen, cmd_sign, cmd_verify};
+use sign::{cmd_keygen, cmd_keys, cmd_sign, cmd_verify};
 
 #[cfg(not(feature = "sign"))]
 fn no_sign(cmd: &str) -> ExitCode {
@@ -13396,6 +13519,11 @@ fn cmd_sign(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
 #[cfg(not(feature = "sign"))]
 fn cmd_verify(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
     no_sign("verify")
+}
+
+#[cfg(not(feature = "sign"))]
+fn cmd_keys(_m: &ArgMatches, _global: &ArgMatches) -> ExitCode {
+    no_sign("keys")
 }
 
 #[cfg(not(feature = "lsp"))]
@@ -13735,6 +13863,7 @@ fn main() -> ProcExitCode {
         "keygen" => cmd_keygen(sub, &matches),
         "sign" => cmd_sign(sub, &matches),
         "verify" => cmd_verify(sub, &matches),
+        "keys" => cmd_keys(sub, &matches),
         _ => {
             // Unreachable while every command in `COMMANDS` has an arm above, which
             // `command_table_matches_section_23` enforces. Kept as the honest answer if one
@@ -14671,12 +14800,54 @@ fn cmd_tel(m: &ArgMatches, global: &ArgMatches) -> ExitCode {
         "templates" => tel_templates(m, global, &args),
         "similar" => tel_similar(m, global, &args),
         "info" => tel_info(m, global, &args),
-        "read" => tel_read(m, global, &args),
+        "read" => tel_read_signed(m, global, &args),
         other => {
             eprintln!("smysl tel: `{other}` is not an action; it is read or profile");
             ExitCode::Usage
         }
     }
+}
+
+/// `tel read`, and with `--sign --key` the attestations it commits signed by `tool:smysl-tel`
+/// (RFC SMYSL-8 §7). Every reader attests as that tool, so the key is checked once, before any
+/// file is read, and what the run added to the library is signed after it.
+#[cfg(feature = "tel")]
+fn tel_read_signed(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCode {
+    if !m.get_flag("sign") {
+        return tel_read(m, global, args);
+    }
+    if !m.get_flag("yes") {
+        eprintln!(
+            "smysl tel read: --sign signs what --yes commits; without --yes nothing is written"
+        );
+        return ExitCode::Usage;
+    }
+    #[cfg(feature = "sign")]
+    {
+        let root = match library_root(m, global, "tel") {
+            Ok(r) => r.to_string_lossy().into_owned(),
+            Err(code) => return code,
+        };
+        let agent = AgentId::new("tool:smysl-tel").expect("a valid literal");
+        let signer = match sign::commit_signer(m, "tel read", &agent, &root) {
+            Ok(Some(s)) => s,
+            Ok(None) => unreachable!("--sign was given"),
+            Err(code) => return code,
+        };
+        let code = tel_read(m, global, args);
+        if code != ExitCode::Success {
+            return code;
+        }
+        match signer.finish(&root, "tel read") {
+            Ok(n) => {
+                println!("signed {n} attestation(s)");
+                ExitCode::Success
+            }
+            Err(code) => code,
+        }
+    }
+    #[cfg(not(feature = "sign"))]
+    no_sign("tel read --sign")
 }
 
 /// A shipped profile by name, or an HJSON file by path.
@@ -19712,7 +19883,7 @@ mod tests {
     /// reconcile, not a miscount.
     #[test]
     fn command_table_matches_section_23() {
-        assert_eq!(COMMANDS.len(), 44);
+        assert_eq!(COMMANDS.len(), 45);
         let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
         assert_eq!(
             names,
@@ -19760,7 +19931,8 @@ mod tests {
                 "lsp-server",
                 "keygen",
                 "sign",
-                "verify"
+                "verify",
+                "keys"
             ]
         );
     }
@@ -19861,7 +20033,7 @@ mod tests {
             // delivery plan, `TX-P*` is SMYSL-2.4's, `TL-P*` is SMYSL-3's, `BQ-P*` is
             // SMYSL-4's, `LS-P*` is SMYSL-6's and `SG-P*` is SMYSL-7's. A release number is
             // the seventh form, for a command that arrived outside any plan.
-            let phase = ["SM-P", "TX-P", "TL-P", "BQ-P", "LS-P", "SG-P"]
+            let phase = ["SM-P", "TX-P", "TL-P", "BQ-P", "LS-P", "SG-P", "TR-P"]
                 .iter()
                 .any(|p| c.phase.starts_with(p));
             let cycle = c

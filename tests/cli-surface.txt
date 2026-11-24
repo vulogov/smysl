@@ -574,6 +574,8 @@ ingest     --window-level
 ingest     --digest-budget
 ingest     --reextract
 ingest     --single-pass
+ingest     --sign
+ingest     --key
 ingest     --cost
 ingest     --help
 attest     [PATH]
@@ -1118,6 +1120,8 @@ tel        --zabbix-api
 tel        --top
 tel        --seed
 tel        --older-than
+tel        --sign
+tel        --key
 tel        --yes
 tel        --help
 bund       --config
@@ -1229,3 +1233,36 @@ verify     [possible values: memory, redb]
 verify     --shard
 verify     --seed-check
 verify     --help
+keys       <ACTION>
+keys       [possible values: list, add, revoke, rotate, check]
+keys       [STORE]
+keys       --config
+keys       --keys
+keys       --sigs
+keys       --agent
+keys       --output
+keys       --ed25519
+keys       --format
+keys       [possible values: surface, cbor, pack]
+keys       --entry
+keys       --strict
+keys       --max-status
+keys       --offline
+keys       --no-color
+keys       --not-before
+keys       --noprogress
+keys       --not-after
+keys       --json
+keys       --kid
+keys       --after
+keys       --quiet
+keys       --compromised
+keys       --verbose
+keys       --backend
+keys       [possible values: memory, redb]
+keys       --reason
+keys       --out
+keys       --shard
+keys       --rewrite
+keys       --seed-check
+keys       --help
