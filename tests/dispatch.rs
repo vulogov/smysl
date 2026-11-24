@@ -37,7 +37,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_smysl");
 ///
 /// Hardcoding it costs one thing — the list can go stale when a command is added — and
 /// `the_help_lists_exactly_these_commands` below is what covers that, in both directions.
-const COMMANDS: [&str; 40] = [
+const COMMANDS: [&str; 44] = [
     "fmt",
     "check",
     "pack",
@@ -78,6 +78,10 @@ const COMMANDS: [&str; 40] = [
     "migrate",
     "tel",
     "bund",
+    "lsp-server",
+    "keygen",
+    "sign",
+    "verify",
 ];
 
 /// Clap's answer when `cli()` never registered the subcommand.
@@ -147,6 +151,11 @@ fn minimal_args(command: &str) -> Vec<&'static str> {
         // The action and its arguments are required; a profile that is no shipped name and no
         // file is refused after the router is reached.
         "tel" => vec!["profile", "check", "no-such-profile/1"],
+        // Both flags are required. An agent id that does not parse is refused after the router
+        // is reached, so no key is written.
+        "keygen" => vec!["--agent", "not-an-agent", "--out", "k.key"],
+        // A key file that is not there is refused after the router is reached.
+        "sign" => vec!["--key", "no-such.key"],
         _ => vec![],
     }
 }

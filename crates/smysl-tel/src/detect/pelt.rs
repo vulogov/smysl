@@ -82,7 +82,7 @@ fn noise_variance_floored(xs: &[f64], floor: Option<f64>) -> f64 {
         let mean = xs.iter().sum::<f64>() / xs.len().max(1) as f64;
         1e-18 * (mean * mean).max(1.0)
     };
-    // The resolution floor only ever raises the shipped variance.
+    // A floor only ever raises the shipped variance.
     match floor {
         Some(f) => var.max(f * f),
         None => var,
@@ -94,8 +94,8 @@ pub fn change_points(xs: &[f64], p: &Params) -> Vec<usize> {
     change_points_floored(xs, p, None)
 }
 
-/// [`change_points`] under `opts` (§21.2): with `floor: resolution`, `σ̂` is at least the
-/// resolution of `xs`.
+/// [`change_points`] under `opts` (§21.2): with a floor (`resolution` or `spread`), `σ̂` is at
+/// least that floor of `xs`.
 pub fn change_points_with(xs: &[f64], p: &Params, opts: &Options) -> Vec<usize> {
     change_points_floored(xs, p, opts.floor_of(xs.iter().copied()))
 }

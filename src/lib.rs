@@ -440,6 +440,16 @@ pub use smysl_series as series;
 #[cfg(feature = "bund")]
 pub use smysl_bund as bund;
 
+/// The language server (RFC SMYSL-6): diagnostics for `.smy` and `.sq` documents over LSP 3.17,
+/// served by `smysl lsp-server`. Behind `lsp`.
+#[cfg(feature = "lsp")]
+pub use smysl_lsp as lsp;
+
+/// Detached attestation signatures (RFC SMYSL-7): Ed25519 in `COSE_Sign1`, kept beside a store,
+/// verified against a key file. Pure. Behind `sign`.
+#[cfg(feature = "sign")]
+pub use smysl_sign as sign;
+
 /// The crate version, as a convenience for embedders recording provenance.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -661,7 +671,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "1.19.0");
+        assert_eq!(VERSION, "1.20.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

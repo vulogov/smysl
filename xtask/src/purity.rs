@@ -197,6 +197,12 @@ const PURE_CRATES: &[&str] = &[
     // `store-redb` as `smysl-graph`'s store is: a window's digest is a function of its
     // samples, so the same ban as `smysl-tel`'s.
     "smysl-series",
+    // Detached attestation signatures (RFC SMYSL-7 §2, G2). Pure in every configuration: a key
+    // is made from bytes the caller drew and a key file is parsed from its text, so the CLI does
+    // the I/O and the randomness. `ed25519-dalek` is pure Rust, with no `cc` and no `ring`.
+    // `CRATE_SYMBOLS` bans a generator, a clock and the environment, because a signature that
+    // drew from any of them would not be the deterministic one RFC 8032 specifies.
+    "smysl-sign",
 ];
 
 /// Symbols forbidden in one pure crate's source beyond [`FORBIDDEN_SYMBOLS`], each list with
@@ -255,6 +261,21 @@ const CRATE_SYMBOLS: &[(&str, &[&str])] = &[
             "std::env",
         ],
     ),
+    (
+        "smysl-sign",
+        &[
+            "thread_rng",
+            "rand::random",
+            "OsRng",
+            "getrandom",
+            "from_entropy",
+            "SigningKey::generate",
+            "SystemTime",
+            "Instant",
+            "std::env",
+            "std::fs",
+        ],
+    ),
 ];
 
 /// Rule A, as `src/lib.rs` states it: *"no CLI capability may be unreachable from here, and
@@ -279,6 +300,28 @@ const RULE_A_EXEMPT_FILES: &[&str] = &[
 /// capability that a consumer of the library cannot reach, which is the thing rule A exists
 /// to prevent — so the bar is not "this was inconvenient to re-export".
 const RULE_A_ALLOWED: &[(&str, &str)] = &[];
+
+/// Pure modules inside a crate that is not pure, each with what it may not name beyond
+/// [`FORBIDDEN_SYMBOLS`].
+///
+/// `smysl-lsp` (RFC SMYSL-6 §3.2) reads stdin and writes stdout, so it cannot be on
+/// [`PURE_CRATES`], and its `analysis` module is the pure half the RFC promises: text in,
+/// values out. Checked per directory, because the per-crate list cannot say "this half".
+const PURE_MODULES: &[(&str, &[&str])] = &[(
+    "crates/smysl-lsp/src/analysis",
+    &[
+        "std::io",
+        "std::fs",
+        "std::thread",
+        "std::time",
+        "std::env",
+        "std::process",
+        "std::sync",
+        "serde",
+        "SystemTime",
+        "Instant",
+    ],
+)];
 
 /// Symbols that betray a runtime or a socket in source.
 const FORBIDDEN_SYMBOLS: &[&str] = &[
@@ -397,6 +440,33 @@ pub fn run(root: &Path) -> Result<(), String> {
             .map(|(c, _)| *c)
             .collect::<Vec<_>>()
             .join(", ")
+    );
+
+    // --- 2b. pure modules in impure crates ----------------------------------
+    let mut modules = 0usize;
+    for (dir, syms) in PURE_MODULES {
+        for file in rust_files(&root.join(dir))? {
+            modules += 1;
+            let text =
+                std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            for (n, line) in text.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                for sym in FORBIDDEN_SYMBOLS.iter().chain(syms.iter()) {
+                    if code.contains(sym) {
+                        failures.push(format!(
+                            "pure module {dir}: `{sym}` in {}:{}",
+                            file.display(),
+                            n + 1
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    println!(
+        "  pure modules: {} director{}, {modules} files",
+        PURE_MODULES.len(),
+        if PURE_MODULES.len() == 1 { "y" } else { "ies" }
     );
 
     // --- 3. rule A: the CLI goes through the facade -------------------------

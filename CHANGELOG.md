@@ -7,6 +7,161 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.20.0 — 2026-11-24
+
+Two RFCs built from first phase to last, and one gap 1.19 named closed. `smysl` gains a language
+server and signatures on what an agent attested, two new crates, `smysl-lsp` and `smysl-sign`,
+published for the first time. The wire format did not change, the registry is 176, and
+`smysl/1.0` holds.
+
+**A language server (RFC SMYSL-6, LS-P1 to LS-P4).** `smysl lsp-server`, in the same binary, gives
+an editor `check`'s findings while you type, hover, go to definition, references, the outline,
+completion, `fmt` as formatting, and three quick fixes that never raise a status. With a library
+open, `b3:` references resolve across documents, and the library is only read. It was run in
+Neovim, which found a hang on a case-insensitive disk, now bounded.
+
+**Who made an attestation (RFC SMYSL-7, SG-P1 to SG-P4).** An `AgentId` was a string its writer
+chose. `smysl keygen`, `sign` and `verify` sign attestations with Ed25519 in a detached
+`COSE_Sign1` beside the store, and check them in `Advisory`, `Selective` or `Strict`. A forged,
+revoked or over-cap signature fails every mode, and so did every byte flipped in a signed
+attestation or its envelope. `merge`, `retract` and `check` carry, make and report signatures.
+
+**PELT's scale on float metrics (SMYSL-3 §21.2, SMYSL-5 R12).** `floor: spread` keeps a detector's
+scale at least a tenth of the standard deviation of what it
+reads. Calibrated on Sock Shop, PELT holds 10 % on Online Boutique and
+Train Ticket, where it overshot to every fault-free window in 1.19.
+
+**Still open.** GE-M7 has not run: it needs the Train-Ticket testbed (D-T12) and agent runs, arms
+(a) to (d). On real incidents episode similarity is weak (GE-M8 on RCAEval). The other real-data
+runs (GE-M1 on a seven-day cluster, the Zabbix fixtures, GE-M2 and GE-M5 on DeathStarBench),
+calibration beyond one benchmark at one sample a second, OKO's own ledger, the range index's
+tables, and what earlier releases left did not move. Signatures are read beside a store, not
+yet by corroboration or origin authority themselves: `verified_attesters` gives a caller the
+filter.
+
+### `smysl lsp-server`: a language server in the same binary (RFC SMYSL-6, LS-P1)
+
+- **RFC SMYSL-6** specifies a language server for `.smy` and `.sq` documents, read against the
+  code before anything was built (R1). Its first phase is here: a new crate, `smysl-lsp`,
+  reached as `smysl::lsp` behind the `lsp` feature (on by default), and `smysl lsp-server`.
+- **Diagnostics while you type.** An open `.smy` document gets what `smysl check FILE`
+  reports, each finding on the record it names, and its parse errors on their spans; a `.sq`
+  document gets its parse error. Positions are UTF-16 or, when the editor offers it, UTF-8. A
+  burst of changes is checked once, 150 ms after the last (`--debounce-ms`).
+- **One binary, no runtime.** JSON-RPC 2.0 over stdio with `serde_json` and `std` threads, so no
+  `tokio` and no `lsp-types`. stdout carries the protocol only, and nothing is written to
+  disk. The `analysis` module is pure, and `xtask check-purity` now scans it on its own.
+- **The parser keeps its places.** `ParseOutcome` gains `spans`, each record's span parallel
+  to `records`, and `refs`, every reference that resolved with its span and target. A `@rel`'s
+  ends now carry their own spans. Both are additions to a `#[non_exhaustive]` struct.
+- **Hover and navigation (LS-P2).** Hovering a unit's label, a reference to it or a `b3:` uid
+  shows its schema, declared and effective status, gist and its tokens against `l0_max`, its
+  grounds with their statuses, its deps, how many units rebut it, and its source. Go to
+  definition, find references and the document outline (`@doc`, `@schema`, units, `@rel`,
+  `@thread`) work within a document. `ParseOutcome::spans` now places `@schema` records too.
+- **Completion, formatting and safe quick fixes (LS-P3).** Completion after `@`, `status:`,
+  inside `grounds: [` and `deps: [`, between `--` and `-->`, at a header key, and in `.sq`.
+  Formatting is `smysl fmt`'s canonical form, refused with a message whenever a comment or a
+  record would be lost. Three quick fixes: lower a `derived` or `inferred` unit to its weakest
+  ground's status (Rule M), correct a label within edit distance 2, and declare an undeclared
+  `x.` relation kind. A property test over 400 generated documents finds no fix that raises a
+  status, removes a rebuttal or writes a `@resolve`.
+- **The workspace (LS-P4).** `--library DIR`, or the editor's root folder: a `b3:` reference into
+  another document or the library resolves in `check`, hover, definition and references, and
+  `.sq` documents are planned against it. A library is read by the new
+  `smysl_text::Library::read_only`, which reads the marker and the shard logs and nothing else,
+  so the server leaves it byte-identical even with a redaction `Library::open` would enforce.
+  Editor recipes for Helix, Neovim, VS Code and Zed are in
+  `Documentation/SMYSL-6_RFC/EDITORS.md`. RFC SMYSL-6 is built to its last phase.
+- **Run in Neovim (R1-12).** The Neovim recipe was run in Neovim 0.12.6 on macOS. Its root marker
+  `LIBRARY` matched `/Library` on the case-insensitive disk, Neovim sent `/` as the root, and
+  `initialize` hung while the folder scan walked the disk. The scan is now bounded at 20,000
+  entries, skips links to directories and the filesystem root; the Neovim recipe matches a file
+  named exactly `LIBRARY`. With that, every request works through Neovim's own client.
+- `smysl-lsp` is published for the first time with 1.20.0.
+
+### `smysl-sign`: detached attestation signatures (RFC SMYSL-7, SG-P1 to SG-P4)
+
+An `AgentId` has been a string its writer chose, and the code said so: corroboration could be
+inflated and Origin authority typed by anyone. RFC SMYSL-7 signs what an agent attested with
+Ed25519 (RFC 8032), in a detached `COSE_Sign1` envelope (RFC 9052) kept beside the store.
+
+- **Read against the code first (R1).** The format has reserved `Attestation.sig` (key 7) since
+  0.1; it stays reserved, because a store is append-only and filling it means a second copy of
+  the attestation. The `retracts` edge carries no attestation, so a signed retraction is an
+  attestation on the edge. The crate is pure in every configuration (no `keystore-fs`): a key is
+  made from 32 bytes the caller drew and a key file is parsed from text. It is reached as
+  `smysl::sign`, as Rule A requires, behind `sign`, on by default. No `coset` and no `ciborium`:
+  the envelope is written with `smysl-core`'s deterministic encoder.
+- **SG-P1: the crate.** `SigningKey` (wiped on drop, never printed), `KeyId`, `KeyResolver` and
+  `MemoryKeyResolver`, the envelope and a strict reader, `sign_record`, `verify_record`, and
+  `verify_store` in `Advisory` and `Strict`. A forged signature is an error in every mode; a
+  record with several signatures takes the worst error, else verified. Revocation and bounds
+  read the attestation's clock. The crate builds with `CC=false CXX=false` and for
+  `wasm32-unknown-unknown`, and joins `check-purity`'s pure list with a generator, clock,
+  environment and file ban.
+- **SG-P2: modes and keys.** `Selective` requires signatures on the attestations in scope: by
+  agents whose ids start with a given prefix, or on units at or above a given status. A key's
+  `max_status` caps what it vouches for, read against the attested unit's status; over the cap is
+  `StatusOverCap`, an error in every mode. `KeyFile::parse` reads `.smysl/keys.hjson` from its
+  text (keys as `hex:` or `base64:`, raw or SubjectPublicKeyInfo DER), strictly: an unknown or
+  misplaced field, a duplicate key, or a key bound to two agents is an error. `verified_attesters`
+  gives each unit the agents whose attestations verify, for corroboration and origin authority to
+  filter by. A report counts warnings and lists the failing records.
+- **Tampering fails every mode (R1-14).** Each byte of a signed attestation and of its envelope
+  was flipped in turn: every change the reader accepts fails `Advisory`, `Selective` and
+  `Strict`, except the kid's bytes, which name an unknown key, a warning in `Advisory` as §6 says.
+  An attestation changed after signing is judged against the leftover signature that names its
+  agent and unit, and the unprotected subject uid is checked against the attestation.
+- **SG-P3: the commands.** `smysl keygen --agent A --out FILE` writes an owner-only signing
+  key and prints its `keys.hjson` entry. `smysl sign STORE --key FILE` signs the store's
+  attestations by the key's agent into `STORE.sig` (`<library>/log/sigs.cbor` for a library).
+  `smysl verify STORE --mode advisory|selective|strict` exits 0 when the store passes, 1 when it
+  does not, and 2 on a usage error or a missing or malformed key file; `--json` gives one object
+  with the findings. `merge` carries its inputs' signature files to the output's, in one order
+  whichever order the inputs came in, and `merge --staged --sign --key K` signs the batch it
+  commits. `retract --as A --sign --key K` records `A`'s attestation on the retraction and signs
+  it. `check --verify-sigs MODE` adds the findings as `sign/<verdict>` diagnostics. The phase's
+  gate: two agents sign overlapping attestations in two stores, and the store merged either way
+  verifies under `Strict` with the same signature file (`tests/cmd_sign.rs`).
+- **SG-P4: the gates and the manual.** `check-purity` passes with the crate on the pure list,
+  and `cargo semver-checks` finds no bump needed in any published crate. Chapter 21 gains
+  "Signatures — who made an attestation", walking `import`, `keygen`, `sign`, the three modes,
+  a tampered signature, `retract --sign` and `check --verify-sigs`; Appendix A gains `keygen`,
+  `sign` and `verify` and the new flags. Its claim to cover "all twenty-five" commands, stale
+  at forty-one, now says which thirty-eight it covers and where the other six are.
+- **A golden vector**, `fixtures/sign/`: RFC 8032's first test key signs an attestation. Rust
+  rebuilds it and verifies it over a `Sig_structure` written out by hand; the Go and Node
+  conformance tests verify it with their standard libraries' Ed25519 and their own BLAKE3.
+- `ed25519-dalek` 2.2 (default features off) and `zeroize` are new workspace dependencies.
+  `smysl-sign` is published for the first time with 1.20.0.
+
+### `floor: spread`: PELT's scale on float metrics (SMYSL-3 §21.2, SMYSL-5 R12)
+
+- **`floor: spread`** in a `cusum/1`, `pelt/1` or `mad/1` recipe keeps the detector's scale at
+  least a tenth of the standard deviation of what it reads. It reaches float-valued metrics,
+  whose resolution is noise-sized, and is zero only for a constant series. The recipe text gains
+  `floor=spread`; a recipe without the key gives the same bytes as before. Library:
+  `detect::Floor::Spread` (`Floor` is `#[non_exhaustive]`) and `detect::spread`. `tel detect`
+  and `tel calibrate` read it.
+- **On RCAEval**, PELT's calibrated penalty falls from 10¹⁷–10²⁰ to 10⁴–10⁵. Carried from Sock
+  Shop it holds 10 % on Online Boutique and Train Ticket (1.1 and 5.6 % one value a trial, 4.4
+  and 6.7 % per kind), where it overshot to every fault-free window before. CUSUM under the
+  floor carries at every setting. MAD should keep `floor: resolution`: its window is in the
+  floor, so a fault raises its own scale.
+- **A ceiling, stated.** On a noise-free step the floor grows with the step, so a change is
+  worth exactly `100·n` of PELT's `penalty`, whatever its size. At margin 2 one value a trial
+  passed it (80,000 against 72,000) and saw nothing.
+
+### GE-M8 on RCAEval's repeated faults (SMYSL-3 §26)
+
+`examples/ge_m8_rcaeval` ranks RCAEval's 90 cases a system by episode similarity. Each (service,
+fault) is injected three times, and the repetitions are the recurrences. The stop condition does
+not fire on any system, so similarity stays model-independent. On real incidents it is weak,
+though: a case finds about half its repetitions in its top five, ten times chance, against 0.97
+on simulated episodes. Log templates read as "new in the window" were mostly Drain's drift, and
+without them MinHash's recurrence on Sock Shop rises from 0.24 to 0.56.
+
 ## 1.19.0 — 2026-11-23
 
 One question 1.18 left, answered on real data: is a level detector's alarm worth anything on

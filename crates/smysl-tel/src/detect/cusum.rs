@@ -63,8 +63,8 @@ pub fn change_points(points: &[(u64, f64)], p: &Params) -> Vec<usize> {
     change_points_floored(points, p, None)
 }
 
-/// [`change_points`] under `opts` (§21.2): with `floor: resolution`, each regime's `σ` is at
-/// least the resolution of `points`.
+/// [`change_points`] under `opts` (§21.2): with a floor (`resolution` or `spread`), each
+/// regime's `σ` is at least that floor of `points`.
 pub fn change_points_with(points: &[(u64, f64)], p: &Params, opts: &Options) -> Vec<usize> {
     change_points_floored(points, p, opts.floor_of(points.iter().map(|x| x.1)))
 }
@@ -83,7 +83,7 @@ fn change_points_floored(points: &[(u64, f64)], p: &Params, floor: Option<f64>) 
         if sigma == 0.0 {
             sigma = 1e-9 * mean.abs().max(1.0);
         }
-        // The resolution floor only ever raises the shipped scale.
+        // A floor only ever raises the shipped scale.
         if let Some(f) = floor {
             sigma = sigma.max(f);
         }

@@ -101,8 +101,8 @@ pub fn run(
     run_with(input, baseline, from_ms, to_ms, p, &Options::default())
 }
 
-/// [`run`] under `opts` (§21.2), recorded in each anomaly's recipe: with `floor: resolution`, the
-/// scale is at least the resolution of the baseline's and the window's values together.
+/// [`run`] under `opts` (§21.2), recorded in each anomaly's recipe: with a floor (`resolution` or
+/// `spread`), the scale is at least that floor of the baseline's and the window's values together.
 pub fn run_with(
     input: &Input<'_>,
     baseline: &[Sample],

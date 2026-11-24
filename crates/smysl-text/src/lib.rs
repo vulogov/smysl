@@ -95,7 +95,7 @@ pub mod versification;
 
 pub use analyze::Chain;
 pub use ids::{Did, LangTag, Mid, Rdid};
-pub use library::{AddSpec, Added, Library, Passage};
+pub use library::{AddSpec, Added, Library, LibraryRecords, Passage};
 pub use limits::{Budget, Caps, Fuel};
 pub use locator::{Locator, LocatorError};
 pub use lock::{Holder, Lock};

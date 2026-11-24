@@ -11,8 +11,11 @@ command surface is declared, and therefore the only place this table can drift o
 sync with the binary. Each subcommand heading repeats three facts from the command table
 in `src/main.rs` (`§23`): its one-line description, its *purity* (`pure` — a bit-reproducible
 function of its inputs; `mixed` — pure except for one option; `model-dependent` — the only
-kind that can reach off the machine), and the delivery phase that wired it up. All
-twenty-five subcommands are covered.
+kind that can reach off the machine), and the delivery phase that wired it up. Thirty-eight
+of the forty-four subcommands have an entry here. The other six are documented where they are
+used: `same-as`, `link`, `summarise`, `q` and `ask` with the library in Part VI and Chapter 18,
+and `bund` in Chapter 39. This paragraph said "all twenty-five" until 1.20, by when there were
+forty-one.
 
 `ui` was described here as a stub through 0.5.0. It is not, and was not: `smysl-tui` is a
 working crate with its own test suite, the `tui` feature is in the *default* set, and the
@@ -76,6 +79,7 @@ These apply to every subcommand, in any position on the command line.
     ([`--as`], [`SCHEMA` (repeatable)], [Report fidelity for a consumer implementing these schemas.]),
     ([`--granularity`], [—], [Report the granularity distribution of the store.]),
     ([`--pass`], [`NAME` (repeatable)], [Run only these passes.]),
+    ([`--verify-sigs`], [`advisory|selective|strict`], [Also verify the store's signatures in this mode, reported as `sign/<verdict>` findings (RFC SMYSL-7). Takes `verify`'s `--keys`, `--agent-prefix`, `--status-at-least` and `--sigs`.]),
     ([`FILE …`], [positional, 0 or more], [Stores to check; `-` or none reads stdin (rule P).]),
   ),
 )
@@ -117,6 +121,8 @@ These apply to every subcommand, in any position on the command line.
     ([`--policy`], [`latest|all|contend`], [Supersession policy.]),
     ([`--retraction`], [`strict|advisory|ignore`], [Retraction policy.]),
     ([`--staged`], [—], [Commit `.smysl/staged.smy` into the store.]),
+    ([`--sign`], [—], [With `--staged` and `-o`: sign the staged attestations by `--key`'s agent into the output's `.sig`.]),
+    ([`--key`], [`FILE`], [The signing key for `--sign`.]),
     ([`--fail-on-contention`], [—], [Exit 5 when the merged store carries a contention.]),
     ([`--max-contentions-per-agent`], [`N`], [Warn when one merge raises more than N contentions.]),
     ([`STORE …`], [positional, 1 or more, required], [Stores to merge; `-` reads stdin (rule P).]),
@@ -285,13 +291,17 @@ until ingest arrives the flag has a corpus only where one was put there delibera
     ([`--as`], [`AGENT` (repeatable)], [The agent(s) issuing the retraction.]),
     ([`--reason`], [`TEXT`], [Why.]),
     ([`--authority`], [`A`], [`origin | any | quorum:N`.]),
+    ([`--sign`], [—], [Record `--key`'s agent's attestation on the retraction, and sign it; the agent must be among `--as`.]),
+    ([`--key`], [`FILE`], [The signing key for `--sign`.]),
     ([`PATH`], [positional], [Store to retract from.]),
   ),
 )
 
 Since 1.4 the retraction is written to the store — a `@rel … --retracts--> …` line appended to a
 surface file, a record appended to a CBOR log — and a second run of the same retraction writes
-nothing. Before, it was applied to an in-memory copy and reported as done.
+nothing. Before, it was applied to an in-memory copy and reported as done. With `--sign` (1.20)
+the attestation is written with the edge in one append and signed into `<store>.sig`; a surface
+store cannot hold an attestation, so it refuses both.
 
 #section("withdraw")
 
@@ -1212,8 +1222,9 @@ windows jointly, and a series that alarmed in none of them keeps the recipe's va
 reported as uncalibrated. `--margin M` holds the windows to `R / M`, leaving room for values
 carried to other data. A `cusum/1`, `pelt/1` or `mad/1` recipe, for `tel detect` or `tel
 calibrate`, may carry `floor: resolution`: the detector's scale is then at least the smallest
-step between the series' distinct values, so a flat stretch is not read as infinitely precise
-(RFC SMYSL-3 §21.2). An argument not admitted is exit 2, and a rate the ladder cannot meet is
+step between the series' distinct values, so a flat stretch is not read as infinitely precise.
+`floor: spread` holds it at a tenth of the series' standard deviation instead, for float-valued
+series (RFC SMYSL-3 §21.2). An argument not admitted is exit 2, and a rate the ladder cannot meet is
 exit 1.
 
 `tel info RECIPE --series S… --during FROM-TO` computes an information measure (RFC SMYSL-5)
@@ -1317,6 +1328,96 @@ no sample or the accuracy is out of range. `tel check` exits 3 when any window i
 `SMY-W608` for a keyed array it could not key, `SMY-W613` for a number out of `dec`'s range,
 and `SMY-W610` for an object whose previous snapshot was read under another profile. That
 boundary is recorded and not diffed.
+
+#section("lsp-server")
+
+*Serve the language server protocol over stdio, for an editor.* Pure · LS-P1.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`--stdio`], [—], [Serve over stdin and stdout: the only transport, and the default.]),
+    ([`--library`], [`DIR`], [A library to read, without opening it, for references into it; else the editor's root folder.]),
+    ([`--debounce-ms`], [`N`], [Check a document this long after the last of a burst of changes; 150.]),
+    ([`--log-file`], [`PATH`], [Log here instead of stderr.]),
+  ),
+)
+
+An editor starts `smysl lsp-server` and speaks LSP 3.17 to it (RFC SMYSL-6). For `.smy` and
+`.smysl` documents it publishes what `smysl check FILE` reports, each finding placed on the
+record it names, and for `.sq` documents the query's parse error. Hovering a unit, a reference
+or a `b3:` uid shows its status, effective status, gist and token count, grounds, rebuttals and
+source; go to definition, find references and the outline work within a document. It completes
+record types, header keys, statuses, labels and relation kinds, formats as `smysl fmt` does but
+refuses (and says why) when a comment or a record would be lost, and offers three quick fixes:
+lower a status to satisfy rule M, correct a misspelt label, declare an extension relation kind.
+None raises a status. A `b3:` reference into the workspace, `--library` or else the editor's
+folder of documents, resolves in all of these, and a `.sq` query is planned against it. A
+library is read without being opened, so nothing in it changes. Editor recipes are in
+`Documentation/SMYSL-6_RFC/EDITORS.md`. It writes nothing to disk, and
+stdout carries the protocol only. Exit 0 after the editor's `shutdown` and `exit`; 1 when the
+editor exits without `shutdown`, closes the stream first, or sends a frame that is not JSON-RPC.
+A build without the `lsp` feature exits 2 and says so. Helix, in `languages.toml`:
+`[language-server.smysl]` with `command = "smysl"` and `args = ["lsp-server"]`.
+
+#section("keygen")
+
+*Make a signing key for an agent; print its key file entry.* Pure · SG-P3.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`--agent`], [`AGENT` (required)], [The agent the key signs as.]),
+    ([`--out`], [`FILE` (required)], [Where to write the signing key. Created owner-only (0600 on Unix); a file that exists is refused.]),
+  ),
+)
+
+Draws 32 bytes from the operating system, writes the signing key to `--out`, and prints the
+public key's entry for `.smysl/keys.hjson` on stdout. Exit 0, 1 when the file cannot be
+written or exists, 2 on an agent id that does not parse.
+
+#section("sign")
+
+*Sign a store's attestations by a key's agent.* Pure · SG-P3.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`--key`], [`FILE` (required)], [The signing key, as `keygen` wrote it.]),
+    ([`--sigs`], [`FILE`], [The signature file; `<store>.sig` by default, `<library>/log/sigs.cbor` for a library.]),
+    ([`PATH`], [positional, or `-s`], [The store to sign.]),
+  ),
+)
+
+Signs every attestation by the key's agent that this key has not signed, and rewrites the
+signature file whole, sorted and without duplicates. Other agents' attestations are left to
+their keys.
+
+#section("verify")
+
+*Verify a store's signatures against a key file.* Pure · SG-P3.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`--mode`], [`advisory|selective|strict`], [What to require; `advisory` by default.]),
+    ([`--keys`], [`FILE`], [The key file; `.smysl/keys.hjson` beside the store (inside a library) by default.]),
+    ([`--agent-prefix`], [`PREFIX` (repeatable)], [`selective`: require signatures from agents whose ids start with `PREFIX`.]),
+    ([`--status-at-least`], [`STATUS`], [`selective`: require signatures on attestations of units at or above `STATUS`.]),
+    ([`--sigs`], [`FILE`], [The signature file, as for `sign`.]),
+    ([`PATH`], [positional, or `-s`], [The store to verify.]),
+  ),
+)
+
+Exit 0 when the store passes the mode, 1 when it does not or the signature file does not
+parse, 2 on a usage error or a key file that is missing or malformed. A forged, revoked,
+over-cap or misattributed signature fails every mode; an unsigned attestation, or one signed
+with a key the file does not hold, is a warning in `advisory` and an error in `strict` and in
+`selective`'s scope. Chapter 21 walks through it.
 
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference

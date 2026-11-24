@@ -45,22 +45,28 @@ fmt        --seed-check
 fmt        --help
 check      [FILE]
 check      --config
-check      --library
-check      --conformance
+check      --keys
+check      --agent-prefix
 check      --store
-check      --as
 check      --output
+check      --status-at-least
 check      --format
 check      [possible values: surface, cbor, pack]
-check      --granularity
-check      --estimator
+check      --sigs
 check      --strict
+check      --verify-sigs
+check      [possible values: advisory, selective, strict]
+check      --library
 check      --offline
-check      --pass
+check      --conformance
 check      --no-color
+check      --as
 check      --noprogress
+check      --granularity
 check      --json
+check      --estimator
 check      --quiet
+check      --pass
 check      --verbose
 check      --backend
 check      [possible values: memory, redb]
@@ -110,12 +116,14 @@ merge      [possible values: strict, advisory, ignore]
 merge      --store
 merge      --output
 merge      --staged
-merge      --fail-on-contention
 merge      --format
 merge      [possible values: surface, cbor, pack]
-merge      --max-contentions-per-agent
+merge      --sign
+merge      --key
 merge      --strict
+merge      --fail-on-contention
 merge      --offline
+merge      --max-contentions-per-agent
 merge      --no-color
 merge      --noprogress
 merge      --json
@@ -305,7 +313,9 @@ retract    --reason
 retract    --authority
 retract    --format
 retract    [possible values: surface, cbor, pack]
+retract    --sign
 retract    --strict
+retract    --key
 retract    --offline
 retract    --no-color
 retract    --noprogress
@@ -1086,3 +1096,87 @@ bund       [possible values: memory, redb]
 bund       --shard
 bund       --seed-check
 bund       --help
+lsp-server --config
+lsp-server --stdio
+lsp-server --library
+lsp-server --store
+lsp-server --debounce-ms
+lsp-server --output
+lsp-server --format
+lsp-server [possible values: surface, cbor, pack]
+lsp-server --log-file
+lsp-server --strict
+lsp-server --offline
+lsp-server --no-color
+lsp-server --noprogress
+lsp-server --json
+lsp-server --quiet
+lsp-server --verbose
+lsp-server --backend
+lsp-server [possible values: memory, redb]
+lsp-server --shard
+lsp-server --seed-check
+lsp-server --help
+keygen     --agent
+keygen     --config
+keygen     --out
+keygen     --store
+keygen     --output
+keygen     --format
+keygen     [possible values: surface, cbor, pack]
+keygen     --strict
+keygen     --offline
+keygen     --no-color
+keygen     --noprogress
+keygen     --json
+keygen     --quiet
+keygen     --verbose
+keygen     --backend
+keygen     [possible values: memory, redb]
+keygen     --shard
+keygen     --seed-check
+keygen     --help
+sign       [PATH]
+sign       --config
+sign       --key
+sign       --store
+sign       --sigs
+sign       --output
+sign       --format
+sign       [possible values: surface, cbor, pack]
+sign       --strict
+sign       --offline
+sign       --no-color
+sign       --noprogress
+sign       --json
+sign       --quiet
+sign       --verbose
+sign       --backend
+sign       [possible values: memory, redb]
+sign       --shard
+sign       --seed-check
+sign       --help
+verify     [PATH]
+verify     --config
+verify     --keys
+verify     --agent-prefix
+verify     --store
+verify     --output
+verify     --status-at-least
+verify     --format
+verify     [possible values: surface, cbor, pack]
+verify     --sigs
+verify     --mode
+verify     [possible values: advisory, selective, strict]
+verify     --strict
+verify     --offline
+verify     --no-color
+verify     --noprogress
+verify     --json
+verify     --quiet
+verify     --verbose
+verify     --backend
+verify     [possible values: memory, redb]
+verify     --shard
+verify     --seed-check
+verify     --help

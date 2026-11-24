@@ -2,11 +2,11 @@
 
 **Author:** Vladimir Ulogov
 **Status:** first draft, amended after review (R1, 2026-11-20), while building (R2 to R6) and
-after (R7 to R11).
+after (R7 to R12).
 TI-P0 to TI-P4 are built: `ent/1`, `perm/1`, `mi/1`, `jsd/1` and `tent/1`, rule TI in `check`,
 and their recomputation. TI-P5 closed with GE-I5's result: transfer entropy is not released,
 and `te` stays reserved (§10). GE-I1 to GE-I5 have run on simulated data (§15), and GE-I3 on RCAEval's
-RE2-SS, RE2-OB and RE2-TT, real (R7 to R11); every other real-data run is still owed, and every other threshold is a
+RE2-SS, RE2-OB and RE2-TT, real (R7 to R12); every other real-data run is still owed, and every other threshold is a
 proposal until the experiment that owns it has run (§17).
 **Target version:** not fixed. Phases are named (TI-P0 to TI-P5), not numbered by release.
 **Evidence baseline:** `dev/1.18.0` at `3e57160` ("SMYSL-4 BQ-P4"). Every code pointer below
@@ -34,6 +34,7 @@ Part A.
 | R9 | 2026-11-22 | 1.19. **R9-1** The detectors are also calibrated per series (3 §21.1, `calibrate_each`), keyed by metric kind so that values carry between systems, the rate held jointly over the trials. **R9-2** Run on RE2-SS and held out on RE2-OB beside R8's one value a trial. Its result: per series, CUSUM sees every RE2-SS fault and, carried to RE2-OB, its delays (100 % against 13 %); PELT's carried values overshoot their rate there (16.7 %); R7's verdict holds in all four readings (§15). |
 | R10 | 2026-11-22 | 1.19. **R10-1** Every calibration is also made under `floor: resolution` (3 §21.2) and at a transfer margin of 2 (3 §21.1). **R10-2** Its result: the floor brings CUSUM's values to sane ranges and with them RE2-OB's delays at one value a trial (100 % against 13 %), and does nothing for PELT on float-valued metrics; a margin of 2 halves an overshoot that is sampling and not one that is the systems differing. R7's verdict holds, with one RE2-OB pair under the floor flagged by a statistic and no detector (§15). |
 | R11 | 2026-11-23 | 1.19. **R11-1** Per-series calibration no longer refuses when a series fires at the ladder's top in a fault-free trial: the series takes the top, those trials count against the rate jointly, and only more of them than the rate allows refuse (3 §21.1). **R11-2** Every R10 calibration on RE2-SS is carried to a third system, RE2-TT (Train Ticket). CUSUM under `floor: resolution` at one value a trial is the only detector configuration that held its rate on both systems; per-kind values overshoot on one system or the other, PELT's up to every fault-free window. R7's verdict holds (§15). |
+| R12 | 2026-11-23 | 1.20. **R12-1** Every calibration is also made under `floor: spread` (3 §21.2), a scale at least a tenth of the series' standard deviation. **R12-2** Its result: PELT's values fall from 10¹⁷–10²⁰ to 10⁴–10⁵, and carried from RE2-SS they hold 10 % on RE2-OB and RE2-TT at margin 1, one value a trial or per kind; at margin 2, one value a trial passes the floor's ceiling (`100·n`) and sees nothing. R7's verdict holds (§15). |
 
 ---
 
@@ -914,6 +915,46 @@ detector, and 67 % for CUSUM under the floor at one value a trial.
 - **R7's verdict holds on RE2-TT.** In every configuration, no faulty pair is flagged by a
   statistic and by no detector, and no statistic separates a type. `jsd/1` is the strongest, at
   13 to 67 % per type.
+
+**The spread floor, run in 1.20** (R12; the same command, `--held` RE2-OB and then RE2-TT).
+R10 and R11 left PELT without a usable scale on float metrics. Every calibration is now also made
+under `floor: spread` (3 §21.2), where the scale is at least a tenth of the standard deviation of
+what the detector reads. The question was fixed before the run: does PELT's penalty fall below
+10⁶, and do its values carried from RE2-SS hold 10 % on RE2-OB and RE2-TT at margin 1 or 2, while
+flagging at least half of every type on RE2-SS?
+
+| `floor: spread`, calibrated on RE2-SS | PELT `penalty` | RE2-SS, lowest type | RE2-OB false alarms / lowest type | RE2-TT false alarms / lowest type |
+|---|---|---|---|---|
+| one a trial, margin 1 | 6·10⁴ | 73.3 % | **1.1 %** / 80.0 % | **5.6 %** / 66.7 % |
+| one a trial, margin 2 | 8·10⁴ | **0 %** | 0.0 % / 0 % | 0.0 % / 0 % |
+| per kind, margin 1 | 1.2·10⁴–8·10⁴ | 100 % | **4.4 %** / 46.7 % | **6.7 %** / 80.0 % |
+| per kind, margin 2 | 1.2·10⁴–8·10⁴ | 100 % | 4.4 % / 46.7 % | 6.7 % / 80.0 % |
+
+| `floor: spread`, carried, false alarms | MAD | CUSUM |
+|---|---|---|
+| one a trial, margin 1: RE2-OB / RE2-TT | 6.7 / **16.7** % | 3.3 / 3.3 % |
+| one a trial, margin 2 | 2.2 / 7.8 % | 0.0 / 0.0 % |
+| per kind, margin 1 | 8.9 / **12.2** % | 8.9 / 8.9 % |
+| per kind, margin 2 | 4.4 / 8.9 % | 0.0 / 0.0 % |
+
+- **The spread floor fixes PELT at margin 1.** Its penalty falls by up to sixteen orders of
+  magnitude. Carried, it holds the rate on both systems, at one value a trial (1.1 and 5.6 %) and
+  per kind (4.4 and 6.7 %), where R10 and R11 had it alarm on 16.7 % to every fault-free window.
+  At one value a trial it sees every type on both at 66.7 % or more.
+- **Margin 2 crossed the floor's ceiling.** On a noise-free step, the floor grows with the step,
+  and a change is worth exactly `100·n` of penalty (3 §21.2), 72,000 for these 720-point trials.
+  Margin 2 set 80,000, and PELT at one value a trial then saw no fault of any type, anywhere.
+  The ceiling was derived while writing the floor's unit test, before the run, and the run met
+  it.
+- **CUSUM under the spread floor carries at every setting** (0 to 8.9 %), per kind included,
+  which no floor managed before. Its weakest type is `loss` on RE2-TT (53.3 %).
+- **MAD should not take the spread floor.** Its floor reads the window too, so a fault raises
+  the scale it is measured against. Carried at one value a trial it overshoots on RE2-TT
+  (16.7 %) and loses detections (`cpu` 40 % on RE2-OB), where `floor: resolution` holds.
+- **What to run, amended again.** For a value carried to another system: CUSUM or PELT with
+  `floor: spread` at margin 1, keeping PELT's penalty under `100·n`; MAD with `floor: resolution`
+  at margin 2.
+- **R7's verdict holds** under the spread floor on all three systems.
 
 **GE-I5, run at TI-P5 on simulated data** (`cargo run --release -p smysl-tel --example
 ge_i5`, 300 pairs of each kind, seeds 1 to 5). The estimator is §10's, written in the example

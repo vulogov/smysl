@@ -217,6 +217,17 @@ pub struct Passage {
     pub text: String,
 }
 
+/// What [`Library::read_only`] read: every record of the shards it could read without opening
+/// the library, and the shards it left alone.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct LibraryRecords {
+    pub records: Vec<Record>,
+    /// Shards whose records are primary in the unit store, which a read-only reader does not
+    /// open.
+    pub skipped: Vec<String>,
+}
+
 /// A library: the catalog, the objects, and the root they live under.
 #[derive(Debug)]
 pub struct Library {
@@ -296,6 +307,34 @@ impl Library {
             std::fs::create_dir_all(parent).map_err(|e| io("log", &e))?;
         }
         Library::open(root)
+    }
+
+    /// A library's records, read without opening it (1.20, RFC SMYSL-6 §4.4): the marker is
+    /// checked and each shard's CBOR log is read, and nothing else is touched. No migration is
+    /// settled, `enforce_z` does not run, no index is loaded and no lock is taken, so a reader
+    /// beside a running writer, an editor, changes nothing on disk. A shard whose records the
+    /// unit store holds instead of its log (`lib migrate`) would need that store opened, which
+    /// takes its lock, so it is not read, and is named in [`LibraryRecords::skipped`].
+    pub fn read_only(root: &Path) -> Result<LibraryRecords, LibError> {
+        let marker = root.join(MARKER);
+        let version = std::fs::read_to_string(&marker).map_err(|e| io(MARKER, &e))?;
+        let version = version.trim();
+        if version != LAYOUT && version != LAYOUT_1 {
+            return Err(LibError::Io {
+                at: MARKER.to_string(),
+                message: format!("layout `{version}` is not `{LAYOUT}`; this library was written by another release"),
+            });
+        }
+        let mut out = LibraryRecords::default();
+        for (name, _) in crate::shards::list(root)? {
+            if crate::shards::is_primary(root, &name) {
+                out.skipped.push(name);
+                continue;
+            }
+            let (_, records) = ShardLog::read(root, &name)?;
+            out.records.extend(records);
+        }
+        Ok(out)
     }
 
     /// Open a library.

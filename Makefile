@@ -142,8 +142,10 @@ PUBLISHED := smysl-core smysl-graph smysl-check smysl-pack smysl-thread smysl-re
 # Empty from 1.10.0, which first published `smysl-text`, `smysl-query`, `smysl-measure`,
 # `smysl-lib` and `smysl-embed-candle`, until `smysl-tel` and `smysl-series` (RFC SMYSL-3) in 1.17,
 # which were published with 1.17.0 and joined PUBLISHED, and `smysl-bund` (RFC SMYSL-4), published
-# with 1.18.0. Empty again from there.
-UNPUBLISHED :=
+# with 1.18.0. Empty again from there, until `smysl-lsp` (RFC SMYSL-6), whose first phase is
+# built in 1.20, and `smysl-sign` (RFC SMYSL-7), from 1.20 too: each joins PUBLISHED at the
+# baseline commit of the release that publishes it.
+UNPUBLISHED := smysl-lsp smysl-sign
 
 # The library crates behind the facade: everything published except the facade itself, plus
 # the ones not published yet. Their *surface* is watched from the first commit — `api-check`
@@ -151,13 +153,14 @@ UNPUBLISHED :=
 # is a crate whose API nobody chose.
 LIBRARIES := $(filter-out smysl,$(PUBLISHED)) $(UNPUBLISHED)
 
-# The twenty-six subcommands, for `cli-surface`. Written out rather than read from `--help`,
+# The forty-four subcommands, for `cli-surface`. Written out rather than read from `--help`,
 # for the same reason `tests/dispatch.rs` writes them out: a list derived from the binary
 # shrinks silently when the binary does, and the regenerated golden would then record the
 # absence as if it were the intent.
 COMMAND_NAMES := fmt check pack merge diff trace view bundle thread salience find retract \
                  withdraw resolve review commit render import relink compact ingest attest providers \
-                 usage reindex ui text date same-as link summarise q ask measure assess lib schema migrate tel bund
+                 usage reindex ui text date same-as link summarise q ask measure assess lib schema migrate tel bund lsp-server \
+                 keygen sign verify
 
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 
