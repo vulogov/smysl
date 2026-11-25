@@ -2321,7 +2321,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "smysl"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "clap",
  "getrandom 0.3.4",
@@ -2351,7 +2351,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-bund"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -2362,7 +2362,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-check"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -2371,7 +2371,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-core"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "blake3",
  "unicode-normalization",
@@ -2379,7 +2379,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-embed"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "blake3",
  "model2vec-rs",
@@ -2390,7 +2390,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-embed-candle"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "blake3",
  "candle-core",
@@ -2405,7 +2405,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-eval"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "smysl-check",
  "smysl-core",
@@ -2418,7 +2418,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-graph"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "redb",
  "smysl-core",
@@ -2426,7 +2426,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-ingest"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "smysl-check",
  "smysl-core",
@@ -2438,7 +2438,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-lib"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "blake3",
  "smysl-check",
@@ -2451,7 +2451,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-lsp"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "serde_json",
  "smysl-check",
@@ -2463,7 +2463,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-measure"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "brotli",
  "libm",
@@ -2480,7 +2480,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-pack"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -2488,7 +2488,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-provider"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2499,7 +2499,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-query"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -2510,7 +2510,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-render"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -2519,7 +2519,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-retrieve"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "bm25",
  "smysl-check",
@@ -2529,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-series"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "redb",
  "smysl-core",
@@ -2537,7 +2537,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-sign"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "ed25519-dalek",
  "smysl-core",
@@ -2547,7 +2547,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-tel"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "libm",
  "prost",
@@ -2560,7 +2560,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-text"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "blake3",
  "caseless",
@@ -2585,7 +2585,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-thread"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "smysl-core",
  "smysl-graph",
@@ -2593,7 +2593,7 @@ dependencies = [
 
 [[package]]
 name = "smysl-tui"
-version = "1.21.0"
+version = "1.22.0"
 dependencies = [
  "crossterm",
  "ratatui",
@@ -3258,7 +3258,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "1.21.0"
+version = "1.22.0"
 
 [[package]]
 name = "yoke"

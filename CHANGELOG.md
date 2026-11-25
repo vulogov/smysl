@@ -7,6 +7,34 @@ and the facade asserts the two are independent.
 
 ---
 
+## Unreleased — 1.22.0
+
+What 1.21 leaves open, by what it blocks rather than the order it is easiest. 1.21 built two RFCs
+to their last phase; what they did not settle, and what earlier releases left, is where the work
+starts.
+
+**GE-M7 is still the reason for the telemetry work, and it has not run.** It needs the
+Train-Ticket testbed (D-T12) and agent runs, arms (a) to (d). Until it runs, the design of
+investigations is untested against an agent, and rule TQ's catch rate is a property of
+`examples/oko_ledger`'s planted quotes rather than of a model's.
+
+**Episode similarity on real incidents is still weak.** `tel/minhash/2` met no SMYSL-9 gate on
+RCAEval. On Sock Shop the cause is singleton templates, lines that keep their own user names;
+dropping them restores recurrence to 0.55, but that is a diagnosis, not yet a recipe option. On
+Train Ticket the shortfall has no named cause. Renaming the series moves MinHash by up to 0.04,
+the size of the differences gated.
+
+**The language server in more editors.** Neovim is the recipe that was run in an editor; the
+Helix, VS Code and Zed recipes are read against their documentation, not run.
+
+**And what earlier releases left.** The real-data runs (GE-M1 on a cluster observed for seven
+days, the Zabbix fixtures, GE-M2 and GE-M5 on DeathStarBench at production-like load);
+calibration on a production system rather than a benchmark; OKO's own ledger, which is OKO's
+code; the cache's written share, the repair a cut would do, the bound stated in tokens, the
+sizing residual on German, the Ollama arm's model size; questions still unread, a subject by a
+name the store does not write, GE-T7 on a thousand real works, and the ones only people can
+close. None of it moved in 1.21.
+
 ## 1.21.0 — 2026-11-25
 
 Two RFCs, both built in full. Signatures now change what counts (RFC SMYSL-8), and three
