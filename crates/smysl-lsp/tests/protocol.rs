@@ -2,6 +2,8 @@
 //! document's diagnostics, debouncing, and the order of `shutdown` and `exit`.
 
 use std::io::{BufReader, Cursor};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use smysl_lsp::{serve, LspConfig, LspError};
@@ -110,9 +112,10 @@ fn a_burst_of_changes_is_checked_once_after_the_debounce() {
             "textDocument": { "uri": "file:///t.smy", "version": v },
             "contentChanges": [ { "text": text } ] } })
     };
-    // The client's stream stays open past the burst, so the deadline can pass: the reader
-    // thread only sees `shutdown` after a pause.
-    let mut first: Vec<u8> = [
+    // The client's stream stays open past the burst: the reader only hands over `shutdown` once
+    // the server has published twice, so the deadline passes on any machine. The burst itself
+    // arrives in one read, well inside the debounce.
+    let first: Vec<u8> = [
         initialize(json!([])),
         open(DOC),
         change(2, "@doc smysl/0.1 { id: v/t }\n"),
@@ -122,37 +125,62 @@ fn a_burst_of_changes_is_checked_once_after_the_debounce() {
     .flat_map(frame)
     .collect();
     let rest: Vec<u8> = end().into_iter().flat_map(frame).collect();
-    struct Slow {
+    type Shared = Arc<(Mutex<Vec<u8>>, Condvar)>;
+    struct Out(Shared);
+    impl std::io::Write for Out {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 .0.lock().unwrap().extend_from_slice(buf);
+            self.0 .1.notify_all();
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    struct Held {
         a: Cursor<Vec<u8>>,
         b: Cursor<Vec<u8>>,
-        paused: bool,
+        out: Shared,
+        waited: bool,
     }
-    impl std::io::Read for Slow {
+    impl std::io::Read for Held {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
             let n = self.a.read(buf)?;
             if n > 0 {
                 return Ok(n);
             }
-            if !self.paused {
-                self.paused = true;
-                std::thread::sleep(std::time::Duration::from_millis(200));
+            if !self.waited {
+                self.waited = true;
+                let published = |b: &Vec<u8>| {
+                    b.windows(18)
+                        .filter(|w| *w == b"publishDiagnostics")
+                        .count()
+                };
+                let (lock, cv) = &*self.out;
+                // Bounded, so a server that never publishes fails the assertion, not the run.
+                let _ = cv
+                    .wait_timeout_while(lock.lock().unwrap(), Duration::from_secs(30), |b| {
+                        published(b) < 2
+                    })
+                    .unwrap();
             }
             self.b.read(buf)
         }
     }
-    let input = Slow {
-        a: Cursor::new(std::mem::take(&mut first)),
+    let shared: Shared = Arc::new((Mutex::new(Vec::new()), Condvar::new()));
+    let input = Held {
+        a: Cursor::new(first),
         b: Cursor::new(rest),
-        paused: false,
+        out: shared.clone(),
+        waited: false,
     };
-    let mut output = Vec::new();
     let r = serve(
         BufReader::new(input),
-        &mut output,
-        LspConfig::default().with_check_debounce_ms(20),
+        Out(shared.clone()),
+        LspConfig::default().with_check_debounce_ms(150),
     );
     assert!(r.is_ok(), "{r:?}");
-    let out = frames(&output);
+    let out = frames(&shared.0.lock().unwrap());
     let published: Vec<&Value> = out
         .iter()
         .filter(|m| m["method"] == "textDocument/publishDiagnostics")

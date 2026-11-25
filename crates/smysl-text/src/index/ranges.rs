@@ -280,7 +280,7 @@ impl Ranges {
         // table the subject index cannot hold: spliced whole instead, as every splice was.
         let mut seen = BTreeSet::new();
         let second = |r: &Row, index: &BTreeMap<Subject, Row>| {
-            !(drop.contains(&r.subject) || !index.contains_key(&r.subject))
+            !drop.contains(&r.subject) && index.contains_key(&r.subject)
         };
         let one_each = match &self.rows_of {
             Some(index) => add

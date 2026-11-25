@@ -749,7 +749,7 @@ fn split(
             let mut arms = Vec::new();
             let rest: Vec<Value> = items
                 .iter()
-                .filter(|v| !is(v, from) && !(widening && is(v, to)))
+                .filter(|v| !(is(v, from) || (widening && is(v, to))))
                 .cloned()
                 .collect();
             if !rest.is_empty() {
