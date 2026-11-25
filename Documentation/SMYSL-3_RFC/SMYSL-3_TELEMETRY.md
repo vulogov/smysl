@@ -1493,6 +1493,44 @@ Chance is 0.056 for recurrence and 0.157 for type.
   recurrence on RE2-SS goes from 0.24 to 0.56. Which templates count as new is the open
   question, not the measure.
 
+**Amended in 1.21 (RFC SMYSL-9 SI-P2): GE-M8 under `tel/minhash/2`.** The gates were fixed in
+SMYSL-9 §3.3 before the run, and none is met.
+
+| recall@5, MinHash / exact Jaccard | RE2-SS | RE2-OB | RE2-TT | gate |
+|---|---|---|---|---|
+| recurrence, `templates=novel` | 0.239 / 0.350 | 0.528 / 0.589 | 0.328 / 0.339 | SI-1: ≥ 0.561, 0.539, 0.356 |
+| type, `kinds=on` | 0.258 / 0.247 | 0.293 / 0.311 | 0.316 / 0.298 | SI-2: ≥ 0.40 on two |
+| type, `kinds=on`, no templates | 0.329 / 0.313 | 0.289 / 0.309 | 0.376 / 0.373 | |
+| *under the same keys:* `/1` | 0.278 / 0.367 | 0.483 / 0.556 | 0.317 / 0.339 | |
+| *under the same keys:* `/1`, no templates | 0.539 / 0.561 | 0.533 / 0.561 | 0.417 / 0.411 | |
+
+- **Novelty by family does not remove the noise, because the noise is not drift.** On RE2-SS
+  a median of 368 templates survive, against 369 before. Nearly all of them are singletons:
+  lines unique to themselves, a registration with its own user name and e-mail, which Drain
+  keeps apart because two of their six tokens agree (0.33, under its 0.4). No template in any
+  earlier window is of their family, so each is new. Dropping every template a window saw once
+  (`--drop-singletons`, a diagnosis chosen after the run, not a recipe key) brings RE2-SS's
+  recurrence to 0.550 / 0.567, the no-templates figure. On RE2-TT the singletons are about a third of
+  the templates (139 to 91), and recurrence stays low; its cause is not found.
+- **Kinds do not make the type reading.** One fault type in two services now shares a feature,
+  and type recall moves by at most 0.05 against `/1` under the same keys. Not measured, and the
+  likeliest reading: the faults raise many of the same metrics on a microservice, so the kind
+  of an anomaly seen does not single out the fault.
+- **MinHash's own noise is the size of these differences.** The series are keyed by metric and
+  service label (`cpu{service="carts"}`) so that `kinds=on` can read the metric. That renames
+  every `series:` feature and leaves exact Jaccard and the embeddings unchanged to the digit,
+  and MinHash's recurrence moves by up to 0.04 (0.239 → 0.278 on RE2-SS). `/2` with its
+  defaults, the same features under other functions, moves it by as much. Gates set on a
+  single MinHash reading cannot tell apart changes smaller than that.
+- **The simulated run (SI-3) is not met as worded.** Over seeds 8 and 1–5, `/2` with both keys
+  gives 0.965–0.983 against 1.20's 0.968–0.987; `/2` with neither key, which reads `/1`'s
+  features, gives 0.955–0.987. Exact Jaccard, which has no functions, gives 0.972–0.992 with
+  both keys against 0.972–0.985 under `/1`: the features do not break the simulated case.
+- **The stop condition still does not fire.** Embeddings stay at or under 0.40.
+
+`/1` stays the default of `tel similar`. `/2` and its keys stay available, as readings whose
+gain is not shown.
+
 **Order:**
 1. GE-M1, and GE-M3's harness. The harness exists from TL-P0, runs first on TL-P4's summaries, and
    then on each detector as TL-P5 ships it. Both are cheap, and they decide the shape.

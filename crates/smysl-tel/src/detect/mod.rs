@@ -62,7 +62,29 @@ pub enum Floor {
 #[non_exhaustive]
 pub struct Options {
     pub floor: Floor,
+    /// `step` and `agg` (RFC SMYSL-9 §4.2): the detector reads the series resampled.
+    pub resample: Option<Resample>,
 }
+
+/// A coarser cadence a level detector reads its series at: `step: MS, agg: last|mean|max` in a
+/// recipe, by [`smysl_series::resample()`], each window aligned to its own start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Resample {
+    pub step_ms: u64,
+    pub agg: smysl_series::Agg,
+}
+
+impl Resample {
+    pub fn new(step_ms: u64, agg: smysl_series::Agg) -> Resample {
+        Resample { step_ms, agg }
+    }
+}
+
+/// The fewest points a calibration window may hold once resampled (RFC SMYSL-9 §4.2): fewer is
+/// refused, naming the window. Twice CUSUM's default `baseline`, and more than PELT's or MAD's
+/// own minimum.
+pub const MIN_N: usize = 20;
 
 impl Options {
     /// The options with `floor` set.
@@ -71,12 +93,31 @@ impl Options {
         self
     }
 
+    /// The options with `resample` set.
+    pub fn with_resample(mut self, r: Resample) -> Options {
+        self.resample = Some(r);
+        self
+    }
+
     /// `recipe` with these options' keys: none for the defaults.
     pub fn stamp(&self, recipe: Recipe) -> Recipe {
-        match self.floor {
+        let recipe = match self.floor {
             Floor::Tiny => recipe,
             Floor::Resolution => recipe.with("floor", "resolution"),
             Floor::Spread => recipe.with("floor", "spread"),
+        };
+        match self.resample {
+            None => recipe,
+            Some(r) => recipe.with("step", r.step_ms).with("agg", r.agg.as_str()),
+        }
+    }
+
+    /// `samples` (a window read from `from_ms`) as the detector reads them: resampled when the
+    /// options say so, and otherwise as they are.
+    pub fn read(&self, samples: Vec<Sample>, from_ms: u64) -> Vec<Sample> {
+        match self.resample {
+            None => samples,
+            Some(r) => smysl_series::resample(&samples, from_ms, r.step_ms, r.agg),
         }
     }
 
@@ -350,7 +391,7 @@ impl Spec {
         };
         let level = matches!(detector, cusum::ID | pelt::ID | mad::ID);
         for (k, _) in o.iter() {
-            let option = options && level && k.value == "floor";
+            let option = options && level && matches!(k.value.as_str(), "floor" | "step" | "agg");
             if k.value != "detector" && !known.contains(&k.value.as_str()) && !option {
                 return Err(format!("`{}` is not a parameter of {detector}", k.value));
             }
@@ -363,6 +404,24 @@ impl Spec {
             Some(HValue::Str(s)) if s == "spread" => Options::default().with_floor(Floor::Spread),
             Some(HValue::Str(s)) if s == "tiny" => Options::default(),
             Some(_) => return Err("`floor` is `resolution`, `spread` or `tiny`".into()),
+        };
+        let opts = match (get("step"), get("agg")) {
+            (None, None) => opts,
+            (None, Some(_)) => return Err("`agg` goes with `step`".into()),
+            (Some(step), agg) => {
+                let step_ms = match step {
+                    HValue::Int(n) if *n > 0 => *n as u64,
+                    _ => return Err("`step` is a positive integer, in ms".into()),
+                };
+                let agg = match agg {
+                    None => smysl_series::Agg::Last,
+                    Some(HValue::Str(a)) => {
+                        smysl_series::Agg::parse(a).ok_or("`agg` is `last`, `mean` or `max`")?
+                    }
+                    Some(_) => return Err("`agg` is `last`, `mean` or `max`".into()),
+                };
+                opts.with_resample(Resample::new(step_ms, agg))
+            }
         };
         let decimal = |k: &str| -> Result<Option<Decimal>, String> {
             match get(k) {
@@ -465,7 +524,11 @@ impl Spec {
             Floor::Resolution => ", floor: resolution",
             Floor::Spread => ", floor: spread",
         };
-        format!("{{ detector: {}, {body}{floor} }}", self.id())
+        let step = match opts.resample {
+            None => String::new(),
+            Some(r) => format!(", step: {}, agg: {}", r.step_ms, r.agg.as_str()),
+        };
+        format!("{{ detector: {}, {body}{floor}{step} }}", self.id())
     }
 
     /// The detector's id.
@@ -555,6 +618,138 @@ mod spec_tests {
             "a one-quantum move is under 3.5 z at the resolution floor"
         );
         assert!(!mad::run(&input, &samples, 30_000, 60_000, &m).is_empty());
+    }
+
+    #[test]
+    fn a_step_is_parsed_written_back_and_stamped_and_its_absence_changes_nothing() {
+        use smysl_series::Agg;
+        let (s, o) =
+            Spec::parse_with_options("{ detector: cusum/1, floor: resolution, step: 15000 }")
+                .unwrap();
+        assert_eq!(o.resample, Some(Resample::new(15_000, Agg::Last)));
+        assert!(s
+            .hjson(&o)
+            .ends_with(", floor: resolution, step: 15000, agg: last }"));
+        assert_eq!(
+            Spec::parse_with_options(&s.hjson(&o)).unwrap(),
+            (s.clone(), o)
+        );
+        let (_, o) =
+            Spec::parse_with_options("{ detector: pelt/1, step: 5000, agg: max }").unwrap();
+        assert_eq!(o.resample, Some(Resample::new(5_000, Agg::Max)));
+        let Spec::Cusum(p) = s else { panic!() };
+        assert_eq!(
+            o.stamp(p.recipe(0, 10)).text(),
+            "cusum/1?agg=max&baseline=10&from=0&h=5&k=0.5&step=5000&to=10"
+        );
+        // Without the keys, the recipe's text is what it was.
+        assert_eq!(
+            Options::default().stamp(p.recipe(0, 10)).text(),
+            "cusum/1?baseline=10&from=0&h=5&k=0.5&to=10"
+        );
+        for bad in [
+            "{ detector: cusum/1, agg: last }",
+            "{ detector: cusum/1, step: 0 }",
+            "{ detector: cusum/1, step: \"15s\" }",
+            "{ detector: cusum/1, step: 1000, agg: min }",
+            "{ detector: episode/1, step: 1000 }",
+        ] {
+            assert!(Spec::parse_with_options(bad).is_err(), "{bad}");
+        }
+        assert!(Spec::parse("{ detector: cusum/1, step: 1000 }").is_err());
+    }
+
+    fn one_second(n: u64, at: u64) -> smysl_series::Substrate<smysl_series::MemBackend> {
+        use smysl_series::{MemBackend, Sample, SeriesInfo, Substrate};
+        let mut sub = Substrate::new(MemBackend::default());
+        let info = SeriesInfo {
+            scheme: "prom".into(),
+            key: "cpu".into(),
+            class: "gauge".into(),
+        };
+        // Level 5 with a little alternation, and 9 from `at` on.
+        let samples: Vec<Sample> = (0..n)
+            .map(|i| {
+                let v = if i * 1_000 >= at {
+                    9
+                } else {
+                    5 + (i % 2) as i64
+                };
+                Sample::value(i * 1_000, Decimal::from_i64(v))
+            })
+            .collect();
+        sub.add(
+            &Uid::from_bytes([1; 32]),
+            &Uid::from_bytes([2; 32]),
+            &info,
+            &samples,
+        )
+        .unwrap();
+        sub
+    }
+
+    #[test]
+    fn a_detector_reads_the_resampled_series_and_says_so() {
+        use smysl_series::Agg;
+        let sub = one_second(1_200, 900_000);
+        let series = [Uid::from_bytes([1; 32])];
+        let spec = Spec::parse(r#"{ detector: mad/1, baseline: "0-600000" }"#).unwrap();
+        let step = Options::default().with_resample(Resample::new(15_000, Agg::Last));
+        let plain = run_on_with(
+            &spec,
+            &Options::default(),
+            &sub,
+            &series,
+            600_000,
+            1_200_000,
+            &[],
+            None,
+        )
+        .unwrap();
+        let coarse =
+            run_on_with(&spec, &step, &sub, &series, 600_000, 1_200_000, &[], None).unwrap();
+        assert!(!plain.units.is_empty() && !coarse.units.is_empty());
+        for u in &coarse.units {
+            let text = String::from_utf8_lossy(u.payload.as_deref().unwrap()).to_string();
+            assert!(
+                text.contains("agg=last") && text.contains("step=15000"),
+                "{text}"
+            );
+        }
+        // At 15 s, `Last` reads every fifteenth sample: the alternation is gone, all odd.
+        let o = Options::default().with_resample(Resample::new(15_000, Agg::Last));
+        let read = o.read(
+            sub.window(&series[0], &Uid::from_bytes([2; 32]), 0, 60_000)
+                .unwrap()
+                .samples,
+            0,
+        );
+        assert_eq!(
+            read.iter().map(|s| s.ts_ms()).collect::<Vec<_>>(),
+            [14_000, 29_000, 44_000, 59_000]
+        );
+    }
+
+    #[test]
+    fn calibration_refuses_a_window_too_short_at_its_step_and_names_it() {
+        use smysl_series::Agg;
+        let sub = one_second(1_200, u64::MAX);
+        let series = [Uid::from_bytes([1; 32])];
+        let spec = Spec::parse("{ detector: cusum/1 }").unwrap();
+        let target = calibrate::Target::new(Decimal::parse_token("0.5").unwrap()).unwrap();
+        let windows = [(0, 360_000, 720_000)];
+        // 360 points a window at 1 s; 24 at 15 s; 6 at 60 s.
+        let at = |ms| Options::default().with_resample(Resample::new(ms, Agg::Last));
+        assert!(calibrate_on(&spec, &Options::default(), &sub, &series, &windows, target).is_ok());
+        assert!(calibrate_on(&spec, &at(15_000), &sub, &series, &windows, target).is_ok());
+        let e = calibrate_on(&spec, &at(60_000), &sub, &series, &windows, target).unwrap_err();
+        assert!(
+            e.contains("0-360000") && e.contains("6 point(s)") && e.contains("fewer than 20"),
+            "{e}"
+        );
+        // Unresampled, a short window is calibrated as before: the bound is the step's.
+        let short = [(0, 10_000, 20_000)];
+        assert!(calibrate_on(&spec, &Options::default(), &sub, &series, &short, target).is_ok());
     }
 
     #[test]
@@ -728,7 +923,7 @@ pub fn run_on_with<B: smysl_series::Backend>(
         return Ok(out);
     }
     for (s, i, scheme, key) in &streams {
-        let samples = read(s, i, from_ms, to_ms)?;
+        let samples = opts.read(read(s, i, from_ms, to_ms)?, from_ms);
         let input = Input {
             series: *s,
             scheme,
@@ -740,7 +935,7 @@ pub fn run_on_with<B: smysl_series::Backend>(
             Spec::Cusum(p) => cusum::run_with(&input, from_ms, to_ms, p, opts),
             Spec::Pelt(p) => pelt::run_with(&input, from_ms, to_ms, p, opts),
             Spec::Mad(p) => {
-                let base = read(s, i, p.baseline_from, p.baseline_to)?;
+                let base = opts.read(read(s, i, p.baseline_from, p.baseline_to)?, p.baseline_from);
                 mad::run_with(&input, &base, from_ms, to_ms, p, opts)
             }
             Spec::Episode(_) | Spec::Baro(_) => unreachable!("handled above"),
@@ -769,7 +964,7 @@ pub fn calibrate_on<B: smysl_series::Backend>(
     windows: &[(u64, u64, u64)],
     target: calibrate::Target,
 ) -> Result<calibrate::Calibrated, String> {
-    let read = read_trials(substrate, series, windows)?;
+    let read = read_trials(opts, substrate, series, windows)?;
     let trials: Vec<Vec<calibrate::Pair<'_>>> = read
         .iter()
         .map(|t| {
@@ -794,7 +989,7 @@ pub fn calibrate_on_each<B: smysl_series::Backend>(
     windows: &[(u64, u64, u64)],
     target: calibrate::Target,
 ) -> Result<calibrate::CalibratedEach<(Uid, Uid)>, String> {
-    let read = read_trials(substrate, series, windows)?;
+    let read = read_trials(opts, substrate, series, windows)?;
     let trials: Vec<BTreeMap<(Uid, Uid), calibrate::Pair<'_>>> = read
         .iter()
         .map(|t| {
@@ -818,6 +1013,7 @@ pub fn calibrate_on_each<B: smysl_series::Backend>(
 type Trial = BTreeMap<(Uid, Uid), (Vec<(u64, f64)>, Vec<(u64, f64)>)>;
 
 fn read_trials<B: smysl_series::Backend>(
+    opts: &Options,
     substrate: &smysl_series::Substrate<B>,
     series: &[Uid],
     windows: &[(u64, u64, u64)],
@@ -838,14 +1034,27 @@ fn read_trials<B: smysl_series::Backend>(
         if a >= b {
             return Ok(Vec::new());
         }
-        Ok(substrate
+        let samples = substrate
             .window(s, i, a, b)
             .map_err(|e| e.to_string())?
-            .samples
+            .samples;
+        let points: Vec<(u64, f64)> = opts
+            .read(samples, a)
             .iter()
             .filter(|x| counted(x))
             .map(|x| (x.ts_ms(), to_f64(x.value_dec())))
-            .collect())
+            .collect();
+        match opts.resample {
+            Some(r) if points.len() < MIN_N => Err(format!(
+                "a calibration window, {a}-{b} of series {} instrument {}, holds {} point(s) at \
+                 step {} ms, fewer than {MIN_N}",
+                s.canonical(),
+                i.canonical(),
+                points.len(),
+                r.step_ms
+            )),
+            _ => Ok(points),
+        }
     };
     let mut read = Vec::new();
     for &(r0, t0, t1) in windows {

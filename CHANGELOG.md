@@ -100,6 +100,35 @@ and `attest` writes nothing to sign.
   rebuild. At 10⁵ units (`oko_ledger`, 116k operations) the late commit is 4.75 ms at p50, down
   from 7.7, and the tables' share of it is 1.9 %, down from 41 %. RFC SMYSL-3 §17.1 is amended
   with the figures.
+- **RFC SMYSL-9 SI-P1: `tel/minhash/2`, two more kinds of similarity feature.** Read against the
+  code first (R1-A): 1.20's "new" templates were already those absent from the window before, so
+  the drift is Drain generalising a template it had, and novelty is judged by family, not text.
+  `templates=novel` drops a template whose family (as many words, none different, `<*>` matching
+  anything) is in the same stream's previous window, unless its rate rose more than `rise=`
+  times (default 4), when it is `template-rise:`. `kinds=on` adds `kind:METRIC:DIRECTION` per
+  anomaly, the metric being the series' name without its labels (Prometheus, OTLP, Zabbix).
+  `similar::Recipe`, `episodes_with`, `nearest_with`, `MinHash::of` and `metric_name` are new;
+  `tel similar --similarity RECIPE` reads one. `/1` gives 1.20's signatures bit for bit, and
+  stays the default.
+- **RFC SMYSL-9 CC-P1: a series at a coarser cadence.** `smysl_series::resample(samples, from,
+  step, agg)` with `Agg::{Last, Mean, Max}`: buckets aligned to `from`, gaps kept as gaps; `Last`
+  is what a scraper at that interval records, checked against one on generated series. A
+  `cusum/1`, `pelt/1` or `mad/1` recipe takes `step: MS` and `agg:` (default `last`), so `tel
+  detect` and `tel calibrate` read the resampled series and every output's recipe says so; a
+  recipe without them is the same text and hash. Under a step, calibration refuses a window of
+  fewer than 20 points (`detect::MIN_N`), naming it. `detect::Options` gains `resample`.
+- **SMYSL-9 SI-P2: the run, and no gate met.** On RCAEval RE2, `templates=novel` leaves
+  recurrence at 0.24 / 0.53 / 0.33 (MinHash; SS / OB / TT) against the no-templates 0.56 / 0.54
+  / 0.36 it had to reach, and `kinds=on` moves the fault-type reading by at most 0.05, short of
+  0.40. The noise on Sock Shop is not drift but singletons: lines that keep their own user names
+  and so are each their own Drain template. Without them the templates neither help nor hurt.
+  `/1` stays the default. Renaming the series moved MinHash by up to 0.04 with exact Jaccard
+  unchanged, which is the size of the differences gated: SMYSL-3 §26 and SMYSL-9 R2-A2.
+- **SMYSL-9 CC-P2: calibration at 5 s and 15 s.** `ge_i3_rcaeval --step MS`. CUSUM under `floor:
+  resolution`, calibrated on Sock Shop at 5 s, holds 10 % when carried: 0.0 % on Online
+  Boutique and 10.0 % on Train Ticket, the gate's edge, and the same at 15 s. A value set at 1 s
+  does not carry to 15 s: CUSUM's alarms fall to 0 % and its recall to 0–53 %. Calibrate at the
+  cadence the series is scraped at (SMYSL-5 R13).
 
 ## 1.20.0 — 2026-11-24
 

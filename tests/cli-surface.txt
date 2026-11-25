@@ -1124,6 +1124,7 @@ tel        --items
 tel        --zabbix-api
 tel        --top
 tel        --seed
+tel        --similarity
 tel        --older-than
 tel        --sign
 tel        --key

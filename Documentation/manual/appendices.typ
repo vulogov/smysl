@@ -1175,6 +1175,10 @@ series, changes, anomalies and alerts that are members of each, and the log temp
 window. Each line gives the MinHash similarity out of 128, the exact Jaccard index it
 estimates, and the episode's label. When the nearest carry labels, the most common is printed.
 It writes nothing.
+`--similarity tel/minhash/2?…` reads two more kinds of feature (1.21). `templates=novel` keeps
+a template only when the stream's previous window has none of its family, or when its rate rose
+more than `rise=` times (4 by default). `kinds=on` adds each anomaly's metric name without its
+labels, so one fault on two services shares a feature.
 
 `tel at SERIES MS` prints the value in force at `MS`, the last sample at or before it, for each
 instrument the series has samples from. `SERIES` is a series uid or `<scheme>:<key>`. A stale
@@ -1228,8 +1232,12 @@ carried to other data. A `cusum/1`, `pelt/1` or `mad/1` recipe, for `tel detect`
 calibrate`, may carry `floor: resolution`: the detector's scale is then at least the smallest
 step between the series' distinct values, so a flat stretch is not read as infinitely precise.
 `floor: spread` holds it at a tenth of the series' standard deviation instead, for float-valued
-series (RFC SMYSL-3 §21.2). An argument not admitted is exit 2, and a rate the ladder cannot meet is
-exit 1.
+series (RFC SMYSL-3 §21.2). `step: MS` reads the series at one sample every `MS`, each window's
+buckets aligned to its start: `agg: last` (the default) takes each bucket's last sample, as a
+scraper at that interval would, and `agg: mean` or `agg: max` a rollup at the bucket's start.
+Both keys go into the recipe each output records. Under `step`, `tel calibrate` refuses, with
+exit 1, a window that holds fewer than 20 points (1.21). An argument not admitted is exit 2, and
+a rate the ladder cannot meet is exit 1.
 
 `tel info RECIPE --series S… --during FROM-TO` computes an information measure (RFC SMYSL-5)
 over each series and its instruments, or `--instrument I` alone. `RECIPE` is an HJSON file, for
@@ -1318,6 +1326,7 @@ it prints what it would evict and removes nothing.
     ([`--lookback`], [`MS`], [`investigate show`: how far before the opening to look for unexplored evidence. Default one hour.]),
     ([`--top`], [`N`], [`similar`: how many episodes to print. Default 5.]),
     ([`--seed`], [`S`], [`similar`: the MinHash seed, which is part of its recipe. Default 0.]),
+    ([`--similarity`], [`RECIPE`], [`similar`: the similarity recipe, `tel/minhash/1?seed=S` or `tel/minhash/2?seed=S&templates=overlap|novel&rise=N&kinds=on|off`. Not with `--seed`. Default `tel/minhash/1?k=128&seed=0`. (1.21)]),
     ([`--older-than`], [`DUR`], [`evict`: the retention bound before `--at`, a whole number and `s`, `m`, `h`, `d` or `w`. Required.]),
     ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing. `evict`: evict, rather than report what would go. `trace` and `templates`: commit the units, with `--at`.]),
     ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),

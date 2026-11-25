@@ -413,6 +413,17 @@ holds on the windows given. Whether it carries to another system has to be measu
 §21.1 has the rule. On three systems of one benchmark, CUSUM and PELT carried with `floor:
 spread` and MAD with `floor: resolution` (RFC SMYSL-5 §15).
 
+*At another cadence.* Production metrics are scraped every 15 to 60 seconds, and a value set
+on one-second data may not hold there. `step: 15000` in a recipe makes the detector read the
+series as a 15-second scraper would have recorded it, each bucket's last sample, or a rollup
+with `agg: mean` or `agg: max`. The step is in the recipe each output records, so a reading at
+15 s is never mistaken for one at 1 s. Calibration needs points to work with: under a step,
+`tel calibrate` refuses a window with fewer than 20, and names it.
+
+Calibrate at the cadence you will detect at. On RCAEval, CUSUM calibrated at 5 s still carried
+to two other systems within 10 %. But a value set at 1 s and used at 15 s on the same system
+alarmed less and saw less, as little as none of a fault type (RFC SMYSL-5 R13).
+
 *Replayed to the byte.* A detector here uses only addition, subtraction, multiplication,
 division and square roots, which every machine rounds the same way. It never uses a logarithm or
 an exponential from the platform's maths library, and it draws no randomness. GE-M3 is the check:
@@ -820,6 +831,29 @@ episode's five nearest, 97 % were the same fault by MinHash and 90 % by a small 
 model reading a description of the same units. So similarity does not depend on a model.
 The simulated incidents name things by the same identifiers each time, which favours sets.
 Renamed series and alerts in other words are what real incident data would test.
+
+On real incidents, RCAEval's 270 injected faults, 1.20 found two weaknesses. Most templates
+"new" in an incident's window were Drain generalising a template it already had, so they added
+noise. And a feature names a series, so a CPU hog on `carts` and one on `orders` share nothing.
+1.21 adds a second recipe that reads two more kinds of feature, each switched on by name:
+
+```
+smysl tel similar b3:… -s lib --similarity 'tel/minhash/2?templates=novel&kinds=on'
+```
+
+- `templates=novel` compares each template with the templates of the same stream in its
+  previous window. A template whose family is there (as many words, and none of them
+  different, where `<*>` matches anything) is dropped, unless its rate rose more than `rise=`
+  times, 4 by default; then it is kept as `template-rise:`. A template with no family there is
+  new.
+- `kinds=on` adds `kind:METRIC:DIRECTION` for each anomaly. The metric is the series' name
+  without its labels: `cpu` for `cpu{service="carts"}`.
+
+The recipe is printed in full and keys the MinHash functions, so a `/2` reading is never
+mistaken for a `/1` one. `/1` is unchanged and is still the default, because on RCAEval neither
+key did what it was for (RFC SMYSL-9 R2-A2). Most of Sock Shop's "new" templates were lines that
+keep their own user names, each its own template, which no family matches. And fault-type
+recall moved by at most 0.05 with kinds on. Use `/2` to look, not as a better default.
 
 #section("Information measures (1.18)")
 

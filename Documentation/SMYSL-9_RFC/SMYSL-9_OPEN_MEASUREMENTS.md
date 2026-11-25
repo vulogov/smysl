@@ -1,8 +1,9 @@
 # RFC SMYSL-9 — three measurements 1.20 left open
 
 **Author:** Vladimir Ulogov
-**Status:** draft (2026-11-24). Part C read against the code (R1) and built as RT-P1 (1.21), its
-gates met; Parts A and B not started, and R1 is owed before each one's first phase.
+**Status:** draft (2026-11-25). Every phase built and run. Part C (RT-P1): gates met. Part B
+(CC-P1, CC-P2): gates met, CC-1 at its edge. Part A (SI-P1, SI-P2): built, and none of SI-1 to
+SI-3 met; the cause found on RE2-SS is not the one §3.1 named (R2-A2).
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged. Recipe
 texts without the new keys give the same bytes as before.
 **Crates:** `smysl-tel` (similarity features, recipe keys), `smysl-series` (resampling),
@@ -279,3 +280,104 @@ The three parts are independent and may land in any order. RT-P1 needs no data d
   where §17.1 recorded 0.63 ms over the same 116k operations. Staging does not touch the range
   tables. Since AC-8 it has grown with something else, and finding what is owed. The worst
   commit of the clean run was 365 ms, a single outlier §17.1 has no figure to compare with.
+
+**R1 for Parts A and B, 2026-11-25: §3 and §4 read against the code at `9468ca7`.**
+
+- **R1-A1. 1.20's "new" templates were already novel by absence.** `examples/ge_m8_rcaeval` fed
+  one Drain per container the reference window's lines, then the faulty window's, and counted
+  the templates the second pass added, by text. That is §3.2's `templates=novel` as first
+  written. What made a median of 369 a case is not absence from the reference: Drain only ever
+  generalises a cluster (`drain.rs`, `add`), so a template the reference window held as
+  `GET /cart user alice` is `GET /cart user <*>` after one more user, and its text is new. Text
+  equality cannot see that. `templates=novel` is therefore judged by **family**: two templates
+  are one family when they have as many tokens, no position where both are words and differ,
+  and at least one where they are the same word.
+- **R1-A2. Question 2: the reference is read from units, not the substrate.** `tel similar` reads
+  only the library's store (`src/main.rs`, `tel_similar`); counting a template over an arbitrary
+  window would decode every event in it (`logs::materialise`). So a template's reference is the
+  `x.tel/log-template` units of the same stream and instrument in the **latest window that ends
+  at or before its own begins**, not `[start − w, start)`. The episode's own length plays no
+  part: an episode of a few seconds would otherwise have a reference of a few seconds. A
+  stream with no earlier window has no reference, and its templates are all new. `rise=`
+  compares rates, count over window length, in integers.
+- **R1-A3. Question 1: no series carries a metric name apart from its key.** `tel::series` writes
+  `tel:scheme` and `tel:key` only, by design (§4.1: `name` is not part of a series' identity).
+  `kind:` reads the name from the key, per scheme: Prometheus' name before `{`, OTLP's `name`
+  member of its JCS key, a Zabbix item key before `[`. Other schemes give no `kind:`; nor does an
+  anomaly whose series unit is not in the store. RCAEval's columns (`carts_cpu`) carry no labels,
+  so SI-P2 keys them as Prometheus series with the service as a label (`cpu{service="carts"}`).
+- **R1-A4. `/2` keys MinHash by its full recipe text.** `MinHash::new(seed)` hashed
+  `tel/minhash/1?k=128&seed=S`; `/2` hashes its own text with every key written, so `/2` with
+  its defaults reads `/1`'s features under different functions and is never mistaken for it.
+- **R1-B1. Question 3: one read per path, two paths.** `detect::run_on_with` reads windows through
+  one closure for CUSUM, PELT and MAD (and MAD's baseline through the same one), and
+  `calibrate_on` and `calibrate_on_each` through `read_trials`. `step` wraps both; BARO and
+  episodes are not level detectors and do not take it.
+- **R1-B2. `step` and `agg` are `detect::Options`, as `floor` is.** That is what `stamp` writes
+  into each output's recipe and what `Spec::hjson` writes back, so a recipe without them is
+  byte-identical by construction. `step` is in ms, an integer, as `gap` and `baseline` are.
+- **R1-B3. Question 5: no detector assumes 20 points.** CUSUM estimates each regime from
+  `baseline` points (default 10), PELT needs `2 · min_size` (4), MAD a non-empty baseline.
+  `min_n = 20` (`detect::MIN_N`) is twice CUSUM's baseline: a floor for a calibration worth
+  reading, not a detector's minimum. It applies only under `step`, so calibration without one
+  behaves as before.
+- **R1-B4. `Last` keeps the sample.** Each bucket's last counted sample is returned as it is,
+  its own instant and flags, which is what a scraper at bucket ends that keeps an exporter's
+  timestamps and never records one sample twice would store. `Mean` and `Max` stamp the bucket's
+  start. Each window is aligned to its own start, the reference's to its start and the test's to
+  its start.
+
+**R2-A, 2026-11-25: SI-P1 as built.** `similar::Recipe` (`v1`, `v2`, `parse`, `text`),
+`Templates`, `episodes_with`, `nearest_with`, `MinHash::of` and `metric_name`; `tel similar
+--similarity RECIPE`. The gate holds: `/1` signatures equal those of `9468ca7` on a fixed set
+(`v1_signatures_are_the_ones_1_20_gave`), a drift template of the reference's family is
+dropped, a burst of 2 → 40 is kept as `template-rise:` and dropped at `rise=20`, and two CPU
+anomalies on two services share `kind:cpu:up` and nothing else.
+
+**R2-B, 2026-11-25: CC-P1 as built.** `smysl_series::resample` and `Agg`; `detect::Resample`,
+`Options::resample`, `Options::read`, `MIN_N`. The gate holds: on 40 generated one-second series
+with jitter, missed samples, gaps longer than a step and stale markers, `Last` at 5 s and 15 s
+(and at 15 s from an offset start) equals a simulated scraper's record; a recipe without `step`
+stamps the same text as before. `tel calibrate` with `step: 60000` refuses the GE-M3 fixture's
+ten-minute windows (ten points) naming the first, and calibrates twenty-minute ones.
+
+**R2-A2, 2026-11-25: SI-P2, the run. No gate is met.** `examples/ge_m8_rcaeval --similarity
+RECIPE` and `examples/ge_m8 --similarity RECIPE`; the figures and their reading are SMYSL-3 §26's
+1.21 amendment. In brief:
+
+- **SI-1 fails on every system.** `templates=novel`, recurrence by MinHash: 0.239, 0.528, 0.328
+  against 0.561, 0.539, 0.356 (exact Jaccard 0.350, 0.589, 0.339).
+- **SI-2 fails.** `kinds=on`, type by MinHash: 0.258, 0.293, 0.316, none at 0.40; 0.329, 0.289,
+  0.376 without templates.
+- **SI-3 is not met as worded.** Both keys give 0.965–0.983 over the six seeds against
+  0.968–0.987; `/2` with neither key gives 0.955–0.987, so the miss is MinHash's functions, not
+  the features (exact Jaccard 0.972–0.992 against 0.972–0.985).
+- **§3.1's first cause was wrong, and R1-A1's correction was not the whole of it.** On RE2-SS the
+  "new" templates are singletons: lines whose own identifiers (a user name, an e-mail) leave two
+  of six tokens in common, under Drain's 0.4, so each line is its own template in whichever
+  window it falls. Family cannot match them. Dropping a window's count-1 templates, a diagnosis
+  run after the gates had failed, brings RE2-SS to 0.550 / 0.567, the no-templates figure: once
+  singletons go, the templates left neither help nor hurt. On RE2-TT, singletons are about a
+  third of the templates, and its cause is not found.
+- **A gate on one MinHash reading is finer than MinHash.** Renaming the series (for `kinds:`)
+  moves recurrence by up to 0.04 with exact Jaccard unchanged. A successor should gate on exact
+  Jaccard, or on MinHash over several seeds.
+- **What ships.** `/2` and its keys stay, as readings whose gain is not shown; `/1` stays the
+  default. No recipe key was added after the run: `--drop-singletons` is the example's.
+
+**R2-B2, 2026-11-25: CC-P2, the run. CC-1 is met, at its edge.** `ge_i3_rcaeval --step 5000` and
+`--step 15000`, `--held` RE2-OB and then RE2-TT; the figures and their reading are SMYSL-5 R13
+and §15's 1.21 paragraph. In brief:
+
+- **CC-1.** CUSUM under `floor: resolution`, one value a trial, calibrated on RE2-SS at 5 s and
+  carried at margin 1: 0.0 % fault-free alarms on RE2-OB and 10.0 % on RE2-TT (9 of 90, the
+  rate). At 15 s, reported either way: the same.
+- **CC-2.** A value calibrated at 1 s and used at 5 s or 15 s alarms less on CUSUM and PELT (0
+  to 2.2 %), and MAD stays near the rate (up to 14.4 % per kind at 15 s). CUSUM's recall at its
+  1 s value falls to 0–53 % at 15 s.
+- **CC-3.** At its own cadence's calibration, each level detector sees every RE2-SS fault type
+  at 87 to 100 %.
+- **`min_n`.** At 15 s, 43 of RE2-TT's 1,968 (series, window) hold fewer than 20 points, against
+  1 at 1 s; the example reads pairs directly and does not refuse them, so the CLI's refusal is
+  not exercised by this run.
+

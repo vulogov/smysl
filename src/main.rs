@@ -3021,6 +3021,17 @@ fn cli() -> Command {
                         .help("similar: the MinHash seed, part of its recipe (default 0)"),
                 )
                 .arg(
+                    Arg::new("similarity")
+                        .long("similarity")
+                        .value_name("RECIPE")
+                        .conflicts_with("seed")
+                        .help(
+                            "similar: the similarity recipe, `tel/minhash/1?seed=S` or \
+                             `tel/minhash/2?seed=S&templates=overlap|novel&rise=N&kinds=on|off` \
+                             (default tel/minhash/1?k=128&seed=0)",
+                        ),
+                )
+                .arg(
                     Arg::new("older-than")
                         .long("older-than")
                         .value_name("DUR")
@@ -16528,7 +16539,16 @@ fn tel_similar(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCod
         return ExitCode::Usage;
     };
     let top = m.get_one::<usize>("top").copied().unwrap_or(5);
-    let seed = m.get_one::<u64>("seed").copied().unwrap_or(0);
+    let recipe = match m.get_one::<String>("similarity") {
+        Some(text) => match similar::Recipe::parse(text) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("smysl tel similar: --similarity: {e}");
+                return ExitCode::Usage;
+            }
+        },
+        None => similar::Recipe::v1(m.get_one::<u64>("seed").copied().unwrap_or(0)),
+    };
     let root = match library_root(m, global, "tel") {
         Ok(r) => r,
         Err(code) => return code,
@@ -16541,9 +16561,10 @@ fn tel_similar(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCod
         }
     };
     let store = library.store();
-    let eps = similar::episodes(
+    let eps = similar::episodes_with(
         StoreRead::units(store).map(|(u, c)| (u, &c.core)),
         store.relations(),
+        &recipe,
     );
     let Some(mine) = eps.get(&ep) else {
         eprintln!(
@@ -16556,7 +16577,7 @@ fn tel_similar(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCod
         "episode   {}  {} feature(s); {}",
         ep.canonical(),
         mine.len(),
-        similar::recipe(seed)
+        recipe.text()
     );
     let label_of = |u: &Uid| {
         let core = &StoreRead::get(store, u)?.core;
@@ -16567,7 +16588,7 @@ fn tel_similar(m: &ArgMatches, global: &ArgMatches, args: &[&String]) -> ExitCod
         }
     };
     let mut labels: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    for n in similar::nearest(&eps, &ep, top, seed) {
+    for n in similar::nearest_with(&eps, &ep, top, &recipe) {
         let label = label_of(&n.uid);
         if let Some(l) = &label {
             *labels.entry(l.clone()).or_default() += 1;

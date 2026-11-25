@@ -21,7 +21,10 @@
 //! The stop condition is the RFC's: MinHash below 0.6 where embeddings exceed 0.8 makes
 //! similarity model-dependent by default.
 //!
-//! `cargo run --release --features tel,semantic --example ge_m8 [-- --seed S]`
+//! `cargo run --release --features tel,semantic --example ge_m8 [-- --seed S] [--similarity RECIPE]`
+//!
+//! `--similarity` reads the features and functions of a `tel/minhash/2` recipe (RFC SMYSL-9
+//! SI-P2), as `tel similar --similarity` does; the default is `/1`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -293,6 +296,11 @@ fn main() {
         .and_then(|i| args.get(i + 1))
         .and_then(|v| v.parse().ok())
         .unwrap_or(8u64);
+    let recipe = match args.iter().position(|a| a == "--similarity") {
+        Some(i) => similar::Recipe::parse(args.get(i + 1).expect("--similarity RECIPE"))
+            .unwrap_or_else(|e| panic!("--similarity: {e}")),
+        None => similar::Recipe::v1(0),
+    };
     let started = std::time::Instant::now();
     let mut r = Rng(seed);
     let types = fault_types();
@@ -383,13 +391,13 @@ fn main() {
         units.insert(uid, g.unit.clone());
         relations.extend(g.relations.iter().cloned());
     }
-    let eps_feats = similar::episodes(units.iter(), relations.iter());
+    let eps_feats = similar::episodes_with(units.iter(), relations.iter(), &recipe);
     let eps: Vec<Uid> = eps_feats.keys().copied().collect();
     let feats: Vec<usize> = eps_feats.values().map(BTreeSet::len).collect();
 
     // Arm MinHash.
     let mh = recall5(&eps, &ty, |e| {
-        similar::nearest(&eps_feats, e, 5, 0)
+        similar::nearest_with(&eps_feats, e, 5, &recipe)
             .into_iter()
             .map(|n| n.uid)
             .collect()

@@ -401,3 +401,56 @@ fn a_margin_tightens_and_a_floor_travels_into_detect() {
         .to_string();
     assert!(recipe.ends_with(", floor: spread }"), "{recipe}");
 }
+
+#[test]
+fn a_step_is_read_printed_and_bounded_by_its_points() {
+    // RFC SMYSL-9 CC-P1: the samples are a minute apart.
+    let dir = library("step");
+    let cpu = series("cpu");
+    let recipe = dir.join("step.hjson");
+    std::fs::write(&recipe, "{ detector: cusum/1, step: 60000 }").unwrap();
+    // Ten-minute test windows hold ten points: refused, naming the window.
+    let o = calibrate(&dir, recipe.to_str().unwrap(), "0.2");
+    let err = String::from_utf8_lossy(&o.stderr).into_owned();
+    assert_eq!(o.status.code(), Some(1), "{err}");
+    assert!(
+        err.contains(&format!("{}-{}", START + 20 * MIN, START + 30 * MIN))
+            && err.contains("10 point(s) at step 60000 ms, fewer than 20"),
+        "{err}"
+    );
+    // Thirty and twenty minutes: calibrated, and the step is in the recipe printed.
+    let mut args = vec![
+        "tel",
+        "calibrate",
+        recipe.to_str().unwrap(),
+        "--series",
+        &cpu,
+        "--rate",
+        "0.5",
+    ];
+    let ws: Vec<String> = (0..4)
+        .map(|k| {
+            let r = START + k * 50 * MIN;
+            format!("{}-{}-{}", r, r + 30 * MIN, r + 50 * MIN)
+        })
+        .collect();
+    for w in &ws {
+        args.extend(["--window", w]);
+    }
+    args.extend(["-s", "lib"]);
+    let o = run(&dir, &args);
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        out.lines()
+            .next()
+            .unwrap()
+            .ends_with(", step: 60000, agg: last }"),
+        "{out}"
+    );
+}
