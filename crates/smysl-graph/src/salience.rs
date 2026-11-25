@@ -24,6 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::{quantise, Uid};
 
 use crate::adjacency::{EdgeSet, NodeId};
+use crate::admission::AttestationAdmission;
 use crate::store::StoreRead;
 
 /// Damping factor. Fixed rather than configurable: it is hash input for every pack.
@@ -132,6 +133,9 @@ pub struct SalienceRequest {
     /// salience looked like *at hop 4*, not what it looks like now. `None` leaves the
     /// recency term at zero however it is weighted.
     pub now_hop: Option<u32>,
+    /// Which attestations corroboration counts (RFC SMYSL-8 §4.1). The default admits every
+    /// one, which is the salience every caller got before a signature policy existed.
+    pub admission: AttestationAdmission,
 }
 
 impl SalienceRequest {
@@ -155,6 +159,12 @@ impl SalienceRequest {
         self.role_weights = r;
         self
     }
+
+    /// Count corroboration from the attestations `a` admits only (RFC SMYSL-8 §4.1).
+    pub fn with_admission(mut self, a: AttestationAdmission) -> SalienceRequest {
+        self.admission = a;
+        self
+    }
 }
 
 /// Why a unit scored what it did - the output of `salience --explain`.
@@ -170,6 +180,9 @@ pub struct SalienceTerms {
     pub groups: Vec<String>,
     /// Groups found but discarded for sharing ancestry with a group already counted.
     pub dependent_groups: Vec<String>,
+    /// Groups that would have been formed but for the request's admission: every attestation
+    /// in them was excluded by a signature policy (RFC SMYSL-8 §4.1). Empty under no policy.
+    pub excluded_groups: Vec<String>,
     pub role: f32,
     pub raw: f32,
     /// True when an authored override replaced the derived value entirely.
@@ -245,7 +258,7 @@ pub fn salience(store: &(impl StoreRead + ?Sized), req: &SalienceRequest) -> Sal
 
     for (uid, unit) in store.units() {
         let c = g.id(uid).map(|i| centrality[i as usize]).unwrap_or(0.0);
-        let (corr, groups, dependent) = corroboration(store, uid);
+        let (corr, groups, dependent, excluded) = corroboration(store, uid, &req.admission);
         let role = req.role_weights.get(uid).copied().unwrap_or(0.0);
 
         // A unit with no attestation has no episode, so it has no recency either - it is
@@ -275,6 +288,7 @@ pub fn salience(store: &(impl StoreRead + ?Sized), req: &SalienceRequest) -> Sal
                 recency: quantise(recency),
                 groups,
                 dependent_groups: dependent,
+                excluded_groups: excluded,
                 role: quantise(role),
                 raw: quantise(raw.clamp(0.0, 1.0)),
                 authored,
@@ -345,24 +359,41 @@ fn personalised_pagerank(store: &(impl StoreRead + ?Sized), seed: &[NodeId]) -> 
 /// would let one agent corroborate itself. Groups that share ancestry are collapsed for
 /// the same reason: two agents that both worked from the same parent agree because they
 /// read the same thing, not because they checked.
-fn corroboration(store: &(impl StoreRead + ?Sized), uid: &Uid) -> (f32, Vec<String>, Vec<String>) {
+///
+/// Only admitted attestations form groups, and admission runs first: an excluded attestation's
+/// parents claim nothing, so a forged attestation cannot collapse an honest group by naming its
+/// ancestry (RFC SMYSL-8 §4.1).
+fn corroboration(
+    store: &(impl StoreRead + ?Sized),
+    uid: &Uid,
+    admission: &AttestationAdmission,
+) -> (f32, Vec<String>, Vec<String>, Vec<String>) {
     let Some(unit) = store.get(uid) else {
-        return (0.0, Vec::new(), Vec::new());
+        return (0.0, Vec::new(), Vec::new(), Vec::new());
     };
 
     // Group by key, collecting each group's ancestry.
     let mut groups: BTreeMap<String, BTreeSet<Uid>> = BTreeMap::new();
+    let mut refused: BTreeSet<String> = BTreeSet::new();
     for a in &unit.attestations {
         let (agent, recipe) = a.corroboration_key();
         let key = match recipe {
             Some(r) => format!("{agent}#{}", Uid::from_bytes(r).short()),
             None => agent,
         };
+        if !admission.admits(a) {
+            refused.insert(key);
+            continue;
+        }
         groups
             .entry(key)
             .or_default()
             .extend(a.parents.iter().copied());
     }
+    let excluded: Vec<String> = refused
+        .into_iter()
+        .filter(|k| !groups.contains_key(k))
+        .collect();
 
     // Keep groups whose ancestry is disjoint from everything kept so far. Canonical key
     // order, so which group wins a collision is a function of the graph.
@@ -379,7 +410,7 @@ fn corroboration(store: &(impl StoreRead + ?Sized), uid: &Uid) -> (f32, Vec<Stri
     }
 
     let score = counted.len().min(CORROBORATION_CAP) as f32 / CORROBORATION_CAP as f32;
-    (score, counted, dependent)
+    (score, counted, dependent, excluded)
 }
 
 /// The seed set for a store with no active thread: every root of every view (§16.4).

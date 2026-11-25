@@ -18,7 +18,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use smysl_core::{
     tokens, AgentId, Hlc, RelKind, Role, Status, Step, Thread, ThreadId, ThreadSchema, Uid,
 };
-use smysl_graph::{salience, topo, EdgeSet, SalienceReport, SalienceRequest, StoreRead};
+use smysl_graph::{
+    salience, topo, AttestationAdmission, EdgeSet, SalienceReport, SalienceRequest, StoreRead,
+};
 
 use crate::schema::{definition, Matcher, Position, SchemaDef};
 
@@ -39,6 +41,9 @@ pub struct DeriveOptions {
     /// Restrict derivation to these units; empty means the whole store.
     pub scope: BTreeSet<Uid>,
     pub gist_tokens: u32,
+    /// Which attestations the salience that orders selection counts (RFC SMYSL-8 §4.1). The
+    /// default admits every one.
+    pub admission: AttestationAdmission,
 }
 
 impl Default for DeriveOptions {
@@ -50,6 +55,7 @@ impl Default for DeriveOptions {
             arity: BTreeMap::new(),
             scope: BTreeSet::new(),
             gist_tokens: GIST_TOKENS,
+            admission: AttestationAdmission::all(),
         }
     }
 }
@@ -75,6 +81,12 @@ impl DeriveOptions {
 
     pub fn with_arity(mut self, role: Role, n: usize) -> DeriveOptions {
         self.arity.insert(role, n);
+        self
+    }
+
+    /// Order selection by salience under a signature policy (RFC SMYSL-8 §4.1).
+    pub fn with_admission(mut self, a: AttestationAdmission) -> DeriveOptions {
+        self.admission = a;
         self
     }
 }
@@ -110,7 +122,9 @@ pub fn derive_thread(
 
     let sal = salience(
         store,
-        &SalienceRequest::default().seeded(seed(store, &scope)),
+        &SalienceRequest::default()
+            .seeded(seed(store, &scope))
+            .with_admission(opts.admission.clone()),
     );
     let order = ordering(store, &scope);
 

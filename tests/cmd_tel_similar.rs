@@ -177,3 +177,43 @@ fn what_is_not_an_episode_is_said() {
     );
     assert_eq!(o.status.code(), Some(1));
 }
+
+#[test]
+fn a_similarity_recipe_is_read_printed_and_checked() {
+    let d = scratch("recipe");
+    let eps = library(&d);
+    let ep = eps[0].canonical();
+    let o = run(
+        &d,
+        &[
+            "tel",
+            "similar",
+            &ep,
+            "--similarity",
+            "tel/minhash/2?seed=4&kinds=on&templates=novel",
+            "-s",
+            "lib",
+        ],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    let out = String::from_utf8_lossy(&o.stdout);
+    // The text written in full; alerts have no kind, so the ranking is the same sets'.
+    assert!(
+        out.contains("tel/minhash/2?k=128&seed=4&templates=novel&rise=4&kinds=on"),
+        "{out}"
+    );
+    let first = out.lines().find(|l| l.starts_with("similar")).unwrap();
+    assert!(
+        first.contains(&eps[1].canonical()) && first.contains("jaccard 4/6"),
+        "{out}"
+    );
+    for bad in [
+        &["--similarity", "tel/minhash/2?rise=2"][..],
+        &["--similarity", "tel/minhash/9"][..],
+        &["--similarity", "tel/minhash/2", "--seed", "1"][..],
+    ] {
+        let mut args = vec!["tel", "similar", &ep, "-s", "lib"];
+        args.extend_from_slice(bad);
+        assert_eq!(run(&d, &args).status.code(), Some(2), "{bad:?}");
+    }
+}

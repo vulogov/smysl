@@ -29,6 +29,7 @@ pub use smysl::AnyStore
 pub use smysl::AppendReport
 pub use smysl::Artifact
 pub use smysl::Attestation
+pub use smysl::AttestationAdmission
 pub use smysl::Axis
 pub use smysl::Backend
 pub use smysl::Block
@@ -256,6 +257,7 @@ pub use smysl::pack
 pub use smysl::parse_surface
 pub use smysl::payload_strings
 pub use smysl::plan_retraction
+pub use smysl::plan_retraction_admitted
 pub use smysl::proposition
 pub use smysl::quantise
 pub use smysl::query
@@ -298,5 +300,6 @@ pub use smysl::unit_core_bytes
 pub use smysl::verify
 pub use smysl::verify_pack
 pub use smysl::view_roots
+pub use smysl::withdrawal_authorised
 pub use smysl::write_surface
 pub const smysl::VERSION: &str

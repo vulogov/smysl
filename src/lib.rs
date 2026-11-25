@@ -156,12 +156,13 @@ pub use smysl_graph::compact::{compact, Compacted};
 pub use smysl_graph::relink::{relink, supersession_heads, Relinked};
 pub use smysl_graph::{
     closure, cycles, dependents, dependents_via, diff, effective_status, hop_diff, label_bindings,
-    label_index, labels_of, membership, merge, plan_retraction, rebuttals_of, resolve_label,
-    rests_on, reverse_closure, review, review_with, salience, topo, trace, trace_via, view_roots,
-    Adjacency, AgentActivity, AnyStore, AppendReport, BundleReport, Cached, DetectionContext, Edge,
-    EdgeKind, EdgeSet, EffectiveStatus, Entry, HopDiff, HotKind, HotRecords, Index, IndexError,
-    LabelError, Lineage, LineageNode, MergeError, MergeOptions, MergeReport, NodeId, OpenReport,
-    Overlay, RecipeChange, RecipeChangeKind, RetractionAuthority, RetractionPlan, RetractionPolicy,
+    label_index, labels_of, membership, merge, plan_retraction, plan_retraction_admitted,
+    rebuttals_of, resolve_label, rests_on, reverse_closure, review, review_with, salience, topo,
+    trace, trace_via, view_roots, withdrawal_authorised, Adjacency, AgentActivity, AnyStore,
+    AppendReport, AttestationAdmission, BundleReport, Cached, DetectionContext, Edge, EdgeKind,
+    EdgeSet, EffectiveStatus, Entry, HopDiff, HotKind, HotRecords, Index, IndexError, LabelError,
+    Lineage, LineageNode, MergeError, MergeOptions, MergeReport, NodeId, OpenReport, Overlay,
+    RecipeChange, RecipeChangeKind, RetractionAuthority, RetractionPlan, RetractionPolicy,
     ReviewItem, ReviewOptions, ReviewSubject, SalienceReport, SalienceRequest, SalienceTerms,
     SalienceWeights, Scratch, Store, StoreDiff, StoreLibrary, StoreOptions, StoreRead, StoreWrite,
     SupersessionPolicy, TopoOrder, TraceKind, UnknownRecords, Via,
@@ -671,7 +672,7 @@ mod tests {
     /// manifest, and the diff will say what you decided.
     #[test]
     fn the_crate_version_is_the_one_we_intend_to_ship() {
-        assert_eq!(VERSION, "1.20.0");
+        assert_eq!(VERSION, "1.21.0");
     }
 
     /// A crate major bump MUST NOT imply a format break, and vice versa (§11). The two

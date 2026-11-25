@@ -32,12 +32,14 @@ mod event_store;
 pub mod exchange;
 #[cfg(feature = "store-redb")]
 pub mod redb;
+pub mod resample;
 pub mod sample;
 pub mod store;
 
 pub use chunk::Span;
 pub use event::Event;
 pub use event_store::{EventAddReport, EventsRead, StreamInfo, StreamRow, Tagger};
+pub use resample::{resample, Agg};
 pub use sample::{conflicts, digest, flags, Sample, SampleError};
 pub use store::{
     AddReport, Backend, Coverage, EvictReport, MemBackend, SeriesInfo, SeriesRow, Substrate,

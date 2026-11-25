@@ -99,22 +99,56 @@ fn before(lo: Bound, hi: Bound) -> bool {
     }
 }
 
-/// A range table: rows in `lo` order, with a max-`hi` tree over them.
+/// Rows per block, at least: a block holds `B / 2` to `2 * B` rows (RFC SMYSL-9 §5.2). An append
+/// moves O(B) rows within a block and O(rows / B) blocks, instead of copying every row.
+const B: usize = 512;
+
+/// A run of rows in `lo` order, with the max-`hi` tree over them.
+#[derive(Debug, Clone, Default)]
+struct Block {
+    rows: Vec<Row>,
+    /// `max(hi)` per node of a segment tree over `rows`; node 1 is the block's own `max_hi`.
+    tree: Vec<Bound>,
+}
+
+impl Block {
+    fn new(rows: Vec<Row>) -> Block {
+        let tree = build_tree(&rows);
+        Block { rows, tree }
+    }
+
+    fn retree(&mut self) {
+        self.tree = build_tree(&self.rows);
+    }
+
+    fn max_hi(&self) -> Bound {
+        self.tree[1]
+    }
+}
+
+/// A range table: rows in `lo` order, in blocks, each with a max-`hi` tree over its rows.
 ///
-/// The tree is **derived from the rows** and is not persisted: it is `O(rows)` to build and would
-/// be a second thing to keep in agreement for no gain. [`Ranges::rows`] is what the dump holds
-/// and what §3.8's byte comparison compares.
+/// The blocks are a layout, not content: iterated in order they are the one sorted row vector
+/// the table always was, which is what [`Ranges::rows`] gives, what the dump holds and what §3.8's
+/// byte comparison compares. The trees are derived from the rows and are not persisted.
 #[derive(Debug, Clone, Default)]
 pub struct Ranges {
-    rows: Vec<Row>,
+    /// Non-empty blocks, ordered by their first row, holding every row once.
+    blocks: Vec<Block>,
+    len: usize,
+    /// The rows flattened, built when [`Ranges::rows`] asks and dropped by the next change.
+    flat: std::sync::OnceLock<Vec<Row>>,
+    /// Each subject's row, for removing it without a scan. Built by the first splice and kept
+    /// with the table; never written down. `None` until then, and for good when a subject has
+    /// more than one row, which no builder in this crate makes: such a table splices whole.
+    rows_of: Option<BTreeMap<Subject, Row>>,
+    /// Set when a subject was found with two rows; splices then rebuild the table whole.
+    many: bool,
     /// Whether the corpus held an unresolved dating or an unbuilt constraint when this was built.
     ///
     /// While it does, an arriving unit can resolve one, so the incremental builder has no sound
     /// local path and recomputes. See the module note.
     danglers: bool,
-    /// `max(hi)` per node of a segment tree over `rows`, `None` meaning unbounded and therefore
-    /// maximal. Derived; never written down.
-    maxhi: Vec<Bound>,
     /// The subjects the last solve found anything bearing on, when this process solved for the
     /// table: every other row is its subject's seed. What lets an append that bears on time
     /// re-solve and rewrite only those rows (see `axis_on_append`). Never written down; a table
@@ -144,11 +178,12 @@ fn link(links: &mut Links, r: &smysl_core::Relation) {
     }
 }
 
-/// Equal by what a table answers: its rows and whether anything dangled. The tree is derived
-/// from the rows, and what a solve remembers is how the table was built, not what it holds.
+/// Equal by what a table answers: its rows and whether anything dangled. The blocks and trees
+/// are a layout of the rows, and what a solve remembers is how the table was built, not what it
+/// holds.
 impl PartialEq for Ranges {
     fn eq(&self, other: &Ranges) -> bool {
-        self.rows == other.rows && self.danglers == other.danglers
+        self.len == other.len && self.danglers == other.danglers && self.iter().eq(other.iter())
     }
 }
 
@@ -156,8 +191,16 @@ impl Eq for Ranges {}
 
 impl Ranges {
     /// The rows, in `lo` order. What the dump writes.
+    ///
+    /// Flattened from the blocks on the first call after a change, so it is O(rows) then and
+    /// free after; the commit path never calls it.
     pub fn rows(&self) -> &[Row] {
-        &self.rows
+        self.flat.get_or_init(|| self.iter().copied().collect())
+    }
+
+    /// The rows in `lo` order, without flattening them.
+    fn iter(&self) -> impl Iterator<Item = &Row> {
+        self.blocks.iter().flat_map(|b| b.rows.iter())
     }
 
     /// Whether this table was built over a corpus with something dangling in it.
@@ -167,11 +210,11 @@ impl Ranges {
 
     /// How many subjects the table holds.
     pub fn len(&self) -> usize {
-        self.rows.len()
+        self.len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.rows.is_empty()
+        self.len == 0
     }
 
     /// Build from rows that may be in any order, and in any state of repetition.
@@ -187,27 +230,90 @@ impl Ranges {
             .collect();
         rows.sort_unstable();
         rows.dedup();
-        let maxhi = build_tree(&rows);
+        Ranges::sorted(rows, danglers)
+    }
+
+    /// A table over rows already sorted and deduped, cut into blocks of `B`.
+    fn sorted(rows: Vec<Row>, danglers: bool) -> Ranges {
+        let len = rows.len();
+        let blocks = rows.chunks(B).map(|c| Block::new(c.to_vec())).collect();
         Ranges {
-            rows,
+            blocks,
+            len,
+            flat: std::sync::OnceLock::new(),
+            rows_of: None,
+            many: false,
             danglers,
-            maxhi,
             involved: None,
             links: None,
         }
     }
 
-    /// This table with the rows of `drop`'s subjects replaced by `add`: one pass over the rows,
-    /// the new ones merged in where they sort, rather than sorting every row again.
-    fn spliced(&self, drop: &BTreeSet<Subject>, add: Vec<Row>, danglers: bool) -> Ranges {
+    /// Replace the rows of `drop`'s subjects with `add`, in place.
+    ///
+    /// Each subject's row is found through `rows_of`, removed from its block, and each new row
+    /// inserted where it sorts: O(B + blocks) a row, not O(rows) (RFC SMYSL-9 §5.2). The rows that
+    /// result are the ones a merge of the kept rows and the new would give, which is what §3.8's
+    /// comparison between this and a rebuild checks.
+    fn splice(&mut self, drop: &BTreeSet<Subject>, add: Vec<Row>, danglers: bool) {
         let mut add: Vec<Row> = add
             .into_iter()
             .filter(|r| !(r.lo == Bound::Open && r.hi == Bound::Open))
             .collect();
         add.sort_unstable();
         add.dedup();
-        let kept = self.rows.iter().filter(|r| !drop.contains(&r.subject));
-        let mut rows = Vec::with_capacity(self.rows.len() + add.len());
+        self.danglers = danglers;
+        self.flat = std::sync::OnceLock::new();
+        if !self.many && self.rows_of.is_none() {
+            let mut index = BTreeMap::new();
+            let many = !self
+                .blocks
+                .iter()
+                .flat_map(|b| b.rows.iter())
+                .all(|r| index.insert(r.subject, *r).is_none());
+            self.many = many;
+            if !many {
+                self.rows_of = Some(index);
+            }
+        }
+        // A second row for one subject — two in `add`, or one beside a row `drop` keeps — is a
+        // table the subject index cannot hold: spliced whole instead, as every splice was.
+        let mut seen = BTreeSet::new();
+        let second = |r: &Row, index: &BTreeMap<Subject, Row>| {
+            !drop.contains(&r.subject) && index.contains_key(&r.subject)
+        };
+        let one_each = match &self.rows_of {
+            Some(index) => add
+                .iter()
+                .all(|r| seen.insert(r.subject) && !second(r, index)),
+            None => false,
+        };
+        if !one_each {
+            self.splice_whole(drop, add);
+            return;
+        }
+        let mut index = self.rows_of.take().expect("built above");
+        for subject in drop {
+            if let Some(row) = index.remove(subject) {
+                self.remove(&row);
+            }
+        }
+        for row in add {
+            index.insert(row.subject, row);
+            self.insert(row);
+        }
+        self.rows_of = Some(index);
+    }
+
+    /// [`Ranges::splice`] by one pass over every row: for a table where a subject has two rows,
+    /// which the subject index cannot hold.
+    fn splice_whole(&mut self, drop: &BTreeSet<Subject>, add: Vec<Row>) {
+        let kept = self
+            .blocks
+            .iter()
+            .flat_map(|b| b.rows.iter())
+            .filter(|r| !drop.contains(&r.subject));
+        let mut rows = Vec::with_capacity(self.len + add.len());
         let (mut a, mut b) = (kept.peekable(), add.into_iter().peekable());
         loop {
             let from_kept = match (a.peek(), b.peek()) {
@@ -225,14 +331,80 @@ impl Ranges {
                 rows.push(next);
             }
         }
-        let maxhi = build_tree(&rows);
-        Ranges {
-            rows,
-            danglers,
-            maxhi,
-            involved: self.involved.clone(),
-            links: self.links.clone(),
+        let mut subjects = BTreeSet::new();
+        self.many = !rows.iter().all(|r| subjects.insert(r.subject));
+        let rebuilt = Ranges::sorted(rows, self.danglers);
+        self.blocks = rebuilt.blocks;
+        self.len = rebuilt.len;
+        self.rows_of = None;
+    }
+
+    /// The block `row` belongs in: the last whose first row is not after it, or the first.
+    fn block_for(&self, row: &Row) -> usize {
+        self.blocks
+            .partition_point(|b| b.rows[0] <= *row)
+            .saturating_sub(1)
+    }
+
+    fn insert(&mut self, row: Row) {
+        if self.blocks.is_empty() {
+            self.blocks.push(Block::new(vec![row]));
+            self.len = 1;
+            return;
         }
+        let i = self.block_for(&row);
+        let block = &mut self.blocks[i];
+        let Err(at) = block.rows.binary_search(&row) else {
+            return;
+        };
+        block.rows.insert(at, row);
+        self.len += 1;
+        if block.rows.len() > 2 * B {
+            let upper = block.rows.split_off(block.rows.len() / 2);
+            block.retree();
+            self.blocks.insert(i + 1, Block::new(upper));
+        } else {
+            block.retree();
+        }
+    }
+
+    fn remove(&mut self, row: &Row) {
+        if self.blocks.is_empty() {
+            return;
+        }
+        let i = self.block_for(row);
+        let count = self.blocks.len();
+        let block = &mut self.blocks[i];
+        let Ok(at) = block.rows.binary_search(row) else {
+            return;
+        };
+        block.rows.remove(at);
+        self.len -= 1;
+        if block.rows.is_empty() {
+            self.blocks.remove(i);
+            return;
+        }
+        if block.rows.len() < B / 2 && count > 1 {
+            // Merge with a neighbour, the next one if there is one, and split again if that made
+            // a block over `2 * B`.
+            let (left, right) = if i + 1 < self.blocks.len() {
+                (i, i + 1)
+            } else {
+                (i - 1, i)
+            };
+            let moved = self.blocks.remove(right).rows;
+            let merged = &mut self.blocks[left];
+            merged.rows.extend(moved);
+            if merged.rows.len() > 2 * B {
+                let upper = merged.rows.split_off(merged.rows.len() / 2);
+                merged.retree();
+                self.blocks.insert(left + 1, Block::new(upper));
+            } else {
+                merged.retree();
+            }
+            return;
+        }
+        block.retree();
     }
 
     /// The subjects whose interval overlaps `window`, in row order.
@@ -250,54 +422,65 @@ impl Ranges {
     pub fn instrumented(&self, window: Interval) -> (Vec<Subject>, usize) {
         let mut out = Vec::new();
         let mut visited = 0usize;
-        if self.rows.is_empty() {
-            return (out, visited);
+        // The blocks holding a row with `lo < window.hi`: a prefix, since each block's first row
+        // is its least. Blocks are skipped on their first row and their `max_hi`, which reads no
+        // row as this counts them.
+        let p = self
+            .blocks
+            .partition_point(|b| before(b.rows[0].lo, window.hi));
+        for block in &self.blocks[..p] {
+            if !before(window.lo, block.max_hi()) {
+                continue;
+            }
+            // Inside the block, every row with `lo < window.hi` is a prefix, and the tree lets a
+            // subtree whose every `hi` is at or below `window.lo` be skipped whole, which is what
+            // keeps a narrow window from reading a wide prefix.
+            let limit = block.rows.partition_point(|r| before(r.lo, window.hi));
+            descend(
+                block,
+                1,
+                0,
+                block.rows.len(),
+                limit,
+                window,
+                &mut out,
+                &mut visited,
+            );
         }
-        // Every row with `lo < window.hi`, which is a prefix because the rows are in `lo` order.
-        // `partition_point` is a binary search and visits no rows as this counts them: what it
-        // reads is the sort key, not the row's membership in the answer.
-        let p = self.rows.partition_point(|r| before(r.lo, window.hi));
-        if p == 0 {
-            return (out, visited);
-        }
-        // Inside that prefix, every row with `hi > window.lo`. The tree lets a subtree whose
-        // every `hi` is at or below `window.lo` be skipped whole, which is what keeps a narrow
-        // window from reading a wide prefix.
-        self.descend(1, 0, self.rows.len(), p, window, &mut out, &mut visited);
         (out, visited)
     }
+}
 
-    /// One node of the descent: `[lo, hi)` is the node's span, `limit` the prefix end.
-    #[allow(clippy::too_many_arguments)]
-    fn descend(
-        &self,
-        node: usize,
-        lo: usize,
-        hi: usize,
-        limit: usize,
-        window: Interval,
-        out: &mut Vec<Subject>,
-        visited: &mut usize,
-    ) {
-        if lo >= limit || lo >= hi {
-            return;
-        }
-        // The prune: nothing in this subtree ends after the window starts.
-        if !before(window.lo, self.maxhi[node]) {
-            return;
-        }
-        if hi - lo == 1 {
-            *visited += 1;
-            let row = self.rows[lo];
-            if row.overlaps(window) {
-                out.push(row.subject);
-            }
-            return;
-        }
-        let mid = lo + (hi - lo) / 2;
-        self.descend(node * 2, lo, mid, limit, window, out, visited);
-        self.descend(node * 2 + 1, mid, hi, limit, window, out, visited);
+/// One node of the descent within a block: `[lo, hi)` is the node's span, `limit` the prefix end.
+#[allow(clippy::too_many_arguments)]
+fn descend(
+    block: &Block,
+    node: usize,
+    lo: usize,
+    hi: usize,
+    limit: usize,
+    window: Interval,
+    out: &mut Vec<Subject>,
+    visited: &mut usize,
+) {
+    if lo >= limit || lo >= hi {
+        return;
     }
+    // The prune: nothing in this subtree ends after the window starts.
+    if !before(window.lo, block.tree[node]) {
+        return;
+    }
+    if hi - lo == 1 {
+        *visited += 1;
+        let row = block.rows[lo];
+        if row.overlaps(window) {
+            out.push(row.subject);
+        }
+        return;
+    }
+    let mid = lo + (hi - lo) / 2;
+    descend(block, node * 2, lo, mid, limit, window, out, visited);
+    descend(block, node * 2 + 1, mid, hi, limit, window, out, visited);
 }
 
 /// `max(hi)` per node, over a recursive halving of the rows, `Open` winning as unbounded.
@@ -417,9 +600,8 @@ pub fn axis_on_append(
             })
             .map(|s| row_of(store, &found, *s, axis))
             .collect();
-        let mut next = table.spliced(&touched, add, !found.unresolved.is_empty());
-        next.involved = Some(std::sync::Arc::new(now));
-        *table = next;
+        table.splice(&touched, add, !found.unresolved.is_empty());
+        table.involved = Some(std::sync::Arc::new(now));
         return;
     }
     if batch.is_empty() {
@@ -437,7 +619,7 @@ pub fn axis_on_append(
             }
         })
         .collect();
-    *table = table.spliced(&batch, add, false);
+    table.splice(&batch, add, false);
 }
 
 /// [`axis_on_append`] for a library with no datings and no manifests (AC-8, RFC SMYSL-3
@@ -477,7 +659,7 @@ fn region_on_append(
     }
     // The store already holds the batch: the ties are read from it the first time, and only the
     // batch's are added after.
-    let mut links = match table.links.take() {
+    let links = match table.links.take() {
         Some(l) => {
             let mut l = l;
             for r in records {
@@ -533,10 +715,9 @@ fn region_on_append(
         .filter(|s| matches!(s, Subject::Unit(u) if store.contains_uid(u)))
         .map(|s| row_of(store, &found, *s, axis))
         .collect();
-    let mut next = table.spliced(&touched, add, false);
-    next.involved = None;
-    next.links = Some(std::mem::take(&mut links));
-    *table = next;
+    table.splice(&touched, add, false);
+    table.involved = None;
+    table.links = Some(links);
     true
 }
 
@@ -575,19 +756,18 @@ pub fn observed_rebuild(lib: &crate::library::Library) -> Ranges {
 
 /// The same, over an appended batch. Genuinely local: nothing propagates into `observed`.
 pub fn observed_on_append(table: &mut Ranges, records: &[Record]) {
-    let mut rows: Vec<Row> = table.rows().to_vec();
-    let mut touched = false;
+    // A unit appended twice in one batch keeps its last row, as it always did.
+    let mut add: BTreeMap<Subject, Row> = BTreeMap::new();
     for record in records {
         let Record::Unit(core) = record else { continue };
         let subject = Subject::Unit(smysl_core::canonical_uid(core));
         if let Some(row) = observed_row(subject, core.source.as_ref()) {
-            rows.retain(|r| r.subject != subject);
-            rows.push(row);
-            touched = true;
+            add.insert(subject, row);
         }
     }
-    if touched {
-        *table = Ranges::of(rows, false);
+    if !add.is_empty() {
+        let drop: BTreeSet<Subject> = add.keys().copied().collect();
+        table.splice(&drop, add.into_values().collect(), false);
     }
 }
 
@@ -630,4 +810,158 @@ pub fn named(index: &super::Index) -> BTreeMap<&'static str, &Ranges> {
     ]
     .into_iter()
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    //! RFC SMYSL-9 RT-1: after any sequence of splices, the blocked table is the table built from
+    //! scratch over the same rows, and answers every window as a scan does.
+
+    use super::*;
+
+    /// SplitMix64, so a failure reproduces from its case number.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            z ^ (z >> 31)
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    fn subject(i: u64) -> Subject {
+        let mut bytes = [0u8; 32];
+        bytes[..8].copy_from_slice(&i.to_be_bytes());
+        Subject::Unit(Uid::from_bytes(bytes))
+    }
+
+    /// A row for subject `i`: mostly instants on a narrow clock, so `lo`s collide; some long,
+    /// some open at one end, a few undated (which no table holds).
+    fn row(rng: &mut Rng, i: u64) -> Row {
+        let at = |rng: &mut Rng| Bound::At(Instant(rng.below(5_000) as i64));
+        let (lo, hi) = match rng.below(20) {
+            0 => (Bound::Open, at(rng)),
+            1 => (at(rng), Bound::Open),
+            2 => (Bound::Open, Bound::Open),
+            _ => {
+                let lo = rng.below(5_000) as i64;
+                (
+                    Bound::At(Instant(lo)),
+                    Bound::At(Instant(lo + 1 + rng.below(300) as i64)),
+                )
+            }
+        };
+        Row::new(subject(i), lo, hi)
+    }
+
+    /// The reference: what `of` builds over the rows `drop` keeps and `add`.
+    fn reference(before: &[Row], drop: &BTreeSet<Subject>, add: &[Row]) -> Ranges {
+        Ranges::of(
+            before
+                .iter()
+                .filter(|r| !drop.contains(&r.subject))
+                .chain(add)
+                .copied(),
+            false,
+        )
+    }
+
+    fn check_layout(t: &Ranges, case: u64) {
+        assert_eq!(t.len, t.blocks.iter().map(|b| b.rows.len()).sum::<usize>());
+        for (i, b) in t.blocks.iter().enumerate() {
+            assert!(!b.rows.is_empty(), "case {case}: an empty block");
+            assert!(
+                b.rows.len() <= 2 * B,
+                "case {case}: a block of {}",
+                b.rows.len()
+            );
+            let max = b.rows.iter().map(|r| r.hi).fold(b.rows[0].hi, later);
+            assert_eq!(b.max_hi(), max, "case {case}: block {i}'s max_hi");
+        }
+        assert!(
+            t.iter().zip(t.iter().skip(1)).all(|(a, b)| a < b),
+            "case {case}: order"
+        );
+    }
+
+    #[test]
+    fn splices_give_the_table_a_rebuild_gives() {
+        for case in 0..25u64 {
+            let mut rng = Rng(case);
+            let start = 1 + rng.below(3_000);
+            let mut table = Ranges::of((0..start).map(|i| row(&mut rng, i)), false);
+            let mut next = start;
+            for step in 0..60 {
+                let before: Vec<Row> = table.rows().to_vec();
+                // Drop some present subjects, some absent; re-add some of them with new rows;
+                // add new subjects. Sometimes a large batch, to split and merge blocks.
+                let big = rng.below(10) == 0;
+                let n = if big { 1_500 } else { 1 + rng.below(12) };
+                let mut drop = BTreeSet::new();
+                let mut add = Vec::new();
+                for _ in 0..n {
+                    match rng.below(4) {
+                        0 => {
+                            drop.insert(subject(rng.below(next + 10)));
+                        }
+                        1 => {
+                            let s = rng.below(next);
+                            drop.insert(subject(s));
+                            add.push(row(&mut rng, s));
+                        }
+                        _ => {
+                            drop.insert(subject(next));
+                            add.push(row(&mut rng, next));
+                            next += 1;
+                        }
+                    }
+                }
+                // A batch may name a subject twice; the last row is the one it means.
+                let mut last: BTreeMap<Subject, Row> = BTreeMap::new();
+                for r in add {
+                    last.insert(r.subject, r);
+                }
+                let add: Vec<Row> = last.into_values().collect();
+                let want = reference(&before, &drop, &add);
+                table.splice(&drop, add, false);
+                assert_eq!(table, want, "case {case}, step {step}");
+                assert_eq!(table.rows(), want.rows(), "case {case}, step {step}");
+                check_layout(&table, case);
+                // And it answers as a scan does.
+                for _ in 0..4 {
+                    let lo = rng.below(5_200) as i64 - 100;
+                    let window = Interval::of(lo, lo + 1 + rng.below(400) as i64);
+                    let mut got = table.during(window);
+                    got.sort_unstable();
+                    assert_eq!(got, scan(table.rows(), window), "case {case}, step {step}");
+                }
+            }
+            assert!(
+                !table.many,
+                "case {case}: one row a subject, so the index held"
+            );
+        }
+    }
+
+    /// A subject with two rows, which `of` allows, splices whole and stays correct.
+    #[test]
+    fn a_subject_with_two_rows_splices_whole() {
+        let a = Row::new(subject(1), Bound::At(Instant(1)), Bound::At(Instant(2)));
+        let b = Row::new(subject(1), Bound::At(Instant(5)), Bound::At(Instant(9)));
+        let c = Row::new(subject(2), Bound::At(Instant(3)), Bound::At(Instant(4)));
+        let mut t = Ranges::of([a, b, c], false);
+        let d = Row::new(subject(3), Bound::At(Instant(0)), Bound::At(Instant(7)));
+        t.splice(&BTreeSet::from([subject(3)]), vec![d], false);
+        assert!(t.many);
+        assert_eq!(t.rows(), &[d, a, c, b]);
+        t.splice(&BTreeSet::from([subject(1)]), Vec::new(), false);
+        assert_eq!(t.rows(), &[d, c]);
+        assert!(!t.many, "one row a subject again");
+    }
 }

@@ -510,8 +510,18 @@ for fixture in sorted(glob.glob('fixtures/tutorial/*/**', recursive=True)):
     # the fixture sits, so `.smysl/staged.smy` is checked against its chapter like any other.
     chapter = os.path.join('Documentation', 'manual',
                            fixture.split(os.sep)[2] + '.typ')
-    body = open(fixture).read()
-    if body not in open(chapter).read():
+    text = open(chapter).read()
+    # A store or a signature file is CBOR, which no chapter can print. The reader cannot copy
+    # it from the page, so the most the page can do is name it, and the fixture folder's README
+    # says how it was made. Named is checked; a binary fixture the chapter never mentions is as
+    # stale as a text one it no longer prints (SMYSL-8 TR-P4, the first binary fixtures).
+    try:
+        body = open(fixture, encoding='utf-8').read()
+    except UnicodeDecodeError:
+        if os.path.basename(fixture) not in text:
+            stale.append((fixture, chapter))
+        continue
+    if body not in text:
         stale.append((fixture, chapter))
 for fixture, chapter in stale:
     print(f'=== {fixture}')

@@ -106,28 +106,39 @@ pack       --tokenizer
 pack       --mode
 pack       [possible values: greedy, exact]
 pack       --seed-check
+pack       --keys
+pack       --agent-prefix
+pack       --status-at-least
+pack       --sigs
+pack       --trust-sigs
+pack       [possible values: advisory, selective, strict]
 pack       --help
 merge      <STORE>
 merge      --config
-merge      --policy
-merge      [possible values: latest, all, contend]
-merge      --retraction
-merge      [possible values: strict, advisory, ignore]
+merge      --require-sigs
+merge      [possible values: advisory, selective, strict]
+merge      --keys
 merge      --store
+merge      --agent-prefix
 merge      --output
-merge      --staged
 merge      --format
 merge      [possible values: surface, cbor, pack]
-merge      --sign
-merge      --key
+merge      --status-at-least
+merge      --policy
+merge      [possible values: latest, all, contend]
 merge      --strict
-merge      --fail-on-contention
 merge      --offline
-merge      --max-contentions-per-agent
+merge      --retraction
+merge      [possible values: strict, advisory, ignore]
 merge      --no-color
+merge      --staged
 merge      --noprogress
+merge      --sign
 merge      --json
+merge      --key
+merge      --fail-on-contention
 merge      --quiet
+merge      --max-contentions-per-agent
 merge      --verbose
 merge      --backend
 merge      [possible values: memory, redb]
@@ -244,11 +255,17 @@ thread     --arity
 thread     --json
 thread     --explain
 thread     --quiet
+thread     --keys
 thread     --verbose
+thread     --agent-prefix
 thread     --backend
 thread     [possible values: memory, redb]
 thread     --shard
+thread     --status-at-least
 thread     --seed-check
+thread     --sigs
+thread     --trust-sigs
+thread     [possible values: advisory, selective, strict]
 thread     --help
 salience   [PATH]
 salience   --config
@@ -261,11 +278,17 @@ salience   [possible values: surface, cbor, pack]
 salience   --weights
 salience   --seed
 salience   --strict
+salience   --keys
 salience   --offline
+salience   --agent-prefix
 salience   --no-color
 salience   --noprogress
+salience   --status-at-least
 salience   --json
+salience   --sigs
 salience   --quiet
+salience   --trust-sigs
+salience   [possible values: advisory, selective, strict]
 salience   --verbose
 salience   --backend
 salience   [possible values: memory, redb]
@@ -317,10 +340,16 @@ retract    --sign
 retract    --strict
 retract    --key
 retract    --offline
+retract    --keys
 retract    --no-color
+retract    --agent-prefix
 retract    --noprogress
 retract    --json
+retract    --status-at-least
 retract    --quiet
+retract    --sigs
+retract    --trust-sigs
+retract    [possible values: advisory, selective, strict]
 retract    --verbose
 retract    --backend
 retract    [possible values: memory, redb]
@@ -339,11 +368,18 @@ withdraw   --format
 withdraw   [possible values: surface, cbor, pack]
 withdraw   --dry-run
 withdraw   --strict
+withdraw   --key
 withdraw   --offline
+withdraw   --keys
 withdraw   --no-color
+withdraw   --agent-prefix
 withdraw   --noprogress
 withdraw   --json
+withdraw   --status-at-least
 withdraw   --quiet
+withdraw   --sigs
+withdraw   --trust-sigs
+withdraw   [possible values: advisory, selective, strict]
 withdraw   --verbose
 withdraw   --backend
 withdraw   [possible values: memory, redb]
@@ -543,6 +579,8 @@ ingest     --window-level
 ingest     --digest-budget
 ingest     --reextract
 ingest     --single-pass
+ingest     --sign
+ingest     --key
 ingest     --cost
 ingest     --help
 attest     [PATH]
@@ -626,11 +664,17 @@ reindex    --seed-check
 reindex    --help
 ui         [PATH]
 ui         --config
+ui         --keys
+ui         --agent-prefix
 ui         --store
 ui         --output
+ui         --status-at-least
 ui         --format
 ui         [possible values: surface, cbor, pack]
+ui         --sigs
 ui         --strict
+ui         --trust-sigs
+ui         [possible values: advisory, selective, strict]
 ui         --offline
 ui         --no-color
 ui         --noprogress
@@ -822,6 +866,12 @@ q          --view
 q          --save
 q          --rerun
 q          --current
+q          --keys
+q          --agent-prefix
+q          --status-at-least
+q          --sigs
+q          --trust-sigs
+q          [possible values: advisory, selective, strict]
 q          --help
 ask        [QUESTION]
 ask        [PATH]
@@ -857,6 +907,12 @@ ask        --shard
 ask        --at
 ask        --seed-check
 ask        --yes
+ask        --keys
+ask        --agent-prefix
+ask        --status-at-least
+ask        --sigs
+ask        --trust-sigs
+ask        [possible values: advisory, selective, strict]
 ask        --help
 measure    <IDS>
 measure    [PATH]
@@ -1068,7 +1124,10 @@ tel        --items
 tel        --zabbix-api
 tel        --top
 tel        --seed
+tel        --similarity
 tel        --older-than
+tel        --sign
+tel        --key
 tel        --yes
 tel        --help
 bund       --config
@@ -1180,3 +1239,36 @@ verify     [possible values: memory, redb]
 verify     --shard
 verify     --seed-check
 verify     --help
+keys       <ACTION>
+keys       [possible values: list, add, revoke, rotate, check]
+keys       [STORE]
+keys       --config
+keys       --keys
+keys       --sigs
+keys       --agent
+keys       --output
+keys       --ed25519
+keys       --format
+keys       [possible values: surface, cbor, pack]
+keys       --entry
+keys       --strict
+keys       --max-status
+keys       --offline
+keys       --no-color
+keys       --not-before
+keys       --noprogress
+keys       --not-after
+keys       --json
+keys       --kid
+keys       --after
+keys       --quiet
+keys       --compromised
+keys       --verbose
+keys       --backend
+keys       [possible values: memory, redb]
+keys       --reason
+keys       --out
+keys       --shard
+keys       --rewrite
+keys       --seed-check
+keys       --help

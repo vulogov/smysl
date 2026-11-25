@@ -9,7 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use smysl_core::{Label, Lod, Uid};
-use smysl_graph::{salience, AnyStore, SalienceReport, SalienceRequest, Store};
+use smysl_graph::{
+    salience, AnyStore, AttestationAdmission, SalienceReport, SalienceRequest, Store,
+};
 use smysl_pack::{pack, Estimator, PackRequest, Reason};
 
 use crate::Pane;
@@ -187,6 +189,14 @@ impl App {
     /// store itself, moved.
     pub fn with_store(store: AnyStore, labels: BTreeMap<Label, Uid>) -> App {
         App::new(store.into_memory(), labels)
+    }
+
+    /// The same app, with salience — and so the pack simulator — under a signature policy
+    /// (RFC SMYSL-8 §4.1).
+    pub fn with_admission(mut self, a: AttestationAdmission) -> App {
+        self.salience = salience(&self.store, &SalienceRequest::default().with_admission(a));
+        self.resimulate();
+        self
     }
 
     // -- reads ------------------------------------------------------------

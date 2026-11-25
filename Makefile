@@ -153,14 +153,14 @@ UNPUBLISHED :=
 # is a crate whose API nobody chose.
 LIBRARIES := $(filter-out smysl,$(PUBLISHED)) $(UNPUBLISHED)
 
-# The forty-four subcommands, for `cli-surface`. Written out rather than read from `--help`,
+# The forty-five subcommands, for `cli-surface`. Written out rather than read from `--help`,
 # for the same reason `tests/dispatch.rs` writes them out: a list derived from the binary
 # shrinks silently when the binary does, and the regenerated golden would then record the
 # absence as if it were the intent.
 COMMAND_NAMES := fmt check pack merge diff trace view bundle thread salience find retract \
                  withdraw resolve review commit render import relink compact ingest attest providers \
                  usage reindex ui text date same-as link summarise q ask measure assess lib schema migrate tel bund lsp-server \
-                 keygen sign verify
+                 keygen sign verify keys
 
 DOCS := SMYSL_MANUAL SMYSL_FORMAT_GUIDE SMYSL_RATIONALE SMYSL_RATIONALE_PRESENTATION
 

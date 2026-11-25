@@ -1,0 +1,6 @@
+# smysl's public keys (RFC SMYSL-7 §5), written by `smysl keys`.
+{
+  keys: [
+    { agent: "tool:smysl-import", ed25519: "hex:d777c0751f8b656e98a1f2067387ae191e83447ca2a260c37235a78cc41bae7b", kid: "f6633d8a0b7796fc684dfc4036f56d49" }
+  ]
+}

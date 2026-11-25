@@ -101,6 +101,57 @@ impl KeyFile {
         Ok(out)
     }
 
+    /// A whole key file, as `smysl keys` writes it: a header comment and one entry a line, in
+    /// agent and id order. [`KeyFile::parse`] reads it back to an equal resolver (RFC SMYSL-8
+    /// §6).
+    pub fn render(keys: &MemoryKeyResolver) -> String {
+        let mut s = String::from(
+            "# smysl's public keys (RFC SMYSL-7 §5), written by `smysl keys`.\n{\n  keys: [\n",
+        );
+        for k in keys.keys() {
+            s.push_str("    ");
+            s.push_str(&KeyFile::entry(k));
+            s.push('\n');
+        }
+        s.push_str("  ]\n}\n");
+        s
+    }
+
+    /// The 1-based line of the first comment a [`render`](KeyFile::render) would lose: any
+    /// comment after the leading block of `#` lines. A comment inside a string is not one.
+    pub fn comment_line(text: &str) -> Option<usize> {
+        let mut leading = true;
+        for (i, line) in text.lines().enumerate() {
+            let t = line.trim_start();
+            if leading && (t.is_empty() || t.starts_with('#')) {
+                continue;
+            }
+            leading = false;
+            let (mut quote, mut escaped) = (None::<char>, false);
+            let mut chars = t.chars().peekable();
+            while let Some(c) = chars.next() {
+                match quote {
+                    Some(q) => {
+                        if escaped {
+                            escaped = false;
+                        } else if c == '\\' {
+                            escaped = true;
+                        } else if c == q {
+                            quote = None;
+                        }
+                    }
+                    None => match c {
+                        '"' | '\'' => quote = Some(c),
+                        '#' => return Some(i + 1),
+                        '/' if matches!(chars.peek(), Some('/') | Some('*')) => return Some(i + 1),
+                        _ => {}
+                    },
+                }
+            }
+        }
+        None
+    }
+
     /// One key's entry, on one line, as `parse` reads it.
     pub fn entry(key: &ResolvedKey) -> String {
         let mut s = format!(

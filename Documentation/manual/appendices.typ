@@ -11,8 +11,8 @@ command surface is declared, and therefore the only place this table can drift o
 sync with the binary. Each subcommand heading repeats three facts from the command table
 in `src/main.rs` (`§23`): its one-line description, its *purity* (`pure` — a bit-reproducible
 function of its inputs; `mixed` — pure except for one option; `model-dependent` — the only
-kind that can reach off the machine), and the delivery phase that wired it up. Thirty-eight
-of the forty-four subcommands have an entry here. The other six are documented where they are
+kind that can reach off the machine), and the delivery phase that wired it up. Thirty-nine
+of the forty-five subcommands have an entry here. The other six are documented where they are
 used: `same-as`, `link`, `summarise`, `q` and `ask` with the library in Part VI and Chapter 18,
 and `bund` in Chapter 39. This paragraph said "all twenty-five" until 1.20, by when there were
 forty-one.
@@ -123,6 +123,10 @@ These apply to every subcommand, in any position on the command line.
     ([`--staged`], [—], [Commit `.smysl/staged.smy` into the store.]),
     ([`--sign`], [—], [With `--staged` and `-o`: sign the staged attestations by `--key`'s agent into the output's `.sig`.]),
     ([`--key`], [`FILE`], [The signing key for `--sign`.]),
+    ([`--require-sigs`], [`advisory|selective|strict`], [Judge the merged store under the mode first; on a failure print `verify`'s report, write nothing, exit 1.]),
+    ([`--keys`], [`FILE`], [`--require-sigs`: the key file (default: `.smysl/keys.hjson` beside the output).]),
+    ([`--agent-prefix`], [`PREFIX` (repeatable)], [`--require-sigs selective`: the agents whose attestations must verify.]),
+    ([`--status-at-least`], [`STATUS`], [`--require-sigs selective`: the unit status from which attestations must verify.]),
     ([`--fail-on-contention`], [—], [Exit 5 when the merged store carries a contention.]),
     ([`--max-contentions-per-agent`], [`N`], [Warn when one merge raises more than N contentions.]),
     ([`STORE …`], [positional, 1 or more, required], [Stores to merge; `-` reads stdin (rule P).]),
@@ -1171,6 +1175,10 @@ series, changes, anomalies and alerts that are members of each, and the log temp
 window. Each line gives the MinHash similarity out of 128, the exact Jaccard index it
 estimates, and the episode's label. When the nearest carry labels, the most common is printed.
 It writes nothing.
+`--similarity tel/minhash/2?…` reads two more kinds of feature (1.21). `templates=novel` keeps
+a template only when the stream's previous window has none of its family, or when its rate rose
+more than `rise=` times (4 by default). `kinds=on` adds each anomaly's metric name without its
+labels, so one fault on two services shares a feature.
 
 `tel at SERIES MS` prints the value in force at `MS`, the last sample at or before it, for each
 instrument the series has samples from. `SERIES` is a series uid or `<scheme>:<key>`. A stale
@@ -1224,8 +1232,12 @@ carried to other data. A `cusum/1`, `pelt/1` or `mad/1` recipe, for `tel detect`
 calibrate`, may carry `floor: resolution`: the detector's scale is then at least the smallest
 step between the series' distinct values, so a flat stretch is not read as infinitely precise.
 `floor: spread` holds it at a tenth of the series' standard deviation instead, for float-valued
-series (RFC SMYSL-3 §21.2). An argument not admitted is exit 2, and a rate the ladder cannot meet is
-exit 1.
+series (RFC SMYSL-3 §21.2). `step: MS` reads the series at one sample every `MS`, each window's
+buckets aligned to its start: `agg: last` (the default) takes each bucket's last sample, as a
+scraper at that interval would, and `agg: mean` or `agg: max` a rollup at the bucket's start.
+Both keys go into the recipe each output records. Under `step`, `tel calibrate` refuses, with
+exit 1, a window that holds fewer than 20 points (1.21). An argument not admitted is exit 2, and
+a rate the ladder cannot meet is exit 1.
 
 `tel info RECIPE --series S… --during FROM-TO` computes an information measure (RFC SMYSL-5)
 over each series and its instruments, or `--instrument I` alone. `RECIPE` is an HJSON file, for
@@ -1314,6 +1326,7 @@ it prints what it would evict and removes nothing.
     ([`--lookback`], [`MS`], [`investigate show`: how far before the opening to look for unexplored evidence. Default one hour.]),
     ([`--top`], [`N`], [`similar`: how many episodes to print. Default 5.]),
     ([`--seed`], [`S`], [`similar`: the MinHash seed, which is part of its recipe. Default 0.]),
+    ([`--similarity`], [`RECIPE`], [`similar`: the similarity recipe, `tel/minhash/1?seed=S` or `tel/minhash/2?seed=S&templates=overlap|novel&rise=N&kinds=on|off`. Not with `--seed`. Default `tel/minhash/1?k=128&seed=0`. (1.21)]),
     ([`--older-than`], [`DUR`], [`evict`: the retention bound before `--at`, a whole number and `s`, `m`, `h`, `d` or `w`. Required.]),
     ([`--yes`], [—], [Write the snapshots and commit the units, rather than staging them and writing nothing. `evict`: evict, rather than report what would go. `trace` and `templates`: commit the units, with `--at`.]),
     ([`-s, --store`], [`LIB`], [The library. Created by the first `--yes`.]),
@@ -1418,6 +1431,37 @@ parse, 2 on a usage error or a key file that is missing or malformed. A forged, 
 over-cap or misattributed signature fails every mode; an unsigned attestation, or one signed
 with a key the file does not hold, is a warning in `advisory` and an error in `strict` and in
 `selective`'s scope. Chapter 21 walks through it.
+
+#section("keys")
+
+*List, add, revoke and rotate the key file's keys; check a store's signatures against it.* Pure · TR-P3.
+
+#dtable(
+  (auto, auto, 1fr),
+  (
+    ([Flag], [Value], [Meaning]),
+    ([`ACTION`], [positional, required], [`list`, `add`, `revoke`, `rotate`, or `check STORE`.]),
+    ([`--keys`], [`FILE`], [The key file; `.smysl/keys.hjson` here by default (for `check`, beside the store).]),
+    ([`--entry`], [`FILE`], [`add`: entries as `keygen` prints them, one a line; `-` reads stdin.]),
+    ([`--agent`], [`AGENT`], [`add` with `--ed25519`, and `rotate`: the key's agent.]),
+    ([`--ed25519`], [`KEY`], [`add`: the public key, `hex:` or `base64:`, raw or SubjectPublicKeyInfo DER.]),
+    ([`--max-status`], [`STATUS`], [`add`, `rotate`: the highest status the key vouches for.]),
+    ([`--not-before`, `--not-after`], [`MS`], [`add`: a key valid only for attestations whose clock is in the range.]),
+    ([`--kid`], [`KID`], [`revoke`: the key, by id or an eight-digit prefix.]),
+    ([`--after`], [`MS`], [`revoke`: refuse signatures on attestations at or after `MS`.]),
+    ([`--compromised`], [—], [`revoke`: refuse every signature the key made, since a stolen key can backdate.]),
+    ([`--reason`], [`TEXT`], [`revoke`: why.]),
+    ([`--out`], [`FILE`], [`rotate`: where the new signing key goes, owner-only.]),
+    ([`--rewrite`], [—], [Rewrite a key file whose comments would be lost.]),
+    ([`--sigs`], [`FILE`], [`check`: the signature file, as for `sign`.]),
+  ),
+)
+
+`rotate` makes a key for the agent, adds it, and revokes the agent's active keys for
+attestations from now on, in one write: signatures made before stay valid. The file is
+rewritten whole, through a temporary file and a rename, keeping its permissions; a comment past
+its leading `#` lines would be lost, so that is refused without `--rewrite`, naming the line
+(RFC SMYSL-8 §6).
 
 // ═══════════════════════════════════════════════════════════════════════
 // Appendix B — Full Diagnostic Code Reference

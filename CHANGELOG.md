@@ -7,6 +7,131 @@ and the facade asserts the two are independent.
 
 ---
 
+## 1.21.0 — 2026-11-25
+
+Two RFCs, both built in full. Signatures now change what counts (RFC SMYSL-8), and three
+measurements 1.20 left open have run (RFC SMYSL-9), two of them on RCAEval's real incidents. No
+crate is new, the wire format did not change, the registry is 176, and `smysl/1.0` holds.
+
+**Trust that reads signatures (RFC SMYSL-8, TR-P1 to TR-P4).** In 1.20 signatures stopped at the
+report. Now, under `--trust-sigs advisory|selective|strict` or `trust:` in the configuration, an
+attestation the mode would fail stops counting toward corroboration, thread derivation and origin
+authority. With no policy every result is what it was. Under a policy, `--as` must be proven with a
+key. `smysl keys` lists, adds, revokes and rotates keys and checks a store against them. `ingest`,
+`tel read` and `merge` sign at the commit, and `merge --require-sigs` refuses to write a store that
+would fail.
+
+**Range tables that grow by less than their size (SMYSL-9 RT-P1).** The text library's range
+tables append in blocks. At 10⁵ units the late commit is 4.75 ms at p50, down from 7.7, and the
+tables' share of it is 1.9 %, down from 41 %.
+
+**Episode similarity and calibration on real incidents (SMYSL-9 Parts A and B).**
+`tel/minhash/2` adds novel templates by family and `kind:` features, and `step:` with `agg:`
+reads a series at a coarser cadence. Both were run on RCAEval, and the results are reported as
+measured. The new features met no gate: recurrence stays at 0.24 / 0.53 / 0.33 against 0.56 /
+0.54 / 0.36 without templates, so `/1` stays the default. Calibration carries across systems at
+5 s and 15 s at the gate's edge, but a value set at 1 s does not carry to 15 s, so calibrate at
+the cadence the series is scraped at.
+
+**Still open.** GE-M7 has not run: it needs the Train-Ticket testbed (D-T12) and agent runs, arms
+(a) to (d). Helix, VS Code and Zed recipes for the language server are read, not run. Episode
+similarity on real incidents is still weak: Sock Shop's singleton templates and Train Ticket's
+unexplained shortfall are named, not fixed. The other real-data runs, OKO's own ledger, and what
+earlier releases left did not move.
+
+### Trust that reads signatures, and three measurements run (RFC SMYSL-8, SMYSL-9)
+
+RFC SMYSL-7 made signatures and stopped at the report: corroboration and origin authority still
+counted every `AgentId` as written. RFC SMYSL-8 specifies what changes when they read
+signatures; RFC SMYSL-9, beside it, plans three measurements 1.20 left open. Both were read
+against the code first (SMYSL-8 R1): an exclusion set would have let a strict policy fail open
+on an attestation it never saw, ingest attests as `tool:smysl-ingest` rather than as the model,
+and `attest` writes nothing to sign.
+
+- **Admission.** Under a verification mode, an attestation is admitted when the mode would not
+  fail it, so exactly what `smysl verify --mode M` reports as an error is what stops counting.
+  `smysl::sign::admission` computes it; `smysl_graph::AttestationAdmission` carries it down, by
+  record hash, and decides an attestation it did not judge by the mode: admitted under
+  `Advisory`, excluded under `Selective` and `Strict`.
+- **Corroboration.** `SalienceRequest::with_admission`: only admitted attestations form groups,
+  and before ancestry is compared, so a forged attestation cannot knock out an honest group by
+  naming its parents. `SalienceTerms::excluded_groups` says what a policy removed.
+  `DeriveOptions::with_admission` passes it to thread derivation.
+- **Origin authority.** `plan_retraction_admitted`: an origin claimed only by an excluded
+  attestation does not authorise, and the refusal says so. `plan_retraction` is unchanged.
+- **`verify` sees attestations held without a record.** An edge can hold attestations in memory
+  that have no log record of their own; `verify_store`, `verified_attesters` and `admission` now
+  judge them too (SMYSL-8 R2-2).
+- With no policy, every salience, thread and retraction result is what it was. The new type is
+  `AttestationAdmission` because `smysl::Admission` is already a view's granularity.
+- **TR-P2: the policy in the CLI.** `--trust-sigs advisory|selective|strict`, with `verify`'s
+  `--keys`, `--agent-prefix`, `--status-at-least` and `--sigs`, on `salience`, `pack`, `thread`,
+  `q`, `ask`, `ui`, `retract` and `withdraw`; or `trust: { signatures: … }` in
+  `.smysl/config.hjson`, read by `smysl::sign::TrustConfig`. A policy that cannot be applied — no
+  key file, a malformed `trust:` — exits 2 rather than counting everything.
+  `salience --explain` lists the groups a policy removed. `ask` and `q` carry it in
+  `Env::with_admission`, the TUI in `App::with_admission`.
+- **Proving `--as`.** Under a policy, each `--as` agent in its scope needs a `--key` (now
+  repeatable) that verifies against the key file: a key anyone could `keygen` proves nothing
+  (SMYSL-8 R2-5). `retract --sign` signs one attestation per key, so a quorum signs with each.
+  `withdraw`'s authority check moved into the library as `withdrawal_authorised`, one rule with
+  retraction's.
+- **TR-P3: `smysl keys`.** `list`, `add` (from `keygen`'s printed entry, or `--agent` and
+  `--ed25519`), `revoke` (`--after MS`, or `--compromised` for every signature the key made),
+  `rotate` (a new key, and the agent's old keys revoked from now on, in one write) and
+  `check STORE` (signatures per key, unknown keys, keys that signed nothing). The file is
+  rewritten whole by `smysl::sign::KeyFile::render`, which `KeyFile::parse` reads back to an
+  equal resolver; a comment the rewrite would drop is refused without `--rewrite`. 45 commands.
+- **Signing at the commit.** `--sign --key K` on `ingest --yes`, `ingest --text` and
+  `tel read --yes` signs the attestations the run committed. The key's agent must be the one
+  the command attests as — `tool:smysl-ingest`, `tool:smysl-tel` — and that is checked before
+  any provider is called, so a wrong key exits 2 and costs nothing.
+- **TR-P4: `merge --require-sigs MODE`.** The merged store, with every input's signatures and
+  the staged batch after `--sign`, is judged under the mode before the output is written. A
+  failure prints `verify`'s report, each finding naming the inputs that carried its record
+  (`(in day.cbor)`, or `inputs` in `--json`), writes nothing and exits 1. The union is what is
+  judged, so a signed and an unsigned copy of one attestation pass together. `--keys`,
+  `--agent-prefix` and `--status-at-least` as on `verify`; a mode that cannot be applied exits
+  2 before any input is read. The manual's chapter 21 gains a section on signatures that act,
+  replayed by `doc-output` against committed fixtures.
+- **RFC SMYSL-9 RT-P1: range tables that grow by less than their size.** The text library's
+  `said`, `composed` and `observed` tables (`smysl_text::index::ranges::Ranges`) keep their rows in
+  blocks of 256 to 1,024, each block with its own max-`hi` tree, so an append moves O(B + rows/B)
+  rows instead of copying every row and rebuilding the tree. `rows()`, equality, query answers
+  and the sidecar bytes are unchanged, and a property test checks every splice against a
+  rebuild. At 10⁵ units (`oko_ledger`, 116k operations) the late commit is 4.75 ms at p50, down
+  from 7.7, and the tables' share of it is 1.9 %, down from 41 %. RFC SMYSL-3 §17.1 is amended
+  with the figures.
+- **RFC SMYSL-9 SI-P1: `tel/minhash/2`, two more kinds of similarity feature.** Read against the
+  code first (R1-A): 1.20's "new" templates were already those absent from the window before, so
+  the drift is Drain generalising a template it had, and novelty is judged by family, not text.
+  `templates=novel` drops a template whose family (as many words, none different, `<*>` matching
+  anything) is in the same stream's previous window, unless its rate rose more than `rise=`
+  times (default 4), when it is `template-rise:`. `kinds=on` adds `kind:METRIC:DIRECTION` per
+  anomaly, the metric being the series' name without its labels (Prometheus, OTLP, Zabbix).
+  `similar::Recipe`, `episodes_with`, `nearest_with`, `MinHash::of` and `metric_name` are new;
+  `tel similar --similarity RECIPE` reads one. `/1` gives 1.20's signatures bit for bit, and
+  stays the default.
+- **RFC SMYSL-9 CC-P1: a series at a coarser cadence.** `smysl_series::resample(samples, from,
+  step, agg)` with `Agg::{Last, Mean, Max}`: buckets aligned to `from`, gaps kept as gaps; `Last`
+  is what a scraper at that interval records, checked against one on generated series. A
+  `cusum/1`, `pelt/1` or `mad/1` recipe takes `step: MS` and `agg:` (default `last`), so `tel
+  detect` and `tel calibrate` read the resampled series and every output's recipe says so; a
+  recipe without them is the same text and hash. Under a step, calibration refuses a window of
+  fewer than 20 points (`detect::MIN_N`), naming it. `detect::Options` gains `resample`.
+- **SMYSL-9 SI-P2: the run, and no gate met.** On RCAEval RE2, `templates=novel` leaves
+  recurrence at 0.24 / 0.53 / 0.33 (MinHash; SS / OB / TT) against the no-templates 0.56 / 0.54
+  / 0.36 it had to reach, and `kinds=on` moves the fault-type reading by at most 0.05, short of
+  0.40. The noise on Sock Shop is not drift but singletons: lines that keep their own user names
+  and so are each their own Drain template. Without them the templates neither help nor hurt.
+  `/1` stays the default. Renaming the series moved MinHash by up to 0.04 with exact Jaccard
+  unchanged, which is the size of the differences gated: SMYSL-3 §26 and SMYSL-9 R2-A2.
+- **SMYSL-9 CC-P2: calibration at 5 s and 15 s.** `ge_i3_rcaeval --step MS`. CUSUM under `floor:
+  resolution`, calibrated on Sock Shop at 5 s, holds 10 % when carried: 0.0 % on Online
+  Boutique and 10.0 % on Train Ticket, the gate's edge, and the same at 15 s. A value set at 1 s
+  does not carry to 15 s: CUSUM's alarms fall to 0 % and its recall to 0–53 %. Calibrate at the
+  cadence the series is scraped at (SMYSL-5 R13).
+
 ## 1.20.0 — 2026-11-24
 
 Two RFCs built from first phase to last, and one gap 1.19 named closed. `smysl` gains a language

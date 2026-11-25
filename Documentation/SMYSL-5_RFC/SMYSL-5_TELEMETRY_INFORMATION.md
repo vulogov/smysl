@@ -35,6 +35,7 @@ Part A.
 | R10 | 2026-11-22 | 1.19. **R10-1** Every calibration is also made under `floor: resolution` (3 §21.2) and at a transfer margin of 2 (3 §21.1). **R10-2** Its result: the floor brings CUSUM's values to sane ranges and with them RE2-OB's delays at one value a trial (100 % against 13 %), and does nothing for PELT on float-valued metrics; a margin of 2 halves an overshoot that is sampling and not one that is the systems differing. R7's verdict holds, with one RE2-OB pair under the floor flagged by a statistic and no detector (§15). |
 | R11 | 2026-11-23 | 1.19. **R11-1** Per-series calibration no longer refuses when a series fires at the ladder's top in a fault-free trial: the series takes the top, those trials count against the rate jointly, and only more of them than the rate allows refuse (3 §21.1). **R11-2** Every R10 calibration on RE2-SS is carried to a third system, RE2-TT (Train Ticket). CUSUM under `floor: resolution` at one value a trial is the only detector configuration that held its rate on both systems; per-kind values overshoot on one system or the other, PELT's up to every fault-free window. R7's verdict holds (§15). |
 | R12 | 2026-11-23 | 1.20. **R12-1** Every calibration is also made under `floor: spread` (3 §21.2), a scale at least a tenth of the series' standard deviation. **R12-2** Its result: PELT's values fall from 10¹⁷–10²⁰ to 10⁴–10⁵, and carried from RE2-SS they hold 10 % on RE2-OB and RE2-TT at margin 1, one value a trial or per kind; at margin 2, one value a trial passes the floor's ceiling (`100·n`) and sees nothing. R7's verdict holds (§15). |
+| R13 | 2026-11-25 | 1.21 (RFC SMYSL-9 CC-P2). **R13-1** GE-I3's calibration rerun at 5 s and 15 s: every series resampled by `Last` (a scraper at that interval), everything else as R12. **R13-2** Its result: CUSUM under `floor: resolution`, one value a trial, calibrated on RE2-SS carries at 5 s with 0.0 % fault-free alarms on RE2-OB and 10.0 % on RE2-TT, the gate's edge, and the same at 15 s; values set at 1 s and used at 5 s or 15 s alarm less and see less, CUSUM's recall falling to 0–53 % at 15 s (§15). |
 
 ---
 
@@ -955,6 +956,38 @@ flagging at least half of every type on RE2-SS?
   `floor: spread` at margin 1, keeping PELT's penalty under `100·n`; MAD with `floor: resolution`
   at margin 2.
 - **R7's verdict holds** under the spread floor on all three systems.
+
+**At a coarser cadence, run in 1.21** (R13; RFC SMYSL-9 CC-P2, gates fixed there in §4.3). The
+same command with `--step 5000` and `--step 15000`: every series is read as a scraper at that
+interval would have recorded it (`smysl_series::resample`, `Agg::Last`), aligned to each case's
+first window, and the values calibrated at 1 s on RE2-SS are run on the resampled pairs beside
+the ones calibrated at the new cadence. A six-minute window holds 72 points at 5 s and 24 at
+15 s; at 15 s, 43 of RE2-TT's 1,968 (series, window) hold fewer than 20, against 1 at 1 s.
+
+| CUSUM, `floor: resolution`, one value a trial, margin 1 | 1 s (R12) | 5 s | 15 s |
+|---|---|---|---|
+| RE2-SS's own calibration: fault-free pairs over | 8/90 | 8/90 | 7/90 |
+| RE2-SS's own: recall, `cpu` … `socket` | 100 / 100 / 100 / 93.3 / 100 / 93.3 | 100 all | 100 / 100 / 100 / 86.7 / 86.7 / 93.3 |
+| carried to RE2-OB: fault-free alarms | 3.3 % | **0.0 %** | 0.0 % |
+| carried to RE2-TT: fault-free alarms | 6.7 % | **10.0 %** | 10.0 % |
+| RE2-SS's 1 s value at this cadence: fault-free alarms | | 0.0 % | 0.0 % |
+| RE2-SS's 1 s value at this cadence: recall | | 40–73 % | 0–53 % |
+
+- **CC-1 holds, at its edge.** Calibrated and carried at 5 s, CUSUM under `floor: resolution`
+  stays within 10 % on both held-out systems: 0.0 % on RE2-OB and 10.0 % on RE2-TT, 9 of 90,
+  exactly the rate. At 15 s, reported either way, it is the same. At margin 2 it is 3.3 % on
+  RE2-TT at 5 s and 6.7 % at 15 s.
+- **A value does not carry across cadence (CC-2).** Calibrated at 1 s and used at 5 s or 15 s on
+  the same system, CUSUM's and PELT's false alarms fall (CUSUM 0 %, PELT 0 to 2.2 %) and MAD's
+  stay near the rate (7.8 to 11.1 % at 5 s, 7.8 to 14.4 % at 15 s, per kind the higher), and
+  what CUSUM sees falls with its alarms: CUSUM's recall at its 1 s value falls to 40–73 % at 5 s and
+  0–53 % at 15 s, where calibrated at 15 s it is 87–100 %. Not measured, and the likeliest
+  reading: a CUSUM `h` bounds a sum of deviations over points, and a coarser series has fewer
+  of them. Calibrate at the cadence the series is
+  scraped at.
+- **Recall per cadence (CC-3).** At each cadence's own calibration, the level detectors still
+  see every fault type on RE2-SS, at 87 to 100 %. The statistics keep their `min_n: 50` and are
+  refused at 15 s, as the RFC expected.
 
 **GE-I5, run at TI-P5 on simulated data** (`cargo run --release -p smysl-tel --example
 ge_i5`, 300 pairs of each kind, seeds 1 to 5). The estimator is §10's, written in the example

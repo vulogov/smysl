@@ -210,6 +210,18 @@ impl MemoryKeyResolver {
     pub fn keys(&self) -> impl Iterator<Item = &ResolvedKey> {
         self.keys.values()
     }
+
+    /// Set the status of the key with id `kid`, whichever agent holds it; false when none does
+    /// (RFC SMYSL-8 §6, R1-9).
+    pub fn set_status(&mut self, kid: &KeyId, status: KeyStatus) -> bool {
+        match self.keys.values_mut().find(|k| &k.kid == kid) {
+            Some(k) => {
+                k.status = status;
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 impl KeyResolver for MemoryKeyResolver {

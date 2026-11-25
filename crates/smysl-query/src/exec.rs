@@ -1013,7 +1013,9 @@ fn order(answer: Answer, stage: &OrderPlan, env: &Env<'_>) -> Result<Answer, Vec
             // question the store already answers.
             let report = smysl_graph::salience(
                 env.store,
-                &SalienceRequest::default().seeded(uids.iter().copied()),
+                &SalienceRequest::default()
+                    .seeded(uids.iter().copied())
+                    .with_admission(env.admission.clone()),
             );
             let scores = report.renormalise(&uids);
             let mut sorted = uids.clone();
@@ -1054,7 +1056,9 @@ fn order(answer: Answer, stage: &OrderPlan, env: &Env<'_>) -> Result<Answer, Vec
                 .then(|| {
                     smysl_graph::salience(
                         env.store,
-                        &SalienceRequest::default().seeded(uids.iter().copied()),
+                        &SalienceRequest::default()
+                            .seeded(uids.iter().copied())
+                            .with_admission(env.admission.clone()),
                     )
                     .renormalise(&uids)
                 });
@@ -1181,7 +1185,9 @@ fn shape(
             let scope: Vec<Uid> = answer.uids();
             let report = smysl_graph::salience(
                 env.store,
-                &SalienceRequest::default().seeded(scope.iter().copied()),
+                &SalienceRequest::default()
+                    .seeded(scope.iter().copied())
+                    .with_admission(env.admission.clone()),
             );
             let request = smysl_pack::PackRequest::budget(budget)
                 .scoped(scope.iter().copied())

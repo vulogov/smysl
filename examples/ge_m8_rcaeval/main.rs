@@ -36,9 +36,23 @@
 //! added once the run showed hundreds of "new" templates a case on RE2-SS and RE2-TT, Drain's
 //! templates drifting between windows rather than new behaviour, to see what they cost.
 //!
+//! **Under `tel/minhash/2`** (RFC SMYSL-9 SI-P2). `--similarity RECIPE` reads the features a
+//! recipe names, as `tel similar --similarity` does. Each column is keyed as a Prometheus series
+//! of its metric with the service as a label (`carts-db_cpu` is `cpu{service="carts-db"}`), so
+//! `kinds=on` reads `cpu`; under `/1` the keys are a renaming, and exact Jaccard is unchanged.
+//! Under `templates=novel` each container is a stream with its own Drain per window, the
+//! reference `[t−6m, t)` and the faulty `[t, t+6m)`, as `tel templates` materialises them, and
+//! `similar::episodes_with` judges which faulty templates are novel; under `overlap` the
+//! templates are 1.20's.
+//!
+//! **A diagnosis, after the run** (SMYSL-9 R2-A). `--drop-singletons` leaves out every template a
+//! window's Drain saw once, before features are read. It is not a recipe key and decides no gate:
+//! it tests whether lines unique to themselves (a registration's user name, which Drain keeps
+//! apart at under 0.4 similarity) are what `templates=novel` cannot match.
+//!
 //! ```text
 //! cargo run --release --features tel,semantic --example ge_m8_rcaeval -- [--no-templates] \
-//!     --data PATH/RE2-SS --data PATH/RE2-OB --data PATH/RE2-TT
+//!     [--similarity RECIPE] [--drop-singletons] --data PATH/RE2-SS --data PATH/RE2-OB --data PATH/RE2-TT
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -117,6 +131,9 @@ struct Case {
     window: BTreeMap<String, Vec<(u64, Decimal)>>,
     /// The templates new in the faulty window, as `container: template`.
     templates: BTreeSet<String>,
+    /// Each window's templates by its own Drain, reference then faulty: (container, template,
+    /// count), the template as `container: template`.
+    windows: [Vec<(String, String, u64)>; 2],
 }
 
 fn opts() -> Options {
@@ -208,6 +225,21 @@ fn load(dir: &Path, service: &str, fault: &str) -> Case {
             }
         }
     }
+    // Each window on its own, as `tel templates` materialises one.
+    let split = lines.partition_point(|l| l.0 < t);
+    let windows = [&lines[..split], &lines[split..]].map(|ls| {
+        let mut by: BTreeMap<&str, Drain> = BTreeMap::new();
+        for (_, c, m) in ls {
+            by.entry(c).or_default().add(m);
+        }
+        by.iter()
+            .flat_map(|(c, d)| {
+                d.templates()
+                    .into_iter()
+                    .map(move |(k, n)| (c.to_string(), format!("{c}: {k}"), n))
+            })
+            .collect::<Vec<_>>()
+    });
     Case {
         service: service.to_string(),
         fault: fault.to_string(),
@@ -215,6 +247,15 @@ fn load(dir: &Path, service: &str, fault: &str) -> Case {
         normal,
         window,
         templates,
+        windows,
+    }
+}
+
+/// A column's series key: its metric with the service as a label, Prometheus' spelling.
+fn key_of(col: &str) -> String {
+    match col.split_once('_') {
+        Some((service, metric)) => format!("{metric}{{service=\"{service}\"}}"),
+        None => col.to_string(),
     }
 }
 
@@ -259,7 +300,13 @@ struct Ep {
 }
 
 /// Each case's episode, if its faulty window shows anything a detector or a template marks.
-fn episodes(cases: &[Case], thresholds: &BTreeMap<String, Decimal>, logs: bool) -> Vec<Ep> {
+fn episodes(
+    cases: &[Case],
+    thresholds: &BTreeMap<String, Decimal>,
+    logs: bool,
+    recipe: &similar::Recipe,
+    singletons: bool,
+) -> Vec<Ep> {
     let inst = canonical_uid(
         &tel::instrument("scraper", "rcaeval-simple-metrics").expect("an instrument"),
     );
@@ -269,6 +316,7 @@ fn episodes(cases: &[Case], thresholds: &BTreeMap<String, Decimal>, logs: bool) 
     for (i, c) in cases.iter().enumerate() {
         let t = c.inject_ms;
         let mut members: Vec<UnitCore> = Vec::new();
+        let mut series_units: Vec<UnitCore> = Vec::new();
         let mut text: Vec<String> = Vec::new();
         for (col, pts) in &c.window {
             let Some(theta) = thresholds.get(col) else {
@@ -278,11 +326,14 @@ fn episodes(cases: &[Case], thresholds: &BTreeMap<String, Decimal>, logs: bool) 
                 .iter()
                 .filter_map(|(ts, v)| Sample::new(*ts, None, *v, 0).ok())
                 .collect();
-            let series = canonical_uid(&tel::series("prom", col).expect("a series"));
+            let key = key_of(col);
+            let series_unit = tel::series("prom", &key).expect("a series");
+            let series = canonical_uid(&series_unit);
+            series_units.push(series_unit);
             let input = Input {
                 series,
                 scheme: "prom",
-                key: col,
+                key: &key,
                 instrument: inst,
                 samples: &samples,
             };
@@ -317,7 +368,34 @@ fn episodes(cases: &[Case], thresholds: &BTreeMap<String, Decimal>, logs: bool) 
         for u in &members {
             units.insert(canonical_uid(u), u.clone());
         }
-        for tpl in c.templates.iter().filter(|_| logs) {
+        for u in &series_units {
+            units.insert(canonical_uid(u), u.clone());
+        }
+        let novel = recipe.templates == similar::Templates::Novel;
+        for (w, from) in [t - HALF, t]
+            .into_iter()
+            .enumerate()
+            .filter(|_| logs && novel)
+        {
+            for (container, tpl, count) in c.windows[w].iter().filter(|x| singletons || x.2 > 1) {
+                let key = format!(r#"{{"unit":"{container}"}}"#);
+                let stream = canonical_uid(&tel::series("journald", &key).expect("a stream"));
+                let u = Template {
+                    stream,
+                    scheme: "journald".into(),
+                    key,
+                    inst,
+                    from_ms: from,
+                    to_ms: from + HALF,
+                    template: tpl.clone(),
+                    count: *count,
+                    digest: [0; 32],
+                }
+                .unit();
+                units.insert(canonical_uid(&u), u);
+            }
+        }
+        for tpl in c.templates.iter().filter(|_| logs && !novel) {
             let u = Template {
                 stream: stream_uid,
                 scheme: "journald".into(),
@@ -331,12 +409,19 @@ fn episodes(cases: &[Case], thresholds: &BTreeMap<String, Decimal>, logs: bool) 
             }
             .unit();
             units.insert(canonical_uid(&u), u);
-            text.push(format!("log {tpl}"));
         }
         let g = &grouped[0];
         units.insert(canonical_uid(&g.unit), g.unit.clone());
-        let feats = similar::episodes(units.iter(), g.relations.iter());
+        let feats = similar::episodes_with(units.iter(), g.relations.iter(), recipe);
         let (_, features) = feats.into_iter().next().expect("the episode");
+        for f in &features {
+            if let Some(tpl) = f
+                .strip_prefix("template:")
+                .or_else(|| f.strip_prefix("template-rise:"))
+            {
+                text.push(format!("log {tpl}"));
+            }
+        }
         text.sort();
         text.dedup();
         out.push(Ep {
@@ -392,10 +477,16 @@ fn main() {
         .map(|w| PathBuf::from(&w[1]))
         .collect();
     assert!(!data.is_empty(), "--data PATH/RE2-XX, once or more");
+    let recipe = match args.iter().position(|a| a == "--similarity") {
+        Some(i) => similar::Recipe::parse(args.get(i + 1).expect("--similarity RECIPE"))
+            .unwrap_or_else(|e| panic!("--similarity: {e}")),
+        None => similar::Recipe::v1(0),
+    };
     let started = std::time::Instant::now();
     let model = std::env::var_os("SMYSL_EMBED_MODEL")
         .map(|dir| smysl::EmbedModel::from_dir(&dir).expect("a Model2Vec model directory"));
     println!("GE-M8 on RCAEval (real, CC BY 4.0): do repeated faults recur detectably?");
+    println!("recipe {}", recipe.text());
     for d in &data {
         let name = d.file_name().expect("a name").to_string_lossy().to_string();
         eprintln!("{name}:");
@@ -425,6 +516,8 @@ fn main() {
             &cases,
             &thresholds,
             !args.iter().any(|a| a == "--no-templates"),
+            &recipe,
+            !args.iter().any(|a| a == "--drop-singletons"),
         );
         // MinHash ranks by uid on ties; an episode's stand-in uid is its index, big-endian.
         let uid_of = |k: usize| {
@@ -439,7 +532,7 @@ fn main() {
             .collect();
         let idx_of: BTreeMap<Uid, usize> = (0..eps.len()).map(|k| (uid_of(k), k)).collect();
         let mh = readings(&cases, &eps, |k| {
-            similar::nearest(&fmap, &uid_of(k), 5, 0)
+            similar::nearest_with(&fmap, &uid_of(k), 5, &recipe)
                 .into_iter()
                 .map(|n| idx_of[&n.uid])
                 .collect()
@@ -471,6 +564,16 @@ fn main() {
         let mut sorted = feats.clone();
         sorted.sort_unstable();
         let tpl: Vec<usize> = cases.iter().map(|c| c.templates.len()).collect();
+        let mut tf: Vec<usize> = eps
+            .iter()
+            .map(|e| {
+                e.features
+                    .iter()
+                    .filter(|f| f.starts_with("template"))
+                    .count()
+            })
+            .collect();
+        tf.sort_unstable();
         let others = eps.len().saturating_sub(1).max(1) as f64;
         println!(
             "\n{name}: {} cases, {} with an episode; {} columns calibrated, {refused} refused",
@@ -488,6 +591,13 @@ fn main() {
                 t.sort_unstable();
                 t.get(t.len() / 2).copied().unwrap_or(0)
             }
+        );
+        println!(
+            "  template features per episode: median {}; kind features in {} episode(s)",
+            tf.get(tf.len() / 2).copied().unwrap_or(0),
+            eps.iter()
+                .filter(|e| e.features.iter().any(|f| f.starts_with("kind:")))
+                .count()
         );
         let per_type = cases.iter().filter(|c| c.fault == cases[0].fault).count() as f64;
         println!(

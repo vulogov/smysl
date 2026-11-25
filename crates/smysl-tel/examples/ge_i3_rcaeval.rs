@@ -68,8 +68,16 @@
 //! **A third system** (R11). `--held` takes any RCAEval RE2 system; RE2-TT (Train Ticket) is
 //! read as RE2-OB is.
 //!
+//! **At a coarser cadence** (RFC SMYSL-9 CC-P2). `--step MS` reads every series as a scraper at
+//! one sample every `MS` would have recorded it (`smysl_series::resample`, `Agg::Last`), aligned
+//! to each case's first window, so every six-minute window is on the grid; `MS` divides six
+//! minutes. Everything above then runs at that cadence, held-out set included. Beside it, the
+//! values calibrated at one sample a second on `--data` are run unchanged on the resampled pairs
+//! (CC-2), with their realised false-alarm rate and recall. The statistics keep their recipes,
+//! so at 15 s (24 points a window) their `min_n: 50` refuses them, and the count says so.
+//!
 //! ```text
-//! cargo run --release -p smysl-tel --example ge_i3_rcaeval -- --data PATH/RE2-SS [--held PATH/RE2-OB]
+//! cargo run --release -p smysl-tel --example ge_i3_rcaeval -- --data PATH/RE2-SS [--held PATH/RE2-OB] [--step MS]
 //! ```
 
 use std::collections::BTreeMap;
@@ -752,6 +760,38 @@ fn defaults_line(reading: &Reading) {
     );
 }
 
+/// `cases` as a scraper every `step` ms would have recorded them, from each case's first window.
+fn resampled(cases: Vec<Case>, step: u64) -> Vec<Case> {
+    cases
+        .into_iter()
+        .map(|mut c| {
+            let from = c.inject_ms - 2 * HALF;
+            for (_, s) in &mut c.series {
+                *s = smysl_series::resample(s, from, step, smysl_series::Agg::Last);
+            }
+            c
+        })
+        .collect()
+}
+
+/// Of `cases`' (series, window) over the normal and faulty pairs: how many there are, how many
+/// are empty, and how many hold some points but fewer than `detect::MIN_N`.
+fn short_windows(cases: &[Case]) -> (usize, usize, usize) {
+    let (mut all, mut empty, mut short) = (0, 0, 0);
+    for c in cases {
+        let t = c.inject_ms;
+        for (_, s) in &c.series {
+            for a in [t - 2 * HALF, t - HALF, t] {
+                let n = read(s, a, a + HALF).samples.len();
+                all += 1;
+                empty += usize::from(n == 0);
+                short += usize::from(n > 0 && n < smysl_tel::detect::MIN_N);
+            }
+        }
+    }
+    (all, empty, short)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let arg = |name: &str| {
@@ -762,6 +802,11 @@ fn main() {
     };
     let data = arg("--data").expect("--data PATH/RE2-SS");
     let held = arg("--held");
+    let step: Option<u64> = arg("--step").map(|s| {
+        let ms: u64 = s.to_string_lossy().parse().expect("--step MS");
+        assert!(ms > 0 && HALF % ms == 0, "--step divides six minutes");
+        ms
+    });
     let label = |p: &Path| {
         p.file_name()
             .map_or("data".into(), |n| n.to_string_lossy().to_string())
@@ -769,14 +814,46 @@ fn main() {
 
     let mut refused = Refused::default();
     let cases = load_all(&data);
+    // CC-2: the values calibrated at one sample a second, to run at `step` beside its own.
+    let mut asks = Vec::new();
+    let mut lines_1s = Vec::new();
+    let cases = match step {
+        None => cases,
+        Some(ms) => {
+            let normal = normal_rows(&cases, &[], &mut Refused::default());
+            for cfg in CONFIGS {
+                let (ask, _, text) = calibrate_config(&normal, cfg, 1);
+                println!("calibrated at 1 s, {}:\n{text}", cfg.label());
+                lines_1s.push((format!("{}, at 1 s", cfg.label()), asks.len()));
+                asks.push(ask);
+            }
+            let before = short_windows(&cases);
+            let cases = resampled(cases, ms);
+            let after = short_windows(&cases);
+            println!(
+                "\nresampled to one sample every {ms} ms (last). Of {} (series, window): empty \
+                 {} (at 1 s {}), with fewer than detect::MIN_N = {} points {} (at 1 s {})\n",
+                after.0,
+                after.1,
+                before.1,
+                smysl_tel::detect::MIN_N,
+                after.2,
+                before.2
+            );
+            cases
+        }
+    };
     let services: std::collections::BTreeSet<&str> =
         cases.iter().map(|c| c.service.as_str()).collect();
     let name = label(&data);
     println!(
         "GE-I3 on RCAEval {name} (real, CC BY 4.0): {} cases, services {:?}; six-minute \
-         windows at one sample a second.",
+         windows at {}.",
         cases.len(),
-        services
+        services,
+        step.map_or("one sample a second".to_string(), |ms| format!(
+            "one sample every {ms} ms"
+        ))
     );
     println!(
         "Normal pairs end at the injection, faulty pairs start at it. The detectors are \
@@ -785,9 +862,8 @@ fn main() {
         100.0 * RATE,
         100.0 * RATE
     );
-    let normal = normal_rows(&cases, &[], &mut refused);
+    let normal = normal_rows(&cases, &asks, &mut refused);
     // Every calibration of the calibrating set: by config, then margin.
-    let mut asks = Vec::new();
     let mut lines = Vec::new();
     let mut texts = Vec::new();
     for cfg in CONFIGS {
@@ -824,6 +900,23 @@ fn main() {
         "refused computations (series or pairs too short or too constant): {:?}",
         refused.0
     );
+    if !lines_1s.is_empty() {
+        let carried: Vec<(String, [String; 3], usize)> = lines_1s
+            .iter()
+            .map(|(l, a)| {
+                let fa: [String; 3] = std::array::from_fn(|k| {
+                    pct(share(reading.normal.iter().map(|r| r.fired[*a][k])))
+                });
+                (l.clone(), fa, *a)
+            })
+            .collect();
+        println!(
+            "\n{name}'s values calibrated at 1 s, run at this cadence (normal: realised false \
+             alarms, calibrated for {:.0} %):",
+            100.0 * RATE
+        );
+        detector_tables(&reading, &carried);
+    }
 
     let Some(held) = held else {
         return;
@@ -831,6 +924,10 @@ fn main() {
     // The held-out set: every calibration above run unchanged, and its own at margin 1.
     let mut refused = Refused::default();
     let hcases = load_all(&held);
+    let hcases = match step {
+        None => hcases,
+        Some(ms) => resampled(hcases, ms),
+    };
     let hname = label(&held);
     let hservices: std::collections::BTreeSet<&str> =
         hcases.iter().map(|c| c.service.as_str()).collect();
