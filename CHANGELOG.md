@@ -7,7 +7,7 @@ and the facade asserts the two are independent.
 
 ---
 
-## Unreleased — 1.21.0
+## 1.21.0 — 2026-11-25
 
 Two RFCs, both built in full. Signatures now change what counts (RFC SMYSL-8), and three
 measurements 1.20 left open have run (RFC SMYSL-9), two of them on RCAEval's real incidents. No
