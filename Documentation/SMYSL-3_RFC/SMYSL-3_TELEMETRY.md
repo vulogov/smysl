@@ -939,6 +939,13 @@ append (a sorted row vector and a segment tree, O(rows) in copies), and 8 % stag
 splices a report of O(findings). The range index's tables are the text library's derived state
 and need another structure to grow by less than their size; that is left open, outside AC-8.
 
+**Amended in 1.21 (RFC SMYSL-9 RT-P1).** The range tables are now blocks of rows, each block with
+its own max-`hi` tree, and an append moves O(B + rows/B) rows instead of all of them. At the same
+10⁵ units and 116,229 operations the late commit is 4.75 ms at p50 (it was 7.7). The range tables
+are 1.9 % of it (they were 41 %), and their time per append grows 1.6× from 10⁴ to 10⁵ units.
+What remains of a late commit is mostly the append's `fsync`. Staging's late p50 measured 1.11 ms
+there, against 0.63 above, and is not explained by this change (SMYSL-9 R2-C5).
+
 ## 18. Crates
 
 ```

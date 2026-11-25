@@ -92,6 +92,14 @@ and `attest` writes nothing to sign.
   `--agent-prefix` and `--status-at-least` as on `verify`; a mode that cannot be applied exits
   2 before any input is read. The manual's chapter 21 gains a section on signatures that act,
   replayed by `doc-output` against committed fixtures.
+- **RFC SMYSL-9 RT-P1: range tables that grow by less than their size.** The text library's
+  `said`, `composed` and `observed` tables (`smysl_text::index::ranges::Ranges`) keep their rows in
+  blocks of 256 to 1,024, each block with its own max-`hi` tree, so an append moves O(B + rows/B)
+  rows instead of copying every row and rebuilding the tree. `rows()`, equality, query answers
+  and the sidecar bytes are unchanged, and a property test checks every splice against a
+  rebuild. At 10⁵ units (`oko_ledger`, 116k operations) the late commit is 4.75 ms at p50, down
+  from 7.7, and the tables' share of it is 1.9 %, down from 41 %. RFC SMYSL-3 §17.1 is amended
+  with the figures.
 
 ## 1.20.0 — 2026-11-24
 

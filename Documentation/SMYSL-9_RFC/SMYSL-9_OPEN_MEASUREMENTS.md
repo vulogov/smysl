@@ -1,8 +1,8 @@
 # RFC SMYSL-9 — three measurements 1.20 left open
 
 **Author:** Vladimir Ulogov
-**Status:** draft (2026-11-24). Not yet read against the code as built (R1 is owed before the first
-phase of each part).
+**Status:** draft (2026-11-24). Part C read against the code (R1) and built as RT-P1 (1.21), its
+gates met; Parts A and B not started, and R1 is owed before each one's first phase.
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged. Recipe
 texts without the new keys give the same bytes as before.
 **Crates:** `smysl-tel` (similarity features, recipe keys), `smysl-series` (resampling),
@@ -230,4 +230,52 @@ The three parts are independent and may land in any order. RT-P1 needs no data d
 
 ## 8. Amendments
 
-None yet.
+**R1 for Part C, 2026-11-24: §5 read against the code at `869bffb`.**
+
+- **R1-C1. Question 4: the sidecar is not written at a commit.** `Library::append_records`
+  updates the index in memory (`Index::on_append`) and does not call `write_index`; the CLI's
+  writing commands call it once per command, and `oko_ledger` never does. So the O(rows) in §17.1
+  is the in-memory tables alone, and RT-2 needs no sidecar written by block. The dump format is
+  untouched.
+- **R1-C2. `Ranges::rows` is public and returns `&[Row]`.** Blocks cannot lend one slice, and
+  changing the return type would break `smysl-text`'s API. `rows` keeps its signature over a
+  flattened copy built on the first call after a change. Only the dump and tests call it, and the
+  dump is O(rows) anyway.
+- **R1-C3. Removing a subject's row needs to find it.** `spliced` drops rows by subject, and rows
+  are sorted by `(lo, hi, subject)`, so a block delete needs the row. The table keeps a
+  subject-to-row index, built by its first splice, never persisted, so a table that is only read
+  never pays for it. `Ranges::of` accepts two rows for one subject, which no builder in the crate
+  makes; such a table falls back to splicing whole, as every splice did before.
+- **R1-C4. The query's "rows read" bound stays.** `tests/ranges.rs` asserts that a day's window
+  over 155,510 rows reads fewer than 200 (TX-P4 step 3), so a block cannot simply be scanned. Each
+  block keeps a max-`hi` segment tree over its rows, rebuilt in O(B) when the block changes. A block
+  is skipped on its first row and its `max_hi`, and neither check reads a row as the query counts
+  them.
+
+**R2, 2026-11-24: RT-P1 as built.**
+
+- **R2-C1. The structure.** `Ranges` holds blocks of 256 to 1,024 rows (`B = 512`), each with
+  its own max-`hi` tree. `spliced` became an in-place `splice`: each dropped subject's row is
+  removed from its block, each new row is inserted where it sorts, and a block over `2B` splits
+  while one under `B/2` merges with a neighbour. `observed_on_append` splices too, instead of
+  copying every row. `rows`, equality and the dump are unchanged (R1-C2).
+- **R2-C2. RT-1 holds.** The property test (`ranges::tests`, 25 generated cases of 60 splices
+  over up to 3,000 starting rows, with batches of 1,500 so that blocks split and merge) compares
+  every splice with `Ranges::of` over the same rows, checks the layout invariants, and compares
+  four windows each against `scan`. A subject with two rows splices whole and stays correct.
+  `smysl-text`'s existing goldens, which compare tables kept incrementally with a rebuild, pass
+  unchanged.
+- **R2-C3. RT-2 holds.** `oko_ledger` at 17,000 investigations, which is 116,229 operations and
+  99,249 units, §17.1's size, on the machine that measured 7.7. Late-commit p50 is **4.75 ms**
+  (gate 5.0) and p95 5.79 ms. The range tables are **1.9 %** of the late commits' samples (gate
+  10 %; it was 41 %). That share comes from macOS `sample`, 10 s every 20 s over the last two
+  minutes, 39,134 samples in the commit. Most of the rest of a late commit is the append's
+  `F_FULLFSYNC`, 56 % of the samples.
+- **R2-C4. RT-3 holds.** Range-table time per append is the share times the late-commit p50:
+  1.4 % of 3.99 ms at 10⁴ units (1,500 investigations, 8,835 units) and 1.9 % of 4.75 ms at 10⁵,
+  0.056 → 0.090 ms. That is **1.6×** for 11× the units, where it was about 10× before. The 10⁴
+  share comes from three samples across a 42 s run, not only its last tenth.
+- **R2-C5. Not caused by this change, and left open.** Staging's late p50 at 10⁵ is 1.11 ms,
+  where §17.1 recorded 0.63 ms over the same 116k operations. Staging does not touch the range
+  tables. Since AC-8 it has grown with something else, and finding what is owed. The worst
+  commit of the clean run was 365 ms, a single outlier §17.1 has no figure to compare with.
