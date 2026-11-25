@@ -45,14 +45,16 @@
 //! `similar::episodes_with` judges which faulty templates are novel; under `overlap` the
 //! templates are 1.20's.
 //!
-//! **A diagnosis, after the run** (SMYSL-9 R2-A). `--drop-singletons` leaves out every template a
-//! window's Drain saw once, before features are read. It is not a recipe key and decides no gate:
-//! it tests whether lines unique to themselves (a registration's user name, which Drain keeps
-//! apart at under 0.4 similarity) are what `templates=novel` cannot match.
+//! **Singletons** (SMYSL-9 R2-A, then 1.22). A diagnosis after SI-P2 left out every template a
+//! window's Drain saw once: lines unique to themselves (a registration's user name, which Drain
+//! keeps apart at under 0.4 similarity) were what `templates=novel` could not match. 1.22 makes it
+//! the recipe key `min=2` (`--similarity 'tel/minhash/2?templates=novel&min=2'`), read by
+//! `similar::episodes_with` from each template's count. Under `overlap` the templates are 1.20's,
+//! each with a count of 1, so `min=2` there leaves none.
 //!
 //! ```text
 //! cargo run --release --features tel,semantic --example ge_m8_rcaeval -- [--no-templates] \
-//!     [--similarity RECIPE] [--drop-singletons] --data PATH/RE2-SS --data PATH/RE2-OB --data PATH/RE2-TT
+//!     [--similarity RECIPE] --data PATH/RE2-SS --data PATH/RE2-OB --data PATH/RE2-TT
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -305,7 +307,6 @@ fn episodes(
     thresholds: &BTreeMap<String, Decimal>,
     logs: bool,
     recipe: &similar::Recipe,
-    singletons: bool,
 ) -> Vec<Ep> {
     let inst = canonical_uid(
         &tel::instrument("scraper", "rcaeval-simple-metrics").expect("an instrument"),
@@ -377,7 +378,7 @@ fn episodes(
             .enumerate()
             .filter(|_| logs && novel)
         {
-            for (container, tpl, count) in c.windows[w].iter().filter(|x| singletons || x.2 > 1) {
+            for (container, tpl, count) in c.windows[w].iter() {
                 let key = format!(r#"{{"unit":"{container}"}}"#);
                 let stream = canonical_uid(&tel::series("journald", &key).expect("a stream"));
                 let u = Template {
@@ -517,7 +518,6 @@ fn main() {
             &thresholds,
             !args.iter().any(|a| a == "--no-templates"),
             &recipe,
-            !args.iter().any(|a| a == "--drop-singletons"),
         );
         // MinHash ranks by uid on ties; an episode's stand-in uid is its index, big-endian.
         let uid_of = |k: usize| {

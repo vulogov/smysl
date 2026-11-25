@@ -207,7 +207,27 @@ fn a_similarity_recipe_is_read_printed_and_checked() {
         first.contains(&eps[1].canonical()) && first.contains("jaccard 4/6"),
         "{out}"
     );
+    // `min=` (1.22) is read and printed when it is not 1.
+    let o = run(
+        &d,
+        &[
+            "tel",
+            "similar",
+            &ep,
+            "--similarity",
+            "tel/minhash/2?min=2",
+            "-s",
+            "lib",
+        ],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        out.contains("tel/minhash/2?k=128&seed=0&templates=overlap&kinds=off&min=2"),
+        "{out}"
+    );
     for bad in [
+        &["--similarity", "tel/minhash/2?min=0"][..],
         &["--similarity", "tel/minhash/2?rise=2"][..],
         &["--similarity", "tel/minhash/9"][..],
         &["--similarity", "tel/minhash/2", "--seed", "1"][..],

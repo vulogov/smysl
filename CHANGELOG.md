@@ -35,6 +35,24 @@ sizing residual on German, the Ollama arm's model size; questions still unread, 
 name the store does not write, GE-T7 on a thousand real works, and the ones only people can
 close. None of it moved in 1.21.
 
+### Episode similarity: `min=`, and Train Ticket's cause (RFC SMYSL-9 R3-A)
+
+- **`min=N`**, a `tel/minhash/2` key: a template counted fewer than `N` times in its window is
+  read as absent, as a feature and as a reference. `similar::Recipe::with_min`. At 1 it is not
+  written, so every 1.21 `/2` recipe keeps its text and its signatures. `templates=novel&min=2`
+  is what 1.21's after-the-run diagnosis tested: on RCAEval RE2-SS recurrence recall@5 goes
+  from 0.239 to 0.556 (MinHash), its no-templates figure. `examples/ge_m8_rcaeval` reads it
+  in place of `--drop-singletons`.
+- **Why Train Ticket stays below.** Its faulty windows' new templates are request payloads,
+  Java objects printed whole (median 568 tokens), different in every window: 94 % of its
+  template features are in one incident only, and 11 of 90 repetition pairs share any template.
+  They dilute the features that recur, so no templates (0.411 exact Jaccard) beats every
+  template reading tried: `min=2` 0.328, dates masked 0.328, digits masked 0.261, a length cap
+  0.361–0.372. None of those masks ships; the advice is no templates for such a system.
+- **RFC SMYSL-10 drafted:** GE-M7 in two stages, M7-R on RCAEval replay with local models,
+  needing no testbed, and M7-T on a Train-Ticket deployment, gated on a cluster. Gates
+  pre-registered, nothing built.
+
 ## 1.21.0 — 2026-11-25
 
 Two RFCs, both built in full. Signatures now change what counts (RFC SMYSL-8), and three

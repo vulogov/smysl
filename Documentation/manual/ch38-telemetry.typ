@@ -855,6 +855,12 @@ key did what it was for (RFC SMYSL-9 R2-A2). Most of Sock Shop's "new" templates
 keep their own user names, each its own template, which no family matches. And fault-type
 recall moved by at most 0.05 with kinds on. Use `/2` to look, not as a better default.
 
+1.22 adds `min=N`: a template counted fewer than `N` times in its window is read as if it were
+not there. `templates=novel&min=2` leaves out the lines unique to themselves, and on Sock Shop
+recovers what templates had cost. It does not help a system that logs its request payloads:
+on Train Ticket each window's templates are printed objects that differ every time, shared by
+almost no two incidents, and similarity is better without templates there (RFC SMYSL-9 R3-A).
+
 #section("Information measures (1.18)")
 
 A detector says *where* a series changed. An information measure says how much a window's

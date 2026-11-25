@@ -29,6 +29,11 @@
 //! - `kinds=on`: `kind:<metric>:<direction>` for each anomaly, the metric being the series' name
 //!   without its identifying labels ([`metric_name`]), so two faults of one kind on two services
 //!   share a feature.
+//! - `min=N` (default 1, and then not written): a template unit whose `tel:count` is below `N` is
+//!   read as if it were not there, neither as a feature nor in a reference. `min=2` leaves out
+//!   lines Drain saw once in their window, which on RCAEval's Sock Shop are registrations that
+//!   keep their own user names (SMYSL-9 R2-A2). Leaving `min=` out of the text when it is 1 keeps
+//!   every 1.21 `/2` recipe's text, and so its signatures.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -72,6 +77,8 @@ pub struct Recipe {
     /// The factor a known template's rate must exceed (`templates=novel` only).
     pub rise: u64,
     pub kinds: bool,
+    /// The least `tel:count` a template unit needs to be read at all (`/2` only; 1 reads all).
+    pub min: u64,
 }
 
 /// `rise=`'s default.
@@ -86,6 +93,7 @@ impl Recipe {
             templates: Templates::Overlap,
             rise: RISE,
             kinds: false,
+            min: 1,
         }
     }
 
@@ -112,7 +120,14 @@ impl Recipe {
         self
     }
 
-    /// The recipe's text, every `/2` key written: what MinHash is keyed by and what is printed.
+    /// `min=`: below 1 is read as 1.
+    pub fn with_min(mut self, min: u64) -> Recipe {
+        self.min = min.max(1);
+        self
+    }
+
+    /// The recipe's text, every `/2` key written but `min=` at 1: what MinHash is keyed by and
+    /// what is printed.
     pub fn text(&self) -> String {
         if self.version == 1 {
             return recipe(self.seed);
@@ -121,8 +136,13 @@ impl Recipe {
             Templates::Overlap => "overlap".to_string(),
             Templates::Novel => format!("novel&rise={}", self.rise),
         };
+        let min = if self.min > 1 {
+            format!("&min={}", self.min)
+        } else {
+            String::new()
+        };
         format!(
-            "tel/minhash/2?k={K}&seed={}&templates={templates}&kinds={}",
+            "tel/minhash/2?k={K}&seed={}&templates={templates}&kinds={}{min}",
             self.seed,
             if self.kinds { "on" } else { "off" }
         )
@@ -161,6 +181,10 @@ impl Recipe {
                 ("rise", 2) => match number()? {
                     0 => return Err("`rise` is at least 1".into()),
                     n => rise = Some(n),
+                },
+                ("min", 2) => match number()? {
+                    0 => return Err("`min` is at least 1".into()),
+                    n => r.min = n,
                 },
                 ("kinds", 2) => {
                     r.kinds = match v {
@@ -393,12 +417,20 @@ pub fn episodes_with<'a>(
             members.get_mut(&r.to).expect("an episode").push(m);
         }
     }
+    // `min=`: a template counted fewer times is not there.
+    let counted = |u: &UnitCore| {
+        recipe.min <= 1
+            || u.payload
+                .as_deref()
+                .and_then(|p| field_uint(p, "tel:count"))
+                .is_some_and(|n| n >= recipe.min)
+    };
     let templates: Vec<(&UnitCore, (u64, u64))> = units
         .values()
-        .filter(|u| u.schema.as_str() == tel::LOG_TEMPLATE)
+        .filter(|u| u.schema.as_str() == tel::LOG_TEMPLATE && counted(u))
         .filter_map(|u| Some((*u, window(u)?)))
         .collect();
-    let novel = (recipe.templates == Templates::Novel).then(|| Reference::of(&units));
+    let novel = (recipe.templates == Templates::Novel).then(|| Reference::of(&units, recipe.min));
     members
         .into_iter()
         .map(|(ep, ms)| {
@@ -461,7 +493,7 @@ struct Reference {
 }
 
 impl Reference {
-    fn of(units: &BTreeMap<&Uid, &UnitCore>) -> Reference {
+    fn of(units: &BTreeMap<&Uid, &UnitCore>, min: u64) -> Reference {
         let mut by_stream: BTreeMap<(Uid, Uid), Windows> = BTreeMap::new();
         for u in units.values() {
             if u.schema.as_str() != tel::LOG_TEMPLATE {
@@ -470,6 +502,9 @@ impl Reference {
             let Some(t) = u.payload.as_deref().and_then(crate::logs::template_fields) else {
                 continue;
             };
+            if t.count < min {
+                continue;
+            }
             by_stream
                 .entry((t.stream, t.inst))
                 .or_default()
@@ -630,6 +665,8 @@ mod tests {
                 .with_templates(Templates::Novel)
                 .with_rise(6)
                 .with_kinds(true),
+            Recipe::v2(2).with_min(2),
+            Recipe::v2(2).with_templates(Templates::Novel).with_min(3),
         ] {
             assert_eq!(Recipe::parse(&r.text()).unwrap(), r, "{}", r.text());
         }
@@ -638,6 +675,23 @@ mod tests {
             Recipe::v2(1).with_templates(Templates::Novel).text(),
             "tel/minhash/2?k=128&seed=1&templates=novel&rise=4&kinds=off"
         );
+        // `min=1` is the default and is not written, so 1.21's `/2` texts are unchanged.
+        assert_eq!(
+            Recipe::v2(1).with_min(1).text(),
+            "tel/minhash/2?k=128&seed=1&templates=overlap&kinds=off"
+        );
+        assert_eq!(
+            Recipe::parse("tel/minhash/2?min=1").unwrap().text(),
+            Recipe::v2(0).text()
+        );
+        assert_eq!(
+            Recipe::v2(1)
+                .with_templates(Templates::Novel)
+                .with_min(2)
+                .text(),
+            "tel/minhash/2?k=128&seed=1&templates=novel&rise=4&kinds=off&min=2"
+        );
+        assert_eq!(Recipe::v2(0).with_min(0).min, 1);
         assert_eq!(
             Recipe::parse("tel/minhash/2?kinds=on&templates=novel").unwrap(),
             Recipe::v2(0)
@@ -653,6 +707,8 @@ mod tests {
             "tel/minhash/2?templates=new",
             "tel/minhash/2?weights=on",
             "tel/minhash/2?seed",
+            "tel/minhash/2?min=0",
+            "tel/minhash/1?min=2",
         ] {
             assert!(Recipe::parse(bad).is_err(), "{bad}");
         }
@@ -800,6 +856,39 @@ mod tests {
                 .collect()
         };
         assert_eq!(members(&novel), members(&overlap));
+    }
+
+    #[test]
+    fn min_reads_a_template_counted_less_as_absent() {
+        let (a, series) = anomaly_on("cpu", 20 * MIN);
+        let extra = vec![
+            series,
+            // The reference: a line seen once, and a family seen often.
+            template(1, 10 * MIN, 20 * MIN, "login user alice", 1),
+            template(1, 10 * MIN, 20 * MIN, "GET /cart", 30),
+            // The episode's window.
+            template(1, 20 * MIN, 30 * MIN, "login user alice", 3),
+            template(1, 20 * MIN, 30 * MIN, "register user bob", 1),
+            template(1, 20 * MIN, 30 * MIN, "GET /cart", 31),
+        ];
+        let st = store(vec![a], extra);
+        let tpl = |r: &Recipe| -> Vec<String> {
+            only(&st, r)
+                .into_iter()
+                .filter(|f| f.starts_with("template"))
+                .collect()
+        };
+        // Overlap: the singleton is gone, the rest stays.
+        assert_eq!(
+            tpl(&Recipe::v2(0).with_min(2)),
+            ["template:GET /cart", "template:login user alice"]
+        );
+        assert_eq!(tpl(&Recipe::v2(0)).len(), 3);
+        // Novel: at min=1 the reference knows `login user alice`, so it is dropped (3 is not more
+        // than 4 × 1). At min=2 the reference's singleton is not there, so it is new.
+        let novel = Recipe::v2(0).with_templates(Templates::Novel);
+        assert_eq!(tpl(&novel), ["template:register user bob"]);
+        assert_eq!(tpl(&novel.with_min(2)), ["template:login user alice"]);
     }
 
     #[test]

@@ -3,7 +3,8 @@
 **Author:** Vladimir Ulogov
 **Status:** draft (2026-11-25). Every phase built and run. Part C (RT-P1): gates met. Part B
 (CC-P1, CC-P2): gates met, CC-1 at its edge. Part A (SI-P1, SI-P2): built, and none of SI-1 to
-SI-3 met; the cause found on RE2-SS is not the one §3.1 named (R2-A2).
+SI-3 met; the cause found on RE2-SS is not the one §3.1 named (R2-A2). 1.22: `min=` added for
+RE2-SS's cause, and RE2-TT's cause found; no template reading rescues RE2-TT (R3-A).
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged. Recipe
 texts without the new keys give the same bytes as before.
 **Crates:** `smysl-tel` (similarity features, recipe keys), `smysl-series` (resampling),
@@ -380,4 +381,41 @@ and §15's 1.21 paragraph. In brief:
 - **`min_n`.** At 15 s, 43 of RE2-TT's 1,968 (series, window) hold fewer than 20 points, against
   1 at 1 s; the example reads pairs directly and does not refuse them, so the CLI's refusal is
   not exercised by this run.
+
+**R3-A, 2026-11-25 (1.22): singletons as a recipe key, and RE2-TT's cause.** Both follow-ups
+1.21's changelog named. Rerun on the same 270 cases, the same episodes and calibration, with the
+series keyed as in R2-A2. Within this run, the no-templates figures are 0.539 / 0.533 / 0.417
+(MinHash; SS / OB / TT) and 0.561 / 0.561 / 0.411 (exact Jaccard). TT's is higher than the 0.356
+SI-1 used, which was read under 1.20's series keys.
+
+- **`min=N`**, a `/2` key (`similar::Recipe::with_min`): a template unit counted fewer than `N`
+  times in its window is read as absent, as a feature and in a reference. At 1 it is not
+  written, so every 1.21 `/2` text, and its signatures, is unchanged. `examples/ge_m8_rcaeval`
+  drops `--drop-singletons` for it.
+- **`templates=novel&min=2`** gives the diagnosis's figures exactly in exact Jaccard: 0.567 /
+  0.556 / 0.328 (MinHash 0.556 / 0.550 / 0.289; the functions differ with the recipe text).
+  RE2-SS recovers from 0.239 to its no-templates figure, as R2-A2 found; RE2-OB is unchanged;
+  RE2-TT stays below its no-templates figure. With `kinds=on` added: 0.561 / 0.561 / 0.344.
+- **RE2-TT's cause.** Each episode keeps about 90 templates after `min=2` (median 91), and 6,234
+  of its 6,617 distinct template features are in one episode only. Only 11 of RE2-TT's 90
+  repetition pairs share any template (none for `disk` or `socket`). A case's best repetition
+  is no closer by exact Jaccard (median 0.118) than its fifth-nearest other case (0.117); on
+  RE2-SS the two are 0.458 and 0.319. The templates are Train Ticket's request payloads: Java
+  objects printed whole (`LeftTicketInfo{soldTickets=[Ticket(seatNo=1118025005, …`, median 568
+  tokens, up to 4,904) by `ts-seat-service`, `ts-order-service` and `ts-order-other-service`,
+  which carry 95 % of them. They are new in every window because every window's tickets differ,
+  and they come from the load generator, not the fault, so they recur nowhere and dilute the
+  series and anomaly features that do.
+- **What was tried, in the example only, and not kept.** Every Train Ticket line starts with its
+  own date (`2024-01-23 09:56:25.001 INFO 1 --- [thread]`); the date stays a literal word in a
+  template, and 45 of 76 repetition pairs with templates were recorded on different days. Masking
+  it changes nothing (exact 0.328): the payloads differ anyway. Masking digit runs inside tokens
+  makes RE2-TT worse (0.261), because the payloads also differ in length, and Drain's first
+  layer is token count; it also costs RE2-SS (0.511). Truncating messages to 12 tokens, or to
+  40 after the digit mask, gives 0.361 and 0.372. Leaving out templates longer than 10, 20, 40
+  or 80 tokens, computed from the episodes' features, gives 0.361 to 0.372. None reaches 0.411.
+- **What ships.** `min=` only. `/1` stays the default, and the reading for systems that log
+  payloads is no templates (`--no-templates` in the example). A Drain mask for dates or for
+  digits inside tokens would be a new `tel/drain` recipe, since the masks are in its text, and
+  it is not proposed: it did not help.
 
