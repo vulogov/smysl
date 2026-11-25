@@ -28,14 +28,14 @@ As a library:
 
 ```toml
 [dependencies]
-smysl = "1.20"
+smysl = "1.21"
 ```
 
 Add `default-features = false` for the pure library: no async runtime, no HTTP client and no
 argument parser in the dependency tree, verified in CI on every push rather than promised
 here.
 
-**The crate is `1.20.0` and the format is `smysl/1.0`.** The crate version means the API is
+**The crate is `1.21.0` and the format is `smysl/1.0`.** The crate version means the API is
 frozen: every public item moves only with a 2.0, enforced per crate by `cargo-semver-checks` on
 every push. [`Documentation/API_CONTRACT.md`](Documentation/API_CONTRACT.md) is that promise
 written down. The format version means nothing about the format changed incompatibly:
@@ -44,25 +44,22 @@ Python, JavaScript and Go written from the specification alone — and `smysl/1.
 record rather than a change. SMYSL-2's library records and SMYSL-3's `x.tel/v1`, at revision 2 since 1.18, are additions a
 1.0 reader skips.
 
-## Release 1.20.0
+## Release 1.21.0
 
-A language server and signed attestations, two RFCs built to their last phase, and two new crates,
-`smysl-lsp` and `smysl-sign`. The wire format did not change. The full account is in
+Signatures that change what counts, and three measurements on real incidents, two RFCs built to
+their last phase. The wire format did not change. The full account is in
 [`CHANGELOG.md`](CHANGELOG.md).
 
-- **Your editor speaks smysl.** `smysl lsp-server` (RFC SMYSL-6) gives any LSP editor `check`'s
-  findings as you type, hover with a unit's status, grounds and rebuttals, definition, references,
-  the outline, completion, `fmt` as formatting, and quick fixes that never raise a status. Open a
-  library and `b3:` references resolve across documents. Recipes for Helix, Neovim, VS Code and
-  Zed are in [`Documentation/SMYSL-6_RFC/EDITORS.md`](Documentation/SMYSL-6_RFC/EDITORS.md).
-- **Who made an attestation.** `smysl keygen`, `sign` and `verify` (RFC SMYSL-7) sign what an agent
-  attested with Ed25519, in a detached `COSE_Sign1` beside the store, and check it in `advisory`,
-  `selective` or `strict` mode. A forged, revoked or over-cap signature fails every mode.
-  `merge --sign`, `retract --sign` and `check --verify-sigs` make and report signatures where the
-  work happens.
-- **PELT on float metrics.** `floor: spread` gives the change-point detector a scale on series whose
-  steps are noise-sized; calibrated on one RCAEval system, it now holds its false-alarm rate on the
-  other two. GE-M7 on agents is still owed.
+- **Signatures that act.** Under `--trust-sigs advisory|selective|strict` (RFC SMYSL-8), an
+  attestation whose signature fails stops counting toward corroboration, threads and the
+  authority to retract. `smysl keys` adds, revokes and rotates keys. `ingest`, `tel read` and
+  `merge` sign at the commit, and `merge --require-sigs` refuses a store that would fail.
+- **Faster library commits.** The text library's range tables grow in blocks. At 10⁵ units the
+  late commit is 4.75 ms at p50, down from 7.7 (RFC SMYSL-9).
+- **Measured on RCAEval, as measured.** `tel/minhash/2` adds two kinds of similarity feature, and
+  `step:` reads a series at a coarser cadence. Neither new feature beats the 1.20 default on real
+  incidents, so `/1` stays the default. Calibration carries at 5 s and 15 s, but only when it was
+  done at that cadence. GE-M7 on agents is still owed.
 
 Building from source:
 
@@ -423,7 +420,7 @@ and `cargo run --example information_theory` for the library layer. See
 
 ## Status
 
-Crate `1.20.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
+Crate `1.21.0`, format `smysl/1.0`, kernel `smysl.kernel/0.1`. The contract is
 [`Documentation/SMYSL_FORMAT_SPEC.md`](Documentation/SMYSL_FORMAT_SPEC.md) — everything a
 second implementation must obey, and nothing else.
 
@@ -465,7 +462,7 @@ say so; the runs on real data, and GE-M7 on agents, are owed.
 | TL-P6 – P7 | investigations, rule TQ, kinds 6 and 7, the timeline thread, instruments and witnesses | **done** |
 | TL-P8 – P9 | retention and exchange, traces and logs, similar episodes | **done** |
 | AC-8 | a store's check kept as derived state | **done** |
-| §21 | calibration at a stated false-alarm rate, the scale floor, on RCAEval (1.19); `floor: spread` (1.20) | **done** |
+| §21 | calibration at a stated false-alarm rate, the scale floor, on RCAEval (1.19); `floor: spread` (1.20); a coarser cadence (1.21) | **done** |
 
 RFC SMYSL-4, Bund2 queries, and RFC SMYSL-5, information measures, are built to their last
 phases. SMYSL-5's experiments ran on simulated data, and GE-I3 also on RCAEval's real incidents
@@ -487,6 +484,17 @@ last phases in 1.20.
 | LS-P3 – P4 | completion, formatting, safe quick fixes; the workspace, a library read only | **done** |
 | SG-P1 – P2 | `smysl-sign`: Ed25519 in detached `COSE_Sign1`, three modes, status caps, the key file | **done** |
 | SG-P3 – P4 | `keygen`, `sign`, `verify`, the `--sign` flags, `check --verify-sigs`; the manual | **done** |
+
+RFC SMYSL-8, signed trust, and RFC SMYSL-9, three open measurements, are built to their last
+phases in 1.21. SMYSL-9's similarity and cadence runs are on RCAEval's real incidents.
+
+| Phase | Delivers | State |
+|---|---|---|
+| TR-P1 – P2 | admission under a signature policy: corroboration, threads, origin authority; `--trust-sigs` | **done** |
+| TR-P3 – P4 | `smysl keys`, signing at the commit, `merge --require-sigs`; the manual | **done** |
+| RT-P1 | range tables that grow by less than their size | **done** |
+| SI-P1 – P2 | `tel/minhash/2`: novel templates, kinds; run on RCAEval, no gate met | **done** |
+| CC-P1 – P2 | `step:` and `agg:`, calibration at 5 s and 15 s on RCAEval | **done** |
 
 Model providers, and how far each has actually been proven — an untested mapper is a
 reading of a vendor's documentation, not a fact about their API:

@@ -9,35 +9,37 @@ and the facade asserts the two are independent.
 
 ## Unreleased — 1.21.0
 
-What 1.20 leaves open, by what it blocks rather than the order it is easiest. 1.20 built two RFCs
-to their last phase; what they did not settle, and what earlier releases left, is where the work
-starts.
+Two RFCs, both built in full. Signatures now change what counts (RFC SMYSL-8), and three
+measurements 1.20 left open have run (RFC SMYSL-9), two of them on RCAEval's real incidents. No
+crate is new, the wire format did not change, the registry is 176, and `smysl/1.0` holds.
 
-**GE-M7 is still the reason for the telemetry work, and it has not run.** It needs the
-Train-Ticket testbed (D-T12) and agent runs, arms (a) to (d). Until it runs, the design of
-investigations is untested against an agent, and rule TQ's catch rate is a property of
-`examples/oko_ledger`'s planted quotes rather than of a model's.
+**Trust that reads signatures (RFC SMYSL-8, TR-P1 to TR-P4).** In 1.20 signatures stopped at the
+report. Now, under `--trust-sigs advisory|selective|strict` or `trust:` in the configuration, an
+attestation the mode would fail stops counting toward corroboration, thread derivation and origin
+authority. With no policy every result is what it was. Under a policy, `--as` must be proven with a
+key. `smysl keys` lists, adds, revokes and rotates keys and checks a store against them. `ingest`,
+`tel read` and `merge` sign at the commit, and `merge --require-sigs` refuses to write a store that
+would fail.
 
-**Signatures stop at the report.** `verify_store` and `verified_attesters` say which attestations
-verify, but corroboration and origin authority still count every `AgentId` as written; a caller
-filters by hand. Keys are distributed as a file beside the store, with no rotation beyond
-`revoked` and bounds, and `Attestation.sig` stays reserved.
+**Range tables that grow by less than their size (SMYSL-9 RT-P1).** The text library's range
+tables append in blocks. At 10⁵ units the late commit is 4.75 ms at p50, down from 7.7, and the
+tables' share of it is 1.9 %, down from 41 %.
 
-**The language server in more editors.** Neovim is the recipe that was run in an editor; the
-Helix, VS Code and Zed recipes are read against their documentation, not run.
+**Episode similarity and calibration on real incidents (SMYSL-9 Parts A and B).**
+`tel/minhash/2` adds novel templates by family and `kind:` features, and `step:` with `agg:`
+reads a series at a coarser cadence. Both were run on RCAEval, and the results are reported as
+measured. The new features met no gate: recurrence stays at 0.24 / 0.53 / 0.33 against 0.56 /
+0.54 / 0.36 without templates, so `/1` stays the default. Calibration carries across systems at
+5 s and 15 s at the gate's edge, but a value set at 1 s does not carry to 15 s, so calibrate at
+the cadence the series is scraped at.
 
-**Episode similarity on real incidents.** On RCAEval a case finds about half its repetitions in
-its top five, against 0.97 on simulated episodes (GE-M8). Calibration has been tested on one
-benchmark at one sample a second, not at a coarser cadence or on a production system.
+**Still open.** GE-M7 has not run: it needs the Train-Ticket testbed (D-T12) and agent runs, arms
+(a) to (d). Helix, VS Code and Zed recipes for the language server are read, not run. Episode
+similarity on real incidents is still weak: Sock Shop's singleton templates and Train Ticket's
+unexplained shortfall are named, not fixed. The other real-data runs, OKO's own ledger, and what
+earlier releases left did not move.
 
-**And what earlier releases left.** The real-data runs (GE-M1 on a cluster observed for seven
-days, the Zabbix fixtures, GE-M2 and GE-M5 on DeathStarBench at production-like load); OKO's own
-ledger, which is OKO's code; the range index's tables (RFC SMYSL-3 §17.1); the cache's written
-share, the repair a cut would do, the bound stated in tokens, the sizing residual on German, the
-Ollama arm's model size; questions still unread, a subject by a name the store does not write,
-GE-T7 on a thousand real works, and the ones only people can close. None of it moved in 1.20.
-
-### Trust that reads signatures (RFC SMYSL-8, TR-P1)
+### Trust that reads signatures, and three measurements run (RFC SMYSL-8, SMYSL-9)
 
 RFC SMYSL-7 made signatures and stopped at the report: corroboration and origin authority still
 counted every `AgentId` as written. RFC SMYSL-8 specifies what changes when they read
