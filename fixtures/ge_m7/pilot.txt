@@ -1,0 +1,6 @@
+RE2-OB/checkoutservice_cpu/2
+RE2-OB/recommendationservice_socket/2
+RE2-SS/carts_cpu/2
+RE2-SS/user_socket/2
+RE2-TT/ts-auth-service_cpu/2
+RE2-TT/ts-travel-service_socket/2

@@ -1,0 +1,865 @@
+time,timestamp,container_name,message,level,req_path,error,cluster_id,log_template
+00:00,1705353840462854657,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705353840249877352,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 0",info,,,1,x
+00:00,1705353840792987781,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353845355387288,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705353845469457758,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 5",info,,,1,x
+00:00,1705353845473129504,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353850702517229,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705353850134235022,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 10",info,,,1,x
+00:00,1705353850781722899,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353855800434320,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705353855951458809,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 15",info,,,1,x
+00:00,1705353855268324239,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353860762207447,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705353860570173275,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 20",info,,,1,x
+00:00,1705353860942640922,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353865749887938,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705353865585515239,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 25",info,,,1,x
+00:00,1705353865598538249,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353870695485658,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705353870364705233,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 30",info,,,1,x
+00:00,1705353870746625589,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353875699735018,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705353875615189131,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 35",info,,,1,x
+00:00,1705353875628251575,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353880389009309,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705353880348286624,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 40",info,,,1,x
+00:00,1705353880626908137,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353885989876211,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705353885326901545,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 45",info,,,1,x
+00:00,1705353885766582040,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353890303647149,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705353890406396733,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 50",info,,,1,x
+00:00,1705353890040623421,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353895652262168,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705353895326328192,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 55",info,,,1,x
+00:00,1705353895722594945,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353900115140133,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705353900054085410,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 60",info,,,1,x
+00:00,1705353900995919527,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353905021525255,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705353905045152032,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 65",info,,,1,x
+00:00,1705353905498250527,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353910116001040,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705353910944147952,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 70",info,,,1,x
+00:00,1705353910314183491,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353915748086919,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705353915265692956,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 75",info,,,1,x
+00:00,1705353915461442203,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353920326423194,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705353920192312014,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 80",info,,,1,x
+00:00,1705353920205675552,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353925941405229,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705353925650740830,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 85",info,,,1,x
+00:00,1705353925930965137,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353930108156607,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705353930390528360,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 90",info,,,1,x
+00:00,1705353930654753094,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353935562769042,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705353935760356286,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 95",info,,,1,x
+00:00,1705353935845362045,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353940008925148,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705353940236241872,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 100",info,,,1,x
+00:00,1705353940204615416,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353945915337206,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705353945169193396,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 105",info,,,1,x
+00:00,1705353945692351204,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353950131932335,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705353950887632854,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 110",info,,,1,x
+00:00,1705353950762064180,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353955750713896,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705353955646280784,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 115",info,,,1,x
+00:00,1705353955684255243,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353960787595998,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705353960201118394,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 120",info,,,1,x
+00:00,1705353960559833422,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353965418739751,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705353965469239222,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 125",info,,,1,x
+00:00,1705353965732244188,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353970656939781,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705353970431299152,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 130",info,,,1,x
+00:00,1705353970787609027,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353975259900936,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705353975920566489,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 135",info,,,1,x
+00:00,1705353975101484352,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353980956579467,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705353980432600745,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 140",info,,,1,x
+00:00,1705353980718184045,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353985295373783,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705353985095995586,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 145",info,,,1,x
+00:00,1705353985605268052,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353990203518253,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705353990114343798,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 150",info,,,1,x
+00:00,1705353990153850781,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705353995100323628,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705353995734468777,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 155",info,,,1,x
+00:00,1705353995331720269,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354000995693387,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354000095650475,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 160",info,,,1,x
+00:00,1705354000499917468,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354005364642204,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354005781356516,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 165",info,,,1,x
+00:00,1705354005534433356,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354010817133822,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354010861052109,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 170",info,,,1,x
+00:00,1705354010064446783,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354015716477822,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354015797218272,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 175",info,,,1,x
+00:00,1705354015394727849,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354020207763437,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354020653255195,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 180",info,,,1,x
+00:00,1705354020595579915,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354025045932005,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354025374906734,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 185",info,,,1,x
+00:00,1705354025252759189,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354030447505722,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354030848370693,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 190",info,,,1,x
+00:00,1705354030358296584,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354035621270901,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354035852209814,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 195",info,,,1,x
+00:00,1705354035464615662,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354040562965762,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354040613748423,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 200",info,,,1,x
+00:00,1705354040870635727,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354045415960682,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354045386057925,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 205",info,,,1,x
+00:00,1705354045089409929,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354050827147212,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354050750228313,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 210",info,,,1,x
+00:00,1705354050819040353,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354055672822263,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354055347141363,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 215",info,,,1,x
+00:00,1705354055397553831,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354060258821544,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354060336847203,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 220",info,,,1,x
+00:00,1705354060267754292,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354065902190707,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354065552351531,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 225",info,,,1,x
+00:00,1705354065155339793,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354070522889183,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354070712690694,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 230",info,,,1,x
+00:00,1705354070939240439,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354075912650266,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354075751251125,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 235",info,,,1,x
+00:00,1705354075918273702,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354080314870304,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354080312318656,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 240",info,,,1,x
+00:00,1705354080604472946,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354085521089879,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354085066236567,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 245",info,,,1,x
+00:00,1705354085942604035,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354090392347155,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354090875095495,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 250",info,,,1,x
+00:00,1705354090766005488,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354095962395542,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354095109187179,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 255",info,,,1,x
+00:00,1705354095703138659,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354100606376585,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354100485053373,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 260",info,,,1,x
+00:00,1705354100520162372,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354105562759209,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354105042362911,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 265",info,,,1,x
+00:00,1705354105026638516,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354110011787159,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354110301482306,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 270",info,,,1,x
+00:00,1705354110872392476,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354115041603769,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354115401922740,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 275",info,,,1,x
+00:00,1705354115097701286,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354120749794447,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354120827664723,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 280",info,,,1,x
+00:00,1705354120387371421,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354125277519259,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354125134907615,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 285",info,,,1,x
+00:00,1705354125861010276,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354130933678643,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354130477862734,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 290",info,,,1,x
+00:00,1705354130640636897,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354135994673307,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354135180050714,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 295",info,,,1,x
+00:00,1705354135928708896,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354140801202525,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354140451698501,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 300",info,,,1,x
+00:00,1705354140459068461,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354145096825683,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354145304347947,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 305",info,,,1,x
+00:00,1705354145619749210,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354150954334919,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354150939500412,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 310",info,,,1,x
+00:00,1705354150979495375,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354155148564529,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354155983258276,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 315",info,,,1,x
+00:00,1705354155053463890,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354160462669822,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354160122479952,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 320",info,,,1,x
+00:00,1705354160030198348,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354165156109978,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354165794378165,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 325",info,,,1,x
+00:00,1705354165821427587,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354170358970257,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354170078442494,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 330",info,,,1,x
+00:00,1705354170554628801,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354175396294164,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354175369819645,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 335",info,,,1,x
+00:00,1705354175878867487,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354180223013955,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354180439170520,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 340",info,,,1,x
+00:00,1705354180230157995,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354185132390082,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354185703710017,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 345",info,,,1,x
+00:00,1705354185667924265,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354190086882046,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354190335500591,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 350",info,,,1,x
+00:00,1705354190081103061,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354195312954198,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354195242455258,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 355",info,,,1,x
+00:00,1705354195841440062,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354200925032656,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354200022814932,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 360",info,,,1,x
+00:00,1705354200576447206,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354205833539119,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354205613499206,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 365",info,,,1,x
+00:00,1705354205279346972,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354210774529238,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354210190248626,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 370",info,,,1,x
+00:00,1705354210781032643,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354215998777756,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354215081585487,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 375",info,,,1,x
+00:00,1705354215352908542,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354220299888774,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354220272043167,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 380",info,,,1,x
+00:00,1705354220271064462,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354225885032148,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354225646679837,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 385",info,,,1,x
+00:00,1705354225757504754,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354230461718107,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354230229405444,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 390",info,,,1,x
+00:00,1705354230397461723,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354235575920957,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354235287078521,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 395",info,,,1,x
+00:00,1705354235371335071,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354240003244210,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354240524754316,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 400",info,,,1,x
+00:00,1705354240410958546,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354245178780813,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354245392239657,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 405",info,,,1,x
+00:00,1705354245115879117,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354250542924093,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354250117572402,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 410",info,,,1,x
+00:00,1705354250376406124,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354255936473823,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354255427378654,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 415",info,,,1,x
+00:00,1705354255874621404,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354260391038108,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354260419829072,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 420",info,,,1,x
+00:00,1705354260049442656,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354265844396154,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354265752686844,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 425",info,,,1,x
+00:00,1705354265105608152,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354270631852620,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354270228009554,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 430",info,,,1,x
+00:00,1705354270494516374,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354275144511610,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354275352147861,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 435",info,,,1,x
+00:00,1705354275098073079,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354280159627434,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354280312522321,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 440",info,,,1,x
+00:00,1705354280956677115,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354285973653333,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354285393855262,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 445",info,,,1,x
+00:00,1705354285130926667,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354290694917860,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354290319482690,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 450",info,,,1,x
+00:00,1705354290670709666,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354295185103474,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354295226562542,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 455",info,,,1,x
+00:00,1705354295166041383,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354300157145053,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354300228706260,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 460",info,,,1,x
+00:00,1705354300848365003,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354305638655329,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354305229828240,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 465",info,,,1,x
+00:00,1705354305014945304,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354310287121237,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354310543414886,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 470",info,,,1,x
+00:00,1705354310378151961,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354315297954239,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354315519022886,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 475",info,,,1,x
+00:00,1705354315157721530,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354320678618524,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354320018564427,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 480",info,,,1,x
+00:00,1705354320729669107,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354325777067139,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354325298169020,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 485",info,,,1,x
+00:00,1705354325267194842,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354330713771767,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354330387624629,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 490",info,,,1,x
+00:00,1705354330143658496,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354335296848081,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354335142569389,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 495",info,,,1,x
+00:00,1705354335543117567,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354340276159563,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354340294951825,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 500",info,,,1,x
+00:00,1705354340315607649,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354345537006026,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354345914966520,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 505",info,,,1,x
+00:00,1705354345104372629,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354350293895877,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354350670475056,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 510",info,,,1,x
+00:00,1705354350507826623,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354355628010905,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354355175878901,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 515",info,,,1,x
+00:00,1705354355267814250,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354360341799803,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354360814698224,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 520",info,,,1,x
+00:00,1705354360975843299,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354365525812430,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354365527282910,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 525",info,,,1,x
+00:00,1705354365429796611,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354370930410533,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354370840198958,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 530",info,,,1,x
+00:00,1705354370768778845,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354375765633611,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354375071756647,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 535",info,,,1,x
+00:00,1705354375063772371,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354380194911427,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354380691277254,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 540",info,,,1,x
+00:00,1705354380125384469,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354385760466836,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354385428653079,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 545",info,,,1,x
+00:00,1705354385377753039,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354390436485105,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354390199190321,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 550",info,,,1,x
+00:00,1705354390306813314,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354395758517375,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354395560196748,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 555",info,,,1,x
+00:00,1705354395306213482,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354400648646972,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354400988118675,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 560",info,,,1,x
+00:00,1705354400883562026,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354405196405974,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354405280947710,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 565",info,,,1,x
+00:00,1705354405795450795,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354410247509161,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354410127448012,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 570",info,,,1,x
+00:00,1705354410946181748,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354415945071193,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354415695690592,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 575",info,,,1,x
+00:00,1705354415353803992,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354420855570475,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354420592397931,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 580",info,,,1,x
+00:00,1705354420971998769,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354425847045748,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354425208164836,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 585",info,,,1,x
+00:00,1705354425528153946,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354430079732090,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354430221950459,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 590",info,,,1,x
+00:00,1705354430779995397,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354435315147366,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354435477792829,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 595",info,,,1,x
+00:00,1705354435815523944,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354440141873955,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354440294069819,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 600",info,,,1,x
+00:00,1705354440689509298,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354445279435041,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354445178588244,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 605",info,,,1,x
+00:00,1705354445496899981,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354450942029562,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354450364477484,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 610",info,,,1,x
+00:00,1705354450457287059,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354455385314900,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354455745916743,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 615",info,,,1,x
+00:00,1705354455877169793,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354460019006922,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354460778158954,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 620",info,,,1,x
+00:00,1705354460410988190,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354465925645818,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354465630171366,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 625",info,,,1,x
+00:00,1705354465516507539,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354470977012308,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354470501872084,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 630",info,,,1,x
+00:00,1705354470353869475,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354475970073293,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354475643628138,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 635",info,,,1,x
+00:00,1705354475738660977,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354480302211722,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354480350267016,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 640",info,,,1,x
+00:00,1705354480844697263,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354485728516155,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354485490603258,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 645",info,,,1,x
+00:00,1705354485359843381,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354490955071853,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354490691526233,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 650",info,,,1,x
+00:00,1705354490314986601,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354495223808456,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354495573464167,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 655",info,,,1,x
+00:00,1705354495786179982,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354500984246795,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354500853270749,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 660",info,,,1,x
+00:00,1705354500096895556,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354505539459943,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354505962396158,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 665",info,,,1,x
+00:00,1705354505733232544,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354510764618850,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354510511723479,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 670",info,,,1,x
+00:00,1705354510795327899,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354515794156506,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354515548838169,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 675",info,,,1,x
+00:00,1705354515501634277,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354520170542560,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354520672893154,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 680",info,,,1,x
+00:00,1705354520089973019,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354525621776214,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354525667615705,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 685",info,,,1,x
+00:00,1705354525598268233,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354530136644704,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354530547041318,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 690",info,,,1,x
+00:00,1705354530260358203,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354535122706690,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354535806178320,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 695",info,,,1,x
+00:00,1705354535184132315,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354540317334027,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354540286996728,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 700",info,,,1,x
+00:00,1705354540764186477,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354545763865934,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354545670020828,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 705",info,,,1,x
+00:00,1705354545298457532,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354550214951715,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354550600931125,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 710",info,,,1,x
+00:00,1705354550200143825,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354555852264758,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354555720117981,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 715",info,,,1,x
+00:00,1705354555680459410,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354560620309644,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354560449639299,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 720",info,,,1,x
+00:00,1705354560653593563,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354565127467309,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354565173787129,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 725",info,,,1,x
+00:00,1705354565328682134,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354570577712456,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354570391619406,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 730",info,,,1,x
+00:00,1705354570605208436,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354575728498479,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354575776218981,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 735",info,,,1,x
+00:00,1705354575104036239,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354580066576272,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354580201682747,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 740",info,,,1,x
+00:00,1705354580129962816,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354585183564149,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354585845368232,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 745",info,,,1,x
+00:00,1705354585337819811,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354590428933651,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354590187494121,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 750",info,,,1,x
+00:00,1705354590215667209,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354595578925737,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354595617639847,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 755",info,,,1,x
+00:00,1705354595141878941,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354600406211057,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354600419965377,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 760",info,,,1,x
+00:00,1705354600610859771,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354605157455381,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354605749825463,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 765",info,,,1,x
+00:00,1705354605419313920,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354610398247111,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354610365321787,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 770",info,,,1,x
+00:00,1705354610128448601,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354615619915851,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354615553029019,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 775",info,,,1,x
+00:00,1705354615493393743,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354620943553035,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354620814348697,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 780",info,,,1,x
+00:00,1705354620501449943,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354625855896252,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354625464871469,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 785",info,,,1,x
+00:00,1705354625975779320,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354630182671388,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354630873968496,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 790",info,,,1,x
+00:00,1705354630694781870,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354635585941950,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354635894148566,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 795",info,,,1,x
+00:00,1705354635112391278,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354640558207499,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354640336172189,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 800",info,,,1,x
+00:00,1705354640449396535,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354645809250887,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354645786502994,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 805",info,,,1,x
+00:00,1705354645304322309,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354650252588271,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354650212277192,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 810",info,,,1,x
+00:00,1705354650633978863,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354655003199709,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354655102067969,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 815",info,,,1,x
+00:00,1705354655509819542,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354660509906877,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354660628368598,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 820",info,,,1,x
+00:00,1705354660244231763,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354665774257271,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354665647508029,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 825",info,,,1,x
+00:00,1705354665874167775,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354670099482618,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354670505103197,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 830",info,,,1,x
+00:00,1705354670548760298,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354675358922841,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354675071459846,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 835",info,,,1,x
+00:00,1705354675563907537,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354680328121286,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354680217816417,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 840",info,,,1,x
+00:00,1705354680063902355,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354685942745821,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354685776704114,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 845",info,,,1,x
+00:00,1705354685695538689,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354690843119600,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354690284872222,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 850",info,,,1,x
+00:00,1705354690851771667,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354695613705558,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354695731604812,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 855",info,,,1,x
+00:00,1705354695011592075,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354700044865845,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354700608142880,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 860",info,,,1,x
+00:00,1705354700192391387,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354705429370572,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354705196994028,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 865",info,,,1,x
+00:00,1705354705444499483,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354710615188217,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354710694728988,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 870",info,,,1,x
+00:00,1705354710857719502,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354715796803032,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354715903101257,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 875",info,,,1,x
+00:00,1705354715876200428,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354720941958618,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354720180690282,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 880",info,,,1,x
+00:00,1705354720908806912,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354725262169412,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354725622318738,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 885",info,,,1,x
+00:00,1705354725984551290,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354730205677025,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354730461682119,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 890",info,,,1,x
+00:00,1705354730296230572,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354735185250369,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354735924709688,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 895",info,,,1,x
+00:00,1705354735835716179,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354740088856029,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354740233236712,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 900",info,,,1,x
+00:00,1705354740409836871,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354745103358500,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354745473790044,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 905",info,,,1,x
+00:00,1705354745333736605,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354750912458883,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354750681395270,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 910",info,,,1,x
+00:00,1705354750239953418,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354755547809502,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354755684175782,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 915",info,,,1,x
+00:00,1705354755794293188,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354760440151333,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354760444324456,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 920",info,,,1,x
+00:00,1705354760300351440,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354765608618603,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354765203602336,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 925",info,,,1,x
+00:00,1705354765487096458,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354770945407593,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354770095113840,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 930",info,,,1,x
+00:00,1705354770796265825,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354775787474470,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354775146114084,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 935",info,,,1,x
+00:00,1705354775973791383,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354780392591246,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354780003507299,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 940",info,,,1,x
+00:00,1705354780336214636,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354785087319625,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354785819464206,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 945",info,,,1,x
+00:00,1705354785356875783,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354790287396754,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354790189433433,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 950",info,,,1,x
+00:00,1705354790016414687,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354795482209150,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354795178407173,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 955",info,,,1,x
+00:00,1705354795219317389,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354800766918830,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354800629336603,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 960",info,,,1,x
+00:00,1705354800249886248,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354805168288480,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354805283723542,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 965",info,,,1,x
+00:00,1705354805993317140,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354810338819934,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354810775375002,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 970",info,,,1,x
+00:00,1705354810647948780,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354815783306325,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354815192254397,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 975",info,,,1,x
+00:00,1705354815142765685,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354820986974523,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354820795835099,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 980",info,,,1,x
+00:00,1705354820415536154,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354825651626400,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354825897586518,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 985",info,,,1,x
+00:00,1705354825353620200,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354830897940044,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354830457218285,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 990",info,,,1,x
+00:00,1705354830989422790,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354835416787670,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354835277968622,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 995",info,,,1,x
+00:00,1705354835351867780,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354840512292890,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354840173884051,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1000",info,,,1,x
+00:00,1705354840391695781,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354845878991476,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354845436956340,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1005",info,,,1,x
+00:00,1705354845145016316,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354850960405337,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354850371051392,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1010",info,,,1,x
+00:00,1705354850950714747,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354855236680848,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354855642524421,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1015",info,,,1,x
+00:00,1705354855842355891,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354860918764533,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354860229960448,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1020",info,,,1,x
+00:00,1705354860670310512,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354865647330100,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354865200666279,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1025",info,,,1,x
+00:00,1705354865557333179,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354870001272790,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354870901442922,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1030",info,,,1,x
+00:00,1705354870969497483,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354875737661959,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354875463426181,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1035",info,,,1,x
+00:00,1705354875828478181,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354880712165021,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354880935681703,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1040",info,,,1,x
+00:00,1705354880589652777,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354885943941866,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354885606868948,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1045",info,,,1,x
+00:00,1705354885673553157,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354890590570075,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354890012549007,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1050",info,,,1,x
+00:00,1705354890702985888,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354895948773918,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354895414729550,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1055",info,,,1,x
+00:00,1705354895073025368,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354900920374171,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354900610037982,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1060",info,,,1,x
+00:00,1705354900567170995,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354905843767406,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354905164237972,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1065",info,,,1,x
+00:00,1705354905587107814,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354910734353313,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354910680650267,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1070",info,,,1,x
+00:00,1705354910529522079,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354915883717414,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354915720328253,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1075",info,,,1,x
+00:00,1705354915508479414,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354920554021092,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354920125339311,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1080",info,,,1,x
+00:00,1705354920007491516,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354925523243373,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354925049732858,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1085",info,,,1,x
+00:00,1705354925468715185,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354930367222858,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354930060850980,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1090",info,,,1,x
+00:00,1705354930698658397,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354935451287178,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354935647646707,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1095",info,,,1,x
+00:00,1705354935081340890,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354940231257154,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354940998800439,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1100",info,,,1,x
+00:00,1705354940808572916,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354945913112811,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354945110575304,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1105",info,,,1,x
+00:00,1705354945399149442,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354950905383838,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354950384271340,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1110",info,,,1,x
+00:00,1705354950707977206,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354955783758371,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354955779949599,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1115",info,,,1,x
+00:00,1705354955516450776,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354960025158187,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354960387251570,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1120",info,,,1,x
+00:00,1705354960235248874,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354965975310155,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705354965666313988,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1125",info,,,1,x
+00:00,1705354965653333361,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354970511043814,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705354970268105170,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1130",info,,,1,x
+00:00,1705354970218467451,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354975316515995,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705354975708003985,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1135",info,,,1,x
+00:00,1705354975021928676,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354980998764369,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705354980222076985,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1140",info,,,1,x
+00:00,1705354980659889243,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354985298239956,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705354985912478026,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1145",info,,,1,x
+00:00,1705354985311119178,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354990565567257,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705354990455946105,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1150",info,,,1,x
+00:00,1705354990078811241,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705354995946342605,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705354995142712670,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1155",info,,,1,x
+00:00,1705354995302275315,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355000895732912,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705355000042225999,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1160",info,,,1,x
+00:00,1705355000977130272,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355005388529664,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705355005734294226,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1165",info,,,1,x
+00:00,1705355005907650366,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355010162474867,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705355010089255264,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1170",info,,,1,x
+00:00,1705355010039497959,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355015531598724,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705355015847544520,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1175",info,,,1,x
+00:00,1705355015843166512,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355020917902855,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705355020955736712,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1180",info,,,1,x
+00:00,1705355020179965587,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355025169055348,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705355025043215674,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1185",info,,,1,x
+00:00,1705355025541151833,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355030203256190,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705355030032657887,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1190",info,,,1,x
+00:00,1705355030003688543,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355035356042026,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705355035718282453,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1195",info,,,1,x
+00:00,1705355035003419286,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355040730830859,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705355040666671243,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1200",info,,,1,x
+00:00,1705355040486665516,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355045177773014,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705355045311540252,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1205",info,,,1,x
+00:00,1705355045662250764,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355050286718625,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705355050158339926,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1210",info,,,1,x
+00:00,1705355050185287686,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355055258618555,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705355055571166951,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1215",info,,,1,x
+00:00,1705355055548091795,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355060181311139,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705355060761964448,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1220",info,,,1,x
+00:00,1705355060772129958,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355065194362508,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705355065959249215,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1225",info,,,1,x
+00:00,1705355065523033251,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355070998812012,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705355070350373386,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1230",info,,,1,x
+00:00,1705355070240519061,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355075732941809,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705355075185758303,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1235",info,,,1,x
+00:00,1705355075244059211,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355080692712978,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705355080675163506,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1240",info,,,1,x
+00:00,1705355080128222506,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355085999828736,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705355085554367544,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1245",info,,,1,x
+00:00,1705355085793099353,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355090232175810,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705355090484051059,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1250",info,,,1,x
+00:00,1705355090344757129,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355095592984610,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705355095875315557,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1255",info,,,1,x
+00:00,1705355095052043836,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355100465949111,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705355100405904122,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1260",info,,,1,x
+00:00,1705355100152065370,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355105152748943,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705355105042405870,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1265",info,,,1,x
+00:00,1705355105223819981,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355110611063842,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705355110408195618,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1270",info,,,1,x
+00:00,1705355110364118609,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355115561049913,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705355115018209741,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1275",info,,,1,x
+00:00,1705355115366159032,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355120408914083,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705355120033632899,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1280",info,,,1,x
+00:00,1705355120915963545,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355125061283646,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705355125378585823,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1285",info,,,1,x
+00:00,1705355125597608521,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355130326964988,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705355130479170873,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1290",info,,,1,x
+00:00,1705355130860107773,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355135136856453,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705355135705491729,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1295",info,,,1,x
+00:00,1705355135319187152,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355140288884247,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705355140973737829,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1300",info,,,1,x
+00:00,1705355140022679682,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355145793760403,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705355145215971901,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1305",info,,,1,x
+00:00,1705355145438379295,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355150531387900,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705355150527588573,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1310",info,,,1,x
+00:00,1705355150111813557,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355155148598333,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705355155944048827,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1315",info,,,1,x
+00:00,1705355155215260653,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355160166279667,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705355160005498251,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1320",info,,,1,x
+00:00,1705355160159690064,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355165925551697,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705355165668075598,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1325",info,,,1,x
+00:00,1705355165058427830,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355170481471822,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705355170749414269,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1330",info,,,1,x
+00:00,1705355170130881463,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355175046165384,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705355175168859403,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1335",info,,,1,x
+00:00,1705355175664658229,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355180521560848,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705355180497874087,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1340",info,,,1,x
+00:00,1705355180816048327,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355185838716540,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705355185999283423,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1345",info,,,1,x
+00:00,1705355185369259707,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355190675938874,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705355190106142630,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1350",info,,,1,x
+00:00,1705355190943404646,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355195806433701,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705355195951751264,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1355",info,,,1,x
+00:00,1705355195020525931,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355200982684237,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705355200262129784,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1360",info,,,1,x
+00:00,1705355200263917545,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355205081808789,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705355205957889713,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1365",info,,,1,x
+00:00,1705355205889729168,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355210200261380,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705355210395176708,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1370",info,,,1,x
+00:00,1705355210577062004,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355215151543664,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705355215325977577,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1375",info,,,1,x
+00:00,1705355215888364660,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355220965234312,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705355220488486889,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1380",info,,,1,x
+00:00,1705355220483932139,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355225669092111,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705355225975868277,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1385",info,,,1,x
+00:00,1705355225622716531,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355230559706514,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705355230107591073,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1390",info,,,1,x
+00:00,1705355230735459585,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355235659339351,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705355235922306678,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1395",info,,,1,x
+00:00,1705355235701624136,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355240680011744,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705355240481036021,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1400",info,,,1,x
+00:00,1705355240165781294,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355245490640873,frontend,"request to cartservice:7070 served in 15 ms",info,,,1,x
+00:00,1705355245021185538,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1405",info,,,1,x
+00:00,1705355245234314429,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355250778239928,frontend,"request to cartservice:7070 served in 13 ms",info,,,1,x
+00:00,1705355250387325075,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1410",info,,,1,x
+00:00,1705355250362043415,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355255167401644,frontend,"request to cartservice:7070 served in 11 ms",info,,,1,x
+00:00,1705355255556749495,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1415",info,,,1,x
+00:00,1705355255008226577,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355260294683803,frontend,"request to cartservice:7070 served in 16 ms",info,,,1,x
+00:00,1705355260046067975,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1420",info,,,1,x
+00:00,1705355260263470303,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355265132752896,frontend,"request to cartservice:7070 served in 14 ms",info,,,1,x
+00:00,1705355265454160256,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1425",info,,,1,x
+00:00,1705355265702538642,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355270512812803,frontend,"request to cartservice:7070 served in 12 ms",info,,,1,x
+00:00,1705355270297071808,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1430",info,,,1,x
+00:00,1705355270790837179,redis,"1 changes in 900 seconds. Saving...",info,,,1,x
+00:00,1705355275387694253,frontend,"request to cartservice:7070 served in 10 ms",info,,,1,x
+00:00,1705355275458851626,cartservice,"cartservice-7d9f8-abcde handled GetCart for user 1435",info,,,1,x
+00:00,1705355275139766167,redis,"1 changes in 900 seconds. Saving...",info,,,1,x

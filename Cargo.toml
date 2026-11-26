@@ -219,6 +219,13 @@ required-features = ["tel", "semantic"]
 name              = "ge_m8_rcaeval"
 required-features = ["tel", "semantic"]
 
+# GE-M7, stage M7-R (RFC SMYSL-10): agent RCA with and without smysl, on RCAEval RE2. Its test
+# runs every arm on two synthetic cases with a scripted agent, so no model or download is needed.
+[[example]]
+name              = "ge_m7"
+required-features = ["tel", "local"]
+test              = true
+
 [[bin]]
 name              = "smysl"
 path              = "src/main.rs"

@@ -111,6 +111,31 @@ impl Ollama {
         Ok(body)
     }
 
+    /// The body as sent: `body`, with a `JsonSchema` schema spliced in as the caller wrote it.
+    ///
+    /// Ollama compiles the schema into a grammar that emits properties in the order they are
+    /// written. `body` holds the schema as a `Value`, whose object keys are sorted, so sending
+    /// it re-sorted every caller's properties: an `anyOf` whose branches each began with a
+    /// `thought` field arrived with `thought` first only where it sorted first, and the grammar
+    /// then admitted only those branches, whatever the model meant (RFC SMYSL-10, M7-P1).
+    fn wire(&self, req: &Request, stream: bool) -> Result<String, ProviderError> {
+        let mut body = self.body(req, stream)?;
+        let raw = match (req.structured, req.schema.as_deref()) {
+            (StructuredMode::JsonSchema, Some(raw)) => raw.trim(),
+            _ => return Ok(body.to_string()),
+        };
+        if let Some(o) = body.as_object_mut() {
+            o.remove("format");
+        }
+        // `body` checked that `raw` is JSON; the object's text ends in its closing brace.
+        let mut text = body.to_string();
+        text.pop();
+        text.push_str(",\"format\":");
+        text.push_str(raw);
+        text.push('}');
+        Ok(text)
+    }
+
     /// Responsibilities 3 and 4: the text, and the usage.
     pub fn parse(&self, raw: &str, retries: u32) -> Result<Completion, ProviderError> {
         let v: Value = serde_json::from_str(raw)
@@ -275,7 +300,7 @@ impl Provider for Ollama {
     }
 
     fn complete(&self, req: &Request) -> Result<Completion, ProviderError> {
-        let body = self.body(req, false)?.to_string();
+        let body = self.wire(req, false)?;
         let url = self.url("/api/chat");
         let timeout = self.timeout();
 
@@ -298,7 +323,7 @@ impl Provider for Ollama {
     ) -> Result<Usage, ProviderError> {
         // Ollama streams newline-delimited JSON objects. `ureq` gives a blocking reader,
         // which is exactly what the dedicated thread is for.
-        let body = self.body(req, true)?.to_string();
+        let body = self.wire(req, true)?;
         let url = self.url("/api/chat");
         let timeout = self.timeout();
 
@@ -570,6 +595,30 @@ mod tests {
         // against; Ollama's own default is 2048, so the absence of this key meant a long
         // prompt could be truncated to a quarter of the plan and answered as if whole.
         assert_eq!(b["options"]["num_ctx"], 8192);
+    }
+
+    /// The schema is sent in the caller's property order, which is the order Ollama's grammar
+    /// makes the model write them in.
+    #[test]
+    fn the_schema_is_sent_in_the_callers_order() {
+        let schema = r#"{"type":"object","properties":{"thought":{"type":"string"},"tool":{"const":"a"}},"required":["thought","tool"]}"#;
+        let req = Request::new("m", "x").with_schema(StructuredMode::JsonSchema, schema);
+        let wire = provider().wire(&req, false).unwrap();
+        assert!(
+            wire.ends_with(&format!(r#","format":{schema}}}"#)),
+            "{wire}"
+        );
+        let v: Value = serde_json::from_str(&wire).unwrap();
+        assert_eq!(
+            v,
+            provider().body(&req, false).unwrap(),
+            "the same body otherwise"
+        );
+        let plain = Request::new("m", "x");
+        assert_eq!(
+            provider().wire(&plain, false).unwrap(),
+            provider().body(&plain, false).unwrap().to_string()
+        );
     }
 
     /// The window sent is the configured one, never a probe's.

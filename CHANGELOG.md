@@ -57,6 +57,27 @@ close. None of it moved in 1.21.
   write each quote or rule TQ measures nothing. Each is fixed in the text, and all seven
   questions are settled; no API change is needed.
 
+### GE-M7's harness (RFC SMYSL-10 M7-P1)
+
+- **`examples/ge_m7`**: RCAEval RE2 cases loaded into an in-memory substrate, services renamed
+  `svc-NN`, the tools, the agent loop over `smysl-provider`, the four arms, an oracle that
+  recomputes every quote from the raw files, and scoring. `run` drives a model over a case list;
+  `check-data` runs every tool on every case and fails on a root-cause name in any result;
+  `sample` lists the 90 scored cases and the 6 pilot cases (`fixtures/ge_m7/`). A scripted agent
+  checks the oracle, rule TQ and the scores without a model or the data.
+- **Leakage needs a check independent of the renaming.** The first scan found nothing because it
+  tested the renaming's own list; Sock Shop's logs say `cart` and `CartsController`, Online
+  Boutique's `ListRecommendations`. The rule now covers singular and plural forms and camelCase
+  segments, and the scan also lists every token holding a root's stem. On 270 cases: 0 leaks,
+  and `username`-like words left on purpose.
+- **Fixed: the Ollama mapping sent JSON schemas with their properties sorted.** It parsed the
+  schema into a `serde_json::Value` and sent that, so properties arrived alphabetised, and
+  Ollama's grammar writes them in the order given. A step schema whose branches each began with
+  `thought` came out with `thought` first in only one branch, and the model could answer only
+  that branch, 25 times running. The schema text is now sent as the caller wrote it.
+- **Smoke run.** One Sock Shop case on `qwen2.5:14b-instruct`, all four arms: each answered, no
+  protocol failure, no fabricated quote. M7-P2, the six-case pilot, is next.
+
 ## 1.21.0 — 2026-11-25
 
 Two RFCs, both built in full. Signatures now change what counts (RFC SMYSL-8), and three
