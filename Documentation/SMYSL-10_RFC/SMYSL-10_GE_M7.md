@@ -362,6 +362,60 @@ below is fixed in the body or in the code, as it says.
   no fabricated quote; (c) and (d) ranked the root cause first, (a) and (b) did not. One case
   says the loop works, not how well.
 
+### A2. M7-P2, the pilot and the freeze (2026-11-26)
+
+The pilot ran `fixtures/ge_m7/pilot.txt` (six cases, repetition 2) on every arm with
+`qwen2.5:14b-instruct`, twice: once as M7-P1 left the harness, and once after the two fixes
+below. The numbers are the second run's.
+
+| Arm | AC@1 | AC@5 | Claims | Fabricated (tolerant) | Steps | Input tokens / run | s / run |
+|---|---|---|---|---|---|---|---|
+| (a) | 0.000 | 0.000 | 18 | 0 | 17.2 | 73,538 | 75.6 |
+| (b) | 0.000 | 0.000 | 18 | 0 | 12.0 | 41,702 | 58.0 |
+| (c) | 0.500 | 0.667 | — | — | — | — | 0 |
+| (d) | 0.500 | 0.500 | 18 | 0 | 12.5 | 46,653 | 59.7 |
+
+Protocol failures: 0 of 18 agent runs (Q-3's stop line is 20 %). Argument errors: 0–1 per run.
+Results cut at the cap: 0–2 per run, mostly `logs` and `traces`.
+
+- **A2-1. The prompt chose the first service.** Every example in the system prompt named
+  `svc-07`, and in the first run 10 of 12 (a) and (b) runs opened with `svc-07`. Most of them
+  answered it, and a (d) run read BARO's ranking as headed by `svc-07` when `svc-06` was first.
+  The examples now say `svc-NN` and `svc-MM`, "any of them, not a service to start with". In the
+  second run the first service opened is the first or second listed. Names are a seeded
+  permutation per case, so that order carries nothing about the root cause.
+- **A2-2. The oracle counted repeated lines.** A (d) quote of a template's count, 718, copied
+  from the tool, was judged fabricated: the oracle's Drain over `logs.csv` counted 724. The file
+  repeats lines at the same millisecond in the same container, and the substrate stores events
+  by content, so the tool counts each once. The oracle now does the same, and the quote verifies.
+  With it went the first run's TQ recall of 0 in (d): the one "miss" was the oracle's. `runs.jsonl`
+  now records every quote the oracle rejects or finds misspelt, with the reason.
+- **A2-3. The floor.** No arm fabricated a quote: 0 of 54 claims, tolerant or strict. Tools print
+  each number as the unit's canonical text beside its id (R1-6), and at temperature 0 this model
+  copies what it reads. G-1 compares (b)'s rate with (a)'s, and (a)'s is 0. A probe (`--digits 4`:
+  tools print four significant digits; one case, (a) and (b)) did not move it. Of six claims in
+  each arm, none was fabricated under the tolerant oracle. Four of (a)'s were not TQ's spelling.
+  In (b) TQ flagged the four correct roundings (G-2's false positives), and after that feedback
+  (b)'s answer quoted every value canonically: feedback teaches spelling, not honesty. Rounding
+  adds TQ false positives without making fabrication to measure, so printing stays canonical.
+  `--digits` is kept as a probe and is not used in scored runs.
+- **A2-4. G-1 at the floor, read before M7-P3.** If (a)'s tolerant fabrication rate on the 90
+  cases is 0, or too small for G-1's difference to be one, G-1 is reported as **not testable on
+  this model**: neither a pass nor a fail, and §26's stop condition is not decided by it.
+  G-2 to G-4, the unused-evidence share and AC@k are reported as for any run. M7-P4's hosted model
+  is the next place G-1 can be read, at the cost M7-P2 states below, on approval.
+- **A2-5. Frozen** for M7-P3, as committed with this amendment: `examples/ge_m7`'s system prompt
+  and step schema; 25 steps; context 32,768; 1,024 output tokens per step; results capped at
+  2,000 characters, logs 20 templates, traces 10 operations; canonical printing; one local model,
+  `qwen2.5:14b-instruct`. `llama3.1` is not added: the pilot gave no reason to need a second model
+  for the protocol. The scored sample is `sample.txt`. G-5's repeat set is `repeat.txt`: 10 cases
+  per system from the sample, each service twice, the six faults five times each. It runs arms (a),
+  (b) and (d) three times.
+- **A2-6. Cost.** An agent run is about 60 s and 40,000–75,000 input tokens. M7-P3 is 270 scored
+  agent runs (90 × (a), (b), (d)), about 4.5 h, and 270 for the repeat set (30 × 3 arms × 3),
+  about 4.5 h. Hosted (M7-P4, (a) and (b) on 90 cases): 180 runs at about 60,000 input tokens is
+  about 11 M input tokens before caching, priced on the day and run only on approval.
+
 ## 12. R1 (2026-11-25)
 
 R1 read the draft against `dev/1.22.0` at `9084112`. What held: the ledger builders

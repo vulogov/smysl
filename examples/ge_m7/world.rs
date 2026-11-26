@@ -31,6 +31,28 @@ pub const HALF_S: u64 = 360;
 pub const QS: &[&str] = &["0.5", "0.9", "0.99"];
 pub const ALPHA: &str = "0.01";
 /// A tool result's cap, characters (Q-4).
+/// The M7-P2 probe (`--digits N`): tools print a non-integer to `N` significant digits, so a
+/// value the agent quotes is no longer the unit's canonical text. Unset: canonical, §4.2.
+pub static DIGITS: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+
+/// `v` to `n` significant digits, trailing zeros dropped.
+pub fn significant(v: &str, n: usize) -> String {
+    let Ok(x) = v.parse::<f64>() else {
+        return v.to_string();
+    };
+    if x == 0.0 || !x.is_finite() {
+        return v.to_string();
+    }
+    let mag = x.abs().log10().floor() as i64;
+    let places = (n as i64 - 1 - mag).max(0) as usize;
+    let s = format!("{x:.places$}");
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
+    }
+}
+
 pub const CAP: usize = 2_000;
 
 /// A value's text as a decimal, or as binary64 rounded to nine places when it is not one.
@@ -457,10 +479,15 @@ impl World {
     // ---- the tools ----------------------------------------------------------------------
 
     fn print_value(u: &UnitCore, field: &str, i: Option<usize>) -> String {
-        u.payload
+        let v = u
+            .payload
             .as_deref()
             .and_then(|p| tel::quoted_value(p, field, i))
-            .unwrap_or_else(|| "-".into())
+            .unwrap_or_else(|| "-".into());
+        match DIGITS.get().copied().flatten() {
+            Some(n) if v.contains('.') => significant(&v, n),
+            _ => v,
+        }
     }
 
     /// Exact and sketched windows of `name` over `[from, to)` seconds.

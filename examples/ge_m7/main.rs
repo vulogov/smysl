@@ -67,6 +67,8 @@ struct Score {
     output_tokens: u64,
     secs: f64,
     calls: BTreeMap<String, usize>,
+    /// Every quote the oracle calls fabricated, or not TQ's spelling: where, the quote, why.
+    verdicts: Vec<serde_json::Value>,
 }
 
 impl Score {
@@ -80,8 +82,16 @@ impl Score {
             "hypotheses": self.hypotheses, "steps": self.steps, "protocol": self.protocol,
             "arg_errors": self.arg_errors, "capped": self.capped,
             "input_tokens": self.input_tokens, "output_tokens": self.output_tokens,
-            "secs": self.secs, "calls": self.calls,
+            "secs": self.secs, "calls": self.calls, "verdicts": self.verdicts,
         })
+    }
+}
+
+fn note(out: &mut Vec<serde_json::Value>, at: &str, q: &world::Quote, v: &oracle::Verdict) {
+    if v.fabricated || !v.strict {
+        out.push(serde_json::json!({
+            "at": at, "quote": q.text(), "fabricated": v.fabricated, "strict": v.strict, "why": v.why,
+        }));
     }
 }
 
@@ -106,6 +116,7 @@ fn score(world: &World, arm: &str, model: &str, run: Option<&Run>, ranking: Vec<
     if let Some(a) = &r.answer {
         for q in &a.quotes {
             let v = oracle::judge(world, q);
+            note(&mut s.verdicts, "answer", q, &v);
             s.claims += 1;
             s.fabricated += usize::from(v.fabricated);
             s.fabricated_strict += usize::from(!v.strict);
@@ -118,6 +129,7 @@ fn score(world: &World, arm: &str, model: &str, run: Option<&Run>, ranking: Vec<
         }
         for (q, tq) in w.quotes.iter().zip(&w.tq) {
             let v = oracle::judge(world, q);
+            note(&mut s.verdicts, "hypothesis", q, &v);
             s.tq_quotes += 1;
             match (tq.is_some(), v.fabricated) {
                 (true, true) => s.tq_tp += 1,
@@ -286,6 +298,8 @@ fn cmd_run(args: &[String]) {
     let steps: usize = arg(args, "--steps").map_or(25, |s| s.parse().expect("--steps N"));
     let ctx: usize = arg(args, "--ctx").map_or(32_768, |s| s.parse().expect("--ctx N"));
     let out = PathBuf::from(arg(args, "--out").unwrap_or_else(|| "target/ge-m7".into()));
+    let digits = arg(args, "--digits").map(|s| s.parse::<usize>().expect("--digits N"));
+    world::DIGITS.set(digits).expect("set once");
     std::fs::create_dir_all(out.join("transcripts")).expect("the output directory");
     let cases: Vec<String> = std::fs::read_to_string(&cases_file)
         .unwrap_or_else(|e| panic!("{cases_file}: {e}"))

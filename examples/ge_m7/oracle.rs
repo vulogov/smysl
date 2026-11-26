@@ -156,15 +156,28 @@ pub fn judge(world: &World, q: &Quote) -> Verdict {
                 return fab("no such service");
             };
             let (a, b) = (world.ms(*from), world.ms(*to));
+            // A line repeated at the same millisecond in the same container is one event: the
+            // substrate stores events by content, and the tool counts what it stores. A quote
+            // copied from the tool is not a fabrication because the file repeats a line (M7-P2).
             let lines: Vec<String> = world
                 .raw
                 .logs
                 .iter()
                 .filter(|(ms, who, _)| who == orig && (a..b).contains(ms))
-                .map(|(_, _, m)| world.anon.text(m))
+                .map(|(ms, _, m)| (*ms, m))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .map(|(_, m)| world.anon.text(m))
                 .collect();
             let t = smysl::tel::drain::run(lines.iter().map(String::as_str));
-            close(claim, places, t.get(template).copied().unwrap_or(0) as f64)
+            let n = t.get(template).copied().unwrap_or(0);
+            if !close(claim, places, n as f64) {
+                return fab(&format!(
+                    "Drain over the window's {} lines counts {n}",
+                    lines.len()
+                ));
+            }
+            true
         }
         Known::Hypothesis | Known::Ranked => return fab("a hypothesis is not evidence"),
     };

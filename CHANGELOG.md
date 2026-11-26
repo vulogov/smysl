@@ -76,7 +76,14 @@ close. None of it moved in 1.21.
   `thought` came out with `thought` first in only one branch, and the model could answer only
   that branch, 25 times running. The schema text is now sent as the caller wrote it.
 - **Smoke run.** One Sock Shop case on `qwen2.5:14b-instruct`, all four arms: each answered, no
-  protocol failure, no fabricated quote. M7-P2, the six-case pilot, is next.
+  protocol failure, no fabricated quote.
+- **The pilot (M7-P2) and the freeze.** Six cases, every arm: no protocol failure in 18 agent
+  runs; BARO alone (c) and with the ledger (d) put the root cause first in half the cases, the
+  agent alone (a) and with the ledger (b) in none. It found two harness faults: every prompt
+  example named `svc-07`, and the model opened with it, and the oracle counted lines the file
+  repeats, which the substrate stores once. Both are fixed. No arm fabricated a quote, 0 of 54,
+  so G-1 may be untestable on this model; that reading is pre-registered (A2-4) before M7-P3
+  runs. Prompt, schema, budget, caps and model are frozen, with a 30-case repeat set for G-5.
 
 ## 1.21.0 — 2026-11-25
 

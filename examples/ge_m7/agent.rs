@@ -68,11 +68,11 @@ pub fn schema() -> String {
 /// A tool's call as the system prompt shows it, for an argument error.
 fn usage(tool: &str) -> &'static str {
     match tool {
-        "metrics" => r#"{"tool":"metrics","service":"svc-07"}"#,
-        "window" => r#"{"tool":"window","series":"svc-07/cpu","from":600,"to":720}"#,
-        "compare" => r#"{"tool":"compare","series":"svc-07/cpu","at":720}"#,
-        "logs" => r#"{"tool":"logs","service":"svc-07","from":600,"to":1080}"#,
-        "traces" => r#"{"tool":"traces","service":"svc-07","from":600,"to":1080}"#,
+        "metrics" => r#"{"tool":"metrics","service":"svc-NN"}"#,
+        "window" => r#"{"tool":"window","series":"svc-NN/cpu","from":600,"to":720}"#,
+        "compare" => r#"{"tool":"compare","series":"svc-NN/cpu","at":720}"#,
+        "logs" => r#"{"tool":"logs","service":"svc-NN","from":600,"to":1080}"#,
+        "traces" => r#"{"tool":"traces","service":"svc-NN","from":600,"to":1080}"#,
         _ => "",
     }
 }
@@ -80,26 +80,27 @@ fn usage(tool: &str) -> &'static str {
 pub fn system_prompt(steps: usize) -> String {
     format!(
         "You are an on-call engineer finding the root cause of an incident in a microservice \
-system. Services are named svc-01, svc-02, and so on. Time is in seconds from the start of the \
+system. Services are named svc-01, svc-02, and so on; svc-NN and svc-MM below stand for any \
+of them, not for a service to start with. Time is in seconds from the start of the \
 recording, which lasts {CASE_S} s.\n\
 \n\
 Reply with exactly one JSON object per turn: a tool call, its first field `thought`, a sentence \
 or two on what you know so far and why this call is next. The tools (shown without `thought`):\n\
 - {{\"tool\":\"services\"}}: the services, and what data each has.\n\
-- {{\"tool\":\"metrics\",\"service\":\"svc-07\"}}: a service's metric series.\n\
-- {{\"tool\":\"window\",\"series\":\"svc-07/cpu\",\"from\":600,\"to\":720}}: a summary of a \
+- {{\"tool\":\"metrics\",\"service\":\"svc-NN\"}}: a service's metric series.\n\
+- {{\"tool\":\"window\",\"series\":\"svc-NN/cpu\",\"from\":600,\"to\":720}}: a summary of a \
 series over [from, to): an exact summary (count, min, max, sum, mean, first, last) and a sketched \
 one (q[0] p50, q[1] p90, q[2] p99), each with an id.\n\
-- {{\"tool\":\"compare\",\"series\":\"svc-07/cpu\",\"at\":720}}: window over the 360 s before \
+- {{\"tool\":\"compare\",\"series\":\"svc-NN/cpu\",\"at\":720}}: window over the 360 s before \
 `at` and the 360 s after.\n\
-- {{\"tool\":\"logs\",\"service\":\"svc-07\",\"from\":600,\"to\":1080}}: log templates with \
+- {{\"tool\":\"logs\",\"service\":\"svc-NN\",\"from\":600,\"to\":1080}}: log templates with \
 counts, each with an id.\n\
-- {{\"tool\":\"traces\",\"service\":\"svc-07\",\"from\":600,\"to\":1080}}: per traced \
+- {{\"tool\":\"traces\",\"service\":\"svc-NN\",\"from\":600,\"to\":1080}}: per traced \
 operation, its calls and its latency in ms, as windows with ids.\n\
-- {{\"tool\":\"hypothesise\",\"service\":\"svc-07\",\"claim\":\"…\",\"quotes\":[{{\"id\":\"…\",\
+- {{\"tool\":\"hypothesise\",\"service\":\"svc-NN\",\"claim\":\"…\",\"quotes\":[{{\"id\":\"…\",\
 \"field\":\"max\",\"value\":\"0.93\"}}],\"grounds\":[\"…\"]}}: record a hypothesis that a \
 service is the root cause, with the numbers it rests on.\n\
-- {{\"tool\":\"answer\",\"ranking\":[\"svc-07\",\"svc-02\"],\"quotes\":[…]}}: your final \
+- {{\"tool\":\"answer\",\"ranking\":[\"svc-NN\",\"svc-MM\"],\"quotes\":[…]}}: your final \
 answer: up to five services, most likely root cause first, and the numbers that support it. \
 This ends the investigation.\n\
 \n\

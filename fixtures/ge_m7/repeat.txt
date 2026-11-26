@@ -1,0 +1,32 @@
+# G-5's repeat set (A2-3): 10 cases per system, each service twice, the faults spread by
+# (2k + m + 2s) mod 6 for service k, m in {0, 3}, system s. Arms a, b, d, three runs each.
+RE2-OB/checkoutservice_cpu/1
+RE2-OB/checkoutservice_loss/1
+RE2-OB/currencyservice_disk/1
+RE2-OB/currencyservice_socket/1
+RE2-OB/emailservice_mem/1
+RE2-OB/emailservice_delay/1
+RE2-OB/productcatalogservice_cpu/1
+RE2-OB/productcatalogservice_loss/1
+RE2-OB/recommendationservice_disk/1
+RE2-OB/recommendationservice_socket/1
+RE2-SS/carts_disk/1
+RE2-SS/carts_socket/1
+RE2-SS/catalogue_mem/1
+RE2-SS/catalogue_delay/1
+RE2-SS/orders_cpu/1
+RE2-SS/orders_loss/1
+RE2-SS/payment_disk/1
+RE2-SS/payment_socket/1
+RE2-SS/user_mem/1
+RE2-SS/user_delay/1
+RE2-TT/ts-auth-service_mem/1
+RE2-TT/ts-auth-service_delay/1
+RE2-TT/ts-order-service_cpu/1
+RE2-TT/ts-order-service_loss/1
+RE2-TT/ts-route-service_disk/1
+RE2-TT/ts-route-service_socket/1
+RE2-TT/ts-train-service_mem/1
+RE2-TT/ts-train-service_delay/1
+RE2-TT/ts-travel-service_cpu/1
+RE2-TT/ts-travel-service_loss/1
