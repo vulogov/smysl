@@ -51,7 +51,11 @@ close. None of it moved in 1.21.
   0.361–0.372. None of those masks ships; the advice is no templates for such a system.
 - **RFC SMYSL-10 drafted:** GE-M7 in two stages, M7-R on RCAEval replay with local models,
   needing no testbed, and M7-T on a Train-Ticket deployment, gated on a cluster. Gates
-  pre-registered, nothing built.
+  pre-registered, nothing built. R1 read it against the code: an exact window has no quantile
+  (they are the sketched window's, `derived`), BARO's defaults are not GE-I3's windows, there is
+  no per-operation trace unit, `Request` has no seed, and the agent, not the harness, has to
+  write each quote or rule TQ measures nothing. Each is fixed in the text, and all seven
+  questions are settled; no API change is needed.
 
 ## 1.21.0 — 2026-11-25
 
