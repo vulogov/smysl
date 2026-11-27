@@ -84,6 +84,15 @@ close. None of it moved in 1.21.
   repeats, which the substrate stores once. Both are fixed. No arm fabricated a quote, 0 of 54,
   so G-1 may be untestable on this model; that reading is pre-registered (A2-4) before M7-P3
   runs. Prompt, schema, budget, caps and model are frozen, with a 30-case repeat set for G-5.
+- **GE-M7 on RCAEval (M7-P3): §11 stands.** 90 cases, four arms, `qwen2.5:14b-instruct`. With the
+  ledger and rule TQ's feedback (b), 1.5 % of claims reaching an answer are fabricated, against
+  4.8 % for the agent alone (a): −0.033, 95 % [−0.070, −0.0005], so SMYSL-3 §26's stop condition
+  does not fire, by a narrow margin. Every `SMY-W606` raised was a real fabrication, and none was
+  missed. The ledger with BARO's ranking (d) puts the root cause first more often than BARO alone
+  (0.411 against 0.322) but answers with about two services, so it trails BARO at AC@3 (0.489
+  against 0.656): G-4 fails. Three reruns are identical at temperature 0. OQ-T1 is decided, one
+  `consulted` per unit (median 20–50 per investigation). Scores per case are in
+  `fixtures/ge_m7/scores-m7p3.tsv`; RFC SMYSL-10 A3 has the rest.
 
 ## 1.21.0 — 2026-11-25
 

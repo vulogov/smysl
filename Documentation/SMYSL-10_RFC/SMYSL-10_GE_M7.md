@@ -2,7 +2,7 @@
 
 **Author:** Vladimir Ulogov
 **Status:** draft, R1 (2026-11-25): read against the code; §12 lists what R1 found and how §10's
-questions are settled. Nothing built or run.
+questions are settled. M7-P1 to M7-P3 done (§11, A1 to A3); M7-P4 and M7-P5 not run.
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged. The
 harness is an example and a test crate; no public API is planned to change (§8, Q-6).
 **Crates:** none changed by plan. New: `examples/ge_m7` (the harness), fixtures under
@@ -415,6 +415,79 @@ Results cut at the cap: 0–2 per run, mostly `logs` and `traces`.
   agent runs (90 × (a), (b), (d)), about 4.5 h, and 270 for the repeat set (30 × 3 arms × 3),
   about 4.5 h. Hosted (M7-P4, (a) and (b) on 90 cases): 180 runs at about 60,000 input tokens is
   about 11 M input tokens before caching, priced on the day and run only on approval.
+
+### A3. M7-P3, M7-R on the local model (2026-11-26)
+
+M7-P3 ran at `c965120` as A2-5 froze it: `sample.txt` on every arm, then `repeat.txt` on (a),
+(b) and (d) three times, on `qwen2.5:14b-instruct`. Every case and arm is in
+`fixtures/ge_m7/scores-m7p3.tsv` (630 rows; transcripts and stores stay outside the repository,
+§8). Intervals are §6's: paired by case, 10,000 case-resampled draws, seed 20261126. A rate is
+the ratio of sums over a draw's cases: fabricated claims ÷ claims.
+
+| Arm | AC@1 | AC@3 | AC@5 | Claims | Fabricated (tolerant) | TQ flags (real) | Unused | Budget failures | Steps | Input tokens / run | s / run |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| (a) | 0.244 | 0.300 | 0.300 | 293 | 14 (4.8 %) | — | 0.943 | 9 | 18.6 | 83,995 | 86.9 |
+| (b) | 0.200 | 0.200 | 0.200 | 199 | 3 (1.5 %) | 25 (25) | 0.943 | 7 | 14.3 | 55,595 | 67.3 |
+| (c) | 0.322 | 0.656 | 0.800 | — | — | — | — | 0 | — | — | 0 |
+| (d) | 0.411 | 0.489 | 0.533 | 203 | 5 (2.5 %) | 24 (24) | 0.864 | 11 | 12.8 | 46,396 | 57.5 |
+
+The strict rate equals the tolerant one in every arm: at canonical printing no claim was a
+correct rounding (A2-3). A budget failure is a run that spent its 25 steps without answering,
+and scores as a miss: 27 of 270 agent runs (10 %), under Q-3's 20 %.
+
+| Gate | Measured | Read |
+|---|---|---|
+| **G-1** | (b) − (a): −0.033, [−0.070, −0.0005] | **Holds.** The upper end is below 0, by a hair |
+| **G-2** | (b): 25 of 25 W606 are real (1.00); (d): 24 of 24 | **Holds.** Wilson 95 % lower bound 0.87 on 25 |
+| **G-3** | (b): 25 of 25 fabricated quotes raised (1.00); (d): 24 of 24 | **Holds** |
+| **G-4** | AC@3 (d) − max((a), (c)) = (d) − (c): −0.167, [−0.256, −0.089] | **Fails** |
+| **G-5** | Range over three runs: 0 for AC@3 and the fabrication rate, every arm | **Holds**, trivially (A3-5) |
+
+- **A3-1. G-1 is testable.** A2-4's floor did not occur: (a) fabricated 14 claims in 9 cases. (b)
+  fabricated 3, all in one case (`RE2-TT/ts-auth-service_mem/1`). (d) − (a), not gated, is
+  −0.023, [−0.066, +0.018].
+- **A3-2. What TQ did.** In (b) TQ raised 25 W606 during the runs, every one a fabrication by the
+  oracle, and the agent re-quoted or dropped all but three before its answer. The fabrication
+  that reaches an answer is what G-1 measures, and it is the feedback, not the ledger alone, that
+  removed it. There is no arm (b′), ledger without feedback (Q-2), so the split is not measured. (b) also makes a third fewer
+  claims than (a), which a rate does not punish.
+- **A3-3. Why G-4 fails.** The agent answers with one or two services (mean ranking length: (a)
+  1.5, (b) 1.0, (d) 2.2), and BARO with five. Given BARO's ranking, (d) is the best arm at the
+  first place, AC@1 (d) − (c) +0.089, [+0.022, +0.156], and (d) − (a) +0.167, [+0.033, +0.289].
+  It loses BARO's tail: AC@3 −0.167, AC@5 −0.267, [−0.367, −0.178]. On Train Ticket, where BARO's
+  AC@3 is 0.20, (d)'s is 0.03. That the short answer, not the ledger, is the cost is a reading
+  after the run, not a gate: an arm whose answer is the agent's choice followed by the rest of
+  BARO's ranking would test it, and needs its own pre-registration.
+- **A3-4. The ledger and feedback cost accuracy without BARO.** Not gated: AC@3 (b) − (a) −0.100,
+  [−0.178, −0.022]; AC@1 −0.044, [−0.111, +0.022]. (b) takes 23 % less time and 34 % fewer input
+  tokens a run, and answers sooner (14.3 steps against 18.6).
+
+  | System | (a) AC@1 / @3 | (b) | (c) | (d) |
+  |---|---|---|---|---|
+  | Online Boutique | 0.33 / 0.33 | 0.30 / 0.30 | 0.53 / 0.90 | 0.63 / 0.73 |
+  | Sock Shop | 0.23 / 0.33 | 0.20 / 0.20 | 0.43 / 0.87 | 0.57 / 0.70 |
+  | Train Ticket | 0.17 / 0.23 | 0.10 / 0.10 | 0.00 / 0.20 | 0.03 / 0.03 |
+
+- **A3-5. Greedy decoding repeats itself.** The three repeat runs agree on every field but wall
+  time, in all 90 runs each: (a) AC@3 0.167 and 5 of 85 claims fabricated, (b) 0.133 and 3 of 75,
+  (d) 0.567 and 4 of 62. The scored run agrees with them on 88 of 90; the two that differ are the
+  first case of the list, `RE2-OB/checkoutservice_cpu/1`, in (a) and (b), with one step more and
+  the same rank and fabrication. At temperature 0 G-5 measures Ollama's run-to-run determinism,
+  not sampling: the variance left in G-1 is which cases were drawn, which the bootstrap carries.
+  A model sampled above 0 would need G-5 as designed.
+- **A3-6. Unused evidence and volume.** Unused: 0.943 in (a) and (b), 0.864 in (d): the agent
+  cites one unit in seven to eighteen it reads. Unexplored evidence (§11.2) was not computed by the
+  harness, so it is owed. Consulted units per investigation: median 50.5 (a), 38 (b), 20 (d);
+  largest 153. A relation per unit is a few hundred records an investigation at most, so OQ-T1
+  keeps one relation per unit.
+- **A3-7. Cost.** 11 h 12 min of wall time for both parts. The scored agent runs took 5.3 h and
+  16.8 M input tokens: (a) 7.6 M, (b) 5.0 M, (d) 4.2 M.
+- **A3-8. What this decides.** SMYSL-3 §26's stop condition does not fire: (b) reduces fabricated
+  evidence relative to (a), so §11 stands as designed, on this model, with the margin A3-1 gives.
+  G-4's failure does not touch §11: it says that an agent handed a ranking should not be scored
+  on a shortened answer, and that this agent, alone, ranks below BARO (AC@3 (a) − (c) −0.356,
+  [−0.478, −0.233]). M7-P4 (hosted, (a) and (b)) is the second reading of G-1 and runs only on
+  approval.
 
 ## 12. R1 (2026-11-25)
 

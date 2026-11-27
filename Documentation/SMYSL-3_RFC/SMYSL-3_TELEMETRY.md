@@ -654,6 +654,9 @@ From consulted, cited and explained, a dossier reports:
 - **unexplored evidence:** window or change units in the investigation's window, about series that
   a hypothesis targets, that were never consulted
 
+GE-M7 (RFC SMYSL-10 A3-6) measured the first: an agent cites one consulted unit in seven to eighteen
+(unused 0.86–0.94). The second is not yet measured.
+
 These are the two failure modes the literature measures [B §6]. They become numbers here.
 
 ### 11.3 Probes and actions
@@ -1409,7 +1412,7 @@ Each experiment has a stop condition, stated before it runs.
 | **GE-M4** | Is a hold record needed? | "Value in force at t" from the substrate against simulated holds, on GE-M1 data extended to 6 months | D-T6 | If the substrate is correct and ≤ 50 ms p95 at 6 months, release record 16 |
 | **GE-M5** | Does causal order catch skew? | Inject 1–500 ms skew on chosen hosts; derive constraints from spans | §10.4 | Detection below 90 % at ≥ 5 ms skew means the constraint is not worth a rule E change. **Run on simulated traces (TL-P9, `make ge-m5`): fails; rule E unchanged.** Detection as fixed (the skewed host named): 20.1 % at ≥ 5 ms, and 26.0 % with the response constraint, because two clocks that disagree do not say which is wrong. Seen at all (post hoc: an edge of the host violated by ≥ 2 ms): 63.6 % for §10.4's start-only constraint, which cannot see a leaf service running ahead or the root running behind; 100 % with the response constraint at ≥ 2 ms. With no skew, ±0.25 ms offsets violate 1.3 % of edges at ms resolution (18 of 20 runs). |
 | **GE-M6** | Do independent instruments change conclusions? | The same faults seen through duplicated scrapers and through independent sources | D-T10 | If witness counting never changes a ranking, it stays a report |
-| **GE-M7** | **Does smysl make agent RCA better?** | Train-Ticket (D-T12) with scripted deploys and config edits, faults injected after some of them. Arms: (a) agent alone; (b) agent writing into smysl with TQ, consulted and kind 6; (c) BARO-style derived ranking; (d) (b)+(c). Local models; one hosted arm, labelled (D-T13). | the design of §11 | Measured on top-k accuracy, **fabrications caught** (TQ failures that were real errors), and **unused-evidence rate**. If (b) does not reduce fabricated evidence relative to (a), §11 is wrong and is redesigned before TL-P7. |
+| **GE-M7** | **Does smysl make agent RCA better?** | Train-Ticket (D-T12) with scripted deploys and config edits, faults injected after some of them. Arms: (a) agent alone; (b) agent writing into smysl with TQ, consulted and kind 6; (c) BARO-style derived ranking; (d) (b)+(c). Local models; one hosted arm, labelled (D-T13). | the design of §11 | Measured on top-k accuracy, **fabrications caught** (TQ failures that were real errors), and **unused-evidence rate**. If (b) does not reduce fabricated evidence relative to (a), §11 is wrong and is redesigned before TL-P7. **Run on RCAEval replay (M7-R, RFC SMYSL-10 A3, 1.22): does not fire; §11 stands.** 90 RE2 cases, `qwen2.5:14b-instruct`. Fabricated claims: (a) 14 of 293 (4.8 %), (b) 3 of 199 (1.5 %); (b) − (a) −0.033, 95 % [−0.070, −0.0005], a narrow margin. Every `SMY-W606` raised was a real fabrication (25 of 25), and none went unraised. AC@3: (a) 0.300, (b) 0.200, (c) 0.656, (d) 0.489; (d) is first at AC@1 (0.411 against (c)'s 0.322) but answers with about two services and loses BARO's tail, so the gate that (d) not cost accuracy fails. Unused evidence 0.86–0.94. The Train-Ticket deployment (M7-T) is not run. |
 | **GE-M8** | Do episodes recur detectably? | MinHash over typed feature sets against embeddings, on GE-M7's corpus and RCAEval | similarity labelling | If MinHash recall@5 < 0.6 where embeddings exceed 0.8, similarity is model-dependent by default. **Run on simulated episodes (TL-P9, `make ge-m8`): does not fire; similarity is model-independent.** 120 episodes of twelve fault types, two per service sharing half their core. recall@5: MinHash **0.970**, exact Jaccard 0.982, Model2Vec `potion-base-8M` 0.898. Over five other seeds: 0.968–0.987, 0.972–0.985 and 0.880–0.945. The corpus is made of shared identifiers, which favours sets by construction: renamed series and paraphrased alerts are what GE-M7's corpus and RCAEval would test. **Run on RCAEval (1.20, `examples/ge_m8_rcaeval`): does not fire on any of three systems; similarity stays model-independent, and is far weaker on real data.** recall@5 by fault type: MinHash 0.26–0.34, Model2Vec 0.26–0.40, against 0.16 by chance. A case's two repetitions in its top five: MinHash 0.36–0.56 without log templates, against 0.06. |
 | **GE-M9** | Does retention keep the round trip? | 6 months of GE-M1-scale data, compressed into a test; evict per rule TL; export, import, merge with an unevicted peer | rule TL | Any P1 failure over records, or any substrate resurrection that changes a unit, blocks TL-P8. **Run on simulated data (TL-P8): held.** 20 gauges, 182 days, 5.2 M samples, 152 days evicted. No record changed at any step, and every window recomputed to the unit it is after the merge. A control peer with one sample more was caught as `SMY-E604`. |
 
@@ -1557,7 +1560,7 @@ gain is not shown.
 | Risk | Where it bites | Mitigation |
 |---|---|---|
 | Profiles become the real schema, and drift | §8, §20.2 | profile hash in every recipe; `SMY-W610` at a profile boundary; profiles versioned in the repo with fixtures |
-| `consulted` volume in long investigations | §11.2 | batch per probe; it is a record per unit looked at, not per view refresh; measure in GE-M7 |
+| `consulted` volume in long investigations | §11.2 | batch per probe; it is a record per unit looked at, not per view refresh. GE-M7 measured it: median 20–50 per investigation, at most 153 |
 | Evidence units multiply when agents materialise freely | §9 | identity makes repeats free; the materialiser refuses windows narrower than the series' scrape interval |
 | AC-1 or AC-8 slips, and TL-P0 blocks everything | §17 | TL-P1 (format) and the GE-M1/GE-M3 scripts do not need TL-P0, and start in parallel |
 | redb lock (AC-9) unresolved when OKO needs two processes | §24 | OKO's POC runs the TUI as the single writer; readers use the log fallback (`SMY-W504`) until AC-9 lands |
@@ -1570,6 +1573,8 @@ The research draft's questions are closed by §1. These are new, and none blocks
 - **OQ-T1.** Should `x.tel/consulted` be a relation per unit, or one relation per probe pointing to
   a saved query whose result set is pinned by its record-set digest? The second is smaller, but
   makes "was unit X consulted" a query evaluation instead of a lookup. Decide by GE-M7's volume.
+  **Decided by GE-M7 (RFC SMYSL-10 A3-6): one relation per unit.** Investigations consulted a
+  median of 20 to 50 units, at most 153; that is not a volume worth a query to save.
 - **OQ-T2.** Do Zabbix trends deserve `cited`, or `derived` because their hourly aggregation is
   documented and reproducible? `cited` is chosen because we cannot re-derive them once history is
   housekept on the Zabbix side.
