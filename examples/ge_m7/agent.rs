@@ -1,5 +1,6 @@
 //! The agent loop (RFC SMYSL-10 §4, §8): one structured completion per step, the model returning
-//! `{tool, …}` and the harness running it, until `answer` or the budget.
+//! `{tool, …}` and the harness running it, until `answer` or the budget. A run that spends the
+//! budget without answering gets one more call whose only branch is `answer` (A4-3).
 //!
 //! One system prompt for every arm. The arms differ in what comes back: `hypothesise` answers
 //! with a note in (a) and with the unit, its status and rule TQ's findings in (b) and (d); (d)'s
@@ -31,6 +32,19 @@ pub const TOOLS: &[&str] = &[
 /// every argument optional, the same model dropped `from` and repeated the call to the end of
 /// the budget. `thought` comes first in every branch: the model says why before it picks.
 pub fn schema() -> String {
+    format!(r#"{{"anyOf":[{}]}}"#, branches().join(","))
+}
+
+/// The forced step's schema (A4-3): `answer`'s branch alone.
+pub fn answer_schema() -> String {
+    let b = branches();
+    format!(
+        r#"{{"anyOf":[{}]}}"#,
+        b.last().expect("answer is the last branch")
+    )
+}
+
+fn branches() -> Vec<String> {
     const STR: &str = r#"{"type":"string"}"#;
     const INT: &str = r#"{"type":"integer"}"#;
     const STRS: &str = r#"{"type":"array","items":{"type":"string"}}"#;
@@ -44,7 +58,7 @@ pub fn schema() -> String {
         }
         format!(r#"{{"type":"object","properties":{{{props}}},"required":[{req}]}}"#)
     };
-    let branches = [
+    vec![
         tool("services", &[]),
         tool("metrics", &[("service", STR)]),
         tool("window", &[("series", STR), ("from", INT), ("to", INT)]),
@@ -61,8 +75,7 @@ pub fn schema() -> String {
             ],
         ),
         tool("answer", &[("ranking", STRS), ("quotes", QUOTES)]),
-    ];
-    format!(r#"{{"anyOf":[{}]}}"#, branches.join(","))
+    ]
 }
 
 /// A tool's call as the system prompt shows it, for an argument error.
@@ -148,10 +161,13 @@ pub type Step = Box<dyn Fn(&[Message]) -> String>;
 pub struct Scripted {
     pub steps: Vec<Step>,
     pub next: usize,
+    /// The schema of every request, in order.
+    pub schemas: Vec<Option<String>>,
 }
 
 impl Agent for Scripted {
     fn reply(&mut self, req: &Request) -> Result<Reply, String> {
+        self.schemas.push(req.schema.clone());
         let f = self.steps.get(self.next).ok_or("the script ran out")?;
         self.next += 1;
         Ok(Reply {
@@ -185,7 +201,12 @@ pub struct Run {
     pub arg_errors: usize,
     /// Tool results cut at the cap.
     pub capped: usize,
+    /// The answer came from the forced step after the budget (A4-3).
+    pub forced: bool,
 }
+
+/// The message closing a spent budget, before the forced step.
+pub const FORCED: &str = "No tool calls left: answer now, with what you have.";
 
 fn quotes_of(v: &serde_json::Value) -> Vec<Quote> {
     v.get("quotes")
@@ -264,49 +285,10 @@ pub fn run(world: &mut World, agent: &mut dyn Agent, cfg: &Loop, first: String) 
     let mut messages = vec![Message::user(first)];
     let mut seen = std::collections::BTreeSet::new();
     while r.steps < cfg.steps {
-        r.steps += 1;
-        let mut req = Request::new(cfg.model.clone(), String::new())
-            .with_system(system.clone())
-            .with_max_output(cfg.max_output)
-            .with_schema(StructuredMode::JsonSchema, schema());
-        req.messages = messages.clone();
-        // A transcript the window cannot hold is a protocol failure, not a silent truncation.
-        let tokens = smysl::tokens(&system) as usize
-            + messages
-                .iter()
-                .map(|m| smysl::tokens(&m.content) as usize)
-                .sum::<usize>();
-        if tokens + cfg.max_output > cfg.context_window {
-            r.protocol = Some("context".into());
-            break;
-        }
-        // `GE_M7_DUMP=DIR`: each step's system prompt, schema and messages, to replay against the
-        // model by hand.
-        if let Ok(d) = std::env::var("GE_M7_DUMP") {
-            let body = serde_json::json!({
-                "system": system,
-                "schema": schema(),
-                "messages": messages
-                    .iter()
-                    .map(|m| serde_json::json!({"role": m.role.as_str(), "content": m.content}))
-                    .collect::<Vec<_>>(),
-            });
-            std::fs::write(format!("{d}/step{}.json", r.steps), body.to_string()).ok();
-        }
-        let reply = match agent.reply(&req) {
-            Ok(x) => x,
-            Err(e) => {
-                r.protocol = Some(format!("provider: {e}"));
-                break;
-            }
-        };
-        r.input_tokens += reply.input_tokens;
-        r.output_tokens += reply.output_tokens;
-        messages.push(Message::assistant(reply.text.clone()));
-        let v: serde_json::Value = match serde_json::from_str(reply.text.trim()) {
+        let v = match call(agent, cfg, &system, &mut messages, schema(), &mut r) {
             Ok(v) => v,
-            Err(_) => {
-                r.protocol = Some("parse".into());
+            Err(p) => {
+                r.protocol = Some(p);
                 break;
             }
         };
@@ -369,17 +351,85 @@ pub fn run(world: &mut World, agent: &mut dyn Agent, cfg: &Loop, first: String) 
         }
         messages.push(Message::user(result));
     }
+    // The budget is spent with no answer: one call more, whose only branch is `answer` (A4-3).
     if r.answer.is_none() && r.protocol.is_none() {
-        r.protocol = Some("budget".into());
+        if let Some(m) = messages.last_mut() {
+            m.content.push_str(&format!("\n{FORCED}"));
+        }
+        r.forced = true;
+        match call(agent, cfg, &system, &mut messages, answer_schema(), &mut r) {
+            Ok(v) if v.get("tool").and_then(|x| x.as_str()) == Some("answer") => {
+                *r.calls.entry("answer".into()).or_default() += 1;
+                r.answer = Some(Answer {
+                    ranking: strings(&v, "ranking"),
+                    quotes: quotes_of(&v),
+                });
+            }
+            Ok(_) => r.protocol = Some("budget".into()),
+            Err(p) => r.protocol = Some(p),
+        }
     }
     r.transcript = messages;
     r.secs = start.elapsed().as_secs_f64();
     r
 }
 
+/// One step: the model called on the transcript with `schema`, its reply appended and parsed.
+/// `Err` is the protocol failure that ends the run.
+fn call(
+    agent: &mut dyn Agent,
+    cfg: &Loop,
+    system: &str,
+    messages: &mut Vec<Message>,
+    schema: String,
+    r: &mut Run,
+) -> Result<serde_json::Value, String> {
+    r.steps += 1;
+    let mut req = Request::new(cfg.model.clone(), String::new())
+        .with_system(system.to_string())
+        .with_max_output(cfg.max_output)
+        .with_schema(StructuredMode::JsonSchema, schema);
+    req.messages = messages.clone();
+    // A transcript the window cannot hold is a protocol failure, not a silent truncation.
+    let tokens = smysl::tokens(system) as usize
+        + messages
+            .iter()
+            .map(|m| smysl::tokens(&m.content) as usize)
+            .sum::<usize>();
+    if tokens + cfg.max_output > cfg.context_window {
+        return Err("context".into());
+    }
+    // `GE_M7_DUMP=DIR`: each step's system prompt, schema and messages, to replay against the
+    // model by hand.
+    if let Ok(d) = std::env::var("GE_M7_DUMP") {
+        let body = serde_json::json!({
+            "system": system,
+            "schema": req.schema,
+            "messages": messages
+                .iter()
+                .map(|m| serde_json::json!({"role": m.role.as_str(), "content": m.content}))
+                .collect::<Vec<_>>(),
+        });
+        std::fs::write(format!("{d}/step{}.json", r.steps), body.to_string()).ok();
+    }
+    let reply = agent.reply(&req).map_err(|e| format!("provider: {e}"))?;
+    r.input_tokens += reply.input_tokens;
+    r.output_tokens += reply.output_tokens;
+    messages.push(Message::assistant(reply.text.clone()));
+    serde_json::from_str(reply.text.trim()).map_err(|_| "parse".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_answer_schema_is_answers_branch_alone() {
+        let v: serde_json::Value = serde_json::from_str(&answer_schema()).expect("JSON");
+        let b = v["anyOf"].as_array().expect("anyOf");
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0]["properties"]["tool"]["const"], "answer");
+    }
 
     #[test]
     fn the_schema_parses_and_keeps_thought_first_in_every_branch() {

@@ -90,9 +90,16 @@ close. None of it moved in 1.21.
   does not fire, by a narrow margin. Every `SMY-W606` raised was a real fabrication, and none was
   missed. The ledger with BARO's ranking (d) puts the root cause first more often than BARO alone
   (0.411 against 0.322) but answers with about two services, so it trails BARO at AC@3 (0.489
-  against 0.656): G-4 fails. Three reruns are identical at temperature 0. OQ-T1 is decided, one
-  `consulted` per unit (median 20–50 per investigation). Scores per case are in
-  `fixtures/ge_m7/scores-m7p3.tsv`; RFC SMYSL-10 A3 has the rest.
+  against 0.656): G-4 fails. Three reruns agreed, but only because they replayed one order
+  (A4-10). OQ-T1 is decided, one `consulted` per unit (median 20–50 per investigation). Scores
+  per case are in `fixtures/ge_m7/scores-m7p3.tsv`; RFC SMYSL-10 A3 has the rest.
+- **GE-M7's held-out run, pre-registered and frozen (RFC SMYSL-10 A4).** The 90 repetition-3
+  cases, which no phase has run (`held-out.txt`). A new arm (e) is (d)'s run with its answer
+  completed from BARO's ranking. A run that spends its budget gets one forced step whose only
+  branch is `answer`. Gates: G-4 again on (e), protocol failures at most 2 %, and G-1 replicated.
+  `run --shuffle SEED` orders the cases: a reply to a byte-identical request at temperature 0
+  depends on what the Ollama server ran before it, so M7-P3's identical reruns measured nothing,
+  and the repeat set now runs in three shuffled orders (G-10). Not yet run.
 
 ## 1.21.0 — 2026-11-25
 

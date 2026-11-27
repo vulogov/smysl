@@ -1,0 +1,32 @@
+# G-10's repeat set (RFC SMYSL-10 A4-4): repeat.txt's 30 cases at repetition 3. Arms a, b, d,
+# three runs, with --shuffle 1, 2 and 3.
+RE2-OB/checkoutservice_cpu/3
+RE2-OB/checkoutservice_loss/3
+RE2-OB/currencyservice_disk/3
+RE2-OB/currencyservice_socket/3
+RE2-OB/emailservice_mem/3
+RE2-OB/emailservice_delay/3
+RE2-OB/productcatalogservice_cpu/3
+RE2-OB/productcatalogservice_loss/3
+RE2-OB/recommendationservice_disk/3
+RE2-OB/recommendationservice_socket/3
+RE2-SS/carts_disk/3
+RE2-SS/carts_socket/3
+RE2-SS/catalogue_mem/3
+RE2-SS/catalogue_delay/3
+RE2-SS/orders_cpu/3
+RE2-SS/orders_loss/3
+RE2-SS/payment_disk/3
+RE2-SS/payment_socket/3
+RE2-SS/user_mem/3
+RE2-SS/user_delay/3
+RE2-TT/ts-auth-service_mem/3
+RE2-TT/ts-auth-service_delay/3
+RE2-TT/ts-order-service_cpu/3
+RE2-TT/ts-order-service_loss/3
+RE2-TT/ts-route-service_disk/3
+RE2-TT/ts-route-service_socket/3
+RE2-TT/ts-train-service_mem/3
+RE2-TT/ts-train-service_delay/3
+RE2-TT/ts-travel-service_cpu/3
+RE2-TT/ts-travel-service_loss/3

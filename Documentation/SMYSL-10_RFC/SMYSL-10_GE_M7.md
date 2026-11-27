@@ -441,7 +441,7 @@ and scores as a miss: 27 of 270 agent runs (10 %), under Q-3's 20 %.
 | **G-2** | (b): 25 of 25 W606 are real (1.00); (d): 24 of 24 | **Holds.** Wilson 95 % lower bound 0.87 on 25 |
 | **G-3** | (b): 25 of 25 fabricated quotes raised (1.00); (d): 24 of 24 | **Holds** |
 | **G-4** | AC@3 (d) − max((a), (c)) = (d) − (c): −0.167, [−0.256, −0.089] | **Fails** |
-| **G-5** | Range over three runs: 0 for AC@3 and the fabrication rate, every arm | **Holds**, trivially (A3-5) |
+| **G-5** | Range over three runs: 0 for AC@3 and the fabrication rate, every arm | **Not measured** (A4-10): the runs replayed one order, so they agreed by construction |
 
 - **A3-1. G-1 is testable.** A2-4's floor did not occur: (a) fabricated 14 claims in 9 cases. (b)
   fabricated 3, all in one case (`RE2-TT/ts-auth-service_mem/1`). (d) − (a), not gated, is
@@ -488,6 +488,76 @@ and scores as a miss: 27 of 270 agent runs (10 %), under Q-3's 20 %.
   on a shortened answer, and that this agent, alone, ranks below BARO (AC@3 (a) − (c) −0.356,
   [−0.478, −0.233]). M7-P4 (hosted, (a) and (b)) is the second reading of G-1 and runs only on
   approval.
+
+### A4. M7-P3H, the held-out run: a completed answer and a forced answer (2026-11-26, frozen)
+
+M7-P3 left two faults in how an answer is formed, not in §11: (d) answers with about two services
+and drops BARO's tail (A3-3), and 27 of 270 agent runs spent the budget without answering and
+scored as misses. A4 changes both, states the gates before anything runs, and runs on cases no
+earlier phase has seen. It is frozen by the commit that implements it and records this text,
+before the run. Drafting it found that M7-P3's repeats measured less than A3-5 says (A4-10).
+
+- **A4-1. Cases: repetition 3.** `fixtures/ge_m7/held-out.txt` is the 90 repetition-3 cases, the
+  same 5 services × 6 faults per system as `sample.txt` (all repetition 1). No case of repetition 3
+  has been run: the pilot was repetition 2. A completion of M7-P3's own (d) answers was computed
+  while A4 was drafted (A4-7), so the sample cannot test it.
+- **A4-2. Arm (e), the completed answer.** (e) is (d)'s run, with no run of its own. Its ranking is
+  (d)'s answer followed by BARO's ranking, repeats removed, first five kept. The agent is not told,
+  so (d) and (e) differ only in scoring. Completion adds no claim and no quote, so (e)'s
+  fabrication is (d)'s.
+- **A4-3. The forced answer.** When the budget is spent with no answer, the loop makes one more
+  call: the message "No tool calls left: answer now, with what you have", and a schema whose only
+  branch is `answer`. Its answer is scored like any other, and the run records `forced`. A forced
+  step that does not parse, or does not fit the context, is a protocol failure, as now. The note
+  on each of the last three calls ("N tool calls left") is unchanged. It applies in (a), (b) and
+  (d) alike.
+- **A4-4. Frozen otherwise as A2-5.** Prompt, step schema, 25 steps, context, output limit, caps,
+  canonical printing, `qwen2.5:14b-instruct`, temperature 0. The repeat set returns, with the
+  case order shuffled per run (A4-10): `fixtures/ge_m7/held-out-repeat.txt` is `repeat.txt`'s
+  30 service-and-fault pairs at repetition 3, run on (a), (b) and (d) with `--shuffle 1`, `2`
+  and `3`. The scored run is `held-out.txt` in its listed order, arms (a) to (e).
+- **A4-5. Before the scored run, done.** Tests: the forced step on a scripted agent (its schema is
+  `answer`'s alone, its answer is scored, a forced reply that is not an answer is a budget
+  failure), completion, and the shuffle. Smoke, unscored, on three M7-P3 sample cases that spent
+  the budget in (a), (b) and (d) (`RE2-OB/recommendationservice_mem/1`, `RE2-SS/orders_mem/1`,
+  `RE2-TT/ts-train-service_socket/1`): 9 agent runs, no protocol failure, 4 forced answers, each
+  parsed and scored, none fabricated. Five of the nine did not reach the budget this time; A4-10
+  says why.
+- **A4-6. Gates.** Intervals as §6, seed 20261126, paired by case.
+
+  | Gate | Statement | Fails means |
+  |---|---|---|
+  | **G-7** (G-4 on a completed answer) | AC@3 (e) − max((a), (c)), lower end above −0.05 | The ranking and the ledger cost accuracy even when the agent cannot drop BARO's tail: G-4's failure is not only the short answer |
+  | **G-8** (the budget) | Protocol failures of every kind ≤ 2 % of agent runs (at most 5 of 270) | The forced answer does not answer: the loop needs redesign before another scored run |
+  | **G-9** (G-1, replicated) | G-1's statement, (b) − (a) < 0 with the upper end below 0, on repetition 3, forced answers included | M7-P3's margin is not replicated. §26's stop condition is reported as undecided on this model, and M7-P4 is the deciding reading, on approval |
+
+  | **G-10** (G-5, with the order shuffled) | On `held-out-repeat.txt`'s three shuffled runs, the range of AC@3 and of the fabrication rate, per arm, is below G-9's measured difference | Which cases ran before a case moves G-1 as much as the arms do: G-9 is reported as undecided whatever its interval, and a larger sample is proposed, on approval |
+
+  Reported, not gated: (d)'s AC@k as frozen; AC@1 (e) − (c); G-1's difference without the forced
+  answers, which is comparable with A3; the number of forced answers per arm and their
+  fabrication rate; G-2 and G-3, with their thresholds; unused evidence; tokens and time.
+- **A4-7. What M7-P3 already says, and why it is not the test.** Completed, M7-P3's (d) answers
+  give AC@1 0.411, AC@3 0.656 and AC@5 0.800; AC@3 (e) − (c) is 0.000, [−0.033, +0.033], within
+  G-7's margin. Completion keeps (d)'s first place and gains back BARO's tail, but it was computed
+  after M7-P3's data was seen, so it is exploratory. G-7 reads it on repetition 3.
+- **A4-8. What it decides.** G-7 holds: the answer an agent returns with a derived ranking is
+  completed from that ranking, and SMYSL-3 §26 records G-4's failure as the short answer. G-7
+  fails: (d)'s cost is reported as the ledger's, against the ranking, and is investigated before
+  M7-T. G-9 holds: G-1 has held on two disjoint case sets on this model. G-9 fails: as its row
+  says. G-8 decides only the loop.
+- **A4-9. Cost.** 270 scored agent runs (90 × (a), (b), (d)) and 270 repeat runs (30 × 3 arms ×
+  3 orders): about 11 h local. Repetition 3 needs RCAEval's data on disk until the run is read.
+- **A4-10. A run depends on what ran before it.** In the smoke, `RE2-SS/orders_mem/1` (b) took 8
+  steps, where M7-P3 spent the budget. M7-P3's binary (`c965120`), run on that case alone, gave
+  M7-P3's transcript exactly once, and 8 steps the two times it ran after other requests; the new
+  binary gave 2 claims and, once, 3. Both binaries send byte-identical requests (system prompt,
+  schema, messages, by `GE_M7_DUMP`). The reply to an identical request at temperature 0 depends
+  on the model server's state from earlier requests, most likely its reuse of a cached prompt
+  prefix, which evaluates the prompt in different batches. M7-P3's three repeats replayed the
+  same requests in the same order from the same start, so they agreed, and the one case that
+  differed was the first of the list, the one whose predecessor differed. A3-5's reading is
+  wrong: the variance G-5 was meant to measure exists, and M7-P3 did not measure it. M7-P3's
+  G-1 interval stands as computed, over case draws only; G-10 measures the rest.
 
 ## 12. R1 (2026-11-25)
 

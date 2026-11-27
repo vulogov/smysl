@@ -6,17 +6,24 @@
 //!   hypothesis is a unit with grounds and quotes, and `hypothesise` answers with its effective
 //!   status, rule TQ's `SMY-W606` per quote, and kind 6;
 //! - **(c)** BARO's ranking alone;
-//! - **(d)** (b) with BARO's ranking in the ledger and listed in the first message.
+//! - **(d)** (b) with BARO's ranking in the ledger and listed in the first message;
+//! - **(e)** (d)'s run, its answer completed from BARO's ranking (RFC SMYSL-10 A4-2): no run of
+//!   its own, and the agent is not told.
+//!
+//! A run that spends its budget without answering gets one forced step whose only branch is
+//! `answer` (A4-3); its score records `forced`.
 //!
 //! **Modes:**
 //!
-//! - `run --data DIR --cases FILE [--arms a,b,c,d] [--model M] [--endpoint URL] [--steps 25]
-//!   [--ctx 32768] [--out DIR]`: each case × arm, a JSON line per run in `DIR/runs.jsonl`, the
-//!   transcripts beside it, a table at the end. `FILE` lists cases as `<system>/<service>_<fault>/<rep>`.
+//! - `run --data DIR --cases FILE [--arms a,b,c,d,e] [--model M] [--endpoint URL] [--steps 25]
+//!   [--ctx 32768] [--shuffle SEED] [--out DIR]`: each case × arm, a JSON line per run in `DIR/runs.jsonl`, the
+//!   transcripts beside it, a table at the end. `--shuffle SEED` runs the cases in a seeded
+//!   order: a run's result depends on what the model server ran before it (A4-10). `FILE` lists cases as `<system>/<service>_<fault>/<rep>`.
 //! - `check-data --data DIR`: what R1 left to the data (R1-3, R1-7): the files per system, and
 //!   the leakage check over every case: no tool result names the root cause's service by any
 //!   spelling.
-//! - `sample --data DIR`: the scored sample and the pilot's six, as `fixtures/ge_m7/` lists them.
+//! - `sample --data DIR [--rep N]`: the scored sample and the pilot's six, as `fixtures/ge_m7/`
+//!   lists them; with `--rep 3`, the held-out cases of A4-1 (`held-out.txt`).
 //!
 //! The data is not in the repository (CC BY 4.0, about 32 GB extracted): `make ge-m7-data` names
 //! where it comes from. The fixtures under `fixtures/ge_m7/` are two synthetic cases in RE2's
@@ -46,6 +53,10 @@ struct Score {
     root: String,
     fault: String,
     ranking: Vec<String>,
+    /// (c), (d), (e): BARO's ranking.
+    baro: Vec<String>,
+    /// The answer came from the forced step (A4-3).
+    forced: bool,
     /// 1-based rank of the root cause, 0 when absent.
     rank: usize,
     claims: usize,
@@ -75,7 +86,7 @@ impl Score {
     fn json(&self) -> serde_json::Value {
         serde_json::json!({
             "case": self.case, "arm": self.arm, "model": self.model, "root": self.root, "fault": self.fault,
-            "ranking": self.ranking, "rank": self.rank, "claims": self.claims,
+            "ranking": self.ranking, "baro": self.baro, "forced": self.forced, "rank": self.rank, "claims": self.claims,
             "fabricated": self.fabricated, "fabricated_strict": self.fabricated_strict,
             "tq_quotes": self.tq_quotes, "tq_tp": self.tq_tp, "tq_fp": self.tq_fp,
             "tq_fn": self.tq_fn, "consulted": self.consulted, "cited": self.cited,
@@ -84,6 +95,42 @@ impl Score {
             "input_tokens": self.input_tokens, "output_tokens": self.output_tokens,
             "secs": self.secs, "calls": self.calls, "verdicts": self.verdicts,
         })
+    }
+}
+
+/// `cases` in an order seeded by `seed` (Fisher–Yates over `case::Rng`).
+fn shuffled(mut cases: Vec<String>, seed: &str) -> Vec<String> {
+    let mut rng = case::Rng(case::fnv(seed));
+    for i in (1..cases.len()).rev() {
+        let j = (rng.next() % (i as u64 + 1)) as usize;
+        cases.swap(i, j);
+    }
+    cases
+}
+
+/// `answer` followed by `baro`, repeats removed, the first five kept (A4-2).
+fn complete(answer: &[String], baro: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for s in answer.iter().chain(baro) {
+        if !out.contains(s) {
+            out.push(s.clone());
+        }
+    }
+    out.truncate(5);
+    out
+}
+
+/// Arm (e)'s score from (d)'s: the ranking completed, everything else (d)'s.
+fn completed(d: &Score) -> Score {
+    let ranking = complete(&d.ranking, &d.baro);
+    Score {
+        arm: "e".into(),
+        rank: ranking
+            .iter()
+            .position(|r| *r == d.root)
+            .map_or(0, |i| i + 1),
+        ranking,
+        ..d.clone()
     }
 }
 
@@ -148,6 +195,7 @@ fn score(world: &World, arm: &str, model: &str, run: Option<&Run>, ranking: Vec<
     s.output_tokens = r.output_tokens;
     s.secs = r.secs;
     s.calls = r.calls.clone();
+    s.forced = r.forced;
     s
 }
 
@@ -176,7 +224,8 @@ fn run_arm(
     let tag = format!("{}__{}", w.raw.system, w.raw.rel.replace('/', "_"));
     if arm == "c" {
         let (_, ranking) = oracle::baro(&w);
-        let s = score(&w, arm, "baro/1", None, ranking);
+        let mut s = score(&w, arm, "baro/1", None, ranking.clone());
+        s.baro = ranking;
         return (s, w, None);
     }
     let agent = agent.expect("an agent for arms a, b, d");
@@ -187,11 +236,13 @@ fn run_arm(
         );
     }
     let mut first = alert(&w);
+    let mut baro = Vec::new();
     if arm == "d" {
         let (units, ranking) = oracle::baro(&w);
         w.commit_ranking(&units);
         first.push('\n');
         first.push_str(&oracle::ranking_text(&w, &units, &ranking));
+        baro = ranking;
     }
     let r = agent::run(&mut w, agent, &set.loop_, first);
     let ranking = r
@@ -199,7 +250,8 @@ fn run_arm(
         .as_ref()
         .map(|a| a.ranking.clone())
         .unwrap_or_default();
-    let s = score(&w, arm, &set.loop_.model, Some(&r), ranking);
+    let mut s = score(&w, arm, &set.loop_.model, Some(&r), ranking);
+    s.baro = baro;
     (s, w, Some(r))
 }
 
@@ -230,7 +282,7 @@ fn table(scores: &[Score]) {
     arms.sort_unstable();
     arms.dedup();
     println!(
-        "\narm  runs  AC@1   AC@3   AC@5   fab(tol)  fab(strict)  claims  TQ P    TQ R    unused  protocol  steps  in-tok/run  s/run"
+        "\narm  runs  AC@1   AC@3   AC@5   fab(tol)  fab(strict)  claims  TQ P    TQ R    unused  protocol  forced  steps  in-tok/run  s/run"
     );
     for arm in arms {
         let v: Vec<&Score> = scores.iter().filter(|s| s.arm == arm).collect();
@@ -270,8 +322,9 @@ fn table(scores: &[Score]) {
             (cons - cited) as f64 / cons as f64
         };
         let proto = v.iter().filter(|s| s.protocol.is_some()).count();
+        let forced = v.iter().filter(|s| s.forced).count();
         println!(
-            "{arm:<4} {:>4}  {:.3}  {:.3}  {:.3}  {:>8.3}  {:>11.3}  {claims:>6}  {p:.3}  {r:.3}  {unused:>6.3}  {proto:>8}  {:>5.1}  {:>10.0}  {:>5.1}",
+            "{arm:<4} {:>4}  {:.3}  {:.3}  {:.3}  {:>8.3}  {:>11.3}  {claims:>6}  {p:.3}  {r:.3}  {unused:>6.3}  {proto:>8}  {forced:>6}  {:>5.1}  {:>10.0}  {:>5.1}",
             v.len(),
             ac(1),
             ac(3),
@@ -293,6 +346,12 @@ fn cmd_run(args: &[String]) {
         .split(',')
         .map(str::to_string)
         .collect();
+    // (e) has no run of its own: it is (d)'s, completed (A4-2).
+    let with_e = arms.iter().any(|a| a == "e");
+    assert!(
+        !with_e || arms.iter().any(|a| a == "d"),
+        "arm e is d's run completed: list d too"
+    );
     let model = arg(args, "--model").unwrap_or_else(|| "qwen2.5:14b-instruct".into());
     let endpoint = arg(args, "--endpoint").unwrap_or_else(|| "http://localhost:11434".into());
     let steps: usize = arg(args, "--steps").map_or(25, |s| s.parse().expect("--steps N"));
@@ -308,6 +367,10 @@ fn cmd_run(args: &[String]) {
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .map(str::to_string)
         .collect();
+    let cases = match arg(args, "--shuffle") {
+        Some(seed) => shuffled(cases, &seed),
+        None => cases,
+    };
     let mut cfg = ProviderConfig::new(ProviderId::new("ollama").expect("an id"), "ollama");
     cfg.endpoint = endpoint;
     cfg.model = model.clone();
@@ -333,7 +396,7 @@ fn cmd_run(args: &[String]) {
         .expect("runs.jsonl");
     let mut scores = Vec::new();
     for case in &cases {
-        for arm in &arms {
+        for arm in arms.iter().filter(|a| *a != "e") {
             let (dir, rel) = system_dir(&data, case);
             let raw = Raw::load(&dir, &rel).unwrap_or_else(|e| panic!("{e}"));
             let (s, _, r) = run_arm(
@@ -343,12 +406,13 @@ fn cmd_run(args: &[String]) {
                 &set,
             );
             eprintln!(
-                "{case} ({arm}): rank {} of {:?}, {} claims, {} fabricated, {} steps{}, {:.0} s",
+                "{case} ({arm}): rank {} of {:?}, {} claims, {} fabricated, {} steps{}{}, {:.0} s",
                 s.rank,
                 s.ranking,
                 s.claims,
                 s.fabricated,
                 s.steps,
+                if s.forced { ", forced" } else { "" },
                 s.protocol
                     .as_deref()
                     .map(|p| format!(", protocol failure: {p}"))
@@ -369,6 +433,12 @@ fn cmd_run(args: &[String]) {
                 .expect("a transcript");
             }
             writeln!(log, "{}", s.json()).expect("runs.jsonl");
+            if arm == "d" && with_e {
+                let e = completed(&s);
+                eprintln!("{case} (e): rank {} of {:?}", e.rank, e.ranking);
+                writeln!(log, "{}", e.json()).expect("runs.jsonl");
+                scores.push(e);
+            }
             scores.push(s);
         }
     }
@@ -465,6 +535,24 @@ fn cmd_check_data(args: &[String]) {
 /// The pilot: two cases per system from repetition 2, the first and last fault directory.
 fn cmd_sample(args: &[String]) {
     let data = PathBuf::from(arg(args, "--data").expect("--data DIR"));
+    // The held-out cases of A4-1: every case of one repetition, none of it run before.
+    if let Some(rep) = arg(args, "--rep") {
+        let suffix = format!("/{rep}");
+        let mut held = Vec::new();
+        for system in ["RE2-OB", "RE2-SS", "RE2-TT"] {
+            held.extend(
+                case::list(&data.join(system))
+                    .iter()
+                    .filter(|c| c.ends_with(&suffix))
+                    .map(|c| format!("{system}/{c}")),
+            );
+        }
+        println!("# held-out: repetition {rep}, {} cases", held.len());
+        for h in &held {
+            println!("{h}");
+        }
+        return;
+    }
     let mut sample = Vec::new();
     let mut pilot = Vec::new();
     for system in ["RE2-OB", "RE2-SS", "RE2-TT"] {
@@ -564,6 +652,7 @@ mod tests {
                 }),
             ],
             next: 0,
+            schemas: Vec::new(),
         }
     }
 
@@ -621,6 +710,100 @@ mod tests {
                     assert!(hyp.contains("SMY-W606"), "{hyp}");
                 }
                 assert!(s.consulted >= 2 && s.cited == 1, "{s:?}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn a_shuffle_is_a_seeded_permutation() {
+        let cases: Vec<String> = (0..30).map(|i| format!("c{i}")).collect();
+        let a = shuffled(cases.clone(), "1");
+        assert_eq!(a, shuffled(cases.clone(), "1"));
+        assert_ne!(a, shuffled(cases.clone(), "2"));
+        assert_ne!(a, cases);
+        let mut s = a.clone();
+        s.sort();
+        let mut c = cases.clone();
+        c.sort();
+        assert_eq!(s, c);
+    }
+
+    #[test]
+    fn completion_keeps_the_answer_first_and_fills_from_baro() {
+        let v = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let baro = v(&["s1", "s2", "s3", "s4", "s5"]);
+        assert_eq!(
+            complete(&v(&["s4", "s9"]), &baro),
+            v(&["s4", "s9", "s1", "s2", "s3"])
+        );
+        assert_eq!(complete(&[], &baro), baro);
+        assert_eq!(complete(&v(&["s1", "s1"]), &v(&["s2"])), v(&["s1", "s2"]));
+        let d = Score {
+            arm: "d".into(),
+            root: "s3".into(),
+            ranking: v(&["s4"]),
+            baro: baro.clone(),
+            rank: 0,
+            claims: 2,
+            fabricated: 1,
+            ..Score::default()
+        };
+        let e = completed(&d);
+        assert_eq!(
+            (e.arm.as_str(), e.rank, e.claims, e.fabricated),
+            ("e", 4, 2, 1)
+        );
+    }
+
+    /// A script that never answers: the forced step's schema is `answer`'s alone, and its answer
+    /// is scored; a forced reply that is not an answer is a budget failure.
+    #[test]
+    fn a_spent_budget_gets_one_forced_answer() {
+        let (dir, rel) = system_dir(&fixtures(), "RE2-FX/cartservice_cpu/1");
+        let root = {
+            let w = World::new(Raw::load(&dir, &rel).unwrap());
+            w.anon.to[&w.raw.root].clone()
+        };
+        let out = std::env::temp_dir().join(format!("ge-m7-forced-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let mut set = settings(&out);
+        set.loop_.steps = 2;
+        for good in [true, false] {
+            let r2 = root.clone();
+            let mut sc = Scripted {
+                steps: vec![
+                    Box::new(|_| r#"{"tool":"services"}"#.to_string()),
+                    Box::new(|_| r#"{"tool":"metrics","service":"svc-01"}"#.to_string()),
+                    Box::new(move |m: &[Message]| {
+                        assert!(m.last().unwrap().content.ends_with(agent::FORCED));
+                        if good {
+                            serde_json::json!({"tool": "answer", "ranking": [r2], "quotes": []})
+                                .to_string()
+                        } else {
+                            r#"{"tool":"services"}"#.to_string()
+                        }
+                    }),
+                ],
+                next: 0,
+                schemas: Vec::new(),
+            };
+            let (s, _, r) = run_arm(Raw::load(&dir, &rel).unwrap(), "b", Some(&mut sc), &set);
+            assert_eq!(sc.next, 3, "two tool calls and the forced step");
+            assert_eq!(
+                sc.schemas[2].as_deref(),
+                Some(agent::answer_schema().as_str())
+            );
+            assert_eq!(sc.schemas[0].as_deref(), Some(agent::schema().as_str()));
+            assert!(s.forced && r.unwrap().forced);
+            if good {
+                assert_eq!((s.rank, s.protocol.as_deref()), (1, None), "{s:?}");
+            } else {
+                assert_eq!(
+                    (s.rank, s.protocol.as_deref()),
+                    (0, Some("budget")),
+                    "{s:?}"
+                );
             }
         }
         let _ = std::fs::remove_dir_all(&out);
