@@ -2,7 +2,8 @@
 
 **Author:** Vladimir Ulogov
 **Status:** draft, R1 (2026-11-25): read against the code; §12 lists what R1 found and how §10's
-questions are settled. M7-P1 to M7-P3 done (§11, A1 to A3); M7-P4 and M7-P5 not run.
+questions are settled. M7-P1 to M7-P3 and the held-out M7-P3H done (§11, A1 to A5); M7-P4 and
+M7-P5 not run.
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged. The
 harness is an example and a test crate; no public API is planned to change (§8, Q-6).
 **Crates:** none changed by plan. New: `examples/ge_m7` (the harness), fixtures under
@@ -558,6 +559,77 @@ before the run. Drafting it found that M7-P3's repeats measured less than A3-5 s
   differed was the first of the list, the one whose predecessor differed. A3-5's reading is
   wrong: the variance G-5 was meant to measure exists, and M7-P3 did not measure it. M7-P3's
   G-1 interval stands as computed, over case draws only; G-10 measures the rest.
+
+### A5. M7-P3H, the held-out run (2026-11-27)
+
+M7-P3H ran at `5a8696c` as A4 froze it: `held-out.txt` (repetition 3) on arms (a) to (e) in listed
+order, then `held-out-repeat.txt` on (a), (b) and (d) with `--shuffle 1`, `2` and `3`, on
+`qwen2.5:14b-instruct`, in 10 h 47 min. Every case and arm is in
+`fixtures/ge_m7/scores-m7p3h.tsv` (720 rows). Intervals as §6, seed 20261126, paired by case.
+
+| Arm | AC@1 | AC@3 | AC@5 | Claims | Fabricated (tolerant) | TQ flags (real) | Unused | Protocol failures | Forced | Steps | Input tokens / run | s / run |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| (a) | 0.300 | 0.311 | 0.311 | 264 | 13 (4.9 %) | — | 0.949 | 1 | 12 | 18.5 | 84,982 | 85.4 |
+| (b) | 0.211 | 0.233 | 0.244 | 192 | 2 (1.0 %) | 20 (19) | 0.936 | 0 | 5 | 13.5 | 48,409 | 61.1 |
+| (c) | 0.444 | 0.800 | 0.922 | — | — | — | — | 0 | — | — | — | 0 |
+| (d) | 0.533 | 0.667 | 0.678 | 235 | 3 (1.3 %) | 10 (10) | 0.894 | 1 | 5 | 12.0 | 41,200 | 54.8 |
+| (e) | 0.533 | 0.822 | 0.922 | as (d) | as (d) | as (d) | as (d) | as (d) | as (d) | — | — | — |
+
+The strict rate differs from the tolerant one only in (a): 14 of 264 claims (5.3 %) are not TQ's
+spelling, one of them a correct rounding.
+
+| Gate | Measured | Read |
+|---|---|---|
+| **G-7** | AC@3 (e) − max((a), (c)) = (e) − (c): +0.022, [0.000, +0.056] | **Holds** |
+| **G-8** | 2 of 270 agent runs (0.7 %), both `parse` before the budget | **Holds** |
+| **G-9** | (b) − (a): −0.039, [−0.107, +0.007] | **Fails**: the upper end is above 0 |
+| **G-10** | Range over three orders: 0 for AC@3 and the fabrication rate, every arm | **Holds** |
+
+Reported with the gates: G-2 in (b) 19 of 20 (0.95, one W606 on a correct rounding), in (d) 10 of
+10; G-3 1.00 in both. G-1's difference without the forced answers: −0.047, [−0.126, +0.006].
+(d) − (a), not gated: −0.037, [−0.105, +0.009].
+
+- **A5-1. G-1 is not replicated, and §26's stop condition is undecided on this model.** As G-9's
+  row says. The point estimate is M7-P3's, (b) 1.0 % against (a) 4.9 % here, 1.5 % against 4.8 %
+  there; the interval is wider because (a)'s 13 fabrications fall in five cases, where M7-P3's 14
+  fell in nine. (b)'s two are in two cases. M7-P4 is the deciding reading, on approval.
+- **A5-2. Both runs together, after the fact.** Over M7-P3's and M7-P3H's 180 cases, paired by case
+  as §6: (a) 27 of 557 claims, (b) 5 of 391; (b) − (a) −0.036, [−0.073, −0.006]. The upper end is
+  below 0. This pooling was not pre-registered, so it does not decide G-1; it says the difference
+  has the same sign and size in two disjoint samples, and that 90 cases are too few to show it
+  each time at this model's fabrication rate.
+- **A5-3. G-4's failure was the short answer.** Completed from BARO's ranking, (d)'s answer keeps
+  its first place, AC@1 (e) − (c) +0.089, [+0.022, +0.156], and loses nothing below it: AC@3
+  +0.022, AC@5 0.000. On Train Ticket, where BARO alone is weakest, (e)'s AC@3 is 0.57 against
+  BARO's 0.50. (d) uncompleted: AC@3 (d) − (c) −0.133, [−0.222, −0.056], as in M7-P3.
+
+  | System | (a) AC@1 / @3 | (b) | (c) | (d) | (e) |
+  |---|---|---|---|---|---|
+  | Online Boutique | 0.30 / 0.30 | 0.23 / 0.30 | 0.73 / 0.97 | 0.80 / 0.90 | 0.80 / 0.97 |
+  | Sock Shop | 0.47 / 0.47 | 0.33 / 0.33 | 0.57 / 0.93 | 0.60 / 0.73 | 0.60 / 0.93 |
+  | Train Ticket | 0.13 / 0.17 | 0.07 / 0.07 | 0.03 / 0.50 | 0.20 / 0.37 | 0.20 / 0.57 |
+
+- **A5-4. The forced answer.** 22 runs reached it (12 in (a), 5 in (b), 5 in (d)); every one parsed,
+  none fabricated (64 claims), and 10 have the root cause in their first three. The two protocol
+  failures are replies that did not parse, at steps 19 and 20, before the budget.
+- **A5-5. The ledger's cost without BARO, again.** AC@1 (b) − (a) −0.089, [−0.167, −0.022]; AC@3
+  −0.078, [−0.156, 0.000]. (b) uses 43 % fewer input tokens and 28 % less time a run. Consulted
+  units per investigation: median 60 (a), 38 (b), 20 (d), as A3-6.
+- **A5-6. A4-10 corrected: case order does not move a run.** The three shuffled orders agree on
+  every field but wall time in all 90 runs, and with the scored run in 88. The two that differ are
+  the scored run's first case, `RE2-OB/checkoutservice_cpu/3`, in (a) and (b), as M7-P3's two
+  were its first case. A4-10's reading, a cached prompt prefix left by whichever request ran
+  before, predicts that a shuffle moves runs, and it moved none. What is observed: the first
+  case of a session can differ from a rerun of it, and in the smoke, back-to-back single-case runs
+  of `RE2-SS/orders_mem/1` (b) gave 25 steps once and 8 steps six times, with either binary. The cause is not
+  identified. G-10 bounds what it does to these gates: none within a session.
+- **A5-7. Cost.** 270 scored agent runs in 5.0 h and 15.7 M input tokens ((a) 7.6 M, (b) 4.4 M, (d)
+  3.7 M); the repeats about 5.6 h.
+- **A5-8. What this decides.** §11's G-1 reading on the local model is **undecided**: the same
+  difference twice, significant once. SMYSL-3 §26 says so, in place of A3-8's "§11 stands". G-7
+  holds: an agent's answer given with a derived ranking is completed from that ranking, which is
+  how (d) is read from here on. The loop keeps the forced answer (G-8). M7-P4, (a) and (b) on a
+  hosted model, decides G-1, at about 11 M input tokens, on approval.
 
 ## 12. R1 (2026-11-25)
 

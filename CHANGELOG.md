@@ -99,7 +99,16 @@ close. None of it moved in 1.21.
   branch is `answer`. Gates: G-4 again on (e), protocol failures at most 2 %, and G-1 replicated.
   `run --shuffle SEED` orders the cases: a reply to a byte-identical request at temperature 0
   depends on what the Ollama server ran before it, so M7-P3's identical reruns measured nothing,
-  and the repeat set now runs in three shuffled orders (G-10). Not yet run.
+  and the repeat set now runs in three shuffled orders (G-10).
+- **GE-M7's held-out run (M7-P3H): G-1 does not replicate, so §11 is undecided on the local
+  model.** On the 90 repetition-3 cases, (b) fabricates 1.0 % of claims against (a)'s 4.9 %, the
+  same difference as M7-P3, but its interval reaches +0.007 (G-9 fails): (a)'s fabrications sit in
+  five cases. Pooled over both runs, after the fact, it is −0.036 [−0.073, −0.006]. M7-P4, on a
+  hosted model, is now the deciding reading. Completing (d)'s answer from BARO's ranking (e) keeps
+  its AC@1 lead and matches BARO at AC@3 (G-7 holds): G-4's failure was the short answer. The
+  forced answer leaves 2 protocol failures in 270 runs (G-8). Shuffled case orders change nothing
+  (G-10), which corrects A4's reading of the smoke. Scores per case in
+  `fixtures/ge_m7/scores-m7p3h.tsv`; RFC SMYSL-10 A5.
 
 ## 1.21.0 — 2026-11-25
 
