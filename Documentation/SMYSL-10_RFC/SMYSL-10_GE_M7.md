@@ -631,6 +631,97 @@ Reported with the gates: G-2 in (b) 19 of 20 (0.95, one W606 on a correct roundi
   how (d) is read from here on. The loop keeps the forced answer (G-8). M7-P4, (a) and (b) on a
   hosted model, decides G-1, at about 11 M input tokens, on approval.
 
+### A6. M7-P3R, repetition 2 and G-1 pooled; M7-P4 on Claude Haiku 5.5 (2026-11-27, frozen)
+
+A5 left G-1 undecided on the local model: the same difference twice, its interval below 0 once.
+A6 states the two readings that remain before either runs. M7-P3R runs the last RE2 cases no
+scored phase has seen, locally, and reads G-1 over all three repetitions. M7-P4 runs (a) and (b)
+on a hosted model. It is frozen by the commit that records this text. M7-P3R runs at that
+commit, before any code for M7-P4 lands.
+
+- **A6-1. A5-8 corrected: the hosted run does not decide §11.** §6 puts the decision on the local
+  model (D-T13) and reports the hosted G-1 and G-2 apart. A5-8's "M7-P4 decides G-1" contradicts
+  §6, and §6 stands. The local decision is G-11's. M7-P4 tells whether a second, unrelated model
+  shows the same difference.
+
+**M7-P3R, local.**
+
+- **A6-2. Cases: repetition 2, without the pilot.** `fixtures/ge_m7/rep2.txt` is the 90
+  repetition-2 cases, `sample --rep 2`, without `pilot.txt`'s six, which were seen while the
+  prompt was frozen (A2). That leaves 84 cases, 28 per system. No other phase has run them.
+- **A6-3. Frozen as A4.** The harness is M7-P3H's: prompt, step schema, 25 steps, the forced
+  answer, context, output limit, caps, canonical printing, `qwen2.5:14b-instruct`, temperature 0.
+  The arms are (a) to (e), in listed order. There is no repeat set: G-10 held, and no order moved a
+  run (A5-6). The run's first case may differ from a rerun of it (A5-6), as in both earlier runs.
+- **A6-4. Gates.** Intervals as §6: paired by case, 10,000 case-resampled draws, seed 20261126.
+  A rate is the ratio of sums over a draw's cases.
+
+  | Gate | Statement | Fails means |
+  |---|---|---|
+  | **G-11** (G-1, pooled) | Over 264 cases, (b) − (a) tolerant fabrication rate, upper end below 0. The 264 are M7-P3's 90 (repetition 1, as recorded, with no forced answer), M7-P3H's 90 (repetition 3) and M7-P3R's 84 (repetition 2), with forced answers included. A case is drawn with both of its arms. **And** on M7-P3R's 84 alone, the point estimate of (b) − (a) is below 0 | Either part failing: §11 stays undecided on this model, and RE2 has no unseen cases left. §26's stop condition neither fires nor passes. What follows (another local model, or M7-T's cases) needs its own pre-registration |
+  | **G-12** (G-8 again) | Protocol failures of every kind ≤ 2 % of agent runs (at most 5 of 252) | As G-8 |
+
+  Reported, not gated: G-1 on the 84 alone, with its interval; G-11 without forced answers, which
+  removes them from repetitions 2 and 3; (d) − (a) pooled; G-7 on the 84 ((e) against (a) and
+  (c)); G-2 and G-3; forced answers per arm; AC@k per system; unused evidence; tokens and time.
+- **A6-5. What G-11 is, and what it is not.** Pooling was chosen after A5-2 saw 180 of the 264
+  cases pool to −0.036, [−0.073, −0.006]. G-11 is therefore not a third independent test. 180 of
+  its cases are already read, and their pooled interval already excludes 0. The test is in the
+  84 new cases. They can pull the upper end above 0 if (b) is no better than (a) on them. G-11's
+  second clause also fails if their difference has the wrong sign, however the pool reads. G-11
+  holding says: on this model, over every RE2 case not used to freeze the prompt, the ledger
+  with feedback lets fewer fabricated claims reach an answer, and the one new sample agrees in
+  sign. It does not make M7-P3H's G-9 a pass. A5's pooled computation is the one G-11 uses: rerun
+  on the two TSVs, it gives −0.0357, [−0.0732, −0.0061].
+- **A6-6. What it decides.** G-11 holds: SMYSL-3 §26 records §11 as standing on the local model,
+  on the pooled reading, with G-9's failure beside it. G-11 fails: as its row says. G-12 decides
+  only the loop. M7-P3R's scores go to `fixtures/ge_m7/scores-m7p3r.tsv`, in M7-P3H's format.
+- **A6-7. Cost.** 252 agent runs (84 × (a), (b), (d)), about 4.7 h local at M7-P3H's rates; no
+  spend. RCAEval's data stays on disk until M7-P3R and M7-P4 are read.
+
+**M7-P4, hosted.**
+
+- **A6-8. Model and decoding.** `claude-haiku-5-5`, on the Claude API. Thinking is off
+  (`thinking: {"type": "disabled"}`, effort `medium`), as with the local model. That keeps the
+  arms' only difference in the ledger and feedback, and the transcript in the harness's own
+  messages. Temperature cannot be set: Haiku 5.5 rejects non-default sampling parameters, so it
+  samples at 1. Runs therefore vary, and G-5 is needed as designed (A3-5). The step schema is
+  sent as structured output (`output_config.format`) in place of Ollama's `format`. The prompt,
+  the forced answer, 25 steps, caps, canonical printing and the context limit (32,768 input tokens
+  by the API's count, below the 100 K tokens where the price changes) are A4's.
+- **A6-9. Cases and arms.** `sample.txt` (repetition 1, 90 cases), as §9 planned, on (a) and (b),
+  three passes. Repetition 1 is the sample the local G-1 was first read on. The hosted reading is
+  comparable with A3, and RE2's held-out repetitions stay free of a second model's use.
+- **A6-10. What is built, before the pilot.** A Claude API provider in `examples/ge_m7`, behind
+  its own feature. It sends raw HTTP, since Rust has no official SDK. It covers structured output,
+  the thinking setting, token usage from the response, a retry on rate limits and overload that
+  never counts as a step, and `--max-cost USD`, which stops the run when the running cost from
+  usage passes it. The key comes from the environment and is never logged. The tests use the
+  scripted agent. Nothing in the local path changes, so M7-P3R's results stay reproducible at
+  their commit.
+- **A6-11. Pilot, then freeze.** `pilot.txt`'s six cases on (a) and (b), one pass: 12 runs. Its
+  exit: no protocol failure, every structured reply parses, and each request's input tokens are
+  under the context limit. If the schema or a cap must change for this model, A7 records the
+  change and freezes it before the scored passes.
+- **A6-12. Gates, reported apart (§6).** Same intervals. A case's claims and fabrications are
+  summed over its three passes, and a draw keeps all three passes of a drawn case.
+
+  | Gate | Statement | Fails means |
+  |---|---|---|
+  | **H-1** (G-1 on Haiku 5.5) | (b) − (a), upper end below 0 | The difference is not shown on a second model. §11's local reading is unchanged, and its generality is not claimed |
+  | **H-2** (G-2) | TQ precision ≥ 0.9 in (b) | As G-2, on this model |
+  | **H-3** (G-5, sampled) | Over the three passes, the range of AC@3 and of the fabrication rate, per arm, is below H-1's measured difference | H-1 is reported as undecided whatever its interval |
+  | **H-4** (G-8) | Protocol failures ≤ 2 % of agent runs (at most 10 of 540) | The provider path or schema needs rework before any further hosted reading |
+
+  Also reported: (a)'s fabrication rate (A2-4's floor applies: if it is 0, H-1 is not testable),
+  G-3, forced answers, AC@k, tokens, and the bill.
+- **A6-13. Cost.** M7-P3's (a) and (b) on the sample used 12.6 M input and 0.30 M output tokens.
+  At Haiku 5.5's rates ($0.10 and $0.50 per million), that is about $1.40 a pass, and up to about
+  $1.80 if Haiku's tokenizer counts 30 % more. Three passes come to about $4–6 before caching, and
+  the pilot to about $0.10. The scored run's `--max-cost` is $10. Nothing is sent before the
+  pilot's spend is approved, and the scored passes need their own approval after the pilot. The
+  data sent is RCAEval's, a public benchmark, with services renamed (§5.2).
+
 ## 12. R1 (2026-11-25)
 
 R1 read the draft against `dev/1.22.0` at `9084112`. What held: the ledger builders

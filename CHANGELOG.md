@@ -109,6 +109,11 @@ close. None of it moved in 1.21.
   forced answer leaves 2 protocol failures in 270 runs (G-8). Shuffled case orders change nothing
   (G-10), which corrects A4's reading of the smoke. Scores per case in
   `fixtures/ge_m7/scores-m7p3h.tsv`; RFC SMYSL-10 A5.
+- **GE-M7's last local reading and the hosted run, pre-registered and frozen (RFC SMYSL-10 A6).**
+  M7-P3R runs the 84 repetition-2 cases no scored phase has seen (`rep2.txt`). G-11 reads G-1
+  pooled over all 264 cases, and requires the 84 alone to agree in sign. The hosted M7-P4 runs
+  (a) and (b) on Claude Haiku 5.5, thinking off, in three sampled passes, reported apart as §6
+  says. A6 corrects A5, which had M7-P4 deciding §11.
 
 ## 1.21.0 — 2026-11-25
 
