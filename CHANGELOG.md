@@ -119,6 +119,14 @@ close. None of it moved in 1.21.
   not steps, and `--max-cost`. The step schema now reaches the API in the loop's order, with
   `thought` first. A sorted body had made the model pick a tool before reasoning. The pilot
   passes: 12 runs, no protocol failure, $0.04. The scored passes are frozen at about $1.85.
+- **GE-M7's repetition-2 run (M7-P3R): §11 stands on the local model, on the pooled reading.**
+  On the 84 repetition-2 cases, (b) fabricates 1.1 % of claims against (a)'s 2.4 %. Pooled over
+  all 264 RE2 cases not used to freeze the prompt, that is 1.2 % against 4.1 %: −0.029
+  [−0.055, −0.008]. Every repetition agrees in sign, so G-11 holds and §26's stop condition does
+  not fire. The held-out replication (G-9) still failed, and SMYSL-3 §26 says so beside the
+  result. G-12 holds, with 4 protocol failures in 252 runs. Completed from BARO's ranking, (e)
+  falls two cases short of BARO at AC@3 this time. Scores per case in
+  `fixtures/ge_m7/scores-m7p3r.tsv`; RFC SMYSL-10 A8.
 
 ## 1.21.0 — 2026-11-25
 

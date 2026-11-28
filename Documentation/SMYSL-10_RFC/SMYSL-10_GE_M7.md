@@ -2,8 +2,8 @@
 
 **Author:** Vladimir Ulogov
 **Status:** draft, R1 (2026-11-25): read against the code; §12 lists what R1 found and how §10's
-questions are settled. M7-P1 to M7-P3 and the held-out M7-P3H done (§11, A1 to A5); M7-P4 and
-M7-P5 not run.
+questions are settled. M7-P1 to M7-P3, the held-out M7-P3H and repetition 2's M7-P3R done (§11, A1 to A8);
+M7-P4's pilot done and its scored passes frozen (A7); M7-P5 not run.
 **Target compatibility:** smysl 1.x, strictly additive; format `smysl/1.0`, unchanged. The
 harness is an example and a test crate; no public API is planned to change (§8, Q-6).
 **Crates:** none changed by plan. New: `examples/ge_m7` (the harness), fixtures under
@@ -790,6 +790,83 @@ still running at A6's commit, from a copied binary, and nothing here touches the
   about $0.60, and the three passes about $1.85. That is a third of A6-13's estimate, since that
   estimate assumed no caching. A6-13's approval rule stands: the scored passes need their own
   approval.
+
+### A8. M7-P3R, repetition 2: G-1 pooled holds (2026-11-27)
+
+M7-P3R ran at `5f915f6`, as A6 froze it. The run was `rep2.txt` (84 cases) on arms (a) to (e), in
+listed order, on `qwen2.5:14b-instruct`. It took 4 h 48 min, from 15:08 to 19:56.
+`fixtures/ge_m7/scores-m7p3r.tsv` has every case and arm, 420 rows. Intervals are as A6-4.
+
+| Arm | AC@1 | AC@3 | AC@5 | Claims | Fabricated (tolerant) | TQ flags (real) | Unused | Protocol failures | Forced | Steps | Input tokens / run | s / run |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| (a) | 0.214 | 0.262 | 0.262 | 250 | 6 (2.4 %) | — | 0.949 | 2 | 9 | 18.4 | 85,334 | 86.7 |
+| (b) | 0.179 | 0.190 | 0.190 | 174 | 2 (1.1 %) | 9 (9) | 0.948 | 1 | 0 | 12.0 | 40,274 | 54.8 |
+| (c) | 0.393 | 0.714 | 0.869 | — | — | — | — | 0 | — | — | — | 0 |
+| (d) | 0.464 | 0.560 | 0.583 | 242 | 2 (0.8 %) | 7 (7) | 0.867 | 1 | 3 | 12.0 | 42,376 | 58.3 |
+| (e) | 0.464 | 0.690 | 0.869 | as (d) | as (d) | as (d) | as (d) | as (d) | as (d) | — | — | — |
+
+The strict and tolerant rates agree in every arm.
+
+| Gate | Measured | Read |
+|---|---|---|
+| **G-11** | Pooled over 264 cases: (b) − (a) −0.0285, [−0.0549, −0.0078]. On the 84 alone: −0.0125 | **Holds**: the upper end is below 0, and the new sample's sign agrees |
+| **G-12** | 4 of 252 agent runs (1.6 %), all `parse` | **Holds** |
+
+Reported with the gates:
+
+- **G-1 on the 84 alone.** −0.0125, [−0.0286, +0.0005]. Like M7-P3H's, its interval reaches 0.
+- **G-11 without forced answers.** Pooled −0.0325, [−0.0614, −0.0102]; on the 84 alone −0.0165,
+  [−0.0360, −0.0014].
+- **(d) − (a), pooled.** −0.0262, [−0.0542, −0.0025]; on the 84 alone −0.0157, [−0.0423,
+  +0.0081].
+- **G-2 and G-3.** In (b), 9 of 9 `SMY-W606` flags were real (precision 1.00), and recall was 0.90:
+  one fabricated quote went unflagged. In (d), 7 of 7 were real, with recall 1.00.
+
+- **A8-1. §11 stands on the local model, on the pooled reading.** This is what A6-6 provides for.
+
+  | Repetition | Phase | (a) fabricated | (b) fabricated | (b) − (a) |
+  |---|---|---|---|---|
+  | 1 | M7-P3 | 14 of 293 | 3 of 199 | −0.033 |
+  | 2 | M7-P3R | 6 of 250 | 2 of 174 | −0.013 |
+  | 3 | M7-P3H | 13 of 264 | 2 of 192 | −0.039 |
+  | pooled | | 33 of 807 (4.1 %) | 7 of 565 (1.2 %) | −0.029 |
+
+  - **All three agree in sign.** Each repetition's (b) fabricates less than its (a). Only the
+    first one's interval excludes 0 on its own.
+  - **Why the 84 are weaker.** (a)'s fabrication rate here is half that of the other two
+    repetitions: 6 fabrications, in 5 cases. So the 84 give the smallest difference.
+  - **What G-11 is not (A6-5).** It is not a third independent test, and it does not turn G-9 into
+    a pass. 180 of its 264 cases had been read before the pooling was chosen.
+  - **What holds.** Over every RE2 case not used to freeze the prompt, on this model, the ledger
+    with feedback lets fewer fabricated claims reach an answer. §26's stop condition does not fire.
+- **A8-2. The (a)–(e) comparison, unchanged except at AC@3.**
+  - **BARO's ranking is still the lead.** (d) leads at AC@1: (e) − (c) is +0.071, [+0.024,
+    +0.131], and (d) − (a) is +0.250, [+0.119, +0.381].
+  - **G-7 is not met on this sample (not gated).** (e)'s AC@3 is two cases below BARO's: (e) −
+    (c) is −0.024, [−0.060, 0.000]. In M7-P3H, (e) was above BARO, +0.022.
+  - **Uncompleted (d) loses at AC@3,** as before: (d) − (c) is −0.155, [−0.238, −0.083].
+  - **The ledger without BARO.** It costs the agent accuracy again: AC@1 (b) − (a) is −0.036,
+    [−0.119, +0.036], and AC@3 is −0.071, [−0.155, 0.000]. (b) uses 53 % fewer input tokens than
+    (a), and 37 % less time per run.
+  - **Consulted units per investigation.** The medians are 63 in (a), 37 in (b) and 18 in (d).
+
+  | System | (a) AC@1 / @3 | (b) | (c) | (d) | (e) |
+  |---|---|---|---|---|---|
+  | Online Boutique | 0.18 / 0.21 | 0.14 / 0.18 | 0.64 / 0.93 | 0.71 / 0.75 | 0.71 / 0.89 |
+  | Sock Shop | 0.36 / 0.46 | 0.32 / 0.32 | 0.54 / 0.86 | 0.61 / 0.71 | 0.61 / 0.82 |
+  | Train Ticket | 0.11 / 0.11 | 0.07 / 0.07 | 0.00 / 0.36 | 0.07 / 0.21 | 0.07 / 0.36 |
+
+- **A8-3. The forced answer and the protocol failures.**
+  - **Forced answers.** 12 runs reached one: 9 in (a) and 3 in (d). Every one parsed, and none
+    fabricated, over 39 claims. None has the root cause in its first three.
+  - **Protocol failures.** The 4 are replies that did not parse. They came at steps 21 and 16 in
+    (a) and step 8 in (b), all before the budget, and at the forced step in (d).
+- **A8-4. Cost.** The 252 scored agent runs took 4.7 h and 14.2 M input tokens: (a) 7.2 M, (b)
+  3.4 M and (d) 3.6 M. Nothing was spent.
+- **A8-5. What this decides.** SMYSL-3 §26 records §11 as standing on the local model, on the
+  pooled reading, with G-9's failure beside it. This replaces A5-8's "undecided". RE2 has no unseen
+  cases left. M7-P4 is reported apart (A6-1). It tells whether a second model shows the same
+  difference, not whether §11 stands.
 
 ## 12. R1 (2026-11-25)
 
