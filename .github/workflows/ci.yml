@@ -64,6 +64,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-11-25
+      # cargo-public-api runs `cargo +nightly`, so the pinned toolchain must answer to that name.
+      - run: rustup toolchain link nightly "$(rustc +nightly-2026-11-25 --print sysroot)"
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
