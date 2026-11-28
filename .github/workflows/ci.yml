@@ -70,10 +70,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-public-api,cargo-semver-checks
-      # api-check sends cargo-public-api's stderr to /dev/null; this shows the toolchain it uses
-      # and any error before the diff.
-      - run: rustup show active-toolchain && cargo public-api --all-features --simplified > /dev/null
-      - run: make api-check
+      # The Makefile's `cargo +stable` would send cargo-public-api to a toolchain named
+      # `nightly`, which the pin does not install; the active one is the pinned nightly.
+      - run: make api-check TOOLCHAIN=
 
       # `--release-type patch` is load bearing. Without it, 0.9 -> 0.10 on a 0.x crate is a
       # breaking-allowed bump and every check is skipped — "0 checks: 0 pass, 254 skip",
