@@ -114,6 +114,11 @@ close. None of it moved in 1.21.
   pooled over all 264 cases, and requires the 84 alone to agree in sign. The hosted M7-P4 runs
   (a) and (b) on Claude Haiku 5.5, thinking off, in three sampled passes, reported apart as §6
   says. A6 corrects A5, which had M7-P4 deciding §11.
+- **GE-M7's hosted provider and pilot (RFC SMYSL-10 A7).** `ge_m7 run --provider claude` (feature
+  `remote`) runs the agent on the Claude API through `curl`, with prompt caching, retries that are
+  not steps, and `--max-cost`. The step schema now reaches the API in the loop's order, with
+  `thought` first. A sorted body had made the model pick a tool before reasoning. The pilot
+  passes: 12 runs, no protocol failure, $0.04. The scored passes are frozen at about $1.85.
 
 ## 1.21.0 — 2026-11-25
 

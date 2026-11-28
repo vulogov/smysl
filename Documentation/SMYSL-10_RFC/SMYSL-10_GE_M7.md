@@ -722,6 +722,75 @@ commit, before any code for M7-P4 lands.
   pilot's spend is approved, and the scored passes need their own approval after the pilot. The
   data sent is RCAEval's, a public benchmark, with services renamed (§5.2).
 
+### A7. M7-P4's pilot, and the freeze for its scored passes (2026-11-27, frozen)
+
+A6-10's provider is built, and A6-11's pilot has run. A7 records what the pilot changed and
+freezes the scored passes. The commit that records this text is the one they run at. M7-P3R is
+still running at A6's commit, from a copied binary, and nothing here touches the local path.
+
+- **A7-1. The provider.** `examples/ge_m7/claude.rs`, behind the `remote` feature, is selected
+  with `--provider claude`. It posts to the Messages API at API version `2026-10-21` by running
+  `curl`, not through an HTTP library. A dev-dependency would change the dependency transcripts
+  the manual prints (ch. 25–27). The key goes to curl in its configuration on stdin, so it never
+  appears in an argument, a file or a log. The request body is written to the run's `http/`
+  directory.
+  - **Retries.** A transport failure, 429, 5xx or 529 is retried up to 8 times, with backoff and
+    `retry-after`. A retry is not a step. Any other status, a refusal, or a reply from a model
+    other than the one asked for is a protocol failure.
+  - **Caching.** The system prompt and the conversation are marked for prompt caching.
+  - **Billing.** Each request's usage is priced at Haiku 5.5's card: $0.10 / $0.50 per million,
+    with cache writes at 1.25× input and cache reads at 0.1×; a prompt above 100 K tokens is
+    priced at the higher card. The price is logged to `requests.jsonl`. A request sent when the
+    spend has reached `--max-cost` stops the run, with exit 3.
+- **A7-2. The schema is sent in the loop's order.** Pilot run 1 forced an answer in 11 of 12
+  runs, because the model repeated `services` while its thoughts named other tools.
+  - **Cause.** The body was built as a `serde_json::Value`, which sorts keys. Only the `services`
+    branch still began with `thought`. Structured output's grammar follows the order of the
+    properties, so in every other branch the model chose a tool before reasoning. M7-P1 had the
+    same failure on Ollama.
+  - **Proof.** A replay of one step with the schema in the loop's order chose `metrics` 5 times
+    out of 5.
+  - **Fix.** The schema is now spliced into the body verbatim. The Claude API requires
+    `additionalProperties: false` on every object, so it is added to the text, not to a parsed
+    value. These two changes are the only schema changes for this model, and tests hold both.
+  - **Run 1 is discarded.** Its spend is counted in A7-4.
+- **A7-3. The context limit is the harness's count.** A6-8 put the 32,768-token limit "by the
+  API's count". The check runs before a request is sent, so it can only use the harness's own
+  count, as on the local model (A4). The API's count is logged per request, and the largest is
+  reported. In the pilot it was 14,266, under half the limit.
+- **A7-4. Pilot run 2 meets A6-11's exit.** There were 12 runs and 184 requests. No run had a
+  protocol failure or a forced answer, every reply parsed, and the largest prompt was 14,266
+  tokens. Six cases measure nothing, so the table checks only that the loop works.
+
+  | Arm | AC@1 | AC@3 | Claims | Fabricated (tol.) | Steps / run | API input tokens / run |
+  |---|---|---|---|---|---|---|
+  | (a) | 0.167 | 0.333 | 31 | 1 (0.032) | 17.3 | 119,789 |
+  | (b) | 0.500 | 0.500 | 31 | 0 | 13.3 | 79,378 |
+
+  - **Caching.** Of 1.19 M input tokens, 92 % were read from the cache. Run 2 cost $0.041.
+  - **Total spend so far.** Both pilot runs, a step dump and the replay of A7-2 came to about
+    $0.08.
+- **A7-5. Frozen for the scored passes.** These items are A6's, at this commit:
+  - the provider, the prompt, the step schema in its spelled order, 25 steps, the forced answer,
+    caps and canonical printing;
+  - `claude-haiku-5-5`, thinking off, effort `medium`;
+  - `sample.txt`, (a) then (b), in listed order.
+
+  How the passes run:
+  - **Passes.** There are three passes, run one after another. Each pass is its own invocation
+    of the same binary, with its own output directory.
+  - **Cost cap.** Each pass's `--max-cost` is $10 less the spend of the passes before it.
+  - **Scores.** They go to `fixtures/ge_m7/scores-m7p4.tsv`, in M7-P3H's format, with a `pass`
+    column.
+  - **If the cap is hit.** M7-P4 is unread, and a new amendment is needed before anything more
+    is sent.
+  - **If H-4 fails.** The passes stop at the pass that fails it.
+  - **Gates.** They are A6-12's, as stated.
+- **A7-6. Cost, re-estimated.** At the pilot's rate of $0.0034 per run, one pass of 180 runs is
+  about $0.60, and the three passes about $1.85. That is a third of A6-13's estimate, since that
+  estimate assumed no caching. A6-13's approval rule stands: the scored passes need their own
+  approval.
+
 ## 12. R1 (2026-11-25)
 
 R1 read the draft against `dev/1.22.0` at `9084112`. What held: the ledger builders

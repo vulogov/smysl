@@ -16,9 +16,14 @@
 //! **Modes:**
 //!
 //! - `run --data DIR --cases FILE [--arms a,b,c,d,e] [--model M] [--endpoint URL] [--steps 25]
-//!   [--ctx 32768] [--shuffle SEED] [--out DIR]`: each case × arm, a JSON line per run in `DIR/runs.jsonl`, the
+//!   [--ctx 32768] [--shuffle SEED] [--out DIR] [--provider ollama|claude] [--effort E]
+//!   [--max-cost USD]`: each case × arm, a JSON line per run in `DIR/runs.jsonl`, the
 //!   transcripts beside it, a table at the end. `--shuffle SEED` runs the cases in a seeded
 //!   order: a run's result depends on what the model server ran before it (A4-10). `FILE` lists cases as `<system>/<service>_<fault>/<rep>`.
+//!   `--provider claude` (a build with `remote`, M7-P4, RFC SMYSL-10 A6-8) runs the agent on the
+//!   Claude API, `claude-haiku-5-5` unless `--model` says otherwise, thinking off, at `--effort`
+//!   (`medium`), with the key from `ANTHROPIC_API_KEY`; `--max-cost` is required, and each
+//!   request's usage and price go to `DIR/requests.jsonl`.
 //! - `check-data --data DIR`: what R1 left to the data (R1-3, R1-7): the files per system, and
 //!   the leakage check over every case: no tool result names the root cause's service by any
 //!   spelling.
@@ -31,6 +36,8 @@
 
 mod agent;
 mod case;
+#[cfg(feature = "remote")]
+mod claude;
 mod oracle;
 mod world;
 
@@ -352,7 +359,14 @@ fn cmd_run(args: &[String]) {
         !with_e || arms.iter().any(|a| a == "d"),
         "arm e is d's run completed: list d too"
     );
-    let model = arg(args, "--model").unwrap_or_else(|| "qwen2.5:14b-instruct".into());
+    let provider = arg(args, "--provider").unwrap_or_else(|| "ollama".into());
+    let model = arg(args, "--model").unwrap_or_else(|| {
+        if provider == "claude" {
+            "claude-haiku-5-5".into()
+        } else {
+            "qwen2.5:14b-instruct".into()
+        }
+    });
     let endpoint = arg(args, "--endpoint").unwrap_or_else(|| "http://localhost:11434".into());
     let steps: usize = arg(args, "--steps").map_or(25, |s| s.parse().expect("--steps N"));
     let ctx: usize = arg(args, "--ctx").map_or(32_768, |s| s.parse().expect("--ctx N"));
@@ -371,14 +385,33 @@ fn cmd_run(args: &[String]) {
         Some(seed) => shuffled(cases, &seed),
         None => cases,
     };
-    let mut cfg = ProviderConfig::new(ProviderId::new("ollama").expect("an id"), "ollama");
-    cfg.endpoint = endpoint;
-    cfg.model = model.clone();
-    cfg.context_window = ctx;
-    let provider = smysl::build_provider(&cfg).expect("the Ollama provider");
-    let mut agent = ModelAgent { provider };
-    let model_id = AgentId::new(format!("model:ollama/{}", model.replace(':', "-")))
-        .expect("a model agent id");
+    let (mut agent, model_id): (Box<dyn Agent>, String) = match provider.as_str() {
+        "ollama" => {
+            let mut cfg = ProviderConfig::new(ProviderId::new("ollama").expect("an id"), "ollama");
+            cfg.endpoint = endpoint;
+            cfg.model = model.clone();
+            cfg.context_window = ctx;
+            let provider = smysl::build_provider(&cfg).expect("the Ollama provider");
+            (
+                Box::new(ModelAgent { provider }),
+                format!("model:ollama/{}", model.replace(':', "-")),
+            )
+        }
+        // M7-P4 (A6-8): the Claude API, priced, with a cap on what it may spend.
+        #[cfg(feature = "remote")]
+        "claude" => {
+            let effort = arg(args, "--effort").unwrap_or_else(|| "medium".into());
+            let cap: f64 = arg(args, "--max-cost")
+                .expect("--max-cost USD: a hosted run states what it may spend")
+                .parse()
+                .expect("--max-cost USD");
+            let c = claude::Claude::new(&model, &effort, cap, &out)
+                .unwrap_or_else(|e| panic!("the Claude provider: {e}"));
+            (Box::new(c), format!("model:anthropic/{model}"))
+        }
+        p => panic!("--provider {p}: ollama, or claude in a build with `remote`"),
+    };
+    let model_id = AgentId::new(model_id).expect("a model agent id");
     let set = Settings {
         loop_: Loop {
             model: model.clone(),
@@ -402,7 +435,11 @@ fn cmd_run(args: &[String]) {
             let (s, _, r) = run_arm(
                 raw,
                 arm,
-                if arm == "c" { None } else { Some(&mut agent) },
+                if arm == "c" {
+                    None
+                } else {
+                    Some(agent.as_mut())
+                },
                 &set,
             );
             eprintln!(
