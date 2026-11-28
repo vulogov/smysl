@@ -64,13 +64,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-11-25
-      # api-check sends cargo-public-api's stderr to /dev/null; this shows the toolchain it uses
-      # and any error before the diff.
-      - run: rustup show active-toolchain && cargo public-api -p smysl-core --simplified > /dev/null
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-public-api,cargo-semver-checks
+      # api-check sends cargo-public-api's stderr to /dev/null; this shows the toolchain it uses
+      # and any error before the diff.
+      - run: rustup show active-toolchain && cargo public-api -p smysl-core --simplified > /dev/null
       - run: make api-check
 
       # `--release-type patch` is load bearing. Without it, 0.9 -> 0.10 on a 0.x crate is a
